@@ -48,7 +48,7 @@ class PLATFORM_EXPORT LayoutRect {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
  public:
-  LayoutRect() {}
+  LayoutRect() = default;
   LayoutRect(const LayoutPoint& location, const LayoutSize& size)
       : location_(location), size_(size) {}
   LayoutRect(LayoutUnit x, LayoutUnit y, LayoutUnit width, LayoutUnit height)
@@ -308,6 +308,8 @@ inline IntRect PixelSnappedIntRect(LayoutPoint location, LayoutSize size) {
   return IntRect(RoundedIntPoint(location),
                  PixelSnappedIntSize(size, location));
 }
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const LayoutRect&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

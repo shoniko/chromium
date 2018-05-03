@@ -60,8 +60,6 @@ namespace blink {
 InternalSettings::Backup::Backup(Settings* settings)
     : original_csp_(RuntimeEnabledFeatures::
                         ExperimentalContentSecurityPolicyFeaturesEnabled()),
-      original_css_sticky_position_enabled_(
-          RuntimeEnabledFeatures::CSSStickyPositionEnabled()),
       original_overlay_scrollbars_enabled_(
           RuntimeEnabledFeatures::OverlayScrollbarsEnabled()),
       original_editing_behavior_(settings->GetEditingBehaviorType()),
@@ -88,8 +86,6 @@ InternalSettings::Backup::Backup(Settings* settings)
 void InternalSettings::Backup::RestoreTo(Settings* settings) {
   RuntimeEnabledFeatures::SetExperimentalContentSecurityPolicyFeaturesEnabled(
       original_csp_);
-  RuntimeEnabledFeatures::SetCSSStickyPositionEnabled(
-      original_css_sticky_position_enabled_);
   RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(
       original_overlay_scrollbars_enabled_);
   settings->SetEditingBehaviorType(original_editing_behavior_);
@@ -124,7 +120,7 @@ const char* InternalSettings::SupplementName() {
   return "InternalSettings";
 }
 
-InternalSettings::~InternalSettings() {}
+InternalSettings::~InternalSettings() = default;
 
 InternalSettings::InternalSettings(Page& page)
     : InternalSettingsGenerated(&page),
@@ -166,18 +162,10 @@ void InternalSettings::setMockGestureTapHighlightsEnabled(
   GetSettings()->SetMockGestureTapHighlightsEnabled(enabled);
 }
 
-void InternalSettings::setCSSStickyPositionEnabled(bool enabled) {
-  RuntimeEnabledFeatures::SetCSSStickyPositionEnabled(enabled);
-}
-
 void InternalSettings::setExperimentalContentSecurityPolicyFeaturesEnabled(
     bool enabled) {
   RuntimeEnabledFeatures::SetExperimentalContentSecurityPolicyFeaturesEnabled(
       enabled);
-}
-
-void InternalSettings::setOverlayScrollbarsEnabled(bool enabled) {
-  RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(enabled);
 }
 
 void InternalSettings::setViewportEnabled(bool enabled,

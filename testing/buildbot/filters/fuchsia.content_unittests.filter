@@ -12,9 +12,7 @@
 
 # https://crbug.com/761214
 -RendererAudioOutputStreamFactoryIntegrationTest.StreamIntegrationTest
-
-# https://crbug.com/762125
--VideoCaptureBufferPoolTest.BufferPool/*
+-WebContentsAudioInputStreamTest.MirroringNothingWithTargetChange/0
 
 # Flaky: https://crbug.com/760687.
 -CacheStorageManagerTest.GetAllOriginsUsageWithOldIndex
@@ -42,4 +40,26 @@
 -IndexedDBFactoryTest.DataFormatVersion
 
 # Flaky: https://crbug.com/776424.
--RenderWidgetHostViewAuraOverscrollTest.*
+-RenderWidgetHostViewGuestSurfaceTest.TestGuestSurface
+
+# Flaky: https://crbug.com/800877.
+-RenderWidgetHostViewAuraTest.SetCanScrollForWebMouseWheelEvent
+
+# Flaky: https://crbug.com/800415.
+-RenderWidgetHostViewAuraTest.CursorVisibilityChange
+
+# Flaky: https://crbug.com/777916.
+-NotificationDatabaseTest.NotificationIdCorruption
+
+# Flaky: https://crbug.com/777917.
+-LevelDBTransactionRangeTests/LevelDBTransactionRangeTest.*
+
+# Flaky: https://crbug.com/780508.
+-ServiceWorkerProviderHostTest.*
+
+# Flaky, https://crbug.com/784449.
+-WebContentsAudioInputStreamTest.MirroringOneStreamAfterTargetChange*
+
+# Flaky, https://crbug.com/802375.
+-RenderWidgetHostViewAuraOverscrollTest.GestureScrollDebounceTimerOverscroll
+-RenderWidgetHostViewAuraOverscrollTest.TouchGestureEndDispatchedAfterOverscrollComplete

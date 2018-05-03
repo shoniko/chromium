@@ -83,6 +83,10 @@ SavePageResult ToSavePageResult(ArchiverResult archiver_result) {
       break;
     case ArchiverResult::ERROR_INTERSTITIAL_PAGE:
       result = SavePageResult::INTERSTITIAL_PAGE;
+      break;
+    case ArchiverResult::ERROR_DIGEST_CALCULATION_FAILED:
+      result = SavePageResult::DIGEST_CALCULATION_FAILED;
+      break;
     default:
       NOTREACHED();
       result = SavePageResult::CONTENT_UNAVAILABLE;
@@ -390,7 +394,7 @@ void OfflinePageModelImpl::SavePage(
   create_archive_params.use_page_problem_detectors =
       save_page_params.use_page_problem_detectors;
   archiver->CreateArchive(
-      GetArchiveDirectory(save_page_params.client_id.name_space),
+      GetInternalArchiveDirectory(save_page_params.client_id.name_space),
       create_archive_params,
       base::Bind(&OfflinePageModelImpl::OnCreateArchiveDone,
                  weak_ptr_factory_.GetWeakPtr(), save_page_params, offline_id,
@@ -562,32 +566,6 @@ void OfflinePageModelImpl::DoDeleteCachedPagesByURLPredicate(
   DoDeletePagesByOfflineId(offline_ids, callback);
 }
 
-void OfflinePageModelImpl::CheckPagesExistOffline(
-    const std::set<GURL>& urls,
-    const CheckPagesExistOfflineCallback& callback) {
-  OfflinePageModelQueryBuilder builder;
-  builder
-      .SetUrls(OfflinePageModelQuery::Requirement::INCLUDE_MATCHING,
-               std::vector<GURL>(urls.begin(), urls.end()),
-               URLSearchMode::SEARCH_BY_FINAL_URL_ONLY,
-               false /* strip_fragment */)
-      .RequireRestrictedToOriginalTab(
-          OfflinePageModelQueryBuilder::Requirement::EXCLUDE_MATCHING);
-  auto pages_to_urls = base::Bind(
-      [](const CheckPagesExistOfflineCallback& callback,
-         const MultipleOfflinePageItemResult& pages) {
-        CheckPagesExistOfflineResult result;
-        for (auto& page : pages)
-          result.insert(page.url);
-        callback.Run(result);
-      },
-      callback);
-  RunWhenLoaded(base::Bind(
-      &OfflinePageModelImpl::GetPagesMatchingQueryWhenLoadDone,
-      weak_ptr_factory_.GetWeakPtr(),
-      base::Passed(builder.Build(GetPolicyController())), pages_to_urls));
-}
-
 void OfflinePageModelImpl::GetAllPages(
     const MultipleOfflinePageItemCallback& callback) {
   OfflinePageModelQueryBuilder builder;
@@ -700,11 +678,21 @@ void OfflinePageModelImpl::GetPagesSupportedByDownloads(
                  base::Passed(builder.Build(GetPolicyController())), callback));
 }
 
-const base::FilePath& OfflinePageModelImpl::GetArchiveDirectory(
+const base::FilePath& OfflinePageModelImpl::GetInternalArchiveDirectory(
     const std::string& name_space) const {
   if (policy_controller_->IsRemovedOnCacheReset(name_space))
     return archive_manager_->GetTemporaryArchivesDir();
-  return archive_manager_->GetPersistentArchivesDir();
+  return archive_manager_->GetPrivateArchivesDir();
+}
+
+bool OfflinePageModelImpl::IsArchiveInInternalDir(
+    const base::FilePath& file_path) const {
+  DCHECK(!file_path.empty());
+
+  // TODO(jianli): Update this once persistent archives are moved into the
+  // public directory.
+  return archive_manager_->GetTemporaryArchivesDir().IsParent(file_path) ||
+         archive_manager_->GetPrivateArchivesDir().IsParent(file_path);
 }
 
 void OfflinePageModelImpl::CheckMetadataConsistency() {
@@ -731,10 +719,6 @@ OfflinePageStorageManager* OfflinePageModelImpl::GetStorageManager() {
   return storage_manager_.get();
 }
 
-bool OfflinePageModelImpl::is_loaded() const {
-  return is_loaded_;
-}
-
 OfflineEventLogger* OfflinePageModelImpl::GetLogger() {
   return &offline_event_logger_;
 }
@@ -749,7 +733,8 @@ void OfflinePageModelImpl::OnCreateArchiveDone(
     const GURL& saved_url,
     const base::FilePath& file_path,
     const base::string16& title,
-    int64_t file_size) {
+    int64_t file_size,
+    const std::string& file_hash) {
   DeletePendingArchiver(archiver);
 
   if (archiver_result != ArchiverResult::SUCCESSFULLY_CREATED) {

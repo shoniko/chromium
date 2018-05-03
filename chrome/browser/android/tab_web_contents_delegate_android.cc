@@ -6,16 +6,18 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/optional.h"
-#include "chrome/browser/android/banners/app_banner_manager_android.h"
 #include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/feature_utilities.h"
 #include "chrome/browser/android/hung_renderer_infobar_delegate.h"
+#include "chrome/browser/banners/app_banner_manager_android.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/sound_content_setting_observer.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/media/protected_media_identifier_permission_context.h"
@@ -66,7 +68,7 @@ using content::WebContents;
 
 namespace {
 
-ScopedJavaLocalRef<jobject> CreateJavaRectF(
+ScopedJavaLocalRef<jobject> JNI_TabWebContentsDelegateAndroid_CreateJavaRectF(
     JNIEnv* env,
     const gfx::RectF& rect) {
   return ScopedJavaLocalRef<jobject>(
@@ -77,7 +79,7 @@ ScopedJavaLocalRef<jobject> CreateJavaRectF(
                                                         rect.bottom()));
 }
 
-ScopedJavaLocalRef<jobject> CreateJavaRect(
+ScopedJavaLocalRef<jobject> JNI_TabWebContentsDelegateAndroid_CreateJavaRect(
     JNIEnv* env,
     const gfx::Rect& rect) {
   return ScopedJavaLocalRef<jobject>(
@@ -97,6 +99,14 @@ infobars::InfoBar* FindHungRendererInfoBar(InfoBarService* infobar_service) {
       return infobar;
   }
   return nullptr;
+}
+
+void ShowFramebustBlockInfobarInternal(content::WebContents* web_contents,
+                                       const GURL& url) {
+  FramebustBlockInfoBar::Show(
+      web_contents,
+      std::make_unique<FramebustBlockMessageDelegate>(
+          web_contents, url, FramebustBlockMessageDelegate::OutcomeCallback()));
 }
 
 }  // anonymous namespace
@@ -131,7 +141,7 @@ TabWebContentsDelegateAndroid::RunBluetoothChooser(
     vr::VrTabHelper::UISuppressed(vr::UiSuppressedElement::kBluetoothChooser);
     return nullptr;
   }
-  return base::MakeUnique<BluetoothChooserAndroid>(frame, event_handler);
+  return std::make_unique<BluetoothChooserAndroid>(frame, event_handler);
 }
 
 void TabWebContentsDelegateAndroid::CloseContents(
@@ -219,8 +229,9 @@ void TabWebContentsDelegateAndroid::OnFindResultAvailable(
   if (obj.is_null())
     return;
 
-  ScopedJavaLocalRef<jobject> selection_rect = CreateJavaRect(
-      env, find_result->selection_rect());
+  ScopedJavaLocalRef<jobject> selection_rect =
+      JNI_TabWebContentsDelegateAndroid_CreateJavaRect(
+          env, find_result->selection_rect());
 
   // Create the details object.
   ScopedJavaLocalRef<jobject> details_object =
@@ -245,12 +256,14 @@ void TabWebContentsDelegateAndroid::FindMatchRectsReply(
   // Create the details object.
   ScopedJavaLocalRef<jobject> details_object =
       Java_TabWebContentsDelegateAndroid_createFindMatchRectsDetails(
-          env, version, rects.size(), CreateJavaRectF(env, active_rect));
+          env, version, rects.size(),
+          JNI_TabWebContentsDelegateAndroid_CreateJavaRectF(env, active_rect));
 
   // Add the rects
   for (size_t i = 0; i < rects.size(); ++i) {
     Java_TabWebContentsDelegateAndroid_setMatchRectByIndex(
-        env, details_object, i, CreateJavaRectF(env, rects[i]));
+        env, details_object, i,
+        JNI_TabWebContentsDelegateAndroid_CreateJavaRectF(env, rects[i]));
   }
 
   Java_TabWebContentsDelegateAndroid_onFindMatchRectsAvailable(env, obj,
@@ -330,12 +343,10 @@ WebContents* TabWebContentsDelegateAndroid::OpenURLFromTab(
   }
 
   Profile* profile = Profile::FromBrowserContext(source->GetBrowserContext());
-  chrome::NavigateParams nav_params(profile,
-                                    params.url,
-                                    params.transition);
-  FillNavigateParamsFromOpenURLParams(&nav_params, params);
+  NavigateParams nav_params(profile, params.url, params.transition);
+  nav_params.FillNavigateParamsFromOpenURLParams(params);
   nav_params.source_contents = source;
-  nav_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
+  nav_params.window_action = NavigateParams::SHOW_WINDOW;
   nav_params.user_gesture = params.user_gesture;
   if ((params.disposition == WindowOpenDisposition::NEW_POPUP ||
        params.disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
@@ -421,19 +432,27 @@ void TabWebContentsDelegateAndroid::RequestAppBannerFromDevTools(
   manager->RequestAppBanner(web_contents->GetLastCommittedURL(), true);
 }
 
+void TabWebContentsDelegateAndroid::OnAudioStateChanged(
+    WebContents* web_contents,
+    bool audible) {
+  SoundContentSettingObserver* sound_content_setting_observer =
+      SoundContentSettingObserver::FromWebContents(web_contents);
+  if (sound_content_setting_observer)
+    sound_content_setting_observer->OnAudioStateChanged(audible);
+}
+
 void TabWebContentsDelegateAndroid::OnDidBlockFramebust(
     content::WebContents* web_contents,
     const GURL& url) {
-  FramebustBlockInfoBar::Show(web_contents,
-                              base::MakeUnique<FramebustBlockMessageDelegate>(
-                                  web_contents, url, base::OnceClosure()));
+  ShowFramebustBlockInfobarInternal(web_contents, url);
 }
 
 }  // namespace android
 
-void OnRendererUnresponsive(JNIEnv* env,
-                            const JavaParamRef<jclass>& clazz,
-                            const JavaParamRef<jobject>& java_web_contents) {
+void JNI_TabWebContentsDelegateAndroid_OnRendererUnresponsive(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& java_web_contents) {
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableHungRendererInfoBar)) {
     return;
@@ -448,9 +467,10 @@ void OnRendererUnresponsive(JNIEnv* env,
       infobar_service, web_contents->GetMainFrame()->GetProcess());
 }
 
-void OnRendererResponsive(JNIEnv* env,
-                          const JavaParamRef<jclass>& clazz,
-                          const JavaParamRef<jobject>& java_web_contents) {
+void JNI_TabWebContentsDelegateAndroid_OnRendererResponsive(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& java_web_contents) {
   content::WebContents* web_contents =
           content::WebContents::FromJavaWebContents(java_web_contents);
   InfoBarService* infobar_service =
@@ -466,9 +486,10 @@ void OnRendererResponsive(JNIEnv* env,
   infobar_service->RemoveInfoBar(hung_renderer_infobar);
 }
 
-jboolean IsCapturingAudio(JNIEnv* env,
-                          const JavaParamRef<jclass>& clazz,
-                          const JavaParamRef<jobject>& java_web_contents) {
+jboolean JNI_TabWebContentsDelegateAndroid_IsCapturingAudio(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& java_web_contents) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(java_web_contents);
   scoped_refptr<MediaStreamCaptureIndicator> indicator =
@@ -477,9 +498,10 @@ jboolean IsCapturingAudio(JNIEnv* env,
   return indicator->IsCapturingAudio(web_contents);
 }
 
-jboolean IsCapturingVideo(JNIEnv* env,
-                          const JavaParamRef<jclass>& clazz,
-                          const JavaParamRef<jobject>& java_web_contents) {
+jboolean JNI_TabWebContentsDelegateAndroid_IsCapturingVideo(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& java_web_contents) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(java_web_contents);
   scoped_refptr<MediaStreamCaptureIndicator> indicator =
@@ -488,9 +510,10 @@ jboolean IsCapturingVideo(JNIEnv* env,
   return indicator->IsCapturingVideo(web_contents);
 }
 
-jboolean IsCapturingScreen(JNIEnv* env,
-                           const JavaParamRef<jclass>& clazz,
-                           const JavaParamRef<jobject>& java_web_contents) {
+jboolean JNI_TabWebContentsDelegateAndroid_IsCapturingScreen(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& java_web_contents) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(java_web_contents);
   scoped_refptr<MediaStreamCaptureIndicator> indicator =
@@ -499,13 +522,25 @@ jboolean IsCapturingScreen(JNIEnv* env,
   return indicator->IsBeingMirrored(web_contents);
 }
 
-void NotifyStopped(JNIEnv* env,
-                   const JavaParamRef<jclass>& clazz,
-                   const JavaParamRef<jobject>& java_web_contents) {
+void JNI_TabWebContentsDelegateAndroid_NotifyStopped(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& java_web_contents) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(java_web_contents);
   scoped_refptr<MediaStreamCaptureIndicator> indicator =
       MediaCaptureDevicesDispatcher::GetInstance()
           ->GetMediaStreamCaptureIndicator();
   indicator->NotifyStopped(web_contents);
+}
+
+void JNI_TabWebContentsDelegateAndroid_ShowFramebustBlockInfoBar(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& java_web_contents,
+    const JavaParamRef<jstring>& java_url) {
+  GURL url(base::android::ConvertJavaStringToUTF16(env, java_url));
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(java_web_contents);
+  ShowFramebustBlockInfobarInternal(web_contents, url);
 }

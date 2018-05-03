@@ -11,19 +11,21 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/screens/network_error.h"
+#include "chrome/browser/chromeos/login/signin_partition_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
 #include "chrome/browser/chromeos/policy/policy_oauth2_token_fetcher.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/login/auth/authpolicy_login_helper.h"
 #include "chromeos/network/network_state.h"
@@ -68,7 +70,9 @@ std::string EnrollmentModeToUIMode(policy::EnrollmentConfig::Mode mode) {
       return kEnrollmentModeUIManual;
     case policy::EnrollmentConfig::MODE_LOCAL_FORCED:
     case policy::EnrollmentConfig::MODE_SERVER_FORCED:
-    case policy::EnrollmentConfig::MODE_ATTESTATION_FORCED:
+    case policy::EnrollmentConfig::MODE_ATTESTATION_LOCAL_FORCED:
+    case policy::EnrollmentConfig::MODE_ATTESTATION_SERVER_FORCED:
+    case policy::EnrollmentConfig::MODE_ATTESTATION_MANUAL_FALLBACK:
       return kEnrollmentModeUIForced;
     case policy::EnrollmentConfig::MODE_RECOVERY:
       return kEnrollmentModeUIRecovery;
@@ -189,7 +193,7 @@ void EnrollmentScreenHandler::ShowLicenseTypeSelectionScreen(
 void EnrollmentScreenHandler::ShowAdJoin() {
   observe_network_failure_ = false;
   if (!authpolicy_login_helper_)
-    authpolicy_login_helper_ = base::MakeUnique<AuthPolicyLoginHelper>();
+    authpolicy_login_helper_ = std::make_unique<AuthPolicyLoginHelper>();
   ShowStep(kEnrollmentStepAdJoin);
 }
 
@@ -418,6 +422,10 @@ void EnrollmentScreenHandler::DeclareLocalizedValues(
   builder->Add("adLoginInvalidPassword", IDS_AD_INVALID_PASSWORD);
   builder->Add("adJoinErrorMachineNameInvalid", IDS_AD_MACHINENAME_INVALID);
   builder->Add("adJoinErrorMachineNameTooLong", IDS_AD_MACHINENAME_TOO_LONG);
+  builder->Add("adJoinMoreOptions", IDS_AD_MORE_OPTIONS_BUTTON);
+  builder->Add("adJoinOrgUnit", IDS_AD_ORG_UNIT_HINT);
+  builder->Add("adJoinCancel", IDS_AD_CANCEL_BUTTON);
+  builder->Add("adJoinConfirm", IDS_AD_CONFIRM_BUTTON);
   builder->Add("licenseSelectionCardTitle",
                IDS_ENTERPRISE_ENROLLMENT_LICENSE_SELECTION);
   builder->Add("licenseSelectionCardExplanation",
@@ -565,13 +573,14 @@ void EnrollmentScreenHandler::HandleCompleteLogin(
 
 void EnrollmentScreenHandler::HandleAdCompleteLogin(
     const std::string& machine_name,
+    const std::string& distinguished_name,
     const std::string& user_name,
     const std::string& password) {
   observe_network_failure_ = false;
   DCHECK(controller_);
   DCHECK(authpolicy_login_helper_);
   authpolicy_login_helper_->JoinAdDomain(
-      machine_name, user_name, password,
+      machine_name, distinguished_name, user_name, password,
       base::BindOnce(&EnrollmentScreenHandler::HandleAdDomainJoin,
                      weak_ptr_factory_.GetWeakPtr(), machine_name, user_name));
 }
@@ -579,12 +588,14 @@ void EnrollmentScreenHandler::HandleAdCompleteLogin(
 void EnrollmentScreenHandler::HandleAdDomainJoin(
     const std::string& machine_name,
     const std::string& user_name,
-    authpolicy::ErrorType code) {
+    authpolicy::ErrorType code,
+    const std::string& machine_domain) {
   switch (code) {
-    case authpolicy::ERROR_NONE:
+    case authpolicy::ERROR_NONE: {
       ShowEnrollmentSpinnerScreen();
-      controller_->OnAdJoined(gaia::ExtractDomainName(user_name));
+      controller_->OnAdJoined(machine_domain);
       return;
+    }
     case authpolicy::ERROR_NETWORK_PROBLEM:
       // Could be a network problem, but could also be a misspelled domain name.
       ShowError(IDS_AD_AUTH_NETWORK_ERROR, true);
@@ -616,6 +627,25 @@ void EnrollmentScreenHandler::HandleAdDomainJoin(
     case authpolicy::ERROR_USER_HIT_JOIN_QUOTA:
       ShowError(IDS_AD_USER_HIT_JOIN_QUOTA, true);
       return;
+    case authpolicy::ERROR_OU_DOES_NOT_EXIST:
+      ShowError(IDS_AD_OU_DOES_NOT_EXIST, true);
+      return;
+    case authpolicy::ERROR_INVALID_OU:
+      ShowError(IDS_AD_OU_INVALID, true);
+      return;
+    case authpolicy::ERROR_OU_ACCESS_DENIED:
+      ShowError(IDS_AD_OU_ACCESS_DENIED, true);
+      return;
+    case authpolicy::ERROR_SETTING_OU_FAILED:
+      ShowError(IDS_AD_OU_SETTING_FAILED, true);
+      return;
+#if !defined(ARCH_CPU_X86_64)
+    // Currently, the Active Directory integration is only supported on x86_64
+    // systems. (see https://crbug.com/676602)
+    case authpolicy::ERROR_DBUS_FAILURE:
+      ShowError(IDS_AD_BOARD_NOT_SUPPORTED, true);
+      return;
+#endif
     default:
       LOG(WARNING) << "Unhandled error code: " << code;
       ShowError(IDS_AD_DOMAIN_JOIN_UNKNOWN_ERROR, true);
@@ -672,7 +702,21 @@ void EnrollmentScreenHandler::ShowErrorMessage(const std::string& message,
 }
 
 void EnrollmentScreenHandler::DoShow() {
+  // Start a new session with SigninPartitionManager, generating a unique
+  // StoragePartition.
+  login::SigninPartitionManager* signin_partition_manager =
+      login::SigninPartitionManager::Factory::GetForBrowserContext(
+          Profile::FromWebUI(web_ui()));
+  signin_partition_manager->StartSigninSession(
+      web_ui()->GetWebContents(),
+      base::BindOnce(&EnrollmentScreenHandler::DoShowWithPartition,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void EnrollmentScreenHandler::DoShowWithPartition(
+    const std::string& partition_name) {
   base::DictionaryValue screen_data;
+  screen_data.SetString("webviewPartitionName", partition_name);
   screen_data.SetString("gaiaUrl", GaiaUrls::GetInstance()->gaia_url().spec());
   screen_data.SetString("clientId",
                         GaiaUrls::GetInstance()->oauth2_chrome_client_id());

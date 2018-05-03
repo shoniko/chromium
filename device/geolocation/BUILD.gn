@@ -19,21 +19,16 @@ component("geolocation") {
     "geolocation_config.h",
     "geolocation_context.cc",
     "geolocation_context.h",
-    "geolocation_delegate.cc",
-    "geolocation_delegate.h",
     "geolocation_export.h",
     "geolocation_impl.cc",
     "geolocation_impl.h",
     "geolocation_provider.h",
     "geolocation_provider_impl.cc",
     "geolocation_provider_impl.h",
-    "geoposition.cc",
-    "geoposition.h",
     "location_api_adapter_android.cc",
     "location_api_adapter_android.h",
     "location_arbitrator.cc",
     "location_arbitrator.h",
-    "location_provider.h",
     "location_provider_android.cc",
     "location_provider_android.h",
     "network_location_provider.cc",
@@ -58,6 +53,7 @@ component("geolocation") {
     "wifi_data_provider_manager.h",
     "wifi_data_provider_win.cc",
     "wifi_data_provider_win.h",
+    "wifi_polling_policy.cc",
     "wifi_polling_policy.h",
   ]
 
@@ -69,14 +65,14 @@ component("geolocation") {
     "//ui/gfx",
   ]
   public_deps = [
+    "//device/geolocation/public/cpp",
     "//device/geolocation/public/interfaces",
+    "//services/device/public/interfaces",
   ]
   if (is_android) {
     sources -= [
       "network_location_provider.cc",
       "network_location_provider.h",
-      "network_location_request.cc",
-      "network_location_request.h",
     ]
     deps += [ ":geolocation_jni_headers" ]
   }
@@ -161,6 +157,7 @@ source_set("test_support") {
     ":geolocation",
   ]
   deps = [
+    "//device/geolocation/public/cpp",
     "//testing/gmock",
     "//testing/gtest",
   ]
@@ -185,6 +182,8 @@ source_set("unittests") {
     ":test_support",
     "//base",
     "//base/third_party/dynamic_annotations",
+    "//device/geolocation/public/cpp",
+    "//device/geolocation/public/interfaces",
     "//net:test_support",
     "//testing/gmock",
     "//testing/gtest",

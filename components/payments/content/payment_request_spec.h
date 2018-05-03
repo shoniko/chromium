@@ -69,6 +69,9 @@ class PaymentRequestSpec : public PaymentOptionsProvider {
   // state that depends on |details|.
   void UpdateWith(mojom::PaymentDetailsPtr details);
 
+  // Recomputes spec based on details.
+  void RecomputeSpecForDetails();
+
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
@@ -78,6 +81,8 @@ class PaymentRequestSpec : public PaymentOptionsProvider {
   bool request_payer_phone() const override;
   bool request_payer_email() const override;
   PaymentShippingType shipping_type() const override;
+
+  bool supports_basic_card() const { return !supported_card_networks_.empty(); }
 
   const std::vector<std::string>& supported_card_networks() const {
     return supported_card_networks_;

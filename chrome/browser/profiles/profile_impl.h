@@ -119,6 +119,7 @@ class ProfileImpl : public Profile {
   void DestroyOffTheRecordProfile() override;
   bool HasOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
+  const Profile* GetOriginalProfile() const override;
   bool IsSupervised() const override;
   bool IsChild() const override;
   bool IsLegacySupervised() const override;
@@ -142,14 +143,14 @@ class ProfileImpl : public Profile {
   bool WasCreatedByVersionOrLater(const std::string& version) override;
   void SetExitType(ExitType exit_type) override;
   ExitType GetLastSessionExitType() override;
+  bool ShouldRestoreOldSessionCookies() override;
+  bool ShouldPersistSessionCookies() override;
 
 #if defined(OS_CHROMEOS)
   void ChangeAppLocale(const std::string& locale, AppLocaleChangedVia) override;
   void OnLogin() override;
   void InitChromeOSPreferences() override;
 #endif  // defined(OS_CHROMEOS)
-
-  PrefProxyConfigTracker* GetProxyConfigTracker() override;
 
  private:
 #if defined(OS_CHROMEOS)
@@ -191,8 +192,6 @@ class ProfileImpl : public Profile {
   void UpdateIsEphemeralInStorage();
 
   void GetMediaCacheParameters(base::FilePath* cache_path, int* max_size);
-
-  PrefProxyConfigTracker* CreateProxyConfigTracker();
 
   std::unique_ptr<domain_reliability::DomainReliabilityMonitor>
   CreateDomainReliabilityMonitor(PrefService* local_state);
@@ -260,8 +259,6 @@ class ProfileImpl : public Profile {
 
   std::unique_ptr<chromeos::LocaleChangeGuard> locale_change_guard_;
 #endif
-
-  std::unique_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   // TODO(mmenke):  This should be removed from the Profile, and use a
   // BrowserContextKeyedService instead.

@@ -17,7 +17,7 @@
 #include "cc/animation/animation_ticker.h"
 #include "cc/animation/keyframed_animation_curve.h"
 #include "cc/animation/transform_operations.h"
-#include "cc/base/filter_operations.h"
+#include "cc/paint/filter_operations.h"
 #include "cc/trees/mutator_host_client.h"
 #include "ui/gfx/geometry/box_f.h"
 
@@ -34,7 +34,7 @@ ElementAnimations::ElementAnimations()
       has_element_in_pending_list_(false),
       needs_push_properties_(false) {}
 
-ElementAnimations::~ElementAnimations() {}
+ElementAnimations::~ElementAnimations() = default;
 
 void ElementAnimations::SetAnimationHost(AnimationHost* host) {
   animation_host_ = host;

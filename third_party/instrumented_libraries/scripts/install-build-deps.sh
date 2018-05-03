@@ -31,7 +31,6 @@ libdbusmenu-glib4 \
 libexpat1 \
 libffi6 \
 libfontconfig1 \
-libgconf-2-4 \
 libgcrypt11 \
 libgdk-pixbuf2.0-0 \
 libglib2.0-0 \

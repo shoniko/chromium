@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 // IPC messages for printing.
-// Multiply-included message file, hence no include guard.
+#ifndef COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_
+#define COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_
 
 #include <stdint.h>
 
@@ -30,8 +31,8 @@
 // Force multiple inclusion of the param traits file to generate all methods.
 #undef COMPONENTS_PRINTING_COMMON_PRINTING_PARAM_TRAITS_MACROS_H_
 
-#ifndef COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_
-#define COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_
+#ifndef INTERNAL_COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_
+#define INTERNAL_COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_
 
 struct PrintMsg_Print_Params {
   PrintMsg_Print_Params();
@@ -60,6 +61,8 @@ struct PrintMsg_Print_Params {
   bool display_header_footer;
   base::string16 title;
   base::string16 url;
+  base::string16 header_template;
+  base::string16 footer_template;
   bool should_print_backgrounds;
   printing::SkiaDocumentType printed_doc_type;
 };
@@ -97,7 +100,7 @@ struct PrintHostMsg_SetOptionsFromDocument_Params {
 };
 #endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
-#endif  // COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_
+#endif  // INTERNAL_COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_
 
 #define IPC_MESSAGE_START PrintMsgStart
 
@@ -164,6 +167,12 @@ IPC_STRUCT_TRAITS_BEGIN(PrintMsg_Print_Params)
 
   // URL string to be printed as footer if requested by the user.
   IPC_STRUCT_TRAITS_MEMBER(url)
+
+  // HTML template to use as a print header.
+  IPC_STRUCT_TRAITS_MEMBER(header_template)
+
+  // HTML template to use as a print footer.
+  IPC_STRUCT_TRAITS_MEMBER(footer_template)
 
   // Whether to rasterize a PDF for printing
   IPC_STRUCT_TRAITS_MEMBER(rasterize_pdf)
@@ -275,8 +284,8 @@ IPC_STRUCT_END()
 #endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
 // Parameters to describe a rendered page.
-IPC_STRUCT_BEGIN(PrintHostMsg_DidPrintPage_Params)
-  // A shared memory handle to the EMF data. This data can be quite large so a
+IPC_STRUCT_BEGIN(PrintHostMsg_DidPrintDocument_Params)
+  // A shared memory handle to the PDF data. This data can be quite large so a
   // memory map needs to be used.
   IPC_STRUCT_MEMBER(base::SharedMemoryHandle, metafile_data_handle)
 
@@ -285,9 +294,6 @@ IPC_STRUCT_BEGIN(PrintHostMsg_DidPrintPage_Params)
 
   // Cookie for the document to ensure correctness.
   IPC_STRUCT_MEMBER(int, document_cookie)
-
-  // Page number.
-  IPC_STRUCT_MEMBER(int, page_number)
 
   // The size of the page the page author specified.
   IPC_STRUCT_MEMBER(gfx::Size, page_size)
@@ -323,14 +329,6 @@ IPC_MESSAGE_ROUTED1(PrintMsg_InitiatePrintPreview, bool /* has_selection */)
 // Tells the RenderFrame to initiate printing or print preview for a particular
 // node, depending on which mode the RenderFrame is in.
 IPC_MESSAGE_ROUTED0(PrintMsg_PrintNodeUnderContextMenu)
-
-#if BUILDFLAG(ENABLE_BASIC_PRINTING) && BUILDFLAG(ENABLE_PRINT_PREVIEW)
-// Tells the renderer to print the print preview tab's PDF plugin without
-// showing the print dialog. (This is the final step in the print preview
-// workflow.)
-IPC_MESSAGE_ROUTED1(PrintMsg_PrintForPrintPreview,
-                    base::DictionaryValue /* settings */)
-#endif  // BUILDFLAG(ENABLE_BASIC_PRINTING) && BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
 #if BUILDFLAG(ENABLE_BASIC_PRINTING)
 // Tells the RenderFrame to switch the CSS to print media type, renders every
@@ -374,11 +372,11 @@ IPC_MESSAGE_ROUTED1(PrintHostMsg_DidGetDocumentCookie,
 // Tells the browser that the print dialog has been shown.
 IPC_MESSAGE_ROUTED0(PrintHostMsg_DidShowPrintDialog)
 
-// Sends back to the browser the rendered "printed page" that was requested by
-// a PrintMsg_PrintPages message or from scripted printing. The memory handle in
+// Sends back to the browser the rendered document that was requested by a
+// PrintMsg_PrintPages message or from scripted printing. The memory handle in
 // this message is already valid in the browser process.
-IPC_MESSAGE_ROUTED1(PrintHostMsg_DidPrintPage,
-                    PrintHostMsg_DidPrintPage_Params /* page content */)
+IPC_MESSAGE_ROUTED1(PrintHostMsg_DidPrintDocument,
+                    PrintHostMsg_DidPrintDocument_Params /* page content */)
 
 // The renderer wants to know the default print settings.
 IPC_SYNC_MESSAGE_ROUTED0_1(PrintHostMsg_GetDefaultPrintSettings,
@@ -485,3 +483,5 @@ IPC_MESSAGE_ROUTED1(PrintHostMsg_ShowScriptedPrintPreview,
 IPC_MESSAGE_ROUTED1(PrintHostMsg_SetOptionsFromDocument,
                     PrintHostMsg_SetOptionsFromDocument_Params /* params */)
 #endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
+
+#endif  // COMPONENTS_PRINTING_COMMON_PRINT_MESSAGES_H_

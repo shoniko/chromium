@@ -26,6 +26,16 @@ class DisplayInfoProviderChromeOS : public DisplayInfoProvider {
   static const char kTouchCalibrationPointsNegativeError[];
   static const char kTouchCalibrationPointsTooLargeError[];
   static const char kNativeTouchCalibrationActiveError[];
+  static const char kNoExternalTouchDevicePresent[];
+  static const char kMirrorModeSourceIdNotSpecifiedError[];
+  static const char kMirrorModeDestinationIdsNotSpecifiedError[];
+  static const char kMirrorModeSourceIdBadFormatError[];
+  static const char kMirrorModeDestinationIdBadFormatError[];
+  static const char kMirrorModeSingleDisplayError[];
+  static const char kMirrorModeSourceIdNotFoundError[];
+  static const char kMirrorModeDestinationIdsEmptyError[];
+  static const char kMirrorModeDestinationIdNotFoundError[];
+  static const char kMirrorModeDuplicateIdError[];
 
   DisplayInfoProviderChromeOS();
   ~DisplayInfoProviderChromeOS() override;
@@ -34,7 +44,8 @@ class DisplayInfoProviderChromeOS : public DisplayInfoProvider {
   bool SetInfo(const std::string& display_id,
                const api::system_display::DisplayProperties& info,
                std::string* error) override;
-  bool SetDisplayLayout(const DisplayLayoutList& layouts) override;
+  bool SetDisplayLayout(const DisplayLayoutList& layouts,
+                        std::string* error) override;
   void UpdateDisplayUnitInfoForPlatform(
       const display::Display& display,
       api::system_display::DisplayUnitInfo* unit) override;
@@ -59,6 +70,8 @@ class DisplayInfoProviderChromeOS : public DisplayInfoProvider {
   bool ClearTouchCalibration(const std::string& id,
                              std::string* error) override;
   bool IsNativeTouchCalibrationActive(std::string* error) override;
+  bool SetMirrorMode(const api::system_display::MirrorModeInfo& info,
+                     std::string* out_error) override;
 
  private:
   ash::TouchCalibratorController* GetTouchCalibrator();

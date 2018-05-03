@@ -42,7 +42,6 @@ class MessagePopupCollectionTest;
 class MessageCenterObserver;
 class MessageCenterImplTest;
 class NotificationBlocker;
-class NotifierSettingsProvider;
 
 class MESSAGE_CENTER_EXPORT MessageCenter {
  public:
@@ -69,10 +68,8 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
 
   // Queries of current notification list status.
   virtual size_t NotificationCount() const = 0;
-  virtual size_t UnreadNotificationCount() const = 0;
   virtual bool HasPopupNotifications() const = 0;
   virtual bool IsQuietMode() const = 0;
-  virtual bool IsLockedState() const = 0;
 
   // Find the notification with the corresponding id. Returns null if not
   // found. The returned instance is owned by the message center.
@@ -105,6 +102,8 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
 
   // Removes an existing notification.
   virtual void RemoveNotification(const std::string& id, bool by_user) = 0;
+  virtual void RemoveNotificationsForNotifierId(
+      const NotifierId& notifier_id) = 0;
   virtual void RemoveAllNotifications(bool by_user, RemoveType type) = 0;
 
   // Sets the icon image. Icon appears at the top-left of the notification.
@@ -132,10 +131,23 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   virtual void ClickOnNotificationButton(const std::string& id,
                                          int button_index) = 0;
 
+  // This should be called by UI classes when a notification button with an
+  // input is clicked to trigger the notification's delegate callback and also
+  // update the message center observers.
+  virtual void ClickOnNotificationButtonWithReply(
+      const std::string& id,
+      int button_index,
+      const base::string16& reply) = 0;
+
   // Called by the UI classes when the settings buttons is clicked
   // to trigger the notification's delegate and update the message
   // center observers.
   virtual void ClickOnSettingsButton(const std::string& id) = 0;
+
+  // This should be called by UI classes when a user select from notification
+  // inline settings to disable notifications from the same origin of the
+  // notification.
+  virtual void DisableNotification(const std::string& id) = 0;
 
   // This should be called by UI classes after a visible notification popup
   // closes, indicating that the notification has been shown to the user.
@@ -151,17 +163,8 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
       const std::string& id,
       const DisplaySource source) = 0;
 
-  // Setter/getter of notifier settings provider. The getter may return null
-  // for tests, and will always be null on non-ChromeOS.
-  virtual void SetNotifierSettingsProvider(
-      std::unique_ptr<NotifierSettingsProvider> provider) = 0;
-  virtual NotifierSettingsProvider* GetNotifierSettingsProvider() = 0;
-
   // This can be called to change the quiet mode state (without a timeout).
   virtual void SetQuietMode(bool in_quiet_mode) = 0;
-
-  // This can be called to change the lock mode state.
-  virtual void SetLockedState(bool locked) = 0;
 
   // Temporarily enables quiet mode for |expires_in| time.
   virtual void EnterQuietModeWithExpire(const base::TimeDelta& expires_in) = 0;
@@ -181,10 +184,12 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   // example, after the mouse leaves the popup.)
   virtual void RestartPopupTimers() = 0;
 
-  // "Chromium OS" or "Chrome OS" in the current locale.
-  // Return empty string if not on these platforms.
-  virtual const base::string16& GetProductOSName() const = 0;
-  virtual void SetProductOSName(const base::string16& product_os_name) = 0;
+  // The user-visible "app name" for system-generated notifications, which is
+  // used to identify the application that generated a notification. Only used
+  // for MD style notifications, which means that currently it's only set and
+  // used on Chrome OS. On Chrome OS, this is "Chrome OS".
+  virtual const base::string16& GetSystemNotificationAppName() const = 0;
+  virtual void SetSystemNotificationAppName(const base::string16& name) = 0;
 
  protected:
   friend class ::DownloadNotification;
@@ -192,7 +197,7 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   friend class MessageCenterImplTest;
   friend class MessageCenterImplTestWithChangeQueue;
   friend class MessageCenterImplTestWithoutChangeQueue;
-  friend class MessageCenterTrayTest;
+  friend class UiControllerTest;
   friend class TrayViewControllerTest;
   friend class test::MessagePopupCollectionTest;
   virtual void DisableTimersForTest() = 0;

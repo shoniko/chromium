@@ -34,6 +34,7 @@
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/loader/SubresourceFilter.h"
+#include "platform/network/NetworkUtils.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/WebDocumentSubresourceFilter.h"
 #include "public/platform/WebURL.h"
@@ -43,15 +44,45 @@
 
 namespace blink {
 
+namespace {
+
+bool IsHttpOrHttpsOrigin(const WebSecurityOrigin& origin) {
+  return origin.Protocol() == "http" || origin.Protocol() == "https";
+}
+
+}  // anonymous namespace
+
+// static
+bool WebDocumentLoader::ShouldPersistUserActivation(
+    const WebSecurityOrigin& previous_origin,
+    const WebSecurityOrigin& new_origin) {
+  if (previous_origin.IsNull() || new_origin.IsNull())
+    return false;
+
+  if (!IsHttpOrHttpsOrigin(previous_origin) || !IsHttpOrHttpsOrigin(new_origin))
+    return false;
+
+  if (previous_origin.Host() == new_origin.Host())
+    return true;
+
+  String previous_domain = NetworkUtils::GetDomainAndRegistry(
+      previous_origin.Host(), NetworkUtils::kIncludePrivateRegistries);
+  String new_domain = NetworkUtils::GetDomainAndRegistry(
+      new_origin.Host(), NetworkUtils::kIncludePrivateRegistries);
+
+  return !previous_domain.IsEmpty() && previous_domain == new_domain;
+}
+
 WebDocumentLoaderImpl* WebDocumentLoaderImpl::Create(
     LocalFrame* frame,
     const ResourceRequest& request,
     const SubstituteData& data,
-    ClientRedirectPolicy client_redirect_policy) {
+    ClientRedirectPolicy client_redirect_policy,
+    const base::UnguessableToken& devtools_navigation_token) {
   DCHECK(frame);
 
-  return new WebDocumentLoaderImpl(frame, request, data,
-                                   client_redirect_policy);
+  return new WebDocumentLoaderImpl(frame, request, data, client_redirect_policy,
+                                   devtools_navigation_token);
 }
 
 const WebURLRequest& WebDocumentLoaderImpl::OriginalRequest() const {
@@ -144,8 +175,13 @@ WebDocumentLoaderImpl::WebDocumentLoaderImpl(
     LocalFrame* frame,
     const ResourceRequest& request,
     const SubstituteData& data,
-    ClientRedirectPolicy client_redirect_policy)
-    : DocumentLoader(frame, request, data, client_redirect_policy),
+    ClientRedirectPolicy client_redirect_policy,
+    const base::UnguessableToken& devtools_navigation_token)
+    : DocumentLoader(frame,
+                     request,
+                     data,
+                     client_redirect_policy,
+                     devtools_navigation_token),
       original_request_wrapper_(DocumentLoader::OriginalRequest()),
       request_wrapper_(DocumentLoader::GetRequest()),
       response_wrapper_(DocumentLoader::GetResponse()) {}
@@ -186,6 +222,10 @@ void WebDocumentLoaderImpl::SetSourceLocation(
 
 void WebDocumentLoaderImpl::ResetSourceLocation() {
   DocumentLoader::SetSourceLocation(nullptr);
+}
+
+void WebDocumentLoaderImpl::SetUserActivated() {
+  DocumentLoader::SetUserActivated();
 }
 
 void WebDocumentLoaderImpl::Trace(blink::Visitor* visitor) {

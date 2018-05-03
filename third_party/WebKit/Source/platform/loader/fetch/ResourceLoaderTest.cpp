@@ -8,7 +8,7 @@
 #include "platform/loader/fetch/ResourceLoader.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/loader/testing/MockFetchContext.h"
-#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "platform/wtf/text/StringBuilder.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
@@ -117,12 +117,11 @@ TEST_F(ResourceLoaderTest, DetermineCORSStatus) {
     ResourceRequest request;
     request.SetURL(test.target);
 
-    ResourceResponse response;
+    ResourceResponse response(test.target);
     response.SetHTTPStatusCode(200);
-    response.SetURL(test.target);
 
     if (test.allow_origin_url) {
-      request.SetFetchRequestMode(WebURLRequest::kFetchRequestModeCORS);
+      request.SetFetchRequestMode(network::mojom::FetchRequestMode::kCORS);
       resource->MutableOptions().cors_handling_by_resource_fetcher =
           kEnableCORSHandlingByResourceFetcher;
       response.SetHTTPHeaderField(

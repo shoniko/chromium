@@ -6,7 +6,9 @@
 
 #include <stdio.h>
 
-#include <memory>
+#include <algorithm>
+#include <map>
+#include <utility>
 
 #include "base/at_exit.h"
 #include "base/bind.h"
@@ -44,7 +46,6 @@
 #include "base/test/test_timeouts.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -68,6 +69,7 @@
 // TODO(scottmg): For temporary code in OnOutputTimeout().
 #include <zircon/syscalls.h>
 #include <zircon/syscalls/object.h>
+#include "base/fuchsia/default_job.h"
 #endif
 
 namespace base {
@@ -94,7 +96,7 @@ const char kUnreliableResultsTag[] = "UNRELIABLE_RESULTS";
 // the test launcher to people looking at the output (no output for a long
 // time is mysterious and gives no info about what is happening) 3) help
 // debugging in case the process hangs anyway.
-const int kOutputTimeoutSeconds = 15;
+constexpr TimeDelta kOutputTimeout = TimeDelta::FromSeconds(15);
 
 // Limit of output snippet lines when printing to stdout.
 // Avoids flooding the logs with amount of output that gums up
@@ -200,11 +202,9 @@ bool TakeInt32FromEnvironment(const char* const var, int32_t* result) {
 bool UnsetEnvironmentVariableIfExists(const std::string& name) {
   std::unique_ptr<Environment> env(Environment::Create());
   std::string str_val;
-
-  if (!env->GetVar(name.c_str(), &str_val))
+  if (!env->GetVar(name, &str_val))
     return true;
-
-  return env->UnSetVar(name.c_str());
+  return env->UnSetVar(name);
 }
 
 // Returns true if bot mode has been requested, i.e. defaults optimized
@@ -251,19 +251,18 @@ CommandLine PrepareCommandLineForGTest(const CommandLine& command_line,
 // Launches a child process using |command_line|. If the child process is still
 // running after |timeout|, it is terminated and |*was_timeout| is set to true.
 // Returns exit code of the process.
-int LaunchChildTestProcessWithOptions(
-    const CommandLine& command_line,
-    const LaunchOptions& options,
-    int flags,
-    TimeDelta timeout,
-    const TestLauncher::GTestProcessLaunchedCallback& launched_callback,
-    bool* was_timeout) {
+int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
+                                      const LaunchOptions& options,
+                                      int flags,
+                                      TimeDelta timeout,
+                                      ProcessLifetimeObserver* observer,
+                                      bool* was_timeout) {
   TimeTicks start_time(TimeTicks::Now());
 #if defined(OS_FUCHSIA)  // TODO(scottmg): https://crbug.com/755282
   const bool kOnBot = getenv("CHROME_HEADLESS") != nullptr;
 #endif  // OS_FUCHSIA
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
   // Make sure an option we rely on is present - see LaunchChildGTestProcess.
   DCHECK(options.new_process_group);
 #endif
@@ -297,7 +296,14 @@ int LaunchChildTestProcessWithOptions(
 
     new_options.job_handle = job_handle.Get();
   }
-#endif  // defined(OS_WIN)
+#elif defined(OS_FUCHSIA)
+  DCHECK(!new_options.job_handle);
+
+  ScopedZxHandle job_handle;
+  zx_status_t result = zx_job_create(GetDefaultJob(), 0, job_handle.receive());
+  CHECK_EQ(ZX_OK, result) << "zx_job_create: " << zx_status_get_string(result);
+  new_options.job_handle = job_handle.get();
+#endif  // defined(OS_FUCHSIA)
 
 #if defined(OS_LINUX)
   // To prevent accidental privilege sharing to an untrusted child, processes
@@ -337,21 +343,25 @@ int LaunchChildTestProcessWithOptions(
     if (!process.IsValid())
       return -1;
 
-    // TODO(rvargas) crbug.com/417532: Don't store process handles.
 #if defined(OS_FUCHSIA)  // TODO(scottmg): https://crbug.com/755282
     if (kOnBot) {
       LOG(ERROR) << base::StringPrintf("adding %x to live process list",
                                        process.Handle());
     }
 #endif  // OS_FUCHSIA
+
+    // TODO(rvargas) crbug.com/417532: Don't store process handles.
     GetLiveProcesses()->insert(std::make_pair(process.Handle(), command_line));
   }
 
-  if (!launched_callback.is_null())
-    launched_callback.Run(process.Handle(), process.Pid());
+  if (observer)
+    observer->OnLaunched(process.Handle(), process.Pid());
 
   int exit_code = 0;
   if (!process.WaitForExitWithTimeout(timeout, &exit_code)) {
+    if (observer)
+      observer->OnTimedOut(command_line);
+
     *was_timeout = true;
     exit_code = -1;  // Set a non-zero exit code to signal a failure.
 
@@ -360,6 +370,17 @@ int LaunchChildTestProcessWithOptions(
       LOG(ERROR) << base::StringPrintf("about to process.Terminate() %x",
                                        process.Handle());
     }
+
+    // TODO(crbug.com/799268): Remove once we have debugged timed-out/hung
+    // test job processes.
+    LOG(ERROR) << "Dumping threads in process " << process.Pid();
+
+    CommandLine threads_cmdline(base::FilePath("/boot/bin/threads"));
+    threads_cmdline.AppendArg(IntToString(process.Pid()));
+
+    LaunchOptions threads_options;
+    threads_options.wait = true;
+    LaunchProcess(threads_cmdline, threads_options);
 #endif  // OS_FUCHSIA
     // Ensure that the process terminates.
     process.Terminate(-1, true);
@@ -371,18 +392,20 @@ int LaunchChildTestProcessWithOptions(
     // to do that twice and trigger all kinds of log messages.
     AutoLock lock(*GetLiveProcessesLock());
 
-#if defined(OS_POSIX)
+#if defined(OS_FUCHSIA)
+    // TODO(scottmg): https://crbug.com/755282
+    if (kOnBot) {
+      LOG(ERROR) << base::StringPrintf("going to zx_task_kill(job) for %x",
+                                       process.Handle());
+    }
+
+    CHECK_EQ(zx_task_kill(job_handle.get()), ZX_OK);
+#elif defined(OS_POSIX)
     if (exit_code != 0) {
       // On POSIX, in case the test does not exit cleanly, either due to a crash
       // or due to it timing out, we need to clean up any child processes that
       // it might have created. On Windows, child processes are automatically
       // cleaned up using JobObjects.
-#if defined(OS_FUCHSIA)  // TODO(scottmg): https://crbug.com/755282
-      if (kOnBot) {
-        LOG(ERROR) << base::StringPrintf("going to KillProcessGroup() for %x",
-                                         process.Handle());
-      }
-#endif  // OS_FUCHSIA
       KillProcessGroup(process.Handle());
     }
 #endif
@@ -402,22 +425,13 @@ int LaunchChildTestProcessWithOptions(
   return exit_code;
 }
 
-void RunCallback(const TestLauncher::GTestProcessCompletedCallback& callback,
-                 int exit_code,
-                 const TimeDelta& elapsed_time,
-                 bool was_timeout,
-                 const std::string& output) {
-  callback.Run(exit_code, elapsed_time, was_timeout, output);
-}
-
 void DoLaunchChildTestProcess(
     const CommandLine& command_line,
     TimeDelta timeout,
     const TestLauncher::LaunchOptions& test_launch_options,
     bool redirect_stdio,
     SingleThreadTaskRunner* task_runner,
-    const TestLauncher::GTestProcessCompletedCallback& completed_callback,
-    const TestLauncher::GTestProcessLaunchedCallback& launched_callback) {
+    std::unique_ptr<ProcessLifetimeObserver> observer) {
   TimeTicks start_time = TimeTicks::Now();
 
   ScopedFILE output_file;
@@ -447,7 +461,6 @@ void DoLaunchChildTestProcess(
     }
   }
 #elif defined(OS_POSIX)
-  options.new_process_group = true;
   options.fds_to_remap = test_launch_options.fds_to_remap;
   if (redirect_stdio) {
     int output_file_fd = fileno(output_file.get());
@@ -458,6 +471,9 @@ void DoLaunchChildTestProcess(
         std::make_pair(output_file_fd, STDERR_FILENO));
   }
 
+#if !defined(OS_FUCHSIA)
+  options.new_process_group = true;
+#endif
 #if defined(OS_LINUX)
   options.kill_on_parent_death = true;
 #endif
@@ -466,8 +482,8 @@ void DoLaunchChildTestProcess(
 
   bool was_timeout = false;
   int exit_code = LaunchChildTestProcessWithOptions(
-      command_line, options, test_launch_options.flags, timeout,
-      launched_callback, &was_timeout);
+      command_line, options, test_launch_options.flags, timeout, observer.get(),
+      &was_timeout);
 
   std::string output_file_contents;
   if (redirect_stdio) {
@@ -481,12 +497,13 @@ void DoLaunchChildTestProcess(
     }
   }
 
-  // Run target callback on the thread it was originating from, not on
-  // a worker pool thread.
-  task_runner->PostTask(FROM_HERE,
-                        BindOnce(&RunCallback, completed_callback, exit_code,
-                                 TimeTicks::Now() - start_time, was_timeout,
-                                 output_file_contents));
+  // Invoke OnCompleted on the thread it was originating from, not on a worker
+  // pool thread.
+  task_runner->PostTask(
+      FROM_HERE,
+      BindOnce(&ProcessLifetimeObserver::OnCompleted, std::move(observer),
+               exit_code, TimeTicks::Now() - start_time, was_timeout,
+               output_file_contents));
 }
 
 }  // namespace
@@ -500,7 +517,7 @@ const char kGTestRepeatFlag[] = "gtest_repeat";
 const char kGTestRunDisabledTestsFlag[] = "gtest_also_run_disabled_tests";
 const char kGTestOutputFlag[] = "gtest_output";
 
-TestLauncherDelegate::~TestLauncherDelegate() {}
+TestLauncherDelegate::~TestLauncherDelegate() = default;
 
 TestLauncher::LaunchOptions::LaunchOptions() = default;
 TestLauncher::LaunchOptions::LaunchOptions(const LaunchOptions& other) =
@@ -523,12 +540,12 @@ TestLauncher::TestLauncher(TestLauncherDelegate* launcher_delegate,
       force_run_broken_tests_(false),
       run_result_(true),
       watchdog_timer_(FROM_HERE,
-                      TimeDelta::FromSeconds(kOutputTimeoutSeconds),
+                      kOutputTimeout,
                       this,
                       &TestLauncher::OnOutputTimeout),
       parallel_jobs_(parallel_jobs) {}
 
-TestLauncher::~TestLauncher() {}
+TestLauncher::~TestLauncher() = default;
 
 bool TestLauncher::Run() {
   if (!Init())
@@ -548,9 +565,9 @@ bool TestLauncher::Run() {
   sigemptyset(&action.sa_mask);
   action.sa_handler = &ShutdownPipeSignalHandler;
 
-  CHECK_EQ(0, sigaction(SIGINT, &action, NULL));
-  CHECK_EQ(0, sigaction(SIGQUIT, &action, NULL));
-  CHECK_EQ(0, sigaction(SIGTERM, &action, NULL));
+  CHECK_EQ(0, sigaction(SIGINT, &action, nullptr));
+  CHECK_EQ(0, sigaction(SIGQUIT, &action, nullptr));
+  CHECK_EQ(0, sigaction(SIGTERM, &action, nullptr));
 
   auto controller = base::FileDescriptorWatcher::WatchReadable(
       g_shutdown_pipe[0],
@@ -578,8 +595,7 @@ void TestLauncher::LaunchChildGTestProcess(
     const std::string& wrapper,
     TimeDelta timeout,
     const LaunchOptions& options,
-    const GTestProcessCompletedCallback& completed_callback,
-    const GTestProcessLaunchedCallback& launched_callback) {
+    std::unique_ptr<ProcessLifetimeObserver> observer) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Record the exact command line used to launch the child.
@@ -595,9 +611,7 @@ void TestLauncher::LaunchChildGTestProcess(
       FROM_HERE,
       BindOnce(&DoLaunchChildTestProcess, new_command_line, timeout, options,
                redirect_stdio, RetainedRef(ThreadTaskRunnerHandle::Get()),
-               Bind(&TestLauncher::OnLaunchTestProcessFinished,
-                    Unretained(this), completed_callback),
-               launched_callback));
+               base::Passed(std::move(observer))));
 }
 
 void TestLauncher::OnTestFinished(const TestResult& original_result) {
@@ -608,10 +622,14 @@ void TestLauncher::OnTestFinished(const TestResult& original_result) {
   if (result.output_snippet.length() > kOutputSnippetBytesLimit) {
     if (result.status == TestResult::TEST_SUCCESS)
       result.status = TestResult::TEST_EXCESSIVE_OUTPUT;
-    result.output_snippet = StringPrintf(
-        "<truncated (%" PRIuS " bytes)>\n", result.output_snippet.length()) +
-        result.output_snippet.substr(
-            result.output_snippet.length() - kOutputSnippetLinesLimit) +
+
+    // Keep the top and bottom of the log and truncate the middle part.
+    result.output_snippet =
+        result.output_snippet.substr(0, kOutputSnippetBytesLimit / 2) + "\n" +
+        StringPrintf("<truncated (%" PRIuS " bytes)>\n",
+                     result.output_snippet.length()) +
+        result.output_snippet.substr(result.output_snippet.length() -
+                                     kOutputSnippetBytesLimit / 2) +
         "\n";
   }
 
@@ -1035,13 +1053,13 @@ void TestLauncher::CombinePositiveTestFilters(
 
 void TestLauncher::RunTests() {
   std::vector<std::string> test_names;
-  for (size_t i = 0; i < tests_.size(); i++) {
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  for (const TestIdentifier& test_id : tests_) {
     std::string test_name =
-        FormatFullTestName(tests_[i].test_case_name, tests_[i].test_name);
+        FormatFullTestName(test_id.test_case_name, test_id.test_name);
 
     results_tracker_.AddTest(test_name);
 
-    const CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (test_name.find("DISABLED") != std::string::npos) {
       results_tracker_.AddDisabledTest(test_name);
 
@@ -1050,8 +1068,8 @@ void TestLauncher::RunTests() {
         continue;
     }
 
-    if (!launcher_delegate_->ShouldRunTest(tests_[i].test_case_name,
-                                           tests_[i].test_name)) {
+    if (!launcher_delegate_->ShouldRunTest(test_id.test_case_name,
+                                           test_id.test_name)) {
       continue;
     }
 
@@ -1094,7 +1112,7 @@ void TestLauncher::RunTests() {
 
     // Report test locations after applying all filters, so that we report test
     // locations only for those tests that were run as part of this shard.
-    results_tracker_.AddTestLocation(test_name, tests_[i].file, tests_[i].line);
+    results_tracker_.AddTestLocation(test_name, test_id.file, test_id.line);
 
     test_names.push_back(test_name);
   }
@@ -1172,17 +1190,6 @@ void TestLauncher::MaybeSaveSummaryAsJSON(
       LOG(ERROR) << "Failed to save test launcher trace.";
     }
   }
-}
-
-void TestLauncher::OnLaunchTestProcessFinished(
-    const GTestProcessCompletedCallback& callback,
-    int exit_code,
-    const TimeDelta& elapsed_time,
-    bool was_timeout,
-    const std::string& output) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  callback.Run(exit_code, elapsed_time, was_timeout, output);
 }
 
 void TestLauncher::OnTestIterationFinished() {
@@ -1263,9 +1270,7 @@ scoped_refptr<TaskRunner> TestLauncher::GetTaskRunner() {
 }
 
 size_t NumParallelJobs() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  CommandLine::SwitchMap switches = command_line->GetSwitches();
-
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kTestLauncherJobs)) {
     // If the number of test launcher jobs was specified, return that number.
     size_t jobs = 0U;
@@ -1278,7 +1283,8 @@ size_t NumParallelJobs() {
       return 0U;
     }
     return jobs;
-  } else if (command_line->HasSwitch(kGTestFilterFlag) && !BotModeEnabled()) {
+  }
+  if (command_line->HasSwitch(kGTestFilterFlag) && !BotModeEnabled()) {
     // Do not run jobs in parallel by default if we are running a subset of
     // the tests and if bot mode is off.
     return 1U;

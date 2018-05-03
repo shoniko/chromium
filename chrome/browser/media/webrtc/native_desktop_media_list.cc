@@ -37,7 +37,7 @@ using content::DesktopMediaID;
 namespace {
 
 // Update the list every second.
-const int kDefaultUpdatePeriod = 1000;
+const int kDefaultNativeDesktopMediaListUpdatePeriod = 1000;
 
 // Returns a hash of a DesktopFrame content to detect when image for a desktop
 // media source has changed.
@@ -214,8 +214,8 @@ void NativeDesktopMediaList::Worker::OnCaptureResult(
 NativeDesktopMediaList::NativeDesktopMediaList(
     DesktopMediaID::Type type,
     std::unique_ptr<webrtc::DesktopCapturer> capturer)
-    : DesktopMediaListBase(
-          base::TimeDelta::FromMilliseconds(kDefaultUpdatePeriod)),
+    : DesktopMediaListBase(base::TimeDelta::FromMilliseconds(
+          kDefaultNativeDesktopMediaListUpdatePeriod)),
       weak_factory_(this) {
   type_ = type;
   capture_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
@@ -330,7 +330,7 @@ void NativeDesktopMediaList::CaptureAuraWindowThumbnail(
 }
 
 void NativeDesktopMediaList::OnAuraThumbnailCaptured(const DesktopMediaID& id,
-                                                     const gfx::Image& image) {
+                                                     gfx::Image image) {
   if (!image.IsEmpty()) {
     // Only new or changed thumbnail need update.
     new_aura_thumbnail_hashes_[id] = GetImageHash(image);

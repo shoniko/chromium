@@ -118,29 +118,6 @@ static IntCallback IntCallbackAdapter(const base::Closure& f) {
 // Are cookies allowed for file:// URLs by default?
 const bool kDefaultFileSchemeAllowed = false;
 
-void ImportLegacyCookieStore(const FilePath& cookie_store_path) {
-  // We use the old cookie store to create the new cookie store only if the
-  // new cookie store does not exist.
-  if (base::PathExists(cookie_store_path))
-    return;
-
-  // WebViewClassic gets the database path from Context and appends a
-  // hardcoded name. See:
-  // https://android.googlesource.com/platform/frameworks/base/+/bf6f6f9d/core/java/android/webkit/JniUtil.java
-  // https://android.googlesource.com/platform/external/webkit/+/7151e/
-  //     Source/WebKit/android/WebCoreSupport/WebCookieJar.cpp
-  FilePath old_cookie_store_path;
-  base::android::GetDatabaseDirectory(&old_cookie_store_path);
-  old_cookie_store_path = old_cookie_store_path.Append(
-      FILE_PATH_LITERAL("webviewCookiesChromium.db"));
-  if (base::PathExists(old_cookie_store_path) &&
-      !base::Move(old_cookie_store_path, cookie_store_path)) {
-    LOG(WARNING) << "Failed to move old cookie store path from "
-                 << old_cookie_store_path.AsUTF8Unsafe() << " to "
-                 << cookie_store_path.AsUTF8Unsafe();
-  }
-}
-
 void GetUserDataDir(FilePath* user_data_dir) {
   if (!PathService::Get(base::DIR_ANDROID_APP_DATA, user_data_dir)) {
     NOTREACHED() << "Failed to get app data directory for Android WebView";
@@ -315,12 +292,8 @@ net::CookieStore* CookieManager::GetCookieStore() {
     FilePath cookie_store_path =
         user_data_dir.Append(FILE_PATH_LITERAL("Cookies"));
 
-    cookie_store_backend_thread_.task_runner()->PostTask(
-        FROM_HERE, base::Bind(ImportLegacyCookieStore, cookie_store_path));
-
-    content::CookieStoreConfig cookie_config(
-        cookie_store_path, content::CookieStoreConfig::RESTORED_SESSION_COOKIES,
-        nullptr);
+    content::CookieStoreConfig cookie_config(cookie_store_path, true, true,
+                                             nullptr);
     cookie_config.client_task_runner = cookie_store_task_runner_;
     cookie_config.background_task_runner =
         cookie_store_backend_thread_.task_runner();
@@ -520,22 +493,25 @@ void CookieManager::SetAcceptFileSchemeCookies(bool accept) {
     accept_file_scheme_cookies_ = accept;
 }
 
-static void SetShouldAcceptCookies(JNIEnv* env,
-                                   const JavaParamRef<jobject>& obj,
-                                   jboolean accept) {
+static void JNI_AwCookieManager_SetShouldAcceptCookies(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jboolean accept) {
   CookieManager::GetInstance()->SetShouldAcceptCookies(accept);
 }
 
-static jboolean GetShouldAcceptCookies(JNIEnv* env,
-                                       const JavaParamRef<jobject>& obj) {
+static jboolean JNI_AwCookieManager_GetShouldAcceptCookies(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   return CookieManager::GetInstance()->GetShouldAcceptCookies();
 }
 
-static void SetCookie(JNIEnv* env,
-                      const JavaParamRef<jobject>& obj,
-                      const JavaParamRef<jstring>& url,
-                      const JavaParamRef<jstring>& value,
-                      const JavaParamRef<jobject>& java_callback) {
+static void JNI_AwCookieManager_SetCookie(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& url,
+    const JavaParamRef<jstring>& value,
+    const JavaParamRef<jobject>& java_callback) {
   GURL host(ConvertJavaStringToUTF16(env, url));
   std::string cookie_value(ConvertJavaStringToUTF8(env, value));
   std::unique_ptr<BoolCookieCallbackHolder> callback(
@@ -544,72 +520,85 @@ static void SetCookie(JNIEnv* env,
                                           std::move(callback));
 }
 
-static void SetCookieSync(JNIEnv* env,
-                          const JavaParamRef<jobject>& obj,
-                          const JavaParamRef<jstring>& url,
-                          const JavaParamRef<jstring>& value) {
+static void JNI_AwCookieManager_SetCookieSync(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& url,
+    const JavaParamRef<jstring>& value) {
   GURL host(ConvertJavaStringToUTF16(env, url));
   std::string cookie_value(ConvertJavaStringToUTF8(env, value));
 
   CookieManager::GetInstance()->SetCookieSync(host, cookie_value);
 }
 
-static ScopedJavaLocalRef<jstring> GetCookie(JNIEnv* env,
-                                             const JavaParamRef<jobject>& obj,
-                                             const JavaParamRef<jstring>& url) {
+static ScopedJavaLocalRef<jstring> JNI_AwCookieManager_GetCookie(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& url) {
   GURL host(ConvertJavaStringToUTF16(env, url));
 
   return base::android::ConvertUTF8ToJavaString(
       env, CookieManager::GetInstance()->GetCookie(host));
 }
 
-static void RemoveSessionCookies(JNIEnv* env,
-                                 const JavaParamRef<jobject>& obj,
-                                 const JavaParamRef<jobject>& java_callback) {
+static void JNI_AwCookieManager_RemoveSessionCookies(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& java_callback) {
   std::unique_ptr<BoolCookieCallbackHolder> callback(
       new BoolCookieCallbackHolder(env, java_callback));
   CookieManager::GetInstance()->RemoveSessionCookies(std::move(callback));
 }
 
-static void RemoveSessionCookiesSync(JNIEnv* env,
-                                     const JavaParamRef<jobject>& obj) {
+static void JNI_AwCookieManager_RemoveSessionCookiesSync(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   CookieManager::GetInstance()->RemoveSessionCookiesSync();
 }
 
-static void RemoveAllCookies(JNIEnv* env,
-                             const JavaParamRef<jobject>& obj,
-                             const JavaParamRef<jobject>& java_callback) {
+static void JNI_AwCookieManager_RemoveAllCookies(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& java_callback) {
   std::unique_ptr<BoolCookieCallbackHolder> callback(
       new BoolCookieCallbackHolder(env, java_callback));
   CookieManager::GetInstance()->RemoveAllCookies(std::move(callback));
 }
 
-static void RemoveAllCookiesSync(JNIEnv* env,
-                                 const JavaParamRef<jobject>& obj) {
+static void JNI_AwCookieManager_RemoveAllCookiesSync(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   CookieManager::GetInstance()->RemoveAllCookiesSync();
 }
 
-static void RemoveExpiredCookies(JNIEnv* env,
-                                 const JavaParamRef<jobject>& obj) {
+static void JNI_AwCookieManager_RemoveExpiredCookies(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   CookieManager::GetInstance()->RemoveExpiredCookies();
 }
 
-static void FlushCookieStore(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+static void JNI_AwCookieManager_FlushCookieStore(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   CookieManager::GetInstance()->FlushCookieStore();
 }
 
-static jboolean HasCookies(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+static jboolean JNI_AwCookieManager_HasCookies(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   return CookieManager::GetInstance()->HasCookies();
 }
 
-static jboolean AllowFileSchemeCookies(JNIEnv* env,
-                                       const JavaParamRef<jobject>& obj) {
+static jboolean JNI_AwCookieManager_AllowFileSchemeCookies(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   return CookieManager::GetInstance()->AllowFileSchemeCookies();
 }
 
-static void SetAcceptFileSchemeCookies(JNIEnv* env,
-                                       const JavaParamRef<jobject>& obj,
-                                       jboolean accept) {
+static void JNI_AwCookieManager_SetAcceptFileSchemeCookies(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jboolean accept) {
   return CookieManager::GetInstance()->SetAcceptFileSchemeCookies(accept);
 }
 

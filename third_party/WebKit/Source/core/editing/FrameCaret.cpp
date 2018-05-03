@@ -25,7 +25,7 @@
 
 #include "core/editing/FrameCaret.h"
 
-#include "core/dom/TaskRunnerHelper.h"
+#include "base/location.h"
 #include "core/editing/CaretDisplayItemClient.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/FrameSelection.h"
@@ -37,10 +37,10 @@
 #include "core/frame/Settings.h"
 #include "core/html/forms/TextControlElement.h"
 #include "core/layout/LayoutBlock.h"
+#include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/api/LayoutEmbeddedContentItem.h"
 #include "core/page/Page.h"
-#include "public/platform/WebTraceLocation.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -51,7 +51,7 @@ FrameCaret::FrameCaret(LocalFrame& frame,
       display_item_client_(new CaretDisplayItemClient()),
       caret_visibility_(CaretVisibility::kHidden),
       caret_blink_timer_(new TaskRunnerTimer<FrameCaret>(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &frame),
+          frame.GetTaskRunner(TaskType::kUnspecedTimer),
           this,
           &FrameCaret::CaretBlinkTimerFired)),
       should_paint_caret_(true),
@@ -114,8 +114,9 @@ void FrameCaret::StartBlinkCaret() {
   if (caret_blink_timer_->IsActive())
     return;
 
-  if (double blink_interval = LayoutTheme::GetTheme().CaretBlinkInterval())
-    caret_blink_timer_->StartRepeating(blink_interval, BLINK_FROM_HERE);
+  TimeDelta blink_interval = LayoutTheme::GetTheme().CaretBlinkInterval();
+  if (!blink_interval.is_zero())
+    caret_blink_timer_->StartRepeating(blink_interval, FROM_HERE);
 
   should_paint_caret_ = true;
   ScheduleVisualUpdateForPaintInvalidationIfNeeded();

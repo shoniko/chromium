@@ -72,13 +72,13 @@ MultiprofilesIntroDialog::MultiprofilesIntroDialog(OnAcceptCallback on_accept)
   never_show_again_checkbox_->SetChecked(true);
 }
 
-MultiprofilesIntroDialog::~MultiprofilesIntroDialog() {}
+MultiprofilesIntroDialog::~MultiprofilesIntroDialog() = default;
 
 void MultiprofilesIntroDialog::InitDialog() {
   SetBorder(
       views::CreateEmptyBorder(views::LayoutProvider::Get()->GetInsetsMetric(
           views::INSETS_DIALOG_TITLE)));
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
   // Explanation string
   views::Label* label = new views::Label(

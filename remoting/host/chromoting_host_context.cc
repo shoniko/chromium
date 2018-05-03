@@ -19,7 +19,8 @@ namespace {
 
 void DisallowBlockingOperations() {
   base::ThreadRestrictions::SetIOAllowed(false);
-  base::ThreadRestrictions::DisallowWaiting();
+  // TODO(crbug.com/793486): Re-enable after the underlying issue is fixed.
+  // base::ThreadRestrictions::DisallowBaseSyncPrimitives();
 }
 
 }  // namespace
@@ -44,8 +45,7 @@ ChromotingHostContext::ChromotingHostContext(
       url_request_context_getter_(url_request_context_getter),
       system_input_injector_factory_(system_input_injector_factory) {}
 
-ChromotingHostContext::~ChromotingHostContext() {
-}
+ChromotingHostContext::~ChromotingHostContext() = default;
 
 std::unique_ptr<ChromotingHostContext> ChromotingHostContext::Copy() {
   return base::WrapUnique(new ChromotingHostContext(

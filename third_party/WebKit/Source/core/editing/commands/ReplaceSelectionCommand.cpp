@@ -26,10 +26,11 @@
 
 #include "core/editing/commands/ReplaceSelectionCommand.h"
 
+#include "base/macros.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/CSSPropertyNames.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSStyleDeclaration.h"
-#include "core/css/StylePropertySet.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/Element.h"
@@ -75,7 +76,6 @@ enum EFragmentType { kEmptyFragment, kSingleTextNodeFragment, kTreeFragment };
 // --- ReplacementFragment helper class
 
 class ReplacementFragment final {
-  WTF_MAKE_NONCOPYABLE(ReplacementFragment);
   STACK_ALLOCATED();
 
  public:
@@ -108,6 +108,8 @@ class ReplacementFragment final {
   Member<DocumentFragment> fragment_;
   bool has_interchange_newline_at_start_;
   bool has_interchange_newline_at_end_;
+
+  DISALLOW_COPY_AND_ASSIGN(ReplacementFragment);
 };
 
 static bool IsInterchangeHTMLBRElement(const Node* node) {
@@ -555,7 +557,7 @@ void ReplaceSelectionCommand::RemoveRedundantStylesAndKeepStyleSpanInline(
 
     Element* element = ToElement(node);
 
-    const StylePropertySet* inline_style = element->InlineStyle();
+    const CSSPropertyValueSet* inline_style = element->InlineStyle();
     EditingStyle* new_inline_style = EditingStyle::Create(inline_style);
     if (inline_style) {
       if (element->IsHTMLElement()) {
@@ -1141,10 +1143,11 @@ void ReplaceSelectionCommand::InsertParagraphSeparatorIfNeeds(
 void ReplaceSelectionCommand::DoApply(EditingState* editing_state) {
   TRACE_EVENT0("blink", "ReplaceSelectionCommand::doApply");
   const VisibleSelection& selection = EndingVisibleSelection();
-  if (selection.IsNone() || !selection.IsValidFor(GetDocument())) {
-    NOTREACHED();
-    return;
-  }
+
+  // ReplaceSelectionCommandTest.CrashWithNoSelection hits below abort
+  // condition.
+  ABORT_EDITING_COMMAND_IF(selection.IsNone());
+  ABORT_EDITING_COMMAND_IF(!selection.IsValidFor(GetDocument()));
 
   if (!selection.RootEditableElement())
     return;
@@ -1368,8 +1371,10 @@ void ReplaceSelectionCommand::DoApply(EditingState* editing_state) {
     node = next;
   }
 
-  if (IsRichlyEditablePosition(insertion_pos))
+  if (IsRichlyEditablePosition(insertion_pos)) {
     RemoveUnrenderedTextNodesAtEnds(inserted_nodes);
+    ABORT_EDITING_COMMAND_IF(!inserted_nodes.RefNode());
+  }
 
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
 
@@ -1385,9 +1390,8 @@ void ReplaceSelectionCommand::DoApply(EditingState* editing_state) {
       !enclosing_block_of_insertion_pos->isConnected())
     enclosing_block_of_insertion_pos = nullptr;
 
-  VisiblePosition start_of_inserted_content =
-      CreateVisiblePosition(FirstPositionInOrBeforeNodeDeprecated(
-          inserted_nodes.FirstNodeInserted()));
+  VisiblePosition start_of_inserted_content = CreateVisiblePosition(
+      FirstPositionInOrBeforeNode(*inserted_nodes.FirstNodeInserted()));
 
   // We inserted before the enclosingBlockOfInsertionPos to prevent nesting, and
   // the content before the enclosingBlockOfInsertionPos wasn't in its own block
@@ -1412,11 +1416,13 @@ void ReplaceSelectionCommand::DoApply(EditingState* editing_state) {
         !(fragment.HasInterchangeNewlineAtEnd() && selection_is_plain_text)))) {
     ContainerNode* parent = end_br->parentNode();
     inserted_nodes.WillRemoveNode(*end_br);
+    ABORT_EDITING_COMMAND_IF(!inserted_nodes.RefNode());
     RemoveNode(end_br, editing_state);
     if (editing_state->IsAborted())
       return;
     if (Node* node_to_remove = HighestNodeToRemoveInPruning(parent)) {
       inserted_nodes.WillRemoveNode(*node_to_remove);
+      ABORT_EDITING_COMMAND_IF(!inserted_nodes.RefNode());
       RemoveNode(node_to_remove, editing_state);
       if (editing_state->IsAborted())
         return;
@@ -1451,12 +1457,18 @@ void ReplaceSelectionCommand::DoApply(EditingState* editing_state) {
       return;
   }
 
-  // Setup m_startOfInsertedContent and m_endOfInsertedContent. This should be
-  // the last two lines of code that access insertedNodes.
+  // Setup |start_of_inserted_content_| and |end_of_inserted_content_|.
+  // This should be the last two lines of code that access insertedNodes.
+  // TODO(editing-dev): The {First,Last}NodeInserted() nullptr checks may be
+  // unnecessary. Investigate.
   start_of_inserted_content_ =
-      FirstPositionInOrBeforeNodeDeprecated(inserted_nodes.FirstNodeInserted());
+      inserted_nodes.FirstNodeInserted()
+          ? FirstPositionInOrBeforeNode(*inserted_nodes.FirstNodeInserted())
+          : Position();
   end_of_inserted_content_ =
-      LastPositionInOrAfterNodeDeprecated(inserted_nodes.LastLeafInserted());
+      inserted_nodes.LastLeafInserted()
+          ? LastPositionInOrAfterNode(*inserted_nodes.LastLeafInserted())
+          : Position();
 
   // Determine whether or not we should merge the end of inserted content with
   // what's after it before we do the start merge so that the start merge

@@ -102,6 +102,7 @@ Para obtener información sobre la privacidad, consulta la Política de Privacid
 <translation id="3106379468611574572">El ordenador remoto no responde a las solicitudes de conexión. Comprueba que esté conectado y vuelve a intentarlo.</translation>
 <translation id="310979712355504754">Eliminar todos</translation>
 <translation id="3150823315463303127">El host no ha podido leer la política.</translation>
+<translation id="3171922709365450819">Este cliente no admite el dispositivo porque necesita autenticación de terceros.</translation>
 <translation id="3194245623920924351">Escritorio Remoto de Chrome</translation>
 <translation id="3197730452537982411">Escritorio remoto</translation>
 <translation id="324272851072175193">Enviar estas instrucciones por correo electrónico</translation>
@@ -319,7 +320,7 @@ PC</translation>
 <translation id="837021510621780684">Conexiones desde este ordenador</translation>
 <translation id="8383794970363966105">Para utilizar Chromoting, debes añadir una cuenta de Google al dispositivo.</translation>
 <translation id="8386846956409881180">El host está configurado con credenciales de OAuth que no son válidas.</translation>
-<translation id="8428213095426709021">Ajustes</translation>
+<translation id="8428213095426709021">Configuración</translation>
 <translation id="8445362773033888690">Ver en Google Play Store</translation>
 <translation id="8509907436388546015">Proceso de integración del escritorio</translation>
 <translation id="8513093439376855948">Host de mensajes nativo para administración de host de forma remota</translation>
@@ -337,6 +338,7 @@ PC</translation>
 <translation id="8998327464021325874">Controlador de host de Escritorio Remoto de Chrome</translation>
 <translation id="9016232822027372900">Conectar de todos modos</translation>
 <translation id="906458777597946297">Maximizar ventana</translation>
+<translation id="9111855907838866522">Estás conectado al dispositivo remoto. Para abrir el menú, toca la pantalla con cuatro dedos.</translation>
 <translation id="9126115402994542723">No volver a pedir un PIN al conectarse a este host desde este dispositivo.</translation>
 <translation id="9149580767411232853">Mantiene todo el escritorio remoto visible</translation>
 <translation id="9149992051684092333">Para empezar a compartir tu escritorio, proporciona el código de acceso que se muestra a continuación a la persona que te vaya a ayudar.</translation>

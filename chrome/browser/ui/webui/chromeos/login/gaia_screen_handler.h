@@ -20,6 +20,10 @@
 
 class AccountId;
 
+namespace policy {
+class UntrustedAuthorityCertsCache;
+}
+
 namespace chromeos {
 
 class ActiveDirectoryPasswordChangeScreenHandler;
@@ -58,9 +62,18 @@ class GaiaScreenHandler : public BaseScreenHandler,
 
   void LoadGaia(const GaiaContext& context);
 
-  // Callback that loads GAIA after version information has been retrieved.
-  void LoadGaiaWithVersion(const GaiaContext& context,
-                           const std::string& platform_version);
+  // Callback that loads GAIA after version and stat consent information has
+  // been retrieved.
+  void LoadGaiaWithPartition(const GaiaContext& context,
+                             const std::string& partition_name);
+
+  // Callback that loads GAIA after version and stat consent information has
+  // been retrieved.
+  void LoadGaiaWithPartitionAndVersionAndConsent(
+      const GaiaContext& context,
+      const std::string& partition_name,
+      const std::string* platform_version,
+      const bool* collect_stats_consent);
 
   // Sends request to reload Gaia. If |force_reload| is true, request
   // will be sent in any case, otherwise it will be sent only when Gaia is
@@ -267,6 +280,11 @@ class GaiaScreenHandler : public BaseScreenHandler,
   // Helper to call AuthPolicyClient and cancel calls if needed. Used to
   // authenticate users against Active Directory server.
   std::unique_ptr<AuthPolicyLoginHelper> authpolicy_login_helper_;
+
+  // Makes untrusted authority certificates from device policy available for
+  // client certificate discovery.
+  std::unique_ptr<policy::UntrustedAuthorityCertsCache>
+      untrusted_authority_certs_cache_;
 
   base::WeakPtrFactory<GaiaScreenHandler> weak_factory_;
 

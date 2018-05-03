@@ -46,11 +46,12 @@ const float kExitTabletModeAngle = 160.0f;
 const float kMinStableAngle = 20.0f;
 const float kMaxStableAngle = 340.0f;
 
-// The time duration to consider the lid to be recently opened.
-// This is used to prevent entering tablet mode if an erroneous accelerometer
-// reading makes the lid appear to be fully open when the user is opening the
-// lid from a closed position.
-const int kLidRecentlyOpenedDurationSeconds = 2;
+// The time duration to consider an unstable lid angle to be valid. This is used
+// to prevent entering tablet mode if an erroneous accelerometer reading makes
+// the lid appear to be fully open when the user is opening the lid from a
+// closed position or is closing the lid from an opened position.
+constexpr base::TimeDelta kUnstableLidAngleDuration =
+    base::TimeDelta::FromSeconds(2);
 
 // When the device approaches vertical orientation (i.e. portrait orientation)
 // the accelerometers for the base and lid approach the same values (i.e.
@@ -121,6 +122,7 @@ TabletModeController::TabletModeController()
       lid_is_closed_(false),
       auto_hide_title_bars_(!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAshDisableTabletAutohideTitlebars)),
+      binding_(this),
       scoped_session_observer_(this),
       weak_factory_(this) {
   Shell::Get()->AddShellObserver(this);
@@ -137,7 +139,7 @@ TabletModeController::TabletModeController()
   chromeos::PowerManagerClient* power_manager_client =
       chromeos::DBusThreadManager::Get()->GetPowerManagerClient();
   power_manager_client->AddObserver(this);
-  power_manager_client->GetSwitchStates(base::Bind(
+  power_manager_client->GetSwitchStates(base::BindOnce(
       &TabletModeController::OnGetSwitchStates, weak_factory_.GetWeakPtr()));
 }
 
@@ -201,7 +203,8 @@ void TabletModeController::AddWindow(aura::Window* window) {
 
 void TabletModeController::BindRequest(
     mojom::TabletModeControllerRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+  DCHECK(!binding_.is_bound()) << "Only one client allowed.";
+  binding_.Bind(std::move(request));
 }
 
 void TabletModeController::AddObserver(TabletModeObserver* observer) {
@@ -259,8 +262,6 @@ void TabletModeController::LidEventReceived(
     return;
 
   const bool open = state == chromeos::PowerManagerClient::LidState::OPEN;
-  if (open)
-    last_lid_open_time_ = time;
   lid_is_closed_ = !open;
   LeaveTabletMode();
 }
@@ -290,7 +291,8 @@ void TabletModeController::TabletModeEventReceived(
   }
 }
 
-void TabletModeController::SuspendImminent() {
+void TabletModeController::SuspendImminent(
+    power_manager::SuspendImminent::Reason reason) {
   // The system is about to suspend, so record TabletMode usage interval metrics
   // based on whether TabletMode mode is currently active.
   RecordTabletModeUsageInterval(CurrentTabletModeIntervalType());
@@ -352,11 +354,13 @@ void TabletModeController::HandleHingeRotation(
   bool is_angle_stable = is_angle_reliable && lid_angle >= kMinStableAngle &&
                          lid_angle <= kMaxStableAngle;
 
-  // Clear the last_lid_open_time_ for a stable reading so that there is less
-  // chance of a delay if the lid is moved from the close state to the fully
-  // open state very quickly.
-  if (is_angle_stable)
-    last_lid_open_time_ = base::TimeTicks();
+  if (is_angle_stable) {
+    // Reset the timestamp of first unstable lid angle because we get a stable
+    // reading.
+    first_unstable_lid_angle_time_ = base::TimeTicks();
+  } else if (first_unstable_lid_angle_time_.is_null()) {
+    first_unstable_lid_angle_time_ = tick_clock_->NowTicks();
+  }
 
   // Toggle tablet mode on or off when corresponding thresholds are passed.
   if (IsTabletModeWindowManagerEnabled() && is_angle_stable &&
@@ -364,7 +368,7 @@ void TabletModeController::HandleHingeRotation(
     LeaveTabletMode();
   } else if (!IsTabletModeWindowManagerEnabled() && !lid_is_closed_ &&
              lid_angle >= kEnterTabletModeAngle &&
-             (is_angle_stable || !WasLidOpenedRecently())) {
+             (is_angle_stable || CanUseUnstableLidAngle())) {
     EnterTabletMode();
   }
 }
@@ -388,7 +392,7 @@ void TabletModeController::LeaveTabletMode() {
 }
 
 void TabletModeController::FlushForTesting() {
-  bindings_.FlushForTesting();
+  binding_.FlushForTesting();
 }
 
 void TabletModeController::OnShellInitialized() {
@@ -472,20 +476,20 @@ void TabletModeController::OnChromeTerminating() {
 }
 
 void TabletModeController::OnGetSwitchStates(
-    chromeos::PowerManagerClient::LidState lid_state,
-    chromeos::PowerManagerClient::TabletMode tablet_mode) {
-  LidEventReceived(lid_state, base::TimeTicks::Now());
-  TabletModeEventReceived(tablet_mode, base::TimeTicks::Now());
+    base::Optional<chromeos::PowerManagerClient::SwitchStates> result) {
+  if (!result.has_value())
+    return;
+  LidEventReceived(result->lid_state, base::TimeTicks::Now());
+  TabletModeEventReceived(result->tablet_mode, base::TimeTicks::Now());
 }
 
-bool TabletModeController::WasLidOpenedRecently() const {
-  if (last_lid_open_time_.is_null())
-    return false;
+bool TabletModeController::CanUseUnstableLidAngle() const {
+  DCHECK(!first_unstable_lid_angle_time_.is_null());
 
-  base::TimeTicks now = tick_clock_->NowTicks();
-  DCHECK(now >= last_lid_open_time_);
-  base::TimeDelta elapsed_time = now - last_lid_open_time_;
-  return elapsed_time.InSeconds() <= kLidRecentlyOpenedDurationSeconds;
+  const base::TimeTicks now = tick_clock_->NowTicks();
+  DCHECK(now >= first_unstable_lid_angle_time_);
+  const base::TimeDelta elapsed_time = now - first_unstable_lid_angle_time_;
+  return elapsed_time >= kUnstableLidAngleDuration;
 }
 
 void TabletModeController::SetTickClockForTest(

@@ -35,8 +35,7 @@ import java.util.List;
  * Integration tests for ClearBrowsingDataPreferences.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class BrowsingDataBridgeTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -100,7 +99,8 @@ public class BrowsingDataBridgeTest {
         assertThat(mActionTester.toString(), getActions(),
                 Matchers.containsInAnyOrder("ClearBrowsingData_LastHour",
                         "ClearBrowsingData_MaskContainsUnprotectedWeb",
-                        "ClearBrowsingData_ChannelIDs", "ClearBrowsingData_Cookies"));
+                        "ClearBrowsingData_ChannelIDs", "ClearBrowsingData_Cookies",
+                        "ClearBrowsingData_SiteUsageData"));
     }
 
     /**
@@ -212,6 +212,6 @@ public class BrowsingDataBridgeTest {
                         "ClearBrowsingData_ShaderCache", "ClearBrowsingData_Cookies",
                         "ClearBrowsingData_ChannelIDs", "ClearBrowsingData_Autofill",
                         "ClearBrowsingData_History", "ClearBrowsingData_Passwords",
-                        "ClearBrowsingData_ContentSettings"));
+                        "ClearBrowsingData_ContentSettings", "ClearBrowsingData_SiteUsageData"));
     }
 }

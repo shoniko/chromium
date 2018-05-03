@@ -27,10 +27,10 @@
 #define OfflineAudioDestinationNode_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "modules/webaudio/AudioBuffer.h"
 #include "modules/webaudio/AudioDestinationNode.h"
 #include "modules/webaudio/OfflineAudioContext.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebThread.h"
 
 namespace blink {
@@ -64,7 +64,7 @@ class OfflineAudioDestinationHandler final : public AudioDestinationHandler {
   void StopRendering() override;
   unsigned long MaxChannelCount() const override;
 
-  void RestartDestination() override;
+  void RestartRendering() override;
 
   // Returns the rendering callback buffer size.  This should never be
   // called.
@@ -153,6 +153,8 @@ class OfflineAudioDestinationHandler final : public AudioDestinationHandler {
 
   unsigned number_of_channels_;
   float sample_rate_;
+
+  scoped_refptr<WebTaskRunner> task_runner_;
 };
 
 class OfflineAudioDestinationNode final : public AudioDestinationNode {

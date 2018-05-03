@@ -29,8 +29,8 @@
 #ifndef AudioScheduledSourceNode_h
 #define AudioScheduledSourceNode_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "modules/webaudio/AudioNode.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 
 namespace blink {
 
@@ -131,6 +131,8 @@ class AudioScheduledSourceHandler : public AudioHandler {
   // This is accessed by both the main thread and audio thread.  Use the setter
   // and getter to protect the access to this.
   int playback_state_;
+
+  scoped_refptr<WebTaskRunner> task_runner_;
 };
 
 class AudioScheduledSourceNode

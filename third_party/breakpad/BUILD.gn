@@ -714,12 +714,15 @@ if (is_linux || is_android) {
 
     deps = [
       ":client",
-      ":linux_dumper_unittest_helper",
       ":processor_support",
       "//build/config:exe_and_shlib_deps",
       "//testing/gmock",
       "//testing/gtest",
       "//testing/gtest:gtest_main",
+    ]
+
+    data_deps = [
+      ":linux_dumper_unittest_helper",
     ]
 
     include_dirs = [
@@ -770,10 +773,7 @@ if (is_linux || is_android) {
     configs += [ ":client_config" ]
 
     if (is_component_build) {
-      ldflags = [
-        "-Wl,-rpath,",
-        rebase_path(root_build_dir),
-      ]
+      ldflags = [ "-Wl,-rpath,\$ORIGIN" ]
     }
   }
 
@@ -903,6 +903,7 @@ if (is_ios) {
       "breakpad/src/client/minidump_file_writer.h",
       "breakpad/src/common/convert_UTF.c",
       "breakpad/src/common/convert_UTF.h",
+      "breakpad/src/common/long_string_dictionary.cc",
       "breakpad/src/common/mac/HTTPMultipartUpload.m",
       "breakpad/src/common/mac/file_id.cc",
       "breakpad/src/common/mac/file_id.h",

@@ -69,15 +69,29 @@ class PLATFORM_EXPORT PaintController {
   void InvalidateAll();
   bool CacheIsAllInvalid() const;
 
-  // These methods are called during painting.u
+  // These methods are called during painting.
 
   // Provide a new set of paint chunk properties to apply to recorded display
-  // items, for Slimming Paint v2.
-  void UpdateCurrentPaintChunkProperties(const PaintChunk::Id*,
-                                         const PaintChunkProperties&);
+  // items, for Slimming Paint v175+.
+  void UpdateCurrentPaintChunkProperties(
+      const Optional<PaintChunk::Id>& id,
+      const PaintChunkProperties& properties) {
+    if (id) {
+      PaintChunk::Id id_with_fragment(*id, current_fragment_);
+      new_paint_chunks_.UpdateCurrentPaintChunkProperties(id_with_fragment,
+                                                          properties);
+#if DCHECK_IS_ON()
+      CheckDuplicatePaintChunkId(id_with_fragment);
+#endif
+    } else {
+      new_paint_chunks_.UpdateCurrentPaintChunkProperties(WTF::nullopt,
+                                                          properties);
+    }
+  }
 
-  // Retrieve the current paint properties.
-  const PaintChunkProperties& CurrentPaintChunkProperties() const;
+  const PaintChunkProperties& CurrentPaintChunkProperties() const {
+    return new_paint_chunks_.CurrentPaintChunkProperties();
+  }
 
   template <typename DisplayItemClass, typename... Args>
   void CreateAndAppend(Args&&... args) {
@@ -94,6 +108,7 @@ class PLATFORM_EXPORT PaintController {
     DisplayItemClass& display_item =
         new_display_item_list_.AllocateAndConstruct<DisplayItemClass>(
             std::forward<Args>(args)...);
+    display_item.SetFragment(current_fragment_);
     ProcessNewItem(display_item);
   }
 
@@ -183,20 +198,13 @@ class PLATFORM_EXPORT PaintController {
 
   void AppendDebugDrawingAfterCommit(const DisplayItemClient&,
                                      sk_sp<const PaintRecord>,
-                                     const FloatRect& record_bounds,
                                      const PropertyTreeState*);
 
+#if DCHECK_IS_ON()
   void ShowDebugData() const;
 #ifndef NDEBUG
   void ShowDebugDataWithRecords() const;
 #endif
-
-#if DCHECK_IS_ON()
-  enum Usage { kForNormalUsage, kForPaintRecordBuilder };
-  void SetUsage(Usage usage) { usage_ = usage; }
-  bool IsForPaintRecordBuilder() const {
-    return usage_ == kForPaintRecordBuilder;
-  }
 #endif
 
   void SetTracksRasterInvalidations(bool);
@@ -206,6 +214,12 @@ class PLATFORM_EXPORT PaintController {
   void BeginFrame(const void* frame);
   FrameFirstPaint EndFrame(const void* frame);
 
+  // The current fragment will be part of the ids of all display items and
+  // paint chunks, to uniquely identify display items in different fragments
+  // for the same client and type.
+  unsigned CurrentFragment() const { return current_fragment_; }
+  void SetCurrentFragment(unsigned fragment) { current_fragment_ = fragment; }
+
  protected:
   PaintController()
       : new_display_item_list_(0),
@@ -214,14 +228,15 @@ class PLATFORM_EXPORT PaintController {
         skipping_cache_count_(0),
         num_cached_new_items_(0),
         current_cached_subsequence_begin_index_in_new_list_(kNotFound),
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
         num_sequential_matches_(0),
         num_out_of_order_matches_(0),
         num_indexed_items_(0),
 #endif
         under_invalidation_checking_begin_(0),
         under_invalidation_checking_end_(0),
-        last_cached_subsequence_end_(0) {
+        last_cached_subsequence_end_(0),
+        current_fragment_(0) {
     ResetCurrentListIndices();
     // frame_first_paints_ should have one null frame since the beginning, so
     // that PaintController is robust even if it paints outside of BeginFrame
@@ -261,9 +276,9 @@ class PLATFORM_EXPORT PaintController {
   static size_t FindMatchingItemFromIndex(const DisplayItem::Id&,
                                           const IndicesByClientMap&,
                                           const DisplayItemList&);
-  static void AddItemToIndexIfNeeded(const DisplayItem&,
-                                     size_t index,
-                                     IndicesByClientMap&);
+  static void AddToIndicesByClientMap(const DisplayItemClient&,
+                                      size_t index,
+                                      IndicesByClientMap&);
 
   size_t FindCachedItem(const DisplayItem::Id&);
   size_t FindOutOfOrderCachedItemForward(const DisplayItem::Id&);
@@ -327,7 +342,10 @@ class PLATFORM_EXPORT PaintController {
 
   SubsequenceMarkers* GetSubsequenceMarkers(const DisplayItemClient&);
 
-  void ShowDebugDataInternal(bool show_paint_records) const;
+#if DCHECK_IS_ON()
+  void CheckDuplicatePaintChunkId(const PaintChunk::Id&);
+  void ShowDebugDataInternal(DisplayItemList::JsonFlags) const;
+#endif
 
   // The last complete paint artifact.
   // In SPv2, this includes paint chunks as well as display items.
@@ -388,17 +406,15 @@ class PLATFORM_EXPORT PaintController {
   DisplayItemClient::CacheGenerationOrInvalidationReason
       current_cache_generation_;
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   int num_sequential_matches_;
   int num_out_of_order_matches_;
   int num_indexed_items_;
-#endif
 
-#if DCHECK_IS_ON()
   // This is used to check duplicated ids during CreateAndAppend().
   IndicesByClientMap new_display_item_indices_by_client_;
-
-  Usage usage_ = kForNormalUsage;
+  // This is used to check duplicated ids for new paint chunks.
+  IndicesByClientMap new_paint_chunk_indices_by_client_;
 #endif
 
   // These are set in UseCachedDrawingIfPossible() and
@@ -429,6 +445,8 @@ class PLATFORM_EXPORT PaintController {
   CachedSubsequenceMap current_cached_subsequences_;
   CachedSubsequenceMap new_cached_subsequences_;
   size_t last_cached_subsequence_end_;
+
+  unsigned current_fragment_;
 
   class DisplayItemListAsJSON;
 };

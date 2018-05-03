@@ -16,6 +16,7 @@
 #include "core/paint/ScrollableAreaPainter.h"
 #include "core/paint/SelectionPaintingUtils.h"
 #include "core/paint/TransformRecorder.h"
+#include "platform/graphics/paint/DisplayItemCacheSkipper.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/wtf/Optional.h"
 
@@ -31,6 +32,15 @@ bool EmbeddedContentPainter::IsSelected() const {
 
 void EmbeddedContentPainter::Paint(const PaintInfo& paint_info,
                                    const LayoutPoint& paint_offset) {
+  // TODO(crbug.com/797779): For now embedded contents don't know whether
+  // they are painted in a fragmented context and may do something bad in a
+  // fragmented context, e.g. creating subsequences. Skip cache to avoid that.
+  // This will be unnecessary when the contents are fragment aware.
+  Optional<DisplayItemCacheSkipper> cache_skipper;
+  DCHECK(layout_embedded_content_.HasLayer());
+  if (layout_embedded_content_.Layer()->EnclosingPaginationLayer())
+    cache_skipper.emplace(paint_info.context);
+
   AdjustPaintOffsetScope adjustment(layout_embedded_content_, paint_info,
                                     paint_offset);
   const auto& local_paint_info = adjustment.GetPaintInfo();
@@ -97,7 +107,7 @@ void EmbeddedContentPainter::Paint(const PaintInfo& paint_info,
     rect.MoveBy(adjusted_paint_offset);
     IntRect selection_rect = PixelSnappedIntRect(rect);
     DrawingRecorder recorder(local_paint_info.context, layout_embedded_content_,
-                             local_paint_info.phase, selection_rect);
+                             local_paint_info.phase);
     Color selection_bg = SelectionPaintingUtils::SelectionBackgroundColor(
         layout_embedded_content_.GetDocument(),
         layout_embedded_content_.StyleRef(),

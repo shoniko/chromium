@@ -39,20 +39,20 @@ enum ChromeDownloadSource {
   // The download was initiated by invoking a context menu within a page.
   DOWNLOAD_INITIATED_BY_CONTEXT_MENU,
 
-  // The download was initiated by the WebStore installer.
-  DOWNLOAD_INITIATED_BY_WEBSTORE_INSTALLER,
+  // Formerly DOWNLOAD_INITIATED_BY_WEBSTORE_INSTALLER.
+  CHROME_DOWNLOAD_SOURCE_UNUSED_2,
 
-  // The download was initiated by the ImageBurner (cros).
-  DOWNLOAD_INITIATED_BY_IMAGE_BURNER,
+  // Formerly DOWNLOAD_INITIATED_BY_IMAGE_BURNER.
+  CHROME_DOWNLOAD_SOURCE_UNUSED_3,
 
-  // The download was initiated by the plugin installer.
-  DOWNLOAD_INITIATED_BY_PLUGIN_INSTALLER,
+  // Formerly DOWNLOAD_INITIATED_BY_PLUGIN_INSTALLER.
+  CHROME_DOWNLOAD_SOURCE_UNUSED_4,
 
-  // The download was initiated by the PDF plugin..
+  // The download was initiated by the PDF plugin.
   DOWNLOAD_INITIATED_BY_PDF_SAVE,
 
-  // The download was initiated by chrome.downloads.download().
-  DOWNLOAD_INITIATED_BY_EXTENSION,
+  // Formerly DOWNLOAD_INITIATED_BY_EXTENSION.
+  CHROME_DOWNLOAD_SOURCE_UNUSED_6,
 
   CHROME_DOWNLOAD_SOURCE_LAST_ENTRY
 };
@@ -120,5 +120,23 @@ void RecordDownloadPathGeneration(DownloadPathGenerationEvent event,
 // Record path validation result.
 void RecordDownloadPathValidation(PathValidationResult result,
                                   bool is_transient);
+
+// Records drags of completed downloads from the shelf. Used in UMA, do not
+// remove, change or reuse existing entries. Update histograms.xml and
+// enums.xml when adding entries.
+enum class DownloadShelfDragEvent {
+  // A download was dragged. All platforms.
+  STARTED,
+  // The download was dropped somewhere that isn't a drag target. Currently
+  // only recorded on Mac.
+  CANCELED,
+  // The download was dropped somewhere useful (a folder, an application,
+  // etc.). Currently only recorded on Mac.
+  DROPPED,
+
+  COUNT
+};
+
+void RecordDownloadShelfDragEvent(DownloadShelfDragEvent drag_event);
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_

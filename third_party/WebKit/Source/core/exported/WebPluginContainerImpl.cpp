@@ -64,9 +64,8 @@
 #include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutBox.h"
+#include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/api/LayoutEmbeddedContentItem.h"
-#include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/FocusController.h"
@@ -166,7 +165,7 @@ void WebPluginContainerImpl::Paint(GraphicsContext& context,
     return;
 
   DrawingRecorder recorder(context, *element_->GetLayoutObject(),
-                           DisplayItem::kWebPlugin, cull_rect.rect_);
+                           DisplayItem::kWebPlugin);
   context.Save();
 
   // The plugin is positioned in the root frame's coordinates, so it needs to
@@ -353,15 +352,14 @@ int WebPluginContainerImpl::PrintBegin(
   return web_plugin_->PrintBegin(print_params);
 }
 
-void WebPluginContainerImpl::PrintPage(int page_number,
-                                       GraphicsContext& gc,
-                                       const IntRect& print_rect) {
+void WebPluginContainerImpl::PrintPage(int page_number, GraphicsContext& gc) {
   if (DrawingRecorder::UseCachedDrawingIfPossible(
           gc, *element_->GetLayoutObject(), DisplayItem::kWebPlugin))
     return;
 
+  // TODO(wkorman): Do we still need print_rect at all?
   DrawingRecorder recorder(gc, *element_->GetLayoutObject(),
-                           DisplayItem::kWebPlugin, print_rect);
+                           DisplayItem::kWebPlugin);
   gc.Save();
 
   WebCanvas* canvas = gc.Canvas();
@@ -430,8 +428,8 @@ void WebPluginContainerImpl::DispatchProgressEvent(const WebString& type,
 void WebPluginContainerImpl::EnqueueMessageEvent(
     const WebDOMMessageEvent& event) {
   static_cast<Event*>(event)->SetTarget(element_);
-  element_->GetExecutionContext()->GetEventQueue()->EnqueueEvent(
-      BLINK_FROM_HERE, event);
+  element_->GetExecutionContext()->GetEventQueue()->EnqueueEvent(FROM_HERE,
+                                                                 event);
 }
 
 void WebPluginContainerImpl::Invalidate() {
@@ -511,7 +509,7 @@ WebString WebPluginContainerImpl::ExecuteScriptURL(const WebURL& url,
   v8::HandleScope handle_scope(ToIsolate(frame));
   v8::Local<v8::Value> result =
       frame->GetScriptController().ExecuteScriptInMainWorldAndReturnValue(
-          ScriptSourceCode(script));
+          ScriptSourceCode(script, ScriptSourceLocationType::kJavascriptUrl));
 
   // Failure is reported as a null string.
   if (result.IsEmpty() || !result->IsString())
@@ -620,8 +618,10 @@ void WebPluginContainerImpl::SetWantsWheelEvents(bool wants_wheel_events) {
             page->GetScrollingCoordinator()) {
       // Only call scrolling_coordinator if attached.  SetWantsWheelEvents can
       // be called from Plugin Initialization when it is not yet attached.
-      if (is_attached_)
-        scrolling_coordinator->NotifyGeometryChanged();
+      if (is_attached_) {
+        LocalFrameView* frame_view = element_->GetDocument().GetFrame()->View();
+        scrolling_coordinator->NotifyGeometryChanged(frame_view);
+      }
     }
   }
 }
@@ -748,7 +748,6 @@ void WebPluginContainerImpl::Dispose() {
 void WebPluginContainerImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   ContextClient::Trace(visitor);
-  PluginView::Trace(visitor);
 }
 
 void WebPluginContainerImpl::HandleMouseEvent(MouseEvent* event) {
@@ -758,8 +757,8 @@ void WebPluginContainerImpl::HandleMouseEvent(MouseEvent* event) {
 
   // TODO(dtapuska): Move WebMouseEventBuilder into the anonymous namespace
   // in this class.
-  WebMouseEventBuilder transformed_event(
-      &parent, LayoutItem(element_->GetLayoutObject()), *event);
+  WebMouseEventBuilder transformed_event(&parent, element_->GetLayoutObject(),
+                                         *event);
   if (transformed_event.GetType() == WebInputEvent::kUndefined)
     return;
 
@@ -802,8 +801,8 @@ void WebPluginContainerImpl::HandleDragEvent(MouseEvent* event) {
   WebDragData drag_data = data_transfer->GetDataObject()->ToWebDragData();
   WebDragOperationsMask drag_operation_mask =
       static_cast<WebDragOperationsMask>(data_transfer->SourceOperation());
-  WebPoint drag_screen_location(event->screenX(), event->screenY());
-  WebPoint drag_location(
+  WebFloatPoint drag_screen_location(event->screenX(), event->screenY());
+  WebFloatPoint drag_location(
       event->AbsoluteLocation().X() - frame_rect_.Location().X(),
       event->AbsoluteLocation().Y() - frame_rect_.Location().Y());
 
@@ -992,8 +991,8 @@ void WebPluginContainerImpl::HandleGestureEvent(GestureEvent* event) {
 }
 
 void WebPluginContainerImpl::SynthesizeMouseEventIfPossible(TouchEvent* event) {
-  WebMouseEventBuilder web_event(
-      &ParentFrameView(), LayoutItem(element_->GetLayoutObject()), *event);
+  WebMouseEventBuilder web_event(&ParentFrameView(),
+                                 element_->GetLayoutObject(), *event);
   if (web_event.GetType() == WebInputEvent::kUndefined)
     return;
 
@@ -1043,9 +1042,9 @@ void WebPluginContainerImpl::ComputeClipRectsForPlugin(
   LayoutRect layout_window_rect =
       LayoutRect(element_->GetDocument()
                      .View()
-                     ->GetLayoutViewItem()
-                     .LocalToAbsoluteQuad(FloatQuad(FloatRect(frame_rect_)),
-                                          kTraverseDocumentBoundaries)
+                     ->GetLayoutView()
+                     ->LocalToAbsoluteQuad(FloatQuad(FloatRect(frame_rect_)),
+                                           kTraverseDocumentBoundaries)
                      .BoundingBox());
   // Finally, adjust for scrolling of the root frame, which the above does not
   // take into account.
@@ -1079,10 +1078,7 @@ void WebPluginContainerImpl::CalculateGeometry(IntRect& window_rect,
   // document().layoutView() can be null when we receive messages from the
   // plugins while we are destroying a frame.
   // FIXME: Can we just check m_element->document().isActive() ?
-  if (!element_->GetLayoutObject()
-           ->GetDocument()
-           .GetLayoutViewItem()
-           .IsNull()) {
+  if (element_->GetLayoutObject()->GetDocument().GetLayoutView()) {
     // Take our element and get the clip rect from the enclosing layer and
     // frame view.
     ComputeClipRectsForPlugin(element_, window_rect, clip_rect,

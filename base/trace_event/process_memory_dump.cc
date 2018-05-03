@@ -29,6 +29,8 @@
 #endif
 
 #if defined(OS_WIN)
+#include <windows.h>  // Must be in front of other Windows header files
+
 #include <Psapi.h>
 #endif
 
@@ -198,7 +200,7 @@ ProcessMemoryDump::ProcessMemoryDump(
           std::move(heap_profiler_serialization_state)),
       dump_args_(dump_args) {}
 
-ProcessMemoryDump::~ProcessMemoryDump() {}
+ProcessMemoryDump::~ProcessMemoryDump() = default;
 ProcessMemoryDump::ProcessMemoryDump(ProcessMemoryDump&& other) = default;
 ProcessMemoryDump& ProcessMemoryDump::operator=(ProcessMemoryDump&& other) =
     default;
@@ -384,11 +386,12 @@ void ProcessMemoryDump::AddOwnershipEdge(const MemoryAllocatorDumpGuid& source,
                                          int importance) {
   // This will either override an existing edge or create a new one.
   auto it = allocator_dumps_edges_.find(source);
+  int max_importance = importance;
   if (it != allocator_dumps_edges_.end()) {
-    DCHECK_EQ(target.ToUint64(),
-              allocator_dumps_edges_[source].target.ToUint64());
+    DCHECK_EQ(target.ToUint64(), it->second.target.ToUint64());
+    max_importance = std::max(importance, it->second.importance);
   }
-  allocator_dumps_edges_[source] = {source, target, importance,
+  allocator_dumps_edges_[source] = {source, target, max_importance,
                                     false /* overridable */};
 }
 

@@ -28,15 +28,17 @@
 #define FrameSelection_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/SynchronousMutationObserver.h"
 #include "core/editing/Forward.h"
 #include "core/editing/SetSelectionOptions.h"
-#include "core/layout/ScrollAlignment.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
+#include "platform/scroll/ScrollAlignment.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
@@ -47,6 +49,7 @@ class LocalFrame;
 class FrameCaret;
 class GranularityStrategy;
 class GraphicsContext;
+class NGPhysicalTextFragment;
 class Range;
 class SelectionEditor;
 class LayoutSelection;
@@ -64,7 +67,6 @@ enum class HandleVisibility { kNotVisible, kVisible };
 class CORE_EXPORT FrameSelection final
     : public GarbageCollectedFinalized<FrameSelection>,
       public SynchronousMutationObserver {
-  WTF_MAKE_NONCOPYABLE(FrameSelection);
   USING_GARBAGE_COLLECTED_MIXIN(FrameSelection);
 
  public:
@@ -92,12 +94,7 @@ class CORE_EXPORT FrameSelection final
   VisibleSelection ComputeVisibleSelectionInDOMTreeDeprecated() const;
 
   void SetSelection(const SelectionInDOMTree&, const SetSelectionOptions&);
-
-  // TODO(editing-dev): We should rename this function to
-  // SetSelectionAndEndTyping()
-  // Set selection with end of typing processing == close typing and clear
-  // typing style.
-  void SetSelection(const SelectionInDOMTree&);
+  void SetSelectionAndEndTyping(const SelectionInDOMTree&);
   void SelectAll(SetSelectionBy);
   void SelectAll();
   void Clear();
@@ -139,7 +136,12 @@ class CORE_EXPORT FrameSelection final
   bool ShouldPaintCaret(const LayoutBlock&) const;
 
   // Bounds of (possibly transformed) caret in absolute coords
-  IntRect AbsoluteCaretBounds();
+  IntRect AbsoluteCaretBounds() const;
+
+  // Returns anchor and focus bounds in absolute coords.
+  // If the selection range is empty, returns the caret bounds.
+  // Note: this updates styles and layout, use cautiously.
+  bool ComputeAbsoluteBounds(IntRect& anchor, IntRect& focus) const;
 
   void DidChangeFocus();
 
@@ -217,9 +219,11 @@ class CORE_EXPORT FrameSelection final
 
   FrameCaret& FrameCaretForTesting() const { return *frame_caret_; }
 
-  base::Optional<int> LayoutSelectionStart() const;
-  base::Optional<int> LayoutSelectionEnd() const;
+  WTF::Optional<unsigned> LayoutSelectionStart() const;
+  WTF::Optional<unsigned> LayoutSelectionEnd() const;
   void ClearLayoutSelection();
+  std::pair<unsigned, unsigned> LayoutSelectionStartEndForNG(
+      const NGPhysicalTextFragment&);
 
   void Trace(blink::Visitor*);
 
@@ -245,11 +249,6 @@ class CORE_EXPORT FrameSelection final
 
   void SetUseSecureKeyboardEntry(bool);
 
-  void UpdateSelectionIfNeeded(const Position& base,
-                               const Position& extent,
-                               const Position& start,
-                               const Position& end);
-
   GranularityStrategy* GetGranularityStrategy();
 
   IntRect ComputeRectToScroll(RevealExtentOption);
@@ -268,6 +267,9 @@ class CORE_EXPORT FrameSelection final
 
   bool focused_ : 1;
   bool is_handle_visible_ = false;
+  // TODO(editing-dev): We should change is_directional_ type to enum.
+  // as directional can have three values forward, backward or directionless.
+  bool is_directional_;
   bool should_shrink_next_tap_ = false;
 
   // Controls text granularity used to adjust the selection's extent in
@@ -276,6 +278,8 @@ class CORE_EXPORT FrameSelection final
 
   const Member<FrameCaret> frame_caret_;
   bool use_secure_keyboard_entry_when_active_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameSelection);
 };
 
 }  // namespace blink

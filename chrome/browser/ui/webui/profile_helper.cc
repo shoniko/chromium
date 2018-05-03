@@ -4,8 +4,9 @@
 
 #include "chrome/browser/ui/webui/profile_helper.h"
 
+#include <memory>
+
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -46,13 +47,6 @@ std::string GetProfileUserName(Profile* profile) {
   return base::UTF16ToUTF8(entry->GetUserName());
 }
 
-void ShowSigninDialog(base::FilePath signin_profile_path,
-                      Profile* system_profile,
-                      Profile::CreateStatus status) {
-  UserManagerProfileDialog::ShowSigninDialog(system_profile,
-                                             signin_profile_path);
-}
-
 void ShowReauthDialog(const std::string& user_name,
                       Profile* system_profile,
                       Profile::CreateStatus status) {
@@ -74,12 +68,9 @@ void DeleteProfileCallback(std::unique_ptr<ScopedKeepAlive> keep_alive,
 void OpenNewWindowForProfile(Profile* profile) {
   if (profiles::IsProfileLocked(profile->GetPath())) {
     if (signin_util::IsForceSigninEnabled()) {
-      // Show sign in dialog iff there is one locked profile.
-      if (g_browser_process->profile_manager()->GetNumberOfProfiles() == 1) {
-        ShowUserManager(base::Bind(&ShowSigninDialog, profile->GetPath()));
-      } else {
-        ShowUserManager(ProfileManager::CreateCallback());
-      }
+      // If force-sign-in policy is enabled, UserManager will be displayed
+      // without any sign-in dialog opened.
+      ShowUserManager(ProfileManager::CreateCallback());
     } else {
       ShowUserManager(
           base::Bind(&ShowReauthDialog, GetProfileUserName(profile)));
@@ -99,10 +90,11 @@ void DeleteProfileAtPath(base::FilePath file_path,
   if (!profiles::IsMultipleProfilesEnabled())
     return;
   g_browser_process->profile_manager()->MaybeScheduleProfileForDeletion(
-      file_path, base::Bind(&DeleteProfileCallback,
-                            base::Passed(base::MakeUnique<ScopedKeepAlive>(
-                                KeepAliveOrigin::PROFILE_HELPER,
-                                KeepAliveRestartOption::DISABLED))),
+      file_path,
+      base::Bind(&DeleteProfileCallback,
+                 base::Passed(std::make_unique<ScopedKeepAlive>(
+                     KeepAliveOrigin::PROFILE_HELPER,
+                     KeepAliveRestartOption::DISABLED))),
       deletion_source);
 }
 

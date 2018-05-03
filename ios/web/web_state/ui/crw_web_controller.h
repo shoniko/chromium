@@ -15,6 +15,8 @@
 
 namespace web {
 
+enum class NavigationInitiationType;
+
 // Page load phases.
 enum LoadPhase {
   // In the LOAD_REQUESTED phase, the system predicts a page change is going to
@@ -34,7 +36,6 @@ enum LoadPhase {
 @protocol CRWNativeContent;
 @protocol CRWNativeContentProvider;
 @protocol CRWSwipeRecognizerProvider;
-@protocol CRWWebControllerObserver;
 @class CRWWebViewContentView;
 @protocol CRWWebViewProxy;
 class GURL;
@@ -91,9 +92,6 @@ class WebStateImpl;
 // Returns the x, y offset the content has been scrolled.
 @property(nonatomic, readonly) CGPoint scrollPosition;
 
-// Returns whether the top of the content is visible.
-@property(nonatomic, readonly) BOOL atTop;
-
 // YES if JavaScript dialogs and window open requests should be suppressed.
 // Default is NO. When dialog is suppressed
 // |WebStateObserver::DidSuppressDialog| will be called.
@@ -110,9 +108,6 @@ class WebStateImpl;
 // calling code must retain the ownership of |webState|.
 - (instancetype)initWithWebState:(web::WebStateImpl*)webState;
 
-// Return an image to use as replacement of a missing snapshot.
-+ (UIImage*)defaultSnapshotImage;
-
 // Replaces the currently displayed content with |contentView|.  The content
 // view will be dismissed for the next navigation.
 - (void)showTransientContentView:(CRWContentView*)contentView;
@@ -121,6 +116,11 @@ class WebStateImpl;
 // method for WebStateImpl::ClearTransientContent(). Callers should use the
 // WebStateImpl API instead of calling this method directly.
 - (void)clearTransientContentView;
+
+// Removes the back WebView. DANGER: this method is exposed for the sole purpose
+// of allowing WKBasedNavigationManagerImpl to reset the back-forward history.
+// Please reconsider before using this method.
+- (void)removeWebView;
 
 // Call to stop the CRWWebController from doing stuff, in particular to
 // stop all network requests. Called as part of the close sequence if it hasn't
@@ -153,14 +153,6 @@ class WebStateImpl;
 // Methods for navigation and properties to interrogate state.
 - (void)reload;
 - (void)stopLoading;
-// YES if the CRWWebController's view is deemed appropriate for saving in order
-// to generate an overlay placeholder view.
-- (BOOL)canUseViewForGeneratingOverlayPlaceholderView;
-
-// Notifies delegate that |currentNavItem| will be loaded with |url|.
-// TODO(crbug.com/674991): Remove this method when CRWWebDelegate is no longer
-// used.
-- (void)willLoadCurrentItemWithURL:(const GURL&)URL;
 
 // Loads the URL indicated by current session state.
 - (void)loadCurrentURL;
@@ -188,10 +180,6 @@ class WebStateImpl;
 // only checks on creation, such that the whole object needs to be rebuilt.
 - (void)requirePageReconstruction;
 
-// Show overlay, don't reload web page. Used when the view will be
-// visible only briefly (e.g., tablet side swipe).
-- (void)setOverlayPreviewMode:(BOOL)overlayPreviewMode;
-
 // Records the state (scroll position, form values, whatever can be harvested)
 // from the current page into the current session entry.
 - (void)recordStateInHistory;
@@ -200,25 +188,8 @@ class WebStateImpl;
 // complete it will be handled internally.
 - (void)restoreStateFromHistory;
 
-// Updates the HTML5 history state of the page using the current NavigationItem.
-// For same-document navigations and navigations affected by
-// window.history.[push/replace]State(), the URL and serialized state object
-// will be updated to the current NavigationItem's values.  A popState event
-// will be triggered for all same-document navigations.  Additionally, a
-// hashchange event will be triggered for same-document navigations where the
-// only difference between the current and previous URL is the fragment.
-- (void)updateHTML5HistoryState;
-
 // Notifies the CRWWebController that it has been shown.
 - (void)wasShown;
-
-// Notifies the CRWWebController that the current page is an HTTP page
-// containing a password field.
-- (void)didShowPasswordInputOnHTTP;
-
-// Notifies the CRWWebController that the current page is an HTTP page
-// containing a credit card field.
-- (void)didShowCreditCardInputOnHTTP;
 
 // Notifies the CRWWebController that it has been hidden.
 - (void)wasHidden;
@@ -239,13 +210,6 @@ class WebStateImpl;
 // Removes |toolbar| from the web view.
 - (void)removeToolbarViewFromWebView:(UIView*)toolbarView;
 
-// Adds a CRWWebControllerObserver to subscribe to page events. |observer|
-// cannot be nil.
-- (void)addObserver:(id<CRWWebControllerObserver>)observer;
-
-// Removes an attached CRWWebControllerObserver.
-- (void)removeObserver:(id<CRWWebControllerObserver>)observer;
-
 // Returns the always-visible frame, not including the part that could be
 // covered by the toolbar.
 - (CGRect)visibleFrame;
@@ -254,6 +218,13 @@ class WebStateImpl;
 
 // Returns the native controller (if any) current mananging the content.
 - (id<CRWNativeContent>)nativeController;
+
+// Called when NavigationManager has completed go to index same-document
+// navigation. Updates HTML5 history state, current document URL and sends
+// approprivate navigation and loading WebStateObserver callbacks.
+- (void)didFinishGoToIndexSameDocumentNavigationWithType:
+    (web::NavigationInitiationType)type;
+
 @end
 
 #pragma mark Testing
@@ -268,8 +239,8 @@ class WebStateImpl;
 - (void)injectWebViewContentView:(CRWWebViewContentView*)webViewContentView;
 - (void)resetInjectedWebViewContentView;
 
-// Returns the number of observers registered for this CRWWebController.
-- (NSUInteger)observerCount;
+// Returns whether any observers are registered with the CRWWebController.
+- (BOOL)hasObservers;
 
 // Loads the HTML into the page at the given URL.
 - (void)loadHTML:(NSString*)HTML forURL:(const GURL&)URL;

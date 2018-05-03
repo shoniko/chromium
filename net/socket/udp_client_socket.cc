@@ -5,6 +5,7 @@
 #include "net/socket/udp_client_socket.h"
 
 #include "net/base/net_errors.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
 
@@ -15,8 +16,7 @@ UDPClientSocket::UDPClientSocket(DatagramSocket::BindType bind_type,
     : socket_(bind_type, rand_int_cb, net_log, source),
       network_(NetworkChangeNotifier::kInvalidNetworkHandle) {}
 
-UDPClientSocket::~UDPClientSocket() {
-}
+UDPClientSocket::~UDPClientSocket() = default;
 
 int UDPClientSocket::Connect(const IPEndPoint& address) {
   int rv = socket_.Open(address.GetFamily());
@@ -76,16 +76,22 @@ NetworkChangeNotifier::NetworkHandle UDPClientSocket::GetBoundNetwork() const {
   return network_;
 }
 
+void UDPClientSocket::ApplySocketTag(const SocketTag& tag) {
+  socket_.ApplySocketTag(tag);
+}
+
 int UDPClientSocket::Read(IOBuffer* buf,
                           int buf_len,
                           const CompletionCallback& callback) {
   return socket_.Read(buf, buf_len, callback);
 }
 
-int UDPClientSocket::Write(IOBuffer* buf,
-                          int buf_len,
-                          const CompletionCallback& callback) {
-  return socket_.Write(buf, buf_len, callback);
+int UDPClientSocket::Write(
+    IOBuffer* buf,
+    int buf_len,
+    const CompletionCallback& callback,
+    const NetworkTrafficAnnotationTag& traffic_annotation) {
+  return socket_.Write(buf, buf_len, callback, traffic_annotation);
 }
 
 void UDPClientSocket::Close() {

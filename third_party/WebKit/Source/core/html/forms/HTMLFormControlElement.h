@@ -102,7 +102,7 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
   void HideVisibleValidationMessage();
   bool checkValidity(
       HeapVector<Member<HTMLFormControlElement>>* unhandled_invalid_controls =
-          0,
+          nullptr,
       CheckValidityEventBehavior = kCheckValidityDispatchInvalidEvent);
   bool reportValidity();
   // This must be called only after the caller check the element is focusable.
@@ -125,7 +125,7 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
   bool IsAutofilled() const { return is_autofilled_; }
   void SetAutofilled(bool = true);
 
-  static HTMLFormControlElement* EnclosingFormControlElement(Node*);
+  static const HTMLFormControlElement* EnclosingFormControlElement(const Node*);
 
   String NameForAutofill() const;
 
@@ -164,7 +164,7 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
       InputDeviceCapabilities* source_capabilities) override;
   void WillCallDefaultEventHandler(const Event&) final;
 
-  void DidRecalcStyle() override;
+  void DidRecalcStyle(StyleRecalcChange) override;
 
   // This must be called any time the result of willValidate() has changed.
   void SetNeedsWillValidateCheck();
@@ -198,6 +198,7 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
   mutable AncestorDisabledState ancestor_disabled_state_;
   enum DataListAncestorState { kUnknown, kInsideDataList, kNotInsideDataList };
   mutable enum DataListAncestorState data_list_ancestor_state_;
+  mutable bool may_have_field_set_ancestor_ : 1;
 
   bool is_autofilled_ : 1;
   bool has_validation_message_ : 1;

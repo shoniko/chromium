@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">સમયગાળો</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 મહિનો}one{# મહિનો}other{# મહિના}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>
+<translation id="1812519734428420144">સ્ટાર રેટિંગ <ph name="RATING_SCORE" /></translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{1 કલાક અને }one{# કલાક અને }other{# કલાક અને }}</translation>
 <translation id="1842960171412779397">પસંદ કરો</translation>
 <translation id="1860796786778352021">સૂચના બંધ છે</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">ફોલ્ડર ખોલો</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{1 વર્ષ પહેલાં}one{# વર્ષ પહેલાં}other{# વર્ષ પહેલાં}}</translation>
 <translation id="2931838996092594335">ક્લિક કરો</translation>
-<translation id="2983818520079887040">સેટિંગ્સ...</translation>
 <translation id="3036649622769666520">ફાઇલો ખોલો</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" />MB</translation>
 <translation id="3087734570205094154">તળિયું</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">બધી ઍપ્લિકેશનો</translation>
 <translation id="4320177379694898372">કોઈ ઇન્ટરનેટ કનેક્શન નથી</translation>
 <translation id="4588090240171750605">જમણે સ્ક્રોલ કરો</translation>
+<translation id="4724120544754982507">સૂચના કેન્દ્ર, વાંચ્યા વગરની <ph name="UNREAD_NOTIFICATION_COUNT" /> સૂચનાઓ</translation>
 <translation id="4730374152663651037">વારંવાર વપરાયેલ</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{1 મહિનો બાકી}one{# મહિનો બાકી}other{# મહિના બાકી}}</translation>
 <translation id="4820616160060340806">કમાન્ડ+<ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">નાનું કરો</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 કલાક}one{# કલાક}other{# કલાક}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">બધી ઍપ્લિકેશનો</translation>
 <translation id="6012623610530968780"><ph name="SELECTED_PAGE" /> પેજમાંનું <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">શોધબૉક્સમાંથી બધી ટેક્સ્ટ સાફ કરો</translation>
 <translation id="6040143037577758943">બંધ કરો</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">અલ્પવિરામ</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{1 સે પહેલાં}one{# સે પહેલાં}other{# સે પહેલાં}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{1 સેકંડ પહેલાં}one{# સેકંડ પહેલાં}other{# સેકંડ પહેલાં}}</translation>
+<translation id="654149438358937226">તમામ નોટિફિકેશનને બ્લૉક કરો</translation>
 <translation id="6567071839949112727">ઍન્સેસ્ટર પર ક્લિક કરો</translation>
 <translation id="6612467943526193239">કેલિબ્રેશનથી બહાર નીકળવા માટે Esc દબાવો.</translation>
 <translation id="6620110761915583480">ફાઇલ સાચવો</translation>
@@ -117,7 +118,7 @@
 <translation id="6907759265145635167"><ph name="QUANTITY" /> PB/s</translation>
 <translation id="6917971086528278418">{YEARS,plural, =1{1 વર્ષ બાકી}one{# વર્ષ બાકી}other{# વર્ષ બાકી}}</translation>
 <translation id="6945221475159498467">પસંદ કરો</translation>
-<translation id="6965382102122355670">ઓકે</translation>
+<translation id="6965382102122355670">બરાબર, સમજાઇ ગયું</translation>
 <translation id="7052633198403197513">F1</translation>
 <translation id="7130207228079676353">સૌથી વધુ શક્ય</translation>
 <translation id="7222373446505536781">F11</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">રદ કરો</translation>
 <translation id="7781829728241885113">ગઈ કાલે</translation>
 <translation id="7814458197256864873">&amp;કૉપિ કરો</translation>
+<translation id="7879499977785298635">બ્લૉક કરશો નહીં</translation>
 <translation id="7907591526440419938">ફાઇલ ખોલો</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{1 કલાક પહેલા}one{# કલાક પહેલાં}other{# કલાક પહેલાં}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{1 સે બાકી}one{# સે બાકી}other{# સે બાકી}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{1 વર્ષ}one{# વર્ષ}other{# વર્ષ}}</translation>
 <translation id="8371695176452482769">હવે બોલો</translation>
 <translation id="838869780401515933">તપાસો</translation>
+<translation id="8393700583063109961">સંદેશ મોકલો</translation>
 <translation id="8394908167088220973">મીડિયા ચલાવો/થોભાવો</translation>
 <translation id="8400147561352026160">Shift+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 વ}one{# વ}other{# વ}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> ફાઇલ (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s</translation>
 <translation id="8725488761726303204">+<ph name="NUMBER" /> વધુ</translation>
+<translation id="8730621377337864115">થઈ ગયું</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{1 ક}one{# ક}other{# ક}}</translation>
 <translation id="8806053966018712535"><ph name="FOLDER_NAME" /> ફોલ્ડર</translation>
 <translation id="883911313571074303">છબીમાં ટીકા કરો</translation>

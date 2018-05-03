@@ -38,7 +38,7 @@ GIFImageDecoder::GIFImageDecoder(AlphaOption alpha_option,
     : ImageDecoder(alpha_option, color_behavior, max_decoded_bytes),
       repetition_count_(kAnimationLoopOnce) {}
 
-GIFImageDecoder::~GIFImageDecoder() {}
+GIFImageDecoder::~GIFImageDecoder() = default;
 
 void GIFImageDecoder::OnSetData(SegmentReader* data) {
   if (reader_)
@@ -262,7 +262,7 @@ void GIFImageDecoder::Parse(GIFParseQuery query) {
     return;
 
   if (!reader_) {
-    reader_ = WTF::MakeUnique<GIFImageReader>(this);
+    reader_ = std::make_unique<GIFImageReader>(this);
     reader_->SetData(data_);
   }
 

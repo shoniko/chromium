@@ -116,6 +116,13 @@ class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
     RunTest(html_file, "accessibility/html");
   }
 
+  void RunRegressionTest(const base::FilePath::CharType* file_path) {
+    base::FilePath test_path = GetTestFilePath("accessibility", "regression");
+    base::FilePath test_file = test_path.Append(base::FilePath(file_path));
+
+    RunTest(test_file, "accessibility/regression");
+  }
+
   std::vector<std::string> Dump() override {
     std::unique_ptr<AccessibilityTreeFormatter> formatter(
         CreateAccessibilityTreeFormatter());
@@ -236,6 +243,7 @@ void DumpAccessibilityTreeTest::AddDefaultFilters(
   //
 
   AddFilter(filters, "hint=*");
+  AddFilter(filters, "interesting", Filter::DENY);
 
   //
   // General
@@ -276,12 +284,22 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAbbr) {
   RunHtmlTest(FILE_PATH_LITERAL("abbr.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityAbsoluteOffscreen) {
+  RunHtmlTest(FILE_PATH_LITERAL("absolute-offscreen.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityActionVerbs) {
   RunHtmlTest(FILE_PATH_LITERAL("action-verbs.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityActions) {
   RunHtmlTest(FILE_PATH_LITERAL("actions.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityAddClickListener) {
+  RunHtmlTest(FILE_PATH_LITERAL("add-click-listener.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAddress) {
@@ -308,6 +326,14 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAOnclick) {
   RunHtmlTest(FILE_PATH_LITERAL("a-onclick.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAIsInteresting) {
+  RunHtmlTest(FILE_PATH_LITERAL("isInteresting.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityClickableAncestor) {
+  RunHtmlTest(FILE_PATH_LITERAL("clickable-ancestor.html"));
+}
 
 #if defined(THREAD_SANITIZER)
 // See (crbug.com/708759).
@@ -740,6 +766,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRowHeader) {
   RunAriaTest(FILE_PATH_LITERAL("aria-rowheader.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRowText) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-rowtext.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaScrollbar) {
   RunAriaTest(FILE_PATH_LITERAL("aria-scrollbar.html"));
 }
@@ -753,7 +783,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSearchbox) {
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-    AccessibilityAriaSearchboxWithSelection) {
+                       DISABLED_AccessibilityAriaSearchboxWithSelection) {
   RunAriaTest(FILE_PATH_LITERAL("aria-searchbox-with-selection.html"));
 }
 
@@ -783,8 +813,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunAriaTest(FILE_PATH_LITERAL("aria-sort-html-table.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityAriaSpinButton) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSpinButton) {
   RunAriaTest(FILE_PATH_LITERAL("aria-spinbutton.html"));
 }
 
@@ -826,7 +855,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       AccessibilityAriaTextboxWithSelection) {
+                       DISABLED_AccessibilityAriaTextboxWithSelection) {
   RunAriaTest(FILE_PATH_LITERAL("aria-textbox-with-selection.html"));
 }
 
@@ -937,7 +966,19 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBoundsInherits) {
   RunHtmlTest(FILE_PATH_LITERAL("bounds-inherits.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, DISABLED_AccessibilityBR) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibiltyBoundsClips) {
+  RunHtmlTest(FILE_PATH_LITERAL("bounds-clips.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBoundsAbsolute) {
+  RunHtmlTest(FILE_PATH_LITERAL("bounds-absolute.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessiblitiyBoundsFixed) {
+  RunHtmlTest(FILE_PATH_LITERAL("bounds-fixed.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBR) {
   RunHtmlTest(FILE_PATH_LITERAL("br.html"));
 }
 
@@ -1168,6 +1209,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("iframe-coordinates-cross-process.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityIframePadding) {
+  RunHtmlTest(FILE_PATH_LITERAL("iframe-padding.html"));
+}
+
 // Flaky on Win7. http://crbug.com/610744
 #ifdef OS_WIN
 #define MAYBE_AccessibilityIframePresentational DISABLED_AccessibilityIframePresentational
@@ -1285,6 +1330,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("input-image-button-in-menu.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputList) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-list.html"));
+}
+
 // crbug.com/423675 - AX tree is different for Win7 and Win8.
 #if defined(OS_WIN)
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
@@ -1296,6 +1345,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputMonth) {
   RunHtmlTest(FILE_PATH_LITERAL("input-month.html"));
 }
 #endif
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputNumber) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-number.html"));
+}
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputPassword) {
   RunHtmlTest(FILE_PATH_LITERAL("input-password.html"));
@@ -1687,6 +1740,16 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityWbr) {
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityWindowCropsItems) {
   RunHtmlTest(FILE_PATH_LITERAL("window-crops-items.html"));
+}
+
+//
+// Regression tests. These don't test a specific web platform feature,
+// they test a specific web page that crashed or had some bad behavior
+// in the past.
+//
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, XmlInIframeCrash) {
+  RunRegressionTest(FILE_PATH_LITERAL("xml-in-iframe-crash.html"));
 }
 
 }  // namespace content

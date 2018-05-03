@@ -14,7 +14,7 @@ NavigatorDelegate* Navigator::GetDelegate() {
 }
 
 NavigationController* Navigator::GetController() {
-  return NULL;
+  return nullptr;
 }
 
 bool Navigator::NavigateToPendingEntry(FrameTreeNode* frame_tree_node,
@@ -33,8 +33,9 @@ base::TimeTicks Navigator::GetCurrentLoadStart() {
   return base::TimeTicks::Now();
 }
 
-void Navigator::OnBeginNavigation(FrameTreeNode* frame_tree_node,
-                                  const CommonNavigationParams& common_params,
-                                  const BeginNavigationParams& begin_params) {}
+void Navigator::OnBeginNavigation(
+    FrameTreeNode* frame_tree_node,
+    const CommonNavigationParams& common_params,
+    mojom::BeginNavigationParamsPtr begin_params) {}
 
 }  // namespace content

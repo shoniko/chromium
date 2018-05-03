@@ -27,6 +27,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/async_method_caller.h"
+#include "chromeos/cryptohome/cryptohome_util.h"
 #include "chromeos/cryptohome/homedir_methods.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -254,7 +255,7 @@ namespace chromeos {
 
 EncryptionMigrationScreenHandler::EncryptionMigrationScreenHandler()
     : BaseScreenHandler(kScreenId),
-      tick_clock_(base::MakeUnique<base::DefaultTickClock>()),
+      tick_clock_(std::make_unique<base::DefaultTickClock>()),
       weak_ptr_factory_(this) {
   set_call_js_prefix(kJsScreenPath);
   free_disk_space_fetcher_ = base::Bind(&base::SysInfo::AmountOfFreeDiskSpace,
@@ -262,6 +263,7 @@ EncryptionMigrationScreenHandler::EncryptionMigrationScreenHandler()
 }
 
 EncryptionMigrationScreenHandler::~EncryptionMigrationScreenHandler() {
+  DBusThreadManager::Get()->GetCryptohomeClient()->RemoveObserver(this);
   DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
   if (delegate_)
     delegate_->OnViewDestroyed(this);
@@ -563,29 +565,24 @@ void EncryptionMigrationScreenHandler::StartMigration() {
 
   // Mount the existing eCryptfs vault to a temporary location for migration.
   cryptohome::MountRequest mount;
+  cryptohome::AuthorizationRequest auth_request;
   mount.set_to_migrate_from_ecryptfs(true);
   if (IsArcKiosk()) {
     mount.set_public_mount(true);
-    cryptohome::HomedirMethods::GetInstance()->MountEx(
-        cryptohome::Identification(user_context_.GetAccountId()),
-        cryptohome::Authorization(cryptohome::KeyDefinition()), mount,
-        base::Bind(&EncryptionMigrationScreenHandler::OnMountExistingVault,
-                   weak_ptr_factory_.GetWeakPtr()));
-
   } else {
-    cryptohome::HomedirMethods::GetInstance()->MountEx(
-        cryptohome::Identification(user_context_.GetAccountId()),
-        cryptohome::Authorization(GetAuthKey()), mount,
-        base::Bind(&EncryptionMigrationScreenHandler::OnMountExistingVault,
-                   weak_ptr_factory_.GetWeakPtr()));
+    auth_request = CreateAuthorizationRequest();
   }
+  DBusThreadManager::Get()->GetCryptohomeClient()->MountEx(
+      cryptohome::Identification(user_context_.GetAccountId()), auth_request,
+      mount,
+      base::BindOnce(&EncryptionMigrationScreenHandler::OnMountExistingVault,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EncryptionMigrationScreenHandler::OnMountExistingVault(
-    bool success,
-    cryptohome::MountError return_code,
-    const std::string& mount_hash) {
-  if (!success || return_code != cryptohome::MOUNT_ERROR_NONE) {
+    base::Optional<cryptohome::BaseReply> reply) {
+  if (cryptohome::BaseReplyToMountError(reply) !=
+      cryptohome::MOUNT_ERROR_NONE) {
     RecordMigrationResultMountFailure(IsResumingIncompleteMigration(),
                                       IsArcKiosk());
     UpdateUIState(UIState::MIGRATION_FAILED);
@@ -597,14 +594,11 @@ void EncryptionMigrationScreenHandler::OnMountExistingVault(
   if (IsMinimalMigration())
     minimal_migration_start_ = tick_clock_->NowTicks();
 
-  DBusThreadManager::Get()
-      ->GetCryptohomeClient()
-      ->SetDircryptoMigrationProgressHandler(
-          base::Bind(&EncryptionMigrationScreenHandler::OnMigrationProgress,
-                     weak_ptr_factory_.GetWeakPtr()));
-  cryptohome::HomedirMethods::GetInstance()->MigrateToDircrypto(
-      cryptohome::Identification(user_context_.GetAccountId()),
-      IsMinimalMigration(),
+  cryptohome::MigrateToDircryptoRequest request;
+  request.set_minimal_migration(IsMinimalMigration());
+  DBusThreadManager::Get()->GetCryptohomeClient()->AddObserver(this);
+  DBusThreadManager::Get()->GetCryptohomeClient()->MigrateToDircrypto(
+      cryptohome::Identification(user_context_.GetAccountId()), request,
       base::Bind(&EncryptionMigrationScreenHandler::OnMigrationRequested,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -630,8 +624,8 @@ device::mojom::WakeLock* EncryptionMigrationScreenHandler::GetWakeLock() {
   connector->BindInterface(device::mojom::kServiceName,
                            mojo::MakeRequest(&wake_lock_provider));
   wake_lock_provider->GetWakeLockWithoutContext(
-      device::mojom::WakeLockType::PreventAppSuspension,
-      device::mojom::WakeLockReason::ReasonOther,
+      device::mojom::WakeLockType::kPreventAppSuspension,
+      device::mojom::WakeLockReason::kOther,
       "Encryption migration is in progress...", std::move(request));
   return wake_lock_.get();
 }
@@ -663,26 +657,29 @@ void EncryptionMigrationScreenHandler::OnRemoveCryptohome(
   UpdateUIState(UIState::MIGRATION_FAILED);
 }
 
-cryptohome::KeyDefinition EncryptionMigrationScreenHandler::GetAuthKey() {
-  // |auth_key| is created in the same manner as CryptohomeAuthenticator.
+cryptohome::AuthorizationRequest
+EncryptionMigrationScreenHandler::CreateAuthorizationRequest() {
+  // |key| is created in the same manner as CryptohomeAuthenticator.
   const Key* key = user_context_.GetKey();
   // If the |key| is a plain text password, crash rather than attempting to
   // mount the cryptohome with a plain text password.
   CHECK_NE(Key::KEY_TYPE_PASSWORD_PLAIN, key->GetKeyType());
-  // Set the authentication's key label to an empty string, which is a wildcard
-  // allowing any key to match. This is necessary because cryptohomes created by
-  // Chrome OS M38 and older will have a legacy key with no label while those
-  // created by Chrome OS M39 and newer will have a key with the label
-  // kCryptohomeGAIAKeyLabel.
-  return cryptohome::KeyDefinition(key->GetSecret(), std::string(),
-                                   cryptohome::PRIV_DEFAULT);
+  cryptohome::AuthorizationRequest auth;
+  cryptohome::Key* auth_key = auth.mutable_key();
+  // Don't set the authorization's key label, implicitly setting it to an
+  // empty string, which is a wildcard allowing any key to match. This is
+  // necessary because cryptohomes created by Chrome OS M38 and older will have
+  // a legacy key with no label while those created by Chrome OS M39 and newer
+  // will have a key with the label kCryptohomeGAIAKeyLabel.
+  auth_key->set_secret(key->GetSecret());
+  return auth;
 }
 
 bool EncryptionMigrationScreenHandler::IsArcKiosk() const {
   return user_context_.GetUserType() == user_manager::USER_TYPE_ARC_KIOSK_APP;
 }
 
-void EncryptionMigrationScreenHandler::OnMigrationProgress(
+void EncryptionMigrationScreenHandler::DircryptoMigrationProgress(
     cryptohome::DircryptoMigrationStatus status,
     uint64_t current,
     uint64_t total) {
@@ -697,6 +694,8 @@ void EncryptionMigrationScreenHandler::OnMigrationProgress(
     case cryptohome::DIRCRYPTO_MIGRATION_SUCCESS:
       RecordMigrationResultSuccess(IsResumingIncompleteMigration(),
                                    IsArcKiosk());
+      // Stop listening to the progress updates.
+      DBusThreadManager::Get()->GetCryptohomeClient()->RemoveObserver(this);
       // If the battery level decreased during migration, record the consumed
       // battery level.
       if (current_battery_percent_ &&
@@ -733,10 +732,7 @@ void EncryptionMigrationScreenHandler::OnMigrationProgress(
       RecordMigrationResultGeneralFailure(IsResumingIncompleteMigration(),
                                           IsArcKiosk());
       // Stop listening to the progress updates.
-      DBusThreadManager::Get()
-          ->GetCryptohomeClient()
-          ->SetDircryptoMigrationProgressHandler(
-              CryptohomeClient::DircryptoMigrationProgessHandler());
+      DBusThreadManager::Get()->GetCryptohomeClient()->RemoveObserver(this);
       // Shows error screen after removing user directory is completed.
       RemoveCryptohome();
       break;

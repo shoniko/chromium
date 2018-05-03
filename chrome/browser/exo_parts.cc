@@ -20,7 +20,7 @@
 #include "components/exo/display.h"
 #include "components/exo/file_helper.h"
 #include "components/exo/wayland/server.h"
-#include "components/exo/wm_helper_ash.h"
+#include "components/exo/wm_helper.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/arc/notification/arc_notification_surface_manager_impl.h"
 
@@ -37,8 +37,15 @@ class ChromeFileHelper : public exo::FileHelper {
   std::string GetMimeTypeForUriList() const override {
     return kMimeTypeArcUriList;
   }
-  bool ConvertPathToUrl(const base::FilePath& path, GURL* out) override {
+  bool GetUrlFromPath(const std::string& app_id,
+                      const base::FilePath& path,
+                      GURL* out) override {
     return file_manager::util::ConvertPathToArcUrl(path, out);
+  }
+  bool GetUrlFromFileSystemUrl(const std::string& app_id,
+                               const GURL& url,
+                               GURL* out) override {
+    return false;
   }
 };
 
@@ -150,6 +157,7 @@ std::unique_ptr<ExoParts> ExoParts::CreateIfNecessary() {
 ExoParts::~ExoParts() {
   wayland_watcher_.reset();
   wayland_server_.reset();
+  display_.reset();
   exo::WMHelper::SetInstance(nullptr);
   wm_helper_.reset();
 }
@@ -158,7 +166,7 @@ ExoParts::ExoParts() {
   arc_notification_surface_manager_ =
       base::MakeUnique<arc::ArcNotificationSurfaceManagerImpl>();
   DCHECK(!ash_util::IsRunningInMash());
-  wm_helper_ = base::MakeUnique<exo::WMHelperAsh>();
+  wm_helper_ = base::MakeUnique<exo::WMHelper>();
   exo::WMHelper::SetInstance(wm_helper_.get());
   display_ =
       base::MakeUnique<exo::Display>(arc_notification_surface_manager_.get(),

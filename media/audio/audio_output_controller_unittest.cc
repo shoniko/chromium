@@ -48,7 +48,7 @@ static const float kBufferNonZeroData = 1.0f;
 class MockAudioOutputControllerEventHandler
     : public AudioOutputController::EventHandler {
  public:
-  MockAudioOutputControllerEventHandler() {}
+  MockAudioOutputControllerEventHandler() = default;
 
   MOCK_METHOD0(OnControllerCreated, void());
   MOCK_METHOD0(OnControllerPlaying, void());
@@ -63,7 +63,7 @@ class MockAudioOutputControllerEventHandler
 class MockAudioOutputControllerSyncReader
     : public AudioOutputController::SyncReader {
  public:
-  MockAudioOutputControllerSyncReader() {}
+  MockAudioOutputControllerSyncReader() = default;
 
   MOCK_METHOD3(RequestMoreData,
                void(base::TimeDelta delay,
@@ -115,7 +115,7 @@ class AudioOutputControllerTest : public testing::Test {
  public:
   AudioOutputControllerTest()
       : audio_manager_(AudioManager::CreateForTesting(
-            base::MakeUnique<TestAudioThread>())) {
+            std::make_unique<TestAudioThread>())) {
     EXPECT_CALL(mock_event_handler_, OnLog(_)).Times(testing::AnyNumber());
     base::RunLoop().RunUntilIdle();
   }

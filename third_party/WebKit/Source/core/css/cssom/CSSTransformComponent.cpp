@@ -52,4 +52,9 @@ CSSTransformComponent* CSSTransformComponent::FromCSSValue(
   }
 }
 
+String CSSTransformComponent::toString() const {
+  const CSSValue* result = ToCSSValue();
+  return result ? result->CssText() : "";
+}
+
 }  // namespace blink

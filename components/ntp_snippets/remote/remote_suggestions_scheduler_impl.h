@@ -41,7 +41,7 @@ class RemoteSuggestionsSchedulerImpl : public RemoteSuggestionsScheduler {
                                  const UserClassifier* user_classifier,
                                  PrefService* profile_prefs,
                                  PrefService* local_state_prefs,
-                                 std::unique_ptr<base::Clock> clock,
+                                 base::Clock* clock,
                                  Logger* debug_logger);
 
   ~RemoteSuggestionsSchedulerImpl() override;
@@ -123,7 +123,8 @@ class RemoteSuggestionsSchedulerImpl : public RemoteSuggestionsScheduler {
   void OnFetchCompleted(Status fetch_status);
 
   // Clears the time of the last fetch so that the provider is ready to make a
-  // soft fetch at any later time (upon a trigger).
+  // soft fetch at any later time (upon a trigger), treating the last fetch as
+  // stale.
   void ClearLastFetchAttemptTime();
 
   FetchingSchedule GetDesiredFetchingSchedule() const;
@@ -168,7 +169,7 @@ class RemoteSuggestionsSchedulerImpl : public RemoteSuggestionsScheduler {
   std::unique_ptr<EulaState> eula_state_;
 
   PrefService* profile_prefs_;
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
   std::set<TriggerType> enabled_triggers_;
   std::set<TriggerType> queued_triggers_;
 

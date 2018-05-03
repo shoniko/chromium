@@ -5,6 +5,7 @@
 #ifndef IntersectionObserver_h
 #define IntersectionObserver_h
 
+#include "base/callback.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/intersection_observer/IntersectionObservation.h"
 #include "core/intersection_observer/IntersectionObserverEntry.h"
@@ -29,9 +30,8 @@ class CORE_EXPORT IntersectionObserver final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  using EventCallback =
-      Function<void(const HeapVector<Member<IntersectionObserverEntry>>&),
-               WTF::kSameThreadAffinity>;
+  using EventCallback = base::RepeatingCallback<void(
+      const HeapVector<Member<IntersectionObserverEntry>>&)>;
 
   static IntersectionObserver* Create(const IntersectionObserverInit&,
                                       IntersectionObserverDelegate&,
@@ -67,7 +67,8 @@ class CORE_EXPORT IntersectionObserver final : public ScriptWrappable {
 
   // This is the document which is responsible for running
   // computeIntersectionObservations at frame generation time.
-  Document& TrackingDocument() const;
+  // This can return nullptr when no tracking document is available.
+  Document* TrackingDocument() const;
 
   const Length& TopMargin() const { return top_margin_; }
   const Length& RightMargin() const { return right_margin_; }

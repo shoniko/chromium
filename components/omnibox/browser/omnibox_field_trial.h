@@ -10,6 +10,7 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
@@ -33,19 +34,18 @@ class PrefRegistrySyncable;
 
 namespace omnibox {
 
-extern const base::Feature kNewOmniboxAnswerTypes;
 extern const base::Feature kOmniboxEntitySuggestions;
+extern const base::Feature kOmniboxRichEntitySuggestions;
 extern const base::Feature kOmniboxTailSuggestions;
+extern const base::Feature kOmniboxTabSwitchSuggestions;
 extern const base::Feature kEnableClipboardProvider;
-extern const base::Feature kAndroidFakeboxDemotion;
-extern const base::Feature kAndroidFakeboxDemotionOnPhones;
 extern const base::Feature kAndroidChromeHomePersonalizedSuggestions;
 extern const base::Feature kSearchProviderWarmUpOnFocus;
-extern const base::Feature kSearchProviderContextAllowHttpsUrls;
 extern const base::Feature kZeroSuggestRedirectToChrome;
 extern const base::Feature kZeroSuggestSwapTitleAndUrl;
 extern const base::Feature kDisplayTitleForCurrentUrl;
 extern const base::Feature kUIExperimentElideSuggestionUrlAfterHost;
+extern const base::Feature kUIExperimentHideSteadyStateUrlSchemeAndSubdomains;
 extern const base::Feature kUIExperimentHideSuggestionUrlScheme;
 extern const base::Feature kUIExperimentHideSuggestionUrlTrivialSubdomains;
 extern const base::Feature kUIExperimentMaxAutocompleteMatches;
@@ -55,11 +55,12 @@ extern const base::Feature kUIExperimentSwapTitleAndUrl;
 extern const base::Feature kUIExperimentVerticalLayout;
 extern const base::Feature kUIExperimentVerticalMargin;
 extern const base::Feature kSpeculativeServiceWorkerStartOnQueryInput;
+extern const base::Feature kBreakWordsAtUnderscores;
 
 #if defined(OS_IOS)
 extern const base::Feature kZeroSuggestProviderIOS;
 #endif
-}
+}  // namespace omnibox
 
 // The set of parameters customizing the HUP scoring.
 struct HUPScoringParams {

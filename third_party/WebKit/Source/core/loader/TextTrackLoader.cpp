@@ -26,7 +26,6 @@
 #include "core/loader/TextTrackLoader.h"
 
 #include "core/dom/Document.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "platform/SharedBuffer.h"
 #include "platform/loader/fetch/FetchParameters.h"
@@ -35,6 +34,7 @@
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -42,13 +42,13 @@ TextTrackLoader::TextTrackLoader(TextTrackLoaderClient& client,
                                  Document& document)
     : client_(client),
       document_(document),
-      cue_load_timer_(TaskRunnerHelper::Get(TaskType::kNetworking, &document),
+      cue_load_timer_(document.GetTaskRunner(TaskType::kNetworking),
                       this,
                       &TextTrackLoader::CueLoadTimerFired),
       state_(kLoading),
       new_cues_available_(false) {}
 
-TextTrackLoader::~TextTrackLoader() {}
+TextTrackLoader::~TextTrackLoader() = default;
 
 void TextTrackLoader::CueLoadTimerFired(TimerBase* timer) {
   DCHECK_EQ(timer, &cue_load_timer_);
@@ -69,15 +69,15 @@ void TextTrackLoader::CancelLoad() {
 bool TextTrackLoader::RedirectReceived(Resource* resource,
                                        const ResourceRequest& request,
                                        const ResourceResponse&) {
-  DCHECK_EQ(this->GetResource(), resource);
+  DCHECK_EQ(GetResource(), resource);
   if (resource->GetResourceRequest().GetFetchRequestMode() ==
-          WebURLRequest::kFetchRequestModeCORS ||
+          network::mojom::FetchRequestMode::kCORS ||
       GetDocument().GetSecurityOrigin()->CanRequestNoSuborigin(request.Url()))
     return true;
 
   CorsPolicyPreventedLoad(GetDocument().GetSecurityOrigin(), request.Url());
   if (!cue_load_timer_.IsActive())
-    cue_load_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    cue_load_timer_.StartOneShot(TimeDelta(), FROM_HERE);
   ClearResource();
   return false;
 }
@@ -85,7 +85,7 @@ bool TextTrackLoader::RedirectReceived(Resource* resource,
 void TextTrackLoader::DataReceived(Resource* resource,
                                    const char* data,
                                    size_t length) {
-  DCHECK_EQ(this->GetResource(), resource);
+  DCHECK_EQ(GetResource(), resource);
 
   if (state_ == kFailed)
     return;
@@ -96,8 +96,9 @@ void TextTrackLoader::DataReceived(Resource* resource,
   cue_parser_->ParseBytes(data, length);
 }
 
-void TextTrackLoader::CorsPolicyPreventedLoad(SecurityOrigin* security_origin,
-                                              const KURL& url) {
+void TextTrackLoader::CorsPolicyPreventedLoad(
+    const SecurityOrigin* security_origin,
+    const KURL& url) {
   String console_message(
       "Text track from origin '" + SecurityOrigin::Create(url)->ToString() +
       "' has been blocked from loading: Not at same origin as the document, "
@@ -110,7 +111,7 @@ void TextTrackLoader::CorsPolicyPreventedLoad(SecurityOrigin* security_origin,
 }
 
 void TextTrackLoader::NotifyFinished(Resource* resource) {
-  DCHECK_EQ(this->GetResource(), resource);
+  DCHECK_EQ(GetResource(), resource);
   if (cue_parser_)
     cue_parser_->Flush();
 
@@ -122,7 +123,7 @@ void TextTrackLoader::NotifyFinished(Resource* resource) {
   }
 
   if (!cue_load_timer_.IsActive())
-    cue_load_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    cue_load_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 
   CancelLoad();
 }
@@ -147,8 +148,7 @@ bool TextTrackLoader::Load(const KURL& url,
   }
 
   ResourceFetcher* fetcher = GetDocument().Fetcher();
-  SetResource(RawResource::FetchTextTrack(cue_fetch_params, fetcher));
-  return GetResource();
+  return RawResource::FetchTextTrack(cue_fetch_params, fetcher, this);
 }
 
 void TextTrackLoader::NewCuesParsed() {
@@ -156,14 +156,14 @@ void TextTrackLoader::NewCuesParsed() {
     return;
 
   new_cues_available_ = true;
-  cue_load_timer_.StartOneShot(0, BLINK_FROM_HERE);
+  cue_load_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void TextTrackLoader::FileFailedToParse() {
   state_ = kFailed;
 
   if (!cue_load_timer_.IsActive())
-    cue_load_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    cue_load_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 
   CancelLoad();
 }
@@ -179,7 +179,7 @@ void TextTrackLoader::Trace(blink::Visitor* visitor) {
   visitor->Trace(client_);
   visitor->Trace(cue_parser_);
   visitor->Trace(document_);
-  ResourceOwner<RawResource>::Trace(visitor);
+  RawResourceClient::Trace(visitor);
   VTTParserClient::Trace(visitor);
 }
 

@@ -30,9 +30,9 @@ class DEVICE_VR_EXPORT GvrDevice : public VRDeviceBase {
       VRDisplayImpl* display,
       mojom::VRSubmitFrameClientPtr submit_client,
       mojom::VRPresentationProviderRequest request,
+      mojom::VRRequestPresentOptionsPtr present_options,
       mojom::VRDisplayHost::RequestPresentCallback callback) override;
   void ExitPresent() override;
-  void GetPose(mojom::VRMagicWindowProvider::GetPoseCallback callback) override;
   void PauseTracking() override;
   void ResumeTracking() override;
 
@@ -42,24 +42,23 @@ class DEVICE_VR_EXPORT GvrDevice : public VRDeviceBase {
   void Activate(mojom::VRDisplayEventReason reason,
                 base::Callback<void(bool)> on_handled);
 
-  // TODO(mthiesse): Make this functionality cross-platform.
-  void SetInBrowsingMode(bool in_browsing_mode) {
-    in_browsing_mode_ = in_browsing_mode;
-  }
-
  private:
+  // VRDeviceBase
   void OnListeningForActivate(bool listening) override;
+  void OnMagicWindowPoseRequest(
+      mojom::VRMagicWindowProvider::GetPoseCallback callback) override;
+
   void OnRequestPresentResult(
       mojom::VRDisplayHost::RequestPresentCallback callback,
       VRDisplayImpl* display,
-      bool result);
+      bool result,
+      mojom::VRDisplayFrameTransportOptionsPtr transport_options);
 
   GvrDevice();
   GvrDelegateProvider* GetGvrDelegateProvider();
 
   base::android::ScopedJavaGlobalRef<jobject> non_presenting_context_;
   std::unique_ptr<gvr::GvrApi> gvr_api_;
-  bool in_browsing_mode_ = false;
 
   base::WeakPtrFactory<GvrDevice> weak_ptr_factory_;
 

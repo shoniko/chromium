@@ -15,6 +15,7 @@
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_web_contents.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 
 namespace content {
 
@@ -83,8 +84,6 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
   void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     CreateNavigationHandle();
-    EXPECT_EQ(REQUEST_CONTEXT_TYPE_UNSPECIFIED,
-              test_handle_->request_context_type_);
     contents()->GetMainFrame()->InitializeRenderFrameIfNeeded();
   }
 
@@ -112,9 +111,6 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     // It's safe to use base::Unretained since the NavigationHandle is owned by
     // the NavigationHandleImplTest.
     test_handle_->WillStartRequest(
-        "GET", nullptr, Referrer(), false, ui::PAGE_TRANSITION_LINK, false,
-        REQUEST_CONTEXT_TYPE_LOCATION,
-        blink::WebMixedContentContextType::kBlockable,
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }
@@ -140,7 +136,9 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
   // Helper function to call WillFailRequest on |handle|. If this function
   // returns DEFER, |callback_result_| will be set to the actual result of the
   // throttle checks when they are finished.
-  void SimulateWillFailRequest(net::Error net_error_code) {
+  void SimulateWillFailRequest(
+      net::Error net_error_code,
+      const base::Optional<net::SSLInfo> ssl_info = base::nullopt) {
     was_callback_called_ = false;
     callback_result_ = NavigationThrottle::DEFER;
     test_handle_->set_net_error_code(net_error_code);
@@ -148,7 +146,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     // It's safe to use base::Unretained since the NavigationHandle is owned by
     // the NavigationHandleImplTest.
     test_handle_->WillFailRequest(
-        base::nullopt, false,
+        ssl_info,
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }
@@ -168,8 +166,8 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     // in both cases.
     test_handle_->WillProcessResponse(
         main_test_rfh(), scoped_refptr<net::HttpResponseHeaders>(),
-        net::HttpResponseInfo::CONNECTION_INFO_QUIC_35, SSLStatus(),
-        GlobalRequestID(), false, false, false, base::Closure(),
+        net::HttpResponseInfo::CONNECTION_INFO_QUIC_35, net::HostPortPair(),
+        net::SSLInfo(), GlobalRequestID(), false, false, false,
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }
@@ -245,7 +243,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
   void AddDeletingNavigationThrottle() {
     DCHECK(test_handle_);
     test_handle()->RegisterThrottleForTesting(
-        base::MakeUnique<DeletingNavigationThrottle>(
+        std::make_unique<DeletingNavigationThrottle>(
             test_handle(), base::BindRepeating(
                                &NavigationHandleImplTest::ResetNavigationHandle,
                                base::Unretained(this))));
@@ -259,7 +257,15 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
         base::TimeTicks::Now(), 0,
         false,                  // started_from_context_menu
         CSPDisposition::CHECK,  // should_check_main_world_csp
-        false);                 // is_form_submission
+        false,                  // is_form_submission
+        base::nullopt,          // suggested_filename
+        "GET",
+        nullptr,  // resource_request_body
+        Referrer(),
+        false,  // has_user_gesture
+        ui::PAGE_TRANSITION_LINK,
+        false,  // is_external_protocol
+        REQUEST_CONTEXT_TYPE_LOCATION);
   }
 
  private:
@@ -290,7 +296,7 @@ class NavigationHandleImplThrottleInsertionTest
     RenderViewHostImplTestHarness::SetUp();
     contents()->GetMainFrame()->InitializeRenderFrameIfNeeded();
     test_browser_client_ =
-        base::MakeUnique<ThrottleInserterContentBrowserClient>(
+        std::make_unique<ThrottleInserterContentBrowserClient>(
             base::Bind(&NavigationHandleImplThrottleInsertionTest::GetThrottles,
                        base::Unretained(this)));
     old_browser_client_ =
@@ -307,7 +313,7 @@ class NavigationHandleImplThrottleInsertionTest
  private:
   std::vector<std::unique_ptr<NavigationThrottle>> GetThrottles(
       NavigationHandle* handle) {
-    auto throttle = base::MakeUnique<TestNavigationThrottle>(handle);
+    auto throttle = std::make_unique<TestNavigationThrottle>(handle);
     std::vector<std::unique_ptr<NavigationThrottle>> vec;
     throttles_inserted_++;
     vec.push_back(std::move(throttle));
@@ -953,7 +959,6 @@ TEST_F(NavigationHandleImplTest, BlockRequestCustomNetErrorAndErrorHTML) {
 
 TEST_F(NavigationHandleImplTest, BlockRequestCustomNetErrorInRedirect) {
   // BLOCK_REQUEST on redirect requires PlzNavigate.
-  EnableBrowserSideNavigation();
   TestNavigationThrottle* block_throttle = CreateTestNavigationThrottle(
       {NavigationThrottle::BLOCK_REQUEST, net::ERR_FILE_NOT_FOUND});
   EXPECT_TRUE(call_counts_match(block_throttle, 0, 0, 0, 0));
@@ -974,7 +979,6 @@ TEST_F(NavigationHandleImplTest, BlockRequestCustomNetErrorInRedirect) {
 TEST_F(NavigationHandleImplTest,
        BlockRequestCustomNetErrorAndErrorHTMLInRedirect) {
   // BLOCK_REQUEST on redirect requires PlzNavigate.
-  EnableBrowserSideNavigation();
   std::string expected_error_page_content("<html><body>test</body></html>");
   TestNavigationThrottle* block_throttle = CreateTestNavigationThrottle(
       {NavigationThrottle::BLOCK_REQUEST, net::ERR_FILE_NOT_FOUND,
@@ -1137,6 +1141,26 @@ TEST_F(NavigationHandleImplTest, DeletionByNavigationThrottle) {
   } else {
     EXPECT_EQ(NavigationThrottle::CANCEL_AND_IGNORE, callback_result());
   }
+}
+
+// Checks that data from the SSLInfo passed into SimulateWillStartRequest() is
+// stored on the handle.
+TEST_F(NavigationHandleImplTest, WillFailRequestSetsSSLInfo) {
+  uint16_t cipher_suite = 0xc02f;  // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+  int connection_status = 0;
+  net::SSLConnectionStatusSetCipherSuite(cipher_suite, &connection_status);
+
+  // Set some test values.
+  net::SSLInfo ssl_info;
+  ssl_info.cert_status = net::CERT_STATUS_AUTHORITY_INVALID;
+  ssl_info.connection_status = connection_status;
+
+  SimulateWillStartRequest();
+  SimulateWillFailRequest(net::ERR_CERT_DATE_INVALID, ssl_info);
+
+  EXPECT_EQ(net::CERT_STATUS_AUTHORITY_INVALID,
+            test_handle()->GetSSLInfo().cert_status);
+  EXPECT_EQ(connection_status, test_handle()->GetSSLInfo().connection_status);
 }
 
 }  // namespace content

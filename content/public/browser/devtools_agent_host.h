@@ -63,11 +63,6 @@ class CONTENT_EXPORT DevToolsAgentHost
   // does exist.
   static bool HasFor(WebContents* web_contents);
 
-  // Returns DevToolsAgentHost that can be used for inspecting shared worker
-  // with given worker process host id and routing id.
-  static scoped_refptr<DevToolsAgentHost> GetForWorker(int worker_process_id,
-                                                       int worker_route_id);
-
   // Creates DevToolsAgentHost that communicates to the target by means of
   // provided |delegate|. |delegate| ownership is passed to the created agent
   // host.
@@ -92,7 +87,7 @@ class CONTENT_EXPORT DevToolsAgentHost
 
   using List = std::vector<scoped_refptr<DevToolsAgentHost>>;
 
-  // Returns all DevToolsAgentHosts content is aware of.
+  // Returns all non-browser target DevToolsAgentHosts content is aware of.
   static List GetOrCreateAll();
 
   // Starts remote debugging.
@@ -110,6 +105,10 @@ class CONTENT_EXPORT DevToolsAgentHost
 
   // Stops remote debugging.
   static void StopRemoteDebuggingServer();
+
+  // Starts remote debugging for browser target for the given fd=3
+  // for reading and fd=4 for writing remote debugging messages.
+  static void StartRemoteDebuggingPipeHandler();
 
   // Observer is notified about changes in DevToolsAgentHosts.
   static void AddObserver(DevToolsAgentHostObserver*);
@@ -133,11 +132,6 @@ class CONTENT_EXPORT DevToolsAgentHost
   // Returns true if the message is dispatched and handled.
   virtual bool DispatchProtocolMessage(DevToolsAgentHostClient* client,
                                        const std::string& message) = 0;
-
-  // Sends |message| to the client of the specified session. Returns |true| if
-  // the session exists and the message was sent.
-  virtual bool SendProtocolMessageToClient(int session_id,
-                                           const std::string& message) = 0;
 
   // Starts inspecting element at position (|x|, |y|).
   virtual void InspectElement(DevToolsAgentHostClient* client,

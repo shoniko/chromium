@@ -31,6 +31,7 @@ class MockRendererScheduler : public RendererScheduler {
                scoped_refptr<base::SingleThreadTaskRunner>());
   MOCK_METHOD0(IdleTaskRunner,
                scoped_refptr<blink::scheduler::SingleThreadIdleTaskRunner>());
+  MOCK_METHOD0(IPCTaskRunner, scoped_refptr<base::SingleThreadTaskRunner>());
   MOCK_METHOD0(NewRenderWidgetSchedulingState,
                std::unique_ptr<RenderWidgetSchedulingState>());
   MOCK_METHOD1(WillBeginFrame, void(const viz::BeginFrameArgs&));
@@ -45,6 +46,7 @@ class MockRendererScheduler : public RendererScheduler {
   MOCK_METHOD0(DidAnimateForInputOnCompositorThread, void());
   MOCK_METHOD1(SetRendererHidden, void(bool));
   MOCK_METHOD1(SetRendererBackgrounded, void(bool));
+  MOCK_METHOD1(SetSchedulerKeepActive, void(bool));
   MOCK_METHOD0(PauseRenderer, std::unique_ptr<RendererPauseHandle>());
 #if defined(OS_ANDROID)
   MOCK_METHOD0(PauseTimersForAndroidWebView, void());
@@ -66,6 +68,7 @@ class MockRendererScheduler : public RendererScheduler {
   MOCK_METHOD1(SetRAILModeObserver, void(RAILModeObserver*));
   MOCK_METHOD1(MainThreadSeemsUnresponsive, bool(base::TimeDelta));
   MOCK_METHOD1(SetRendererProcessType, void(RendererProcessType));
+  MOCK_METHOD0(CreateWebScopedVirtualTimePauser, WebScopedVirtualTimePauser());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockRendererScheduler);

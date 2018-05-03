@@ -19,7 +19,7 @@
             "contextTypes": [
                 "Node"
             ],
-            "className": "UI.ExternaLinkContextMenuProvider"
+            "className": "UI.XLink.ContextMenuProvider"
         },
         {
             "type": "@UI.ContextMenu.Provider",
@@ -366,20 +366,6 @@
             "category": "Elements",
             "order": 3,
             "className": "Main.ShowMetricsRulersSettingUI"
-        },
-        {
-            "type": "context-menu-item",
-            "location": "mainMenu/navigate",
-            "title": "More tools",
-            "subMenuId": "mainMenuMoreTools",
-            "order": 80
-        },
-        {
-            "type": "context-menu-item",
-            "location": "mainMenu/footer",
-            "title": "Help",
-            "subMenuId": "mainMenuHelp",
-            "order": 30
         },
         {
             "type": "view",

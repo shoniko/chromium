@@ -52,7 +52,7 @@ class FEImage final : public FilterEffect {
   virtual void Trace(blink::Visitor*);
 
  private:
-  ~FEImage() override {}
+  ~FEImage() override = default;
   FEImage(Filter*, scoped_refptr<Image>, SVGPreserveAspectRatio*);
   FEImage(Filter*, TreeScope&, const String&, SVGPreserveAspectRatio*);
   LayoutObject* ReferencedLayoutObject() const;
@@ -63,8 +63,8 @@ class FEImage final : public FilterEffect {
 
   FloatRect MapInputs(const FloatRect&) const override;
 
-  sk_sp<SkImageFilter> CreateImageFilter() override;
-  sk_sp<SkImageFilter> CreateImageFilterForLayoutObject(const LayoutObject&);
+  sk_sp<PaintFilter> CreateImageFilter() override;
+  sk_sp<PaintFilter> CreateImageFilterForLayoutObject(const LayoutObject&);
 
   scoped_refptr<Image> image_;
 

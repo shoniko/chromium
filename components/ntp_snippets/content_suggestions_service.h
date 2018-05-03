@@ -186,6 +186,9 @@ class ContentSuggestionsService : public KeyedService,
   // meantime).
   void ReloadSuggestions();
 
+  // Must be called when Chrome Home is turned on or off.
+  void OnChromeHomeStatusChanged(bool is_chrome_home_enabled);
+
   // Observer accessors.
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -206,16 +209,11 @@ class ContentSuggestionsService : public KeyedService,
                     const base::Callback<bool(const GURL& url)>& filter);
 
   // Removes all suggestions from all caches or internal stores in all
-  // providers. See |ClearCachedSuggestions|.
+  // providers. It does, however, not remove any suggestions from the provider's
+  // sources, so if its configuration hasn't changed, it might return the same
+  // results when it fetches the next time. In particular, calling this method
+  // will not mark any suggestions as dismissed.
   void ClearAllCachedSuggestions();
-
-  // Removes all suggestions of the given |category| from all caches or internal
-  // stores in the service and the corresponding provider. It does, however, not
-  // remove any suggestions from the provider's sources, so if its configuration
-  // hasn't changed, it might return the same results when it fetches the next
-  // time. In particular, calling this method will not mark any suggestions as
-  // dismissed.
-  void ClearCachedSuggestions(Category category);
 
   // Only for debugging use through the internals page.
   // Retrieves suggestions of the given |category| that have previously been
@@ -317,13 +315,18 @@ class ContentSuggestionsService : public KeyedService,
   // Fires the OnCategoryStatusChanged event for the given |category|.
   void NotifyCategoryStatusChanged(Category category);
 
-  void OnSignInStateChanged();
+  void OnSignInStateChanged(bool has_signed_in);
 
   // Re-enables a dismissed category, making querying its provider possible.
   void RestoreDismissedCategory(Category category);
 
   void RestoreDismissedCategoriesFromPrefs();
   void StoreDismissedCategoriesToPrefs();
+
+  // Not implemented for articles. For all other categories, destroys its
+  // provider, deletes all mentions (except from dismissed list) and notifies
+  // observers that the category is disabled.
+  void DestroyCategoryAndItsProvider(Category category);
 
   // Get the domain of the suggestion suitable for fetching the favicon.
   GURL GetFaviconDomain(const ContentSuggestion::ID& suggestion_id);

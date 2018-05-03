@@ -7,11 +7,12 @@
 
 #include <cmath>
 #include <memory>
+
+#include "base/macros.h"
 #include "core/animation/TypedInterpolationValue.h"
 #include "platform/animation/AnimationUtilities.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -20,10 +21,9 @@ namespace blink {
 // format with respect to the animation environment and underlying values.
 class PrimitiveInterpolation {
   USING_FAST_MALLOC(PrimitiveInterpolation);
-  WTF_MAKE_NONCOPYABLE(PrimitiveInterpolation);
 
  public:
-  virtual ~PrimitiveInterpolation() {}
+  virtual ~PrimitiveInterpolation() = default;
 
   virtual void InterpolateValue(
       double fraction,
@@ -34,14 +34,15 @@ class PrimitiveInterpolation {
   virtual bool IsFlip() const { return false; }
 
  protected:
-  PrimitiveInterpolation() {}
+  PrimitiveInterpolation() = default;
+  DISALLOW_COPY_AND_ASSIGN(PrimitiveInterpolation);
 };
 
 // Represents a pair of keyframes that are compatible for "smooth" interpolation
 // eg. "0px" and "100px".
 class PairwisePrimitiveInterpolation : public PrimitiveInterpolation {
  public:
-  ~PairwisePrimitiveInterpolation() override {}
+  ~PairwisePrimitiveInterpolation() override = default;
 
   static std::unique_ptr<PairwisePrimitiveInterpolation> Create(
       const InterpolationType& type,
@@ -100,7 +101,7 @@ class PairwisePrimitiveInterpolation : public PrimitiveInterpolation {
 // behaviour eg. "auto" and "0px".
 class FlipPrimitiveInterpolation : public PrimitiveInterpolation {
  public:
-  ~FlipPrimitiveInterpolation() override {}
+  ~FlipPrimitiveInterpolation() override = default;
 
   static std::unique_ptr<FlipPrimitiveInterpolation> Create(
       std::unique_ptr<TypedInterpolationValue> start,

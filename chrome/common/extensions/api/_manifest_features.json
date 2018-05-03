@@ -11,6 +11,10 @@
     "channel": "stable",
     "extension_types": ["shared_module"]
   },
+  "action": {
+    "channel": "trunk",
+    "extension_types": ["extension"]
+  },
   "app.icon_color": {
     "channel": "stable",
     "extension_types": ["hosted_app"]
@@ -202,10 +206,6 @@
   "platforms": {
     "channel": "stable",
     "extension_types": "all"
-  },
-  "plugins": {
-    "channel": "stable",
-    "extension_types": ["extension", "legacy_packaged_app", "hosted_app"]
   },
   "requirements": {
     "channel": "stable",

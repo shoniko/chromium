@@ -22,6 +22,7 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/bubble/bubble_dialog_delegate.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/event_monitor.h"
 #include "ui/views/test/native_widget_factory.h"
 #include "ui/views/test/test_views.h"
 #include "ui/views/test/test_widget_observer.h"
@@ -1919,6 +1920,59 @@ TEST_F(WidgetTest, CaptureDuringMousePressNotOverridden) {
   widget->CloseNow();
 }
 
+class ClosingEventHandler : public View {
+ public:
+  explicit ClosingEventHandler(Widget* widget) : widget_(widget) {}
+
+  // ui::EventHandler:
+  void OnMouseEvent(ui::MouseEvent* event) override {
+    // Don't close twice if closing the Widget generates a capture update event.
+    if (event->type() != ui::ET_MOUSE_CAPTURE_CHANGED)
+      widget_->CloseNow();
+  }
+
+ private:
+  Widget* widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(ClosingEventHandler);
+};
+
+// Ensures that when multiple objects are intercepting OS-level events, that one
+// can safely close a Widget that has capture.
+TEST_F(WidgetTest, DestroyedWithCaptureViaEventMonitor) {
+  // On Mus, a CHECK(!details.dispatcher_destroyed) is hit in the EventGenerator
+  // call below. TODO(crbug/799428): Investigate.
+  if (IsMus())
+    return;
+
+  Widget* widget = CreateTopLevelNativeWidget();
+  TestWidgetObserver observer(widget);
+  widget->Show();
+  widget->SetSize(gfx::Size(300, 300));
+
+  // We need two ClosingEventHandler (both will try to close the Widget). On Mac
+  // the order that EventMonitors receive OS events is not deterministic. If the
+  // one installed via SetCapture() sees it first, the event is swallowed (so
+  // both need to try). Note the regression test would only fail when the
+  // SetCapture() handler did _not_ swallow the event, but it still needs to try
+  // to close the Widget otherwise it will be left open, which fails elsewhere.
+  ClosingEventHandler* view_handler = new ClosingEventHandler(widget);
+  widget->GetContentsView()->AddChildView(view_handler);
+  widget->SetCapture(view_handler);
+
+  ClosingEventHandler monitor_handler(widget);
+  auto monitor = EventMonitor::CreateApplicationMonitor(&monitor_handler);
+
+  ui::test::EventGenerator generator(
+      IsMus() ? widget->GetNativeWindow() : GetContext(),
+      widget->GetNativeWindow());
+  generator.set_target(ui::test::EventGenerator::Target::APPLICATION);
+
+  EXPECT_FALSE(observer.widget_closed());
+  generator.PressLeftButton();
+  EXPECT_TRUE(observer.widget_closed());
+}
+
 // Verifies WindowClosing() is invoked correctly on the delegate when a Widget
 // is closed.
 TEST_F(WidgetTest, SingleWindowClosing) {
@@ -2201,6 +2255,22 @@ TEST_F(WidgetTest, CloseWidgetWhileAnimating) {
   EXPECT_TRUE(animation_observer.animation_completed());
   EXPECT_EQ(widget_observer.bounds(), bounds);
 }
+
+// Test Widget::CloseAllSecondaryWidgets works as expected across platforms.
+// ChromeOS doesn't implement or need CloseAllSecondaryWidgets() since
+// everything is under a single root window.
+#if !defined(OS_CHROMEOS)
+TEST_F(WidgetTest, CloseAllSecondaryWidgets) {
+  Widget* widget1 = CreateNativeDesktopWidget();
+  Widget* widget2 = CreateNativeDesktopWidget();
+  TestWidgetObserver observer1(widget1);
+  TestWidgetObserver observer2(widget2);
+  widget1->Show();  // Just show the first one.
+  Widget::CloseAllSecondaryWidgets();
+  EXPECT_TRUE(observer1.widget_closed());
+  EXPECT_TRUE(observer2.widget_closed());
+}
+#endif
 
 // Test that the NativeWidget is still valid during OnNativeWidgetDestroying(),
 // and properties that depend on it are valid, when closed via CloseNow().

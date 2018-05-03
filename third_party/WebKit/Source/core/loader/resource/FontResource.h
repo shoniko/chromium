@@ -27,12 +27,12 @@
 #define FontResource_h
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/Resource.h"
 #include "platform/loader/fetch/ResourceClient.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -43,9 +43,9 @@ class FontResourceClient;
 
 class CORE_EXPORT FontResource final : public Resource {
  public:
-  using ClientType = FontResourceClient;
-
-  static FontResource* Fetch(FetchParameters&, ResourceFetcher*);
+  static FontResource* Fetch(FetchParameters&,
+                             ResourceFetcher*,
+                             FontResourceClient*);
   ~FontResource() override;
 
   void DidAddClient(ResourceClient*) override;
@@ -111,7 +111,7 @@ DEFINE_RESOURCE_TYPE_CASTS(Font);
 
 class FontResourceClient : public ResourceClient {
  public:
-  ~FontResourceClient() override {}
+  ~FontResourceClient() override = default;
   static bool IsExpectedType(ResourceClient* client) {
     return client->GetResourceClientType() == kFontType;
   }

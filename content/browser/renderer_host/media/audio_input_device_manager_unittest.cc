@@ -66,7 +66,7 @@ class MAYBE_AudioInputDeviceManagerTest : public testing::Test {
     // AudioInputDeviceManager accesses AudioSystem from IO thread, so it never
     // runs on the same thread with it, even on Mac.
     audio_manager_ = media::AudioManager::CreateForTesting(
-        base::MakeUnique<media::AudioThreadImpl>());
+        std::make_unique<media::AudioThreadImpl>());
     // Flush the message loop to ensure proper initialization of AudioManager.
     base::RunLoop().RunUntilIdle();
 
@@ -338,7 +338,6 @@ TEST_F(AudioInputDeviceManagerNoDevicesTest,
     // Expects that device parameters stored by the manager are valid.
     const MediaStreamDevice* device = manager_->GetOpenedDeviceById(session_id);
     EXPECT_TRUE(device->input.IsValid());
-    EXPECT_TRUE(device->matched_output.IsValid());
 
     manager_->Close(session_id);
     EXPECT_CALL(*audio_input_listener_, Closed(device_request.type, session_id))

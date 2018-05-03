@@ -17,6 +17,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "content/browser/media/media_devices_permission_checker.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -154,6 +155,7 @@ MediaDevicesManager::MediaDevicesManager(
       audio_system_(audio_system),
       video_capture_manager_(video_capture_manager),
       media_stream_manager_(media_stream_manager),
+      permission_checker_(std::make_unique<MediaDevicesPermissionChecker>()),
       cache_infos_(NUM_MEDIA_DEVICE_TYPES),
       monitoring_started_(false),
       weak_factory_(this) {
@@ -240,10 +242,12 @@ void MediaDevicesManager::StartMonitoring() {
   monitoring_started_ = true;
   base::SystemMonitor::Get()->AddDevicesChangedObserver(this);
 
-  for (size_t i = 0; i < NUM_MEDIA_DEVICE_TYPES; ++i) {
-    DCHECK(cache_policies_[i] != CachePolicy::SYSTEM_MONITOR);
-    SetCachePolicy(static_cast<MediaDeviceType>(i),
-                   CachePolicy::SYSTEM_MONITOR);
+  if (base::FeatureList::IsEnabled(features::kMediaDevicesSystemMonitorCache)) {
+    for (size_t i = 0; i < NUM_MEDIA_DEVICE_TYPES; ++i) {
+      DCHECK(cache_policies_[i] != CachePolicy::SYSTEM_MONITOR);
+      SetCachePolicy(static_cast<MediaDeviceType>(i),
+                     CachePolicy::SYSTEM_MONITOR);
+    }
   }
 
 #if defined(OS_MACOSX)
@@ -251,11 +255,6 @@ void MediaDevicesManager::StartMonitoring() {
       BrowserThread::UI, FROM_HERE,
       base::Bind(&MediaDevicesManager::StartMonitoringOnUIThread,
                  base::Unretained(this)));
-
-  // TODO(guidou): Remove this statement once the Mac device monitor is fixed to
-  //  correctly report device-change events for output-only audio devices.
-  // See http://crbug.com/648173.
-  SetCachePolicy(MEDIA_DEVICE_TYPE_AUDIO_OUTPUT, CachePolicy::NO_CACHE);
 #endif
 }
 
@@ -304,6 +303,19 @@ MediaDeviceInfoArray MediaDevicesManager::GetCachedDeviceInfo(
     MediaDeviceType type) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   return current_snapshot_[type];
+}
+
+MediaDevicesPermissionChecker*
+MediaDevicesManager::media_devices_permission_checker() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  return permission_checker_.get();
+}
+
+void MediaDevicesManager::SetPermissionChecker(
+    std::unique_ptr<MediaDevicesPermissionChecker> permission_checker) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(permission_checker);
+  permission_checker_ = std::move(permission_checker);
 }
 
 void MediaDevicesManager::DoEnumerateDevices(MediaDeviceType type) {

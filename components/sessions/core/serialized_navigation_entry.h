@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "components/sessions/core/sessions_export.h"
@@ -31,9 +32,6 @@ class TabNavigation;
 namespace sessions {
 
 class SerializedNavigationEntryTestHelper;
-
-// The key used to store search terms data in the NavigationEntry.
-SESSIONS_EXPORT extern const char kSearchTermsKey[];
 
 // SerializedNavigationEntry is a "freeze-dried" version of NavigationEntry.  It
 // contains the data needed to restore a NavigationEntry during session restore
@@ -93,7 +91,6 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   // Accessors for some fields taken from NavigationEntry.
   int unique_id() const { return unique_id_; }
   const base::string16& title() const { return title_; }
-  const base::string16& search_terms() const { return search_terms_; }
   const GURL& favicon_url() const { return favicon_url_; }
   int http_status_code() const { return http_status_code_; }
   ui::PageTransition transition_type() const {
@@ -146,6 +143,23 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   }
   const std::vector<GURL>& redirect_chain() const { return redirect_chain_; }
 
+  // This class is analogous to content::ReplacedNavigationEntryData.
+  // When a history entry is replaced (e.g. history.replaceState()), this
+  // contains some information about the entry prior to being replaced. Even if
+  // an entry is replaced multiple times, it represents data prior to the
+  // *first* replace.
+  struct ReplacedNavigationEntryData {
+    size_t EstimateMemoryUsage() const;
+
+    GURL first_committed_url;
+    base::Time first_timestamp;
+    ui::PageTransition first_transition_type;
+  };
+  const base::Optional<ReplacedNavigationEntryData>& replaced_entry_data()
+      const {
+    return replaced_entry_data_;
+  }
+
   const std::map<std::string, std::string>& extended_info_map() const {
     return extended_info_map_;
   }
@@ -176,11 +190,12 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   GURL original_request_url_;
   bool is_overriding_user_agent_ = false;
   base::Time timestamp_;
-  base::string16 search_terms_;
   GURL favicon_url_;
   int http_status_code_ = 0;
   bool is_restored_ = false;          // Not persisted.
   std::vector<GURL> redirect_chain_;  // Not persisted.
+  base::Optional<ReplacedNavigationEntryData>
+      replaced_entry_data_;  // Not persisted.
 
   // Additional information.
   BlockedState blocked_state_ = STATE_INVALID;

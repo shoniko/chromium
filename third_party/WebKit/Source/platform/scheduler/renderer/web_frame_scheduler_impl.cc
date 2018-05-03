@@ -5,6 +5,7 @@
 #include "platform/scheduler/renderer/web_frame_scheduler_impl.h"
 
 #include <memory>
+#include "base/metrics/histogram_macros.h"
 #include "base/trace_event/blame_context.h"
 #include "platform/runtime_enabled_features.h"
 #include "platform/scheduler/base/real_time_domain.h"
@@ -55,6 +56,10 @@ const char* CrossOriginStateToString(bool is_cross_origin) {
   }
 }
 
+bool StopNonTimersInBackgroundEnabled() {
+  return RuntimeEnabledFeatures::StopNonTimersInBackgroundEnabled();
+}
+
 }  // namespace
 
 WebFrameSchedulerImpl::ActiveConnectionHandleImpl::ActiveConnectionHandleImpl(
@@ -82,26 +87,31 @@ WebFrameSchedulerImpl::WebFrameSchedulerImpl(
           true,
           "WebFrameScheduler.FrameVisible",
           this,
+          &tracing_controller_,
           VisibilityStateToString),
       page_visible_(
           true,
           "WebFrameScheduler.PageVisible",
           this,
+          &tracing_controller_,
           VisibilityStateToString),
       page_stopped_(
           false,
           "WebFrameScheduler.PageStopped",
           this,
+          &tracing_controller_,
           StoppedStateToString),
       frame_paused_(
           false,
           "WebFrameScheduler.FramePaused",
           this,
+          &tracing_controller_,
           PausedStateToString),
       cross_origin_(
           false,
           "WebFrameScheduler.Origin",
           this,
+          &tracing_controller_,
           CrossOriginStateToString),
       frame_type_(frame_type),
       active_connection_count_(0),
@@ -114,9 +124,10 @@ namespace {
 void CleanUpQueue(MainThreadTaskQueue* queue) {
   if (!queue)
     return;
-  queue->UnregisterTaskQueue();
+  queue->DetachFromRendererScheduler();
   queue->SetFrameScheduler(nullptr);
   queue->SetBlameContext(nullptr);
+  queue->SetQueuePriority(TaskQueue::QueuePriority::kLowPriority);
 }
 
 }  // namespace
@@ -186,6 +197,7 @@ void WebFrameSchedulerImpl::SetFrameVisible(bool frame_visible) {
   DCHECK(parent_web_view_scheduler_);
   if (frame_visible_ == frame_visible)
     return;
+  UMA_HISTOGRAM_BOOLEAN("RendererScheduler.IPC.FrameVisibility", frame_visible);
   bool was_throttled = ShouldThrottleTimers();
   frame_visible_ = frame_visible;
   UpdateThrottling(was_throttled);
@@ -217,12 +229,12 @@ scoped_refptr<blink::WebTaskRunner> WebFrameSchedulerImpl::GetTaskRunner(
   // TODO(haraken): Optimize the mapping from TaskTypes to task runners.
   switch (type) {
     case TaskType::kJavascriptTimer:
-      return ThrottleableTaskRunner();
+      return WebTaskRunnerImpl::Create(ThrottleableTaskQueue(), type);
     case TaskType::kUnspecedLoading:
     case TaskType::kNetworking:
-      return LoadingTaskRunner();
+      return WebTaskRunnerImpl::Create(LoadingTaskQueue(), type);
     case TaskType::kNetworkingControl:
-      return LoadingControlTaskRunner();
+      return WebTaskRunnerImpl::Create(LoadingControlTaskQueue(), type);
     // Throttling following tasks may break existing web pages, so tentatively
     // these are unthrottled.
     // TODO(nhiroki): Throttle them again after we're convinced that it's safe
@@ -246,7 +258,7 @@ scoped_refptr<blink::WebTaskRunner> WebFrameSchedulerImpl::GetTaskRunner(
     case TaskType::kUnspecedTimer:
     case TaskType::kMiscPlatformAPI:
       // TODO(altimin): Move appropriate tasks to throttleable task queue.
-      return DeferrableTaskRunner();
+      return WebTaskRunnerImpl::Create(DeferrableTaskQueue(), type);
     // PostedMessage can be used for navigation, so we shouldn't defer it
     // when expecting a user gesture.
     case TaskType::kPostedMessage:
@@ -255,50 +267,54 @@ scoped_refptr<blink::WebTaskRunner> WebFrameSchedulerImpl::GetTaskRunner(
     // Media events should not be deferred to ensure that media playback is
     // smooth.
     case TaskType::kMediaElementEvent:
-      return PausableTaskRunner();
+    case TaskType::kInternalIndexedDB:
+      return WebTaskRunnerImpl::Create(PausableTaskQueue(), type);
     case TaskType::kUnthrottled:
-      return UnpausableTaskRunner();
+    case TaskType::kInternalTest:
+    case TaskType::kInternalWebCrypto:
+      return WebTaskRunnerImpl::Create(UnpausableTaskQueue(), type);
+    case TaskType::kCount:
+      NOTREACHED();
+      break;
   }
   NOTREACHED();
   return nullptr;
 }
 
-scoped_refptr<blink::WebTaskRunner> WebFrameSchedulerImpl::LoadingTaskRunner() {
+scoped_refptr<TaskQueue> WebFrameSchedulerImpl::LoadingTaskQueue() {
   DCHECK(parent_web_view_scheduler_);
   if (!loading_task_queue_) {
     loading_task_queue_ = renderer_scheduler_->NewLoadingTaskQueue(
-        MainThreadTaskQueue::QueueType::FRAME_LOADING);
+        MainThreadTaskQueue::QueueType::kFrameLoading);
     loading_task_queue_->SetBlameContext(blame_context_);
     loading_task_queue_->SetFrameScheduler(this);
     loading_queue_enabled_voter_ =
         loading_task_queue_->CreateQueueEnabledVoter();
     loading_queue_enabled_voter_->SetQueueEnabled(!frame_paused_);
   }
-  return WebTaskRunnerImpl::Create(loading_task_queue_);
+  return loading_task_queue_;
 }
 
-scoped_refptr<blink::WebTaskRunner>
-WebFrameSchedulerImpl::LoadingControlTaskRunner() {
+scoped_refptr<TaskQueue> WebFrameSchedulerImpl::LoadingControlTaskQueue() {
   DCHECK(parent_web_view_scheduler_);
   if (!loading_control_task_queue_) {
     loading_control_task_queue_ = renderer_scheduler_->NewLoadingTaskQueue(
-        MainThreadTaskQueue::QueueType::FRAME_LOADING_CONTROL);
+        MainThreadTaskQueue::QueueType::kFrameLoading_kControl);
     loading_control_task_queue_->SetBlameContext(blame_context_);
     loading_control_task_queue_->SetFrameScheduler(this);
     loading_control_queue_enabled_voter_ =
         loading_control_task_queue_->CreateQueueEnabledVoter();
     loading_control_queue_enabled_voter_->SetQueueEnabled(!frame_paused_);
   }
-  return WebTaskRunnerImpl::Create(loading_control_task_queue_);
+  return loading_control_task_queue_;
 }
 
-scoped_refptr<blink::WebTaskRunner>
-WebFrameSchedulerImpl::ThrottleableTaskRunner() {
+scoped_refptr<TaskQueue> WebFrameSchedulerImpl::ThrottleableTaskQueue() {
   DCHECK(parent_web_view_scheduler_);
   if (!throttleable_task_queue_) {
     throttleable_task_queue_ = renderer_scheduler_->NewTaskQueue(
         MainThreadTaskQueue::QueueCreationParams(
-            MainThreadTaskQueue::QueueType::FRAME_THROTTLEABLE)
+            MainThreadTaskQueue::QueueType::kFrameThrottleable)
             .SetShouldReportWhenExecutionBlocked(true)
             .SetCanBeThrottled(true)
             .SetCanBeStopped(true)
@@ -322,18 +338,18 @@ WebFrameSchedulerImpl::ThrottleableTaskRunner() {
           throttleable_task_queue_.get());
     }
   }
-  return WebTaskRunnerImpl::Create(throttleable_task_queue_);
+  return throttleable_task_queue_;
 }
 
-scoped_refptr<blink::WebTaskRunner>
-WebFrameSchedulerImpl::DeferrableTaskRunner() {
+scoped_refptr<TaskQueue> WebFrameSchedulerImpl::DeferrableTaskQueue() {
   DCHECK(parent_web_view_scheduler_);
   if (!deferrable_task_queue_) {
     deferrable_task_queue_ = renderer_scheduler_->NewTaskQueue(
         MainThreadTaskQueue::QueueCreationParams(
-            MainThreadTaskQueue::QueueType::FRAME_THROTTLEABLE)
+            MainThreadTaskQueue::QueueType::kFrameThrottleable)
             .SetShouldReportWhenExecutionBlocked(true)
             .SetCanBeDeferred(true)
+            .SetCanBeStopped(StopNonTimersInBackgroundEnabled())
             .SetCanBePaused(true));
     deferrable_task_queue_->SetBlameContext(blame_context_);
     deferrable_task_queue_->SetFrameScheduler(this);
@@ -341,17 +357,17 @@ WebFrameSchedulerImpl::DeferrableTaskRunner() {
         deferrable_task_queue_->CreateQueueEnabledVoter();
     deferrable_queue_enabled_voter_->SetQueueEnabled(!frame_paused_);
   }
-  return WebTaskRunnerImpl::Create(deferrable_task_queue_);
+  return deferrable_task_queue_;
 }
 
-scoped_refptr<blink::WebTaskRunner>
-WebFrameSchedulerImpl::PausableTaskRunner() {
+scoped_refptr<TaskQueue> WebFrameSchedulerImpl::PausableTaskQueue() {
   DCHECK(parent_web_view_scheduler_);
   if (!pausable_task_queue_) {
     pausable_task_queue_ = renderer_scheduler_->NewTaskQueue(
         MainThreadTaskQueue::QueueCreationParams(
-            MainThreadTaskQueue::QueueType::FRAME_PAUSABLE)
+            MainThreadTaskQueue::QueueType::kFramePausable)
             .SetShouldReportWhenExecutionBlocked(true)
+            .SetCanBeStopped(StopNonTimersInBackgroundEnabled())
             .SetCanBePaused(true));
     pausable_task_queue_->SetBlameContext(blame_context_);
     pausable_task_queue_->SetFrameScheduler(this);
@@ -359,56 +375,40 @@ WebFrameSchedulerImpl::PausableTaskRunner() {
         pausable_task_queue_->CreateQueueEnabledVoter();
     pausable_queue_enabled_voter_->SetQueueEnabled(!frame_paused_);
   }
-  return WebTaskRunnerImpl::Create(pausable_task_queue_);
+  return pausable_task_queue_;
 }
 
-scoped_refptr<blink::WebTaskRunner>
-WebFrameSchedulerImpl::UnpausableTaskRunner() {
+scoped_refptr<TaskQueue> WebFrameSchedulerImpl::UnpausableTaskQueue() {
   DCHECK(parent_web_view_scheduler_);
   if (!unpausable_task_queue_) {
     unpausable_task_queue_ = renderer_scheduler_->NewTaskQueue(
         MainThreadTaskQueue::QueueCreationParams(
-            MainThreadTaskQueue::QueueType::FRAME_UNPAUSABLE));
+            MainThreadTaskQueue::QueueType::kFrameUnpausable));
     unpausable_task_queue_->SetBlameContext(blame_context_);
     unpausable_task_queue_->SetFrameScheduler(this);
   }
-  return WebTaskRunnerImpl::Create(unpausable_task_queue_);
+  return unpausable_task_queue_;
 }
 
-blink::WebViewScheduler* WebFrameSchedulerImpl::GetWebViewScheduler() {
+blink::WebViewScheduler* WebFrameSchedulerImpl::GetWebViewScheduler() const {
   return parent_web_view_scheduler_;
 }
 
-void WebFrameSchedulerImpl::WillNavigateBackForwardSoon() {
-  parent_web_view_scheduler_->WillNavigateBackForwardSoon(this);
-}
-
 void WebFrameSchedulerImpl::DidStartProvisionalLoad(bool is_main_frame) {
-  parent_web_view_scheduler_->DidBeginProvisionalLoad(this);
   renderer_scheduler_->DidStartProvisionalLoad(is_main_frame);
-}
-
-void WebFrameSchedulerImpl::DidFailProvisionalLoad() {
-  parent_web_view_scheduler_->DidEndProvisionalLoad(this);
 }
 
 void WebFrameSchedulerImpl::DidCommitProvisionalLoad(
     bool is_web_history_inert_commit,
     bool is_reload,
     bool is_main_frame) {
-  parent_web_view_scheduler_->DidEndProvisionalLoad(this);
   renderer_scheduler_->DidCommitProvisionalLoad(is_web_history_inert_commit,
                                                 is_reload, is_main_frame);
 }
 
-void WebFrameSchedulerImpl::DidStartLoading(unsigned long identifier) {
-  if (parent_web_view_scheduler_)
-    parent_web_view_scheduler_->DidStartLoading(identifier);
-}
-
-void WebFrameSchedulerImpl::DidStopLoading(unsigned long identifier) {
-  if (parent_web_view_scheduler_)
-    parent_web_view_scheduler_->DidStopLoading(identifier);
+WebScopedVirtualTimePauser
+WebFrameSchedulerImpl::CreateWebScopedVirtualTimePauser() {
+  return WebScopedVirtualTimePauser(renderer_scheduler_);
 }
 
 void WebFrameSchedulerImpl::DidOpenActiveConnection() {
@@ -422,14 +422,6 @@ void WebFrameSchedulerImpl::DidCloseActiveConnection() {
   --active_connection_count_;
   if (parent_web_view_scheduler_)
     parent_web_view_scheduler_->OnConnectionUpdated();
-}
-
-void WebFrameSchedulerImpl::SetDocumentParsingInBackground(
-    bool background_parser_active) {
-  if (background_parser_active)
-    parent_web_view_scheduler_->IncrementBackgroundParserCount();
-  else
-    parent_web_view_scheduler_->DecrementBackgroundParserCount();
 }
 
 void WebFrameSchedulerImpl::AsValueInto(
@@ -528,7 +520,8 @@ void WebFrameSchedulerImpl::UpdateThrottlingState() {
 
 WebFrameScheduler::ThrottlingState
 WebFrameSchedulerImpl::CalculateThrottlingState() const {
-  if (page_stopped_) {
+  if (RuntimeEnabledFeatures::StopLoadingInBackgroundEnabled() &&
+      page_stopped_) {
     DCHECK(!page_visible_);
     return WebFrameScheduler::ThrottlingState::kStopped;
   }
@@ -571,16 +564,8 @@ base::WeakPtr<WebFrameSchedulerImpl> WebFrameSchedulerImpl::AsWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-bool WebFrameSchedulerImpl::IsExemptFromThrottling() const {
+bool WebFrameSchedulerImpl::IsExemptFromBudgetBasedThrottling() const {
   return has_active_connection();
-}
-
-void WebFrameSchedulerImpl::OnTraceLogEnabled() {
-  frame_visible_.OnTraceLogEnabled();
-  page_visible_.OnTraceLogEnabled();
-  page_stopped_.OnTraceLogEnabled();
-  frame_paused_.OnTraceLogEnabled();
-  cross_origin_.OnTraceLogEnabled();
 }
 
 }  // namespace scheduler

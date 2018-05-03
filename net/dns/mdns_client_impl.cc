@@ -62,8 +62,7 @@ MDnsConnection::SocketHandler::SocketHandler(
       response_(dns_protocol::kMaxMulticastSize),
       send_in_progress_(false) {}
 
-MDnsConnection::SocketHandler::~SocketHandler() {
-}
+MDnsConnection::SocketHandler::~SocketHandler() = default;
 
 int MDnsConnection::SocketHandler::Start() {
   IPEndPoint end_point;
@@ -135,8 +134,7 @@ MDnsConnection::MDnsConnection(MDnsConnection::Delegate* delegate)
     : delegate_(delegate), weak_ptr_factory_(this) {
 }
 
-MDnsConnection::~MDnsConnection() {
-}
+MDnsConnection::~MDnsConnection() = default;
 
 bool MDnsConnection::Init(MDnsSocketFactory* socket_factory) {
   std::vector<std::unique_ptr<DatagramServerSocket>> sockets;
@@ -204,8 +202,7 @@ MDnsClientImpl::Core::Core(base::Clock* clock, base::Timer* timer)
       connection_(new MDnsConnection(this)) {
 }
 
-MDnsClientImpl::Core::~Core() {
-}
+MDnsClientImpl::Core::~Core() = default;
 
 bool MDnsClientImpl::Core::Init(MDnsSocketFactory* socket_factory) {
   return connection_->Init(socket_factory);
@@ -420,20 +417,18 @@ void MDnsClientImpl::Core::QueryCache(
 }
 
 MDnsClientImpl::MDnsClientImpl()
-    : clock_(new base::DefaultClock),
-      cleanup_timer_(new base::Timer(false, false)) {
-}
+    : clock_(base::DefaultClock::GetInstance()),
+      cleanup_timer_(new base::Timer(false, false)) {}
 
-MDnsClientImpl::MDnsClientImpl(std::unique_ptr<base::Clock> clock,
+MDnsClientImpl::MDnsClientImpl(base::Clock* clock,
                                std::unique_ptr<base::Timer> timer)
-    : clock_(std::move(clock)), cleanup_timer_(std::move(timer)) {}
+    : clock_(clock), cleanup_timer_(std::move(timer)) {}
 
-MDnsClientImpl::~MDnsClientImpl() {
-}
+MDnsClientImpl::~MDnsClientImpl() = default;
 
 bool MDnsClientImpl::StartListening(MDnsSocketFactory* socket_factory) {
   DCHECK(!core_.get());
-  core_.reset(new Core(clock_.get(), cleanup_timer_.get()));
+  core_.reset(new Core(clock_, cleanup_timer_.get()));
   if (!core_->Init(socket_factory)) {
     core_.reset();
     return false;
@@ -454,7 +449,7 @@ std::unique_ptr<MDnsListener> MDnsClientImpl::CreateListener(
     const std::string& name,
     MDnsListener::Delegate* delegate) {
   return std::unique_ptr<MDnsListener>(
-      new MDnsListenerImpl(rrtype, name, clock_.get(), delegate, this));
+      new MDnsListenerImpl(rrtype, name, clock_, delegate, this));
 }
 
 std::unique_ptr<MDnsTransaction> MDnsClientImpl::CreateTransaction(

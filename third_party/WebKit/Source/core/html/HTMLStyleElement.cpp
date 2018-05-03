@@ -27,9 +27,9 @@
 #include "core/css/StyleEngine.h"
 #include "core/dom/Document.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/events/Event.h"
 #include "core/html_names.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -42,7 +42,7 @@ inline HTMLStyleElement::HTMLStyleElement(Document& document,
       fired_load_(false),
       loaded_sheet_(false) {}
 
-HTMLStyleElement::~HTMLStyleElement() {}
+HTMLStyleElement::~HTMLStyleElement() = default;
 
 HTMLStyleElement* HTMLStyleElement::Create(Document& document,
                                            bool created_by_parser) {
@@ -128,8 +128,9 @@ void HTMLStyleElement::NotifyLoadedSheetAndAllCriticalSubresources(
   if (fired_load_ && is_load_event)
     return;
   loaded_sheet_ = is_load_event;
-  TaskRunnerHelper::Get(TaskType::kDOMManipulation, &GetDocument())
-      ->PostTask(BLINK_FROM_HERE,
+  GetDocument()
+      .GetTaskRunner(TaskType::kDOMManipulation)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&HTMLStyleElement::DispatchPendingEvent,
                            WrapPersistent(this),
                            WTF::Passed(IncrementLoadEventDelayCount::Create(

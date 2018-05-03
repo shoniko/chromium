@@ -4,10 +4,11 @@
 
 import("//build/buildflag_header.gni")
 import("//build/config/features.gni")
+import("//build/config/jumbo.gni")
 import("//components/sync/protocol/protocol_sources.gni")
 import("//testing/test.gni")
 
-static_library("sync") {
+jumbo_static_library("sync") {
   sources = [
     "base/attachment_id_proto.cc",
     "base/attachment_id_proto.h",
@@ -570,6 +571,8 @@ static_library("sync") {
     "user_events/fake_user_event_service.h",
     "user_events/no_op_user_event_service.cc",
     "user_events/no_op_user_event_service.h",
+    "user_events/trial_recorder.cc",
+    "user_events/trial_recorder.h",
     "user_events/user_event_service.cc",
     "user_events/user_event_service.h",
     "user_events/user_event_service_impl.cc",
@@ -600,6 +603,7 @@ static_library("sync") {
     "//components/signin/core/browser",
     "//components/strings",
     "//components/sync/engine_impl/attachments/proto",
+    "//components/variations",
     "//components/version_info",
     "//crypto",
     "//google_apis",
@@ -895,6 +899,11 @@ source_set("unit_tests") {
     "engine_impl/js_mutation_event_observer_unittest.cc",
     "engine_impl/js_sync_encryption_handler_observer_unittest.cc",
     "engine_impl/js_sync_manager_observer_unittest.cc",
+    "engine_impl/loopback_server/loopback_server_unittest.cc",
+    "engine_impl/loopback_server/persistent_bookmark_entity_unittest.cc",
+    "engine_impl/loopback_server/persistent_permanent_entity_unittest.cc",
+    "engine_impl/loopback_server/persistent_tombstone_entity_unittest.cc",
+    "engine_impl/loopback_server/persistent_unique_client_entity_unittest.cc",
     "engine_impl/model_type_registry_unittest.cc",
     "engine_impl/model_type_worker_unittest.cc",
     "engine_impl/net/sync_server_connection_manager_unittest.cc",
@@ -941,6 +950,7 @@ source_set("unit_tests") {
     "syncable/syncable_enum_conversions_unittest.cc",
     "syncable/syncable_id_unittest.cc",
     "syncable/syncable_unittest.cc",
+    "user_events/trial_recorder_unittest.cc",
     "user_events/user_event_service_impl_unittest.cc",
     "user_events/user_event_sync_bridge_unittest.cc",
   ]
@@ -971,6 +981,7 @@ source_set("unit_tests") {
     "//components/sync/engine_impl/attachments/proto",
     "//components/sync_preferences",
     "//components/sync_preferences:test_support",
+    "//components/variations",
     "//components/version_info",
     "//components/version_info:version_string",
     "//google_apis",
@@ -995,10 +1006,6 @@ source_set("unit_tests") {
 
   if (is_ios) {
     sources -= [ "engine/net/http_bridge_unittest.cc" ]
-  }
-
-  if (is_win) {
-    sources += [ "engine_impl/loopback_server/loopback_server_unittest.cc" ]
   }
 
   if (!is_ios) {

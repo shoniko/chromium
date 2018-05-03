@@ -57,8 +57,7 @@ bool RecursiveFindCycle(const BuilderRecord* search_in,
 Builder::Builder(Loader* loader) : loader_(loader) {
 }
 
-Builder::~Builder() {
-}
+Builder::~Builder() = default;
 
 void Builder::ItemDefined(std::unique_ptr<Item> item) {
   ScopedTrace trace(TraceItem::TRACE_DEFINE_TARGET, item->label());
@@ -136,6 +135,19 @@ std::vector<const BuilderRecord*> Builder::GetAllRecords() const {
   result.reserve(records_.size());
   for (const auto& record : records_)
     result.push_back(record.second);
+  return result;
+}
+
+std::vector<const Item*> Builder::GetAllResolvedItems() const {
+  std::vector<const Item*> result;
+  result.reserve(records_.size());
+  for (const auto& record : records_) {
+    if (record.second->type() != BuilderRecord::ITEM_UNKNOWN &&
+        record.second->should_generate() && record.second->item()) {
+      result.push_back(record.second->item());
+    }
+  }
+
   return result;
 }
 

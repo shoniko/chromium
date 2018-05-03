@@ -88,6 +88,19 @@ public class ContentChildProcessServiceDelegate implements ChildProcessServiceDe
     }
 
     @Override
+    public void preloadNativeLibrary(Context hostContext) {
+        // This function can be called before command line is set. That is fine because
+        // preloading explicitly doesn't run any Chromium code, see NativeLibraryPreloader
+        // for more info.
+        try {
+            LibraryLoader libraryLoader = LibraryLoader.get(mLibraryProcessType);
+            libraryLoader.preloadNowOverrideApplicationContext(hostContext);
+        } catch (ProcessInitException e) {
+            Log.w(TAG, "Failed to preload native library", e);
+        }
+    }
+
+    @Override
     public boolean loadNativeLibrary(Context hostContext) {
         String processType =
                 CommandLine.getInstance().getSwitchValue(ContentSwitches.SWITCH_PROCESS_TYPE);
@@ -183,8 +196,7 @@ public class ContentChildProcessServiceDelegate implements ChildProcessServiceDe
             // For testing, set the Linker implementation and the test runner
             // class name to match those used by the parent.
             assert mLinkerParams != null;
-            Linker.setupForTesting(mLinkerParams.mLinkerImplementationForTesting,
-                    mLinkerParams.mTestRunnerClassNameForTesting);
+            Linker.setupForTesting(mLinkerParams.mTestRunnerClassNameForTesting);
         }
         return Linker.getInstance();
     }
@@ -240,7 +252,7 @@ public class ContentChildProcessServiceDelegate implements ChildProcessServiceDe
     /**
      * Initializes the native parts of the service.
      *
-     * @param serviceImpl This ChildProcessServiceImpl object.
+     * @param serviceImpl This ChildProcessService object.
      * @param cpuCount The number of CPUs.
      * @param cpuFeatures The CPU features.
      */

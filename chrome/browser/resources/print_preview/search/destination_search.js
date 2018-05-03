@@ -16,10 +16,12 @@ cr.define('print_preview', function() {
    *     holding printer sharing invitations.
    * @param {!print_preview.UserInfo} userInfo Event target that contains
    *     information about the logged in user.
+   * @param {!print_preview.AppState} appState Contains recent destination list.
    * @constructor
    * @extends {print_preview.Overlay}
    */
-  function DestinationSearch(destinationStore, invitationStore, userInfo) {
+  function DestinationSearch(
+      destinationStore, invitationStore, userInfo, appState) {
     print_preview.Overlay.call(this);
 
     /**
@@ -41,10 +43,11 @@ cr.define('print_preview', function() {
     this.userInfo_ = userInfo;
 
     /**
-     * Instance of native layer used to send metrics to C++ metrics handler.
-     * @private {!print_preview.NativeLayer}
+     * Contains recent destinations that are currently set to be persisted into
+     * the sticky settings.
+     * @private {!print_preview.AppState}
      */
-    this.nativeLayer_ = print_preview.NativeLayer.getInstance();
+    this.appState_ = appState;
 
     /**
      * Currently displayed printer sharing invitation.
@@ -95,22 +98,13 @@ cr.define('print_preview', function() {
     this.addChild(this.recentList_);
 
     /**
-     * Destination list containing local destinations.
+     * Destination list containing all print destinations.
      * @private {!print_preview.DestinationList}
      */
-    this.localList_ = new print_preview.DestinationList(
-        this, loadTimeData.getString('localDestinationsTitle'),
-        loadTimeData.getBoolean('showLocalManageButton') ?
-            loadTimeData.getString('manage') :
-            null);
-    this.addChild(this.localList_);
-
-    /**
-     * Destination list containing cloud destinations.
-     * @private {!print_preview.DestinationList}
-     */
-    this.cloudList_ = new print_preview.CloudDestinationList(this);
-    this.addChild(this.cloudList_);
+    this.printList_ = new print_preview.DestinationList(
+        this, loadTimeData.getString('printDestinationsTitle'),
+        loadTimeData.getString('manage'));
+    this.addChild(this.printList_);
   }
 
   /**
@@ -121,13 +115,9 @@ cr.define('print_preview', function() {
     // Dispatched when user requests to sign-in into another Google account.
     ADD_ACCOUNT: 'print_preview.DestinationSearch.ADD_ACCOUNT',
 
-    // Dispatched when the user requests to manage their cloud destinations.
-    MANAGE_CLOUD_DESTINATIONS:
-        'print_preview.DestinationSearch.MANAGE_CLOUD_DESTINATIONS',
-
-    // Dispatched when the user requests to manage their local destinations.
-    MANAGE_LOCAL_DESTINATIONS:
-        'print_preview.DestinationSearch.MANAGE_LOCAL_DESTINATIONS',
+    // Dispatched when the user requests to manage their print destinations.
+    MANAGE_PRINT_DESTINATIONS:
+        'print_preview.DestinationSearch.MANAGE_PRINT_DESTINATIONS',
 
     // Dispatched when the user requests to sign-in to their Google account.
     SIGN_IN: 'print_preview.DestinationSearch.SIGN_IN'
@@ -151,7 +141,6 @@ cr.define('print_preview', function() {
         if (getIsVisible(this.getChildElement('.cloudprint-promo'))) {
           this.metrics_.record(
               print_preview.Metrics.DestinationSearchBucket.SIGNIN_PROMPT);
-          this.nativeLayer_.recordAction('Signin_Impression_FromCloudPrint');
         }
         if (this.userInfo_.initialized)
           this.onUsersChanged_();
@@ -163,8 +152,7 @@ cr.define('print_preview', function() {
         this.invitationStore_.startLoadingInvitations();
       } else {
         // Collapse all destination lists
-        this.localList_.setIsShowAll(false);
-        this.cloudList_.setIsShowAll(false);
+        this.printList_.setIsShowAll(false);
         if (this.provisionalDestinationResolver_)
           this.provisionalDestinationResolver_.cancel();
         this.resetSearch_();
@@ -179,11 +167,14 @@ cr.define('print_preview', function() {
 
     /** Shows the Google Cloud Print promotion banner. */
     showCloudPrintPromo: function() {
-      setIsVisible(this.getChildElement('.cloudprint-promo'), true);
+      const cloudPrintPromoElement = this.getChildElement('.cloudprint-promo');
+      if (getIsVisible(cloudPrintPromoElement))
+        return;
+
+      setIsVisible(cloudPrintPromoElement, true);
       if (this.getIsVisible()) {
         this.metrics_.record(
             print_preview.Metrics.DestinationSearchBucket.SIGNIN_PROMPT);
-        this.nativeLayer_.recordAction('Signin_Impression_FromCloudPrint');
       }
       this.reflowLists_();
     },
@@ -259,13 +250,9 @@ cr.define('print_preview', function() {
           this.updateInvitations_.bind(this));
 
       this.tracker.add(
-          this.localList_,
+          this.printList_,
           print_preview.DestinationList.EventType.ACTION_LINK_ACTIVATED,
-          this.onManageLocalDestinationsActivated_.bind(this));
-      this.tracker.add(
-          this.cloudList_,
-          print_preview.DestinationList.EventType.ACTION_LINK_ACTIVATED,
-          this.onManageCloudDestinationsActivated_.bind(this));
+          this.onManagePrintDestinationsActivated_.bind(this));
 
       this.tracker.add(
           this.userInfo_, print_preview.UserInfo.EventType.USERS_CHANGED,
@@ -287,8 +274,7 @@ cr.define('print_preview', function() {
     decorateInternal: function() {
       this.searchBox_.render(this.getChildElement('.search-box-container'));
       this.recentList_.render(this.getChildElement('.recent-list'));
-      this.localList_.render(this.getChildElement('.local-list'));
-      this.cloudList_.render(this.getChildElement('.cloud-list'));
+      this.printList_.render(this.getChildElement('.print-list'));
       this.getChildElement('.promo-text').innerHTML = loadTimeData.getStringF(
           'cloudPrintPromotion', '<a is="action-link" class="sign-in">',
           '</a>');
@@ -318,8 +304,7 @@ cr.define('print_preview', function() {
      */
     filterLists_: function(query) {
       this.recentList_.updateSearchQuery(query);
-      this.localList_.updateSearchQuery(query);
-      this.cloudList_.updateSearchQuery(query);
+      this.printList_.updateSearchQuery(query);
     },
 
     /**
@@ -332,11 +317,33 @@ cr.define('print_preview', function() {
     },
 
     /**
+     * @param {?string} filterAccount Account to filter recent destinations by.
+     * @return {!Array<!print_preview.Destination>} List of recent destinations
+     * @private
+     */
+    getRecentDestinations_(filterAccount) {
+      let recentDestinations = [];
+      this.appState_.recentDestinations.forEach((recentDestination) => {
+        const origin = recentDestination.origin;
+        const id = recentDestination.id;
+        const account = recentDestination.account || '';
+        const destination =
+            this.destinationStore_.getDestination(origin, id, account);
+        if (destination &&
+            (!destination.account || destination.account == filterAccount)) {
+          recentDestinations.push(destination);
+        }
+      });
+      return recentDestinations;
+    },
+
+    /**
      * Renders all of the destinations in the destination store.
      * @private
      */
     renderDestinations_: function() {
-      const recentDestinations = [];
+      const recentDestinations =
+          this.getRecentDestinations_(this.userInfo_.activeUser);
       const localDestinations = [];
       const cloudDestinations = [];
       const unregisteredCloudDestinations = [];
@@ -344,9 +351,6 @@ cr.define('print_preview', function() {
       const destinations =
           this.destinationStore_.destinations(this.userInfo_.activeUser);
       destinations.forEach(function(destination) {
-        if (destination.isRecent) {
-          recentDestinations.push(destination);
-        }
         if (destination.isLocal ||
             destination.origin == print_preview.DestinationOrigin.DEVICE) {
           localDestinations.push(destination);
@@ -374,10 +378,11 @@ cr.define('print_preview', function() {
                   cloudDestinations,
                   unregisteredCloudDestinations.slice(
                       DestinationSearch.MAX_PROMOTED_UNREGISTERED_PRINTERS_));
+      const finalPrintDestinations =
+          localDestinations.concat(finalCloudDestinations);
 
       this.recentList_.updateDestinations(recentDestinations);
-      this.localList_.updateDestinations(localDestinations);
-      this.cloudList_.updateDestinations(finalCloudDestinations);
+      this.printList_.updateDestinations(finalPrintDestinations);
     },
 
     /**
@@ -389,12 +394,7 @@ cr.define('print_preview', function() {
         return;
       }
 
-      const hasCloudList = getIsVisible(this.getChildElement('.cloud-list'));
-      const lists = [this.recentList_, this.localList_];
-      if (hasCloudList) {
-        lists.push(this.cloudList_);
-      }
-
+      const lists = [this.recentList_, this.printList_];
       const getListsTotalHeight = function(lists, counts) {
         return lists.reduce(function(sum, list, index) {
           const container = list.getContainerElement();
@@ -459,13 +459,10 @@ cr.define('print_preview', function() {
      * @private
      */
     updateThrobbers_: function() {
-      this.localList_.setIsThrobberVisible(
-          this.destinationStore_.isLocalDestinationSearchInProgress);
-      this.cloudList_.setIsThrobberVisible(
-          this.destinationStore_.isCloudDestinationSearchInProgress);
+      this.printList_.setIsThrobberVisible(
+          this.destinationStore_.isPrintDestinationSearchInProgress);
       this.recentList_.setIsThrobberVisible(
-          this.destinationStore_.isLocalDestinationSearchInProgress &&
-          this.destinationStore_.isCloudDestinationSearchInProgress);
+          this.destinationStore_.isPrintDestinationSearchInProgress);
       this.reflowLists_();
     },
 
@@ -547,7 +544,6 @@ cr.define('print_preview', function() {
       }
 
       setIsVisible(this.getChildElement('.user-info'), loggedIn);
-      setIsVisible(this.getChildElement('.cloud-list'), loggedIn);
       setIsVisible(this.getChildElement('.cloudprint-promo'), !loggedIn);
       this.updateInvitations_();
     },
@@ -572,14 +568,8 @@ cr.define('print_preview', function() {
      */
     onDestinationConfigureRequest_: function(event) {
       const destination = event.detail.destination;
-      // Cloud Print Device printers are stored in the local list
-      // crbug.com/713831.
-      // TODO(crbug.com/416701): Upon resolution, update this.
       const destinationItem =
-          (destination.isLocal ||
-           destination.origin == print_preview.DestinationOrigin.DEVICE) ?
-          this.localList_.getDestinationItem(destination.id) :
-          this.cloudList_.getDestinationItem(destination.id);
+          this.printList_.getDestinationItem(destination.id);
       assert(
           destinationItem != null,
           'User does not select a valid destination item.');
@@ -612,12 +602,12 @@ cr.define('print_preview', function() {
           .then(
               response => {
                 this.destinationInConfiguring_ = null;
-                this.localList_.getDestinationItem(destination.id)
+                this.printList_.getDestinationItem(destination.id)
                     .onConfigureResolved(response);
               },
               () => {
                 this.destinationInConfiguring_ = null;
-                this.localList_.getDestinationItem(destination.id)
+                this.printList_.getDestinationItem(destination.id)
                     .onConfigureResolved(
                         {printerId: destination.id, success: false});
               });
@@ -690,14 +680,8 @@ cr.define('print_preview', function() {
      * @private
      */
     onDestinationStoreSelect_: function() {
-      const destinations =
-          this.destinationStore_.destinations(this.userInfo_.activeUser);
-      const recentDestinations = [];
-      destinations.forEach(function(destination) {
-        if (destination.isRecent) {
-          recentDestinations.push(destination);
-        }
-      });
+      const recentDestinations =
+          this.getRecentDestinations_(this.userInfo_.activeUser);
       this.recentList_.updateDestinations(recentDestinations);
       this.reflowLists_();
     },
@@ -727,23 +711,13 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Called when the manage cloud printers action is activated.
+     * Called when the manage all printers action is activated.
      * @private
      */
-    onManageCloudDestinationsActivated_: function() {
+    onManagePrintDestinationsActivated_: function() {
       cr.dispatchSimpleEvent(
           this,
-          print_preview.DestinationSearch.EventType.MANAGE_CLOUD_DESTINATIONS);
-    },
-
-    /**
-     * Called when the manage local printers action is activated.
-     * @private
-     */
-    onManageLocalDestinationsActivated_: function() {
-      cr.dispatchSimpleEvent(
-          this,
-          print_preview.DestinationSearch.EventType.MANAGE_LOCAL_DESTINATIONS);
+          print_preview.DestinationSearch.EventType.MANAGE_PRINT_DESTINATIONS);
     },
 
     /**

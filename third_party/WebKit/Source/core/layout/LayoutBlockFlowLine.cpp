@@ -727,6 +727,18 @@ void LayoutBlockFlow::UpdateLogicalWidthForAlignment(
     logical_left += VerticalScrollbarWidthClampedToContentBox();
 }
 
+bool LayoutBlockFlow::CanContainFirstFormattedLine() const {
+  // The 'text-indent' only affects a line if it is the first formatted
+  // line of an element. For example, the first line of an anonymous block
+  // box is only affected if it is the first child of its parent element.
+  // https://drafts.csswg.org/css-text-3/#text-indent-property
+
+  // TODO(kojii): In LayoutNG, leading OOF creates a block box.
+  // text-indent-first-line-002.html fails for this reason.
+  // crbug.com/734554
+  return !(IsAnonymousBlock() && PreviousSibling());
+}
+
 static void UpdateLogicalInlinePositions(LayoutBlockFlow* block,
                                          LayoutUnit& line_logical_left,
                                          LayoutUnit& line_logical_right,
@@ -752,15 +764,8 @@ void LayoutBlockFlow::ComputeInlineDirectionPositionsForLine(
     GlyphOverflowAndFallbackFontsMap& text_box_data_map,
     VerticalPositionCache& vertical_position_cache,
     const WordMeasurements& word_measurements) {
-  // CSS 2.1: "'Text-indent' only affects a line if it is the first formatted
-  // line of an element. For example, the first line of an anonymous block
-  // box is only affected if it is the first child of its parent element."
-  // CSS3 "text-indent", "each-line" affects the first line of the block
-  // container as well as each line after a forced line break, but does not
-  // affect lines after a soft wrap break.
   bool is_first_line =
-      line_info.IsFirstLine() &&
-      !(IsAnonymousBlock() && Parent()->SlowFirstChild() != this);
+      line_info.IsFirstLine() && CanContainFirstFormattedLine();
   bool is_after_hard_line_break =
       line_box->PrevRootBox() && line_box->PrevRootBox()->EndsWithBreak();
   IndentTextOrNot indent_text =
@@ -1495,11 +1500,12 @@ LayoutObject* InlineMinMaxIterator::Next() {
   return current;
 }
 
-static LayoutUnit GetBPMWidth(LayoutUnit child_value, Length css_unit) {
-  if (css_unit.GetType() != kAuto)
-    return (css_unit.IsFixed() ? static_cast<LayoutUnit>(css_unit.Value())
-                               : child_value);
-  return LayoutUnit();
+static LayoutUnit GetBPMWidth(LayoutUnit child_value, const Length& css_unit) {
+  if (css_unit.IsFixed())
+    return LayoutUnit(css_unit.Value());
+  if (css_unit.IsAuto())
+    return LayoutUnit();
+  return child_value;
 }
 
 static LayoutUnit GetBorderPaddingMargin(const LayoutBoxModelObject& child,
@@ -1592,7 +1598,7 @@ void LayoutBlockFlow::ComputeInlinePreferredLogicalWidths(
   LayoutUnit inline_min;
 
   const ComputedStyle& style_to_use = StyleRef();
-  LayoutBlock* containing_block = this->ContainingBlock();
+  LayoutBlock* containing_block = ContainingBlock();
   LayoutUnit cw =
       containing_block ? containing_block->ContentLogicalWidth() : LayoutUnit();
 
@@ -2646,7 +2652,7 @@ LayoutUnit LayoutBlockFlow::StartAlignedOffsetForLine(
 
 void LayoutBlockFlow::SetShouldDoFullPaintInvalidationForFirstLine() {
   DCHECK(ChildrenInline());
-  if (RootInlineBox* first_root_box = this->FirstRootBox())
+  if (RootInlineBox* first_root_box = FirstRootBox())
     first_root_box->SetShouldDoFullPaintInvalidationRecursively();
 }
 

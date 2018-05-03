@@ -13,7 +13,6 @@ import android.view.View;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.Linker;
@@ -40,16 +39,9 @@ public class ChromiumLinkerTestActivity extends Activity {
     // target device running the test really is.
     private static final String LOW_MEMORY_DEVICE = "--low-memory-device";
 
-    // Use one of these on the command-line to force a specific Linker
-    // implementation. Passed from the main process to sub-processes so that
-    // everything that participates in a test uses a consistent implementation.
-    private static final String USE_MODERN_LINKER = "--use-linker=modern";
-    private static final String USE_LEGACY_LINKER = "--use-linker=legacy";
-
     private ShellManager mShellManager;
     private ActivityWindowAndroid mWindowAndroid;
 
-    @SuppressFBWarnings("DMI_HARDCODED_ABSOLUTE_FILENAME")
     @Override
     public void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -66,8 +58,6 @@ public class ChromiumLinkerTestActivity extends Activity {
         // CommandLine.getInstance().hasSwitch() doesn't work here for some funky
         // reason, so parse the command-line differently here:
         boolean hasLowMemoryDeviceSwitch = false;
-        boolean hasModernLinkerSwitch = false;
-        boolean hasLegacyLinkerSwitch = false;
         String[] commandLine = CommandLine.getJavaSwitchesOrNull();
         if (commandLine == null) {
             Log.i(TAG, "Command line is null");
@@ -78,30 +68,8 @@ public class ChromiumLinkerTestActivity extends Activity {
                 Log.i(TAG, "  '" + option + "'");
                 if (option.equals(LOW_MEMORY_DEVICE)) {
                     hasLowMemoryDeviceSwitch = true;
-                } else if (option.equals(USE_MODERN_LINKER)) {
-                    hasModernLinkerSwitch = true;
-                } else if (option.equals(USE_LEGACY_LINKER)) {
-                    hasLegacyLinkerSwitch = true;
                 }
             }
-        }
-
-        if (!(hasModernLinkerSwitch || hasLegacyLinkerSwitch)) {
-            Log.e(TAG, "Missing --use-linker command line argument.");
-            finish();
-        } else if (hasModernLinkerSwitch && hasLegacyLinkerSwitch) {
-            Log.e(TAG, "Conflicting --use-linker command line arguments.");
-            finish();
-        }
-
-        // Set the requested Linker implementation from the command-line, and
-        // register the test runner class by name.
-        if (hasModernLinkerSwitch) {
-            Linker.setupForTesting(Linker.LINKER_IMPLEMENTATION_MODERN,
-                                   LinkerTests.class.getName());
-        } else {
-            Linker.setupForTesting(Linker.LINKER_IMPLEMENTATION_LEGACY,
-                                   LinkerTests.class.getName());
         }
 
         // Determine which kind of device to simulate from the command-line.

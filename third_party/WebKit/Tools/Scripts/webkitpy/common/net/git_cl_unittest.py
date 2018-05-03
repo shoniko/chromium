@@ -6,6 +6,7 @@ import unittest
 
 from webkitpy.common.host_mock import MockHost
 from webkitpy.common.net.buildbot import Build
+from webkitpy.common.net.git_cl import CLStatus
 from webkitpy.common.net.git_cl import GitCL
 from webkitpy.common.net.git_cl import TryJobStatus
 from webkitpy.common.system.executive_mock import MockExecutive
@@ -60,6 +61,7 @@ class GitCLTest(unittest.TestCase):
         self.assertEqual(host.executive.calls, [
             [
                 'git', 'cl', 'try',
+                '-m', 'tryserver.chromium.android',
                 '-b', 'android_blink_rel',
                 '--auth-refresh-token-json', 'token.json'
             ],
@@ -81,6 +83,7 @@ class GitCLTest(unittest.TestCase):
         self.assertEqual(host.executive.calls, [
             [
                 'git', 'cl', 'try',
+                '-m', 'tryserver.chromium.android',
                 '-b', 'android_blink_rel',
                 '--auth-refresh-token-json', 'token.json'
             ],
@@ -90,6 +93,30 @@ class GitCLTest(unittest.TestCase):
                 '-b', 'builder-a',
                 '--auth-refresh-token-json', 'token.json'
             ],
+        ])
+
+    def test_fetch_raw_try_job_results(self):
+        # Fetching raw try job results has a side effect of writing to and
+        # reading from a temporary JSON file. This test method verifies the
+        # command line used to fetch try job results.
+        host = MockHost()
+        host.filesystem.write_text_file(
+            '/__im_tmp/tmp_0_/try-results.json', '{}')
+        host.filesystem.write_text_file(
+            '/__im_tmp/tmp_1_/try-results.json', '{}')
+        git_cl = GitCL(host)
+        git_cl.fetch_raw_try_job_results()
+        git_cl.fetch_raw_try_job_results(patchset=7)
+        self.assertEqual(host.executive.calls, [
+            [
+                'git', 'cl', 'try-results',
+                '--json', '/__im_tmp/tmp_0_/try-results.json',
+            ],
+            [
+                'git', 'cl', 'try-results',
+                '--json', '/__im_tmp/tmp_1_/try-results.json',
+                '--patchset', '7'
+            ]
         ])
 
     def test_get_issue_number(self):
@@ -107,7 +134,7 @@ class GitCLTest(unittest.TestCase):
     def test_wait_for_try_jobs_timeout(self):
         host = MockHost()
         git_cl = GitCL(host)
-        git_cl.fetch_raw_try_job_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda **_: [
             {
                 'builder_name': 'some-builder',
                 'status': 'STARTED',
@@ -130,7 +157,7 @@ class GitCLTest(unittest.TestCase):
     def test_wait_for_try_jobs_no_results_not_considered_finished(self):
         host = MockHost()
         git_cl = GitCL(host)
-        git_cl.fetch_raw_try_job_results = lambda: []
+        git_cl.fetch_raw_try_job_results = lambda **_: []
         self.assertIsNone(git_cl.wait_for_try_jobs())
         self.assertEqual(
             host.stdout.getvalue(),
@@ -143,26 +170,55 @@ class GitCLTest(unittest.TestCase):
             'Waiting for try jobs. 6600 seconds passed.\n'
             'Timed out waiting for try jobs.\n')
 
-    def test_wait_for_try_jobs_done(self):
+    def test_wait_for_try_jobs_cl_closed(self):
         host = MockHost()
+        host.executive = MockExecutive(output='closed')
         git_cl = GitCL(host)
-        git_cl.fetch_raw_try_job_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda **_: [
             {
                 'builder_name': 'some-builder',
-                'status': 'COMPLETED',
-                'result': 'FAILURE',
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/100',
+                'status': 'STARTED',
+                'result': None,
+                'url': None,
             },
         ]
         self.assertEqual(
             git_cl.wait_for_try_jobs(),
-            {
-                Build('some-builder', 100): TryJobStatus('COMPLETED', 'FAILURE')
-            })
+            CLStatus(
+                status='closed',
+                try_job_results={
+                    Build('some-builder', None): TryJobStatus('STARTED', None),
+                },
+            )
+        )
         self.assertEqual(
             host.stdout.getvalue(),
-            'Waiting for try jobs, timeout: 7200 seconds.\n'
-            'All jobs finished.\n')
+            'Waiting for try jobs, timeout: 7200 seconds.\n')
+
+    def test_wait_for_try_jobs_done(self):
+        host = MockHost()
+        host.executive = MockExecutive(output='lgtm')
+        git_cl = GitCL(host)
+        git_cl.fetch_raw_try_job_results = lambda **_: [
+            {
+                'builder_name': 'some-builder',
+                'status': 'COMPLETED',
+                'result': 'FAILURE',
+                'url': 'http://ci.chromium.org/master/some-builder/100',
+            },
+        ]
+        self.assertEqual(
+            git_cl.wait_for_try_jobs(),
+            CLStatus(
+                status='lgtm',
+                try_job_results={
+                    Build('some-builder', 100): TryJobStatus('COMPLETED', 'FAILURE'),
+                }
+            )
+        )
+        self.assertEqual(
+            host.stdout.getvalue(),
+            'Waiting for try jobs, timeout: 7200 seconds.\n')
 
     def test_wait_for_closed_status_timeout(self):
         host = MockHost()
@@ -220,9 +276,43 @@ class GitCLTest(unittest.TestCase):
             Build('some-builder', 2): TryJobStatus('STARTED'),
         }))
 
-    def test_latest_try_builds(self):
+    def test_latest_try_jobs_cq_only(self):
         git_cl = GitCL(MockHost())
-        git_cl.fetch_raw_try_job_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda **_: [
+            {
+                'builder_name': 'cq-a',
+                'experimental': False,
+                'result': None,
+                'status': 'SCHEDULED',
+                'tags': ['user_agent:cq'],
+                'url': None,
+            },
+            {
+                'builder_name': 'cq-a-experimental',
+                'experimental': True,
+                'result': None,
+                'status': 'SCHEDULED',
+                'tags': ['user_agent:cq'],
+                'url': None,
+            },
+            {
+                'builder_name': 'other',
+                'experimental': False,
+                'status': 'SCHEDULED',
+                'result': None,
+                'tags': ['user_agent:git_cl_try'],
+                'url': None,
+            },
+        ]
+        self.assertEqual(
+            git_cl.latest_try_jobs(cq_only=True),
+            {
+                Build('cq-a'): TryJobStatus('SCHEDULED'),
+            })
+
+    def test_latest_try_jobs(self):
+        git_cl = GitCL(MockHost())
+        git_cl.fetch_raw_try_job_results = lambda **_: [
             {
                 'builder_name': 'builder-b',
                 'status': 'COMPLETED',
@@ -245,7 +335,7 @@ class GitCLTest(unittest.TestCase):
                 'builder_name': 'builder-c',
                 'status': 'COMPLETED',
                 'result': 'SUCCESS',
-                'url': 'http://build.chromium.org/p/master/builders/builder-c/builds/123',
+                'url': 'http://ci.chromium.org/master/builder-c/123',
             },
         ]
         self.assertEqual(
@@ -255,36 +345,50 @@ class GitCLTest(unittest.TestCase):
                 Build('builder-b', 100): TryJobStatus('COMPLETED', 'SUCCESS'),
             })
 
-    def test_latest_try_builds_started_builds(self):
+    def test_latest_try_jobs_started_build_luci_url(self):
         git_cl = GitCL(MockHost())
-        git_cl.fetch_raw_try_job_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda **_: [
             {
                 'builder_name': 'builder-a',
                 'status': 'STARTED',
                 'result': None,
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/100',
+                'url': 'http://ci.chromium.org/p/master/some-builder/100',
             },
         ]
         self.assertEqual(
             git_cl.latest_try_jobs(['builder-a']),
             {Build('builder-a', 100): TryJobStatus('STARTED')})
 
-    def test_latest_try_builds_failures(self):
+    def test_latest_try_jobs_started_build_buildbot_url(self):
         git_cl = GitCL(MockHost())
-        git_cl.fetch_raw_try_job_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda **_: [
+            {
+                'builder_name': 'builder-a',
+                'status': 'STARTED',
+                'result': None,
+                'url': 'http://build.chromium.org/master/builders/some-builder/builds/100',
+            },
+        ]
+        self.assertEqual(
+            git_cl.latest_try_jobs(['builder-a']),
+            {Build('builder-a', 100): TryJobStatus('STARTED')})
+
+    def test_latest_try_jobs_failures(self):
+        git_cl = GitCL(MockHost())
+        git_cl.fetch_raw_try_job_results = lambda **_: [
             {
                 'builder_name': 'builder-a',
                 'status': 'COMPLETED',
                 'result': 'FAILURE',
                 'failure_reason': 'BUILD_FAILURE',
-                'url': 'http://build.chromium.org/p/master/builders/builder-a/builds/100',
+                'url': 'http://ci.chromium.org/p/master/builder-a/100',
             },
             {
                 'builder_name': 'builder-b',
                 'status': 'COMPLETED',
                 'result': 'FAILURE',
                 'failure_reason': 'INFRA_FAILURE',
-                'url': 'http://build.chromium.org/p/master/builders/builder-b/builds/200',
+                'url': 'http://ci.chromium.org/p/master/builder-b/200',
             },
         ]
         self.assertEqual(
@@ -294,26 +398,27 @@ class GitCLTest(unittest.TestCase):
                 Build('builder-b', 200): TryJobStatus('COMPLETED', 'FAILURE'),
             })
 
-    def test_latest_try_builds_ignores_swarming(self):
+    def test_latest_try_jobs_ignores_swarming_task(self):
         git_cl = GitCL(MockHost())
-        git_cl.fetch_raw_try_job_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda **_: [
             {
                 'builder_name': 'builder-b',
                 'status': 'COMPLETED',
                 'result': 'SUCCESS',
-                'url': 'http://build.chromium.org/p/master/builders/builder-b/builds/100',
+                'url': 'https://ci.chromium.org/buildbot/mymaster/builder-b/10',
             },
             {
                 'builder_name': 'builder-b',
                 'status': 'COMPLETED',
                 'result': 'SUCCESS',
-                'url': 'https://ci.chromium.org/swarming/task/1234abcd1234abcd?server=chromium-swarm.appspot.com',
+                'url': ('https://ci.chromium.org/swarming/task/'
+                        '1234abcd1234abcd?server=chromium-swarm.appspot.com'),
             }
         ]
         self.assertEqual(
             git_cl.latest_try_jobs(['builder-b']),
             {
-                Build('builder-b', 100): TryJobStatus('COMPLETED', 'SUCCESS'),
+                Build('builder-b', 10): TryJobStatus('COMPLETED', 'SUCCESS'),
             })
 
     def test_filter_latest(self):
@@ -334,19 +439,21 @@ class GitCLTest(unittest.TestCase):
 
     def test_try_job_results_with_task_id_in_url(self):
         git_cl = GitCL(MockHost())
-        git_cl.fetch_raw_try_job_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda **_: [
             {
                 'builder_name': 'builder-a',
                 'status': 'COMPLETED',
                 'result': 'FAILURE',
                 'failure_reason': 'BUILD_FAILURE',
-                'url': 'https://luci-milo.appspot.com/swarming/task/36a767f405d9ee10',
+                'url': ('https://ci.chromium.org/swarming/task/'
+                        '36a767f405d9ee10'),
             },
             {
                 'builder_name': 'builder-b',
                 'status': 'COMPLETED',
                 'result': 'SUCCESS',
-                'url': 'https://ci.chromium.org/swarming/task/38740befcd9c0010?server=chromium-swarm.appspot.com',
+                'url': ('https://ci.chromium.org/swarming/task/'
+                        '38740befcd9c0010?server=chromium-swarm.appspot.com'),
             },
         ]
         self.assertEqual(
@@ -358,7 +465,7 @@ class GitCLTest(unittest.TestCase):
 
     def test_try_job_results_with_unexpected_url_format(self):
         git_cl = GitCL(MockHost())
-        git_cl.fetch_raw_try_job_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda **_: [
             {
                 'builder_name': 'builder-a',
                 'status': 'COMPLETED',
@@ -371,5 +478,6 @@ class GitCLTest(unittest.TestCase):
         with self.assertRaisesRegexp(AssertionError, 'https://example.com/ did not match expected format'):
             git_cl.try_job_results()
         # We ignore builders that we explicitly don't care about;
-        # in this case we only care about other-builder, not builder-a.
+        # so if we only care about other-builder, not builder-a,
+        # then no exception is raised.
         self.assertEqual(git_cl.try_job_results(['other-builder']), {})

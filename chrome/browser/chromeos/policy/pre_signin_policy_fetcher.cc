@@ -11,15 +11,16 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/task_scheduler/task_traits.h"
 #include "base/time/time.h"
 #include "chromeos/chromeos_paths.h"
+#include "chromeos/cryptohome/cryptohome_util.h"
 #include "chromeos/cryptohome/homedir_methods.h"
 #include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "google_apis/gaia/gaia_auth_util.h"
@@ -63,12 +64,16 @@ PreSigninPolicyFetcher ::~PreSigninPolicyFetcher() {}
 void PreSigninPolicyFetcher::FetchPolicy(PolicyFetchResultCallback callback) {
   DCHECK(callback_.is_null());
   callback_ = std::move(callback);
-
+  cryptohome::AuthorizationRequest auth;
+  cryptohome::Key* key = auth.mutable_key();
+  if (!auth_key_.label.empty()) {
+    key->mutable_data()->set_label(auth_key_.label);
+  }
+  key->set_secret(auth_key_.secret);
   cryptohome::MountRequest mount;
   mount.set_hidden_mount(true);
-  cryptohome::HomedirMethods::GetInstance()->MountEx(
-      cryptohome::Identification(account_id_),
-      cryptohome::Authorization(auth_key_), mount,
+  chromeos::DBusThreadManager::Get()->GetCryptohomeClient()->MountEx(
+      cryptohome::Identification(account_id_), auth, mount,
       base::Bind(&PreSigninPolicyFetcher::OnMountTemporaryUserHome,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -84,10 +89,8 @@ bool PreSigninPolicyFetcher::ForceTimeoutForTesting() {
 }
 
 void PreSigninPolicyFetcher::OnMountTemporaryUserHome(
-    bool success,
-    cryptohome::MountError return_code,
-    const std::string& mount_hash) {
-  if (!success || return_code != cryptohome::MOUNT_ERROR_NONE) {
+    base::Optional<cryptohome::BaseReply> reply) {
+  if (BaseReplyToMountError(reply) != cryptohome::MOUNT_ERROR_NONE) {
     LOG(ERROR) << "Temporary user home mount failed.";
     NotifyCallback(PolicyFetchResult::ERROR, nullptr);
     return;
@@ -100,38 +103,38 @@ void PreSigninPolicyFetcher::OnMountTemporaryUserHome(
 }
 
 void PreSigninPolicyFetcher::OnCachedPolicyRetrieved(
-    const std::string& policy_blob,
-    RetrievePolicyResponseType retrieve_policy_response) {
+    RetrievePolicyResponseType retrieve_policy_response,
+    const std::string& policy_blob) {
   // We only need the cached policy key if there was policy and if the device is
   // not joined to Active Directory (policy blobs from Active Directory servers
   // are not signed).
   if (!policy_blob.empty() && !is_active_directory_managed_) {
     base::FilePath policy_key_dir;
     CHECK(PathService::Get(chromeos::DIR_USER_POLICY_KEYS, &policy_key_dir));
-    cached_policy_key_loader_ = base::MakeUnique<CachedPolicyKeyLoaderChromeOS>(
+    cached_policy_key_loader_ = std::make_unique<CachedPolicyKeyLoaderChromeOS>(
         cryptohome_client_, task_runner_, account_id_, policy_key_dir);
     cached_policy_key_loader_->EnsurePolicyKeyLoaded(base::Bind(
         &PreSigninPolicyFetcher::OnPolicyKeyLoaded,
-        weak_ptr_factory_.GetWeakPtr(), policy_blob, retrieve_policy_response));
+        weak_ptr_factory_.GetWeakPtr(), retrieve_policy_response, policy_blob));
   } else {
     // Skip and pretend we've loaded policy key. We won't need it anyway,
     // because there is no policy to validate or because it's not signed (Active
     // Directory).
-    OnPolicyKeyLoaded(policy_blob, retrieve_policy_response);
+    OnPolicyKeyLoaded(retrieve_policy_response, policy_blob);
   }
 }
 
 void PreSigninPolicyFetcher::OnPolicyKeyLoaded(
-    const std::string& policy_blob,
-    RetrievePolicyResponseType retrieve_policy_response) {
+    RetrievePolicyResponseType retrieve_policy_response,
+    const std::string& policy_blob) {
   cryptohome_client_->Unmount(base::BindOnce(
       &PreSigninPolicyFetcher::OnUnmountTemporaryUserHome,
-      weak_ptr_factory_.GetWeakPtr(), policy_blob, retrieve_policy_response));
+      weak_ptr_factory_.GetWeakPtr(), retrieve_policy_response, policy_blob));
 }
 
 void PreSigninPolicyFetcher::OnUnmountTemporaryUserHome(
-    const std::string& policy_blob,
     RetrievePolicyResponseType retrieve_policy_response,
+    const std::string& policy_blob,
     base::Optional<bool> unmount_success) {
   if (!unmount_success.has_value() || !unmount_success.value()) {
     // The temporary userhome mount could not be unmounted. Log an error and
@@ -153,7 +156,7 @@ void PreSigninPolicyFetcher::OnUnmountTemporaryUserHome(
   }
 
   // Parse policy.
-  auto policy = base::MakeUnique<em::PolicyFetchResponse>();
+  auto policy = std::make_unique<em::PolicyFetchResponse>();
   if (!policy->ParseFromString(policy_blob)) {
     NotifyCallback(PolicyFetchResult::ERROR, nullptr);
     return;
@@ -229,7 +232,7 @@ void PreSigninPolicyFetcher::OnPolicyFetched(CloudPolicyClient* client) {
   // Make a copy because there's currently no way to transfer ownership out of
   // CloudPolicyClient.
   auto fetched_policy_copy =
-      base::MakeUnique<em::PolicyFetchResponse>(*fetched_policy);
+      std::make_unique<em::PolicyFetchResponse>(*fetched_policy);
 
   // Validate fresh policy.
   UserCloudPolicyValidator::StartValidation(

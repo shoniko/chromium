@@ -11,16 +11,16 @@
 namespace content {
 
 void StartBlobInternalsURLLoader(
-    const ResourceRequest& request,
-    mojom::URLLoaderClientPtrInfo client_info,
+    const network::ResourceRequest& request,
+    network::mojom::URLLoaderClientPtrInfo client_info,
     ChromeBlobStorageContext* blob_storage_context) {
   scoped_refptr<net::HttpResponseHeaders> headers(
       new net::HttpResponseHeaders("HTTP/1.1 200 OK"));
-  ResourceResponseHead resource_response;
+  network::ResourceResponseHead resource_response;
   resource_response.headers = headers;
   resource_response.mime_type = "text/html";
 
-  mojom::URLLoaderClientPtr client;
+  network::mojom::URLLoaderClientPtr client;
   client.Bind(std::move(client_info));
   client->OnReceiveResponse(resource_response, base::nullopt, nullptr);
 
@@ -40,7 +40,7 @@ void StartBlobInternalsURLLoader(
   CHECK_EQ(result, MOJO_RESULT_OK);
 
   client->OnStartLoadingResponseBody(std::move(data_pipe.consumer_handle));
-  ResourceRequestCompletionStatus status(net::OK);
+  network::URLLoaderCompletionStatus status(net::OK);
   status.encoded_data_length = output.size();
   status.encoded_body_length = output.size();
   client->OnComplete(status);

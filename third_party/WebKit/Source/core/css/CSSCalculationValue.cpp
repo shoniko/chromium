@@ -685,6 +685,8 @@ class CSSCalcExpressionNodeParser {
   STACK_ALLOCATED();
 
  public:
+  CSSCalcExpressionNodeParser() {}
+
   CSSCalcExpressionNode* ParseCalc(CSSParserTokenRange tokens) {
     Value result;
     tokens.ConsumeWhitespace();
@@ -735,7 +737,10 @@ class CSSCalcExpressionNodeParser {
       CSSParserTokenRange inner_range = tokens.ConsumeBlock();
       tokens.ConsumeWhitespace();
       inner_range.ConsumeWhitespace();
-      return ParseValueExpression(inner_range, depth, result);
+      if (!ParseValueExpression(inner_range, depth, result))
+        return false;
+      result->value->SetIsNestedCalc();
+      return true;
     }
 
     return ParseValue(tokens, result);
@@ -764,6 +769,7 @@ class CSSCalcExpressionNodeParser {
       result->value = CSSCalcBinaryOperation::CreateSimplified(
           result->value, rhs.value,
           static_cast<CalcOperator>(operator_character));
+
       if (!result->value)
         return false;
     }
@@ -798,6 +804,7 @@ class CSSCalcExpressionNodeParser {
       result->value = CSSCalcBinaryOperation::CreateSimplified(
           result->value, rhs.value,
           static_cast<CalcOperator>(operator_character));
+
       if (!result->value)
         return false;
     }

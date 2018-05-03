@@ -12,7 +12,7 @@ namespace vr {
 
 GlTestEnvironment::GlTestEnvironment(const gfx::Size frame_buffer_size) {
   // Setup offscreen GL context.
-  gl::GLImageTestSupport::InitializeGL();
+  gl::GLImageTestSupport::InitializeGL(base::nullopt);
   surface_ = gl::init::CreateOffscreenGLSurface(gfx::Size());
   context_ = gl::init::CreateGLContext(nullptr, surface_.get(),
                                        gl::GLContextAttribs());
@@ -27,16 +27,6 @@ GlTestEnvironment::GlTestEnvironment(const gfx::Size frame_buffer_size) {
   frame_buffer_ = gl::GLTestHelper::SetupFramebuffer(
       frame_buffer_size.width(), frame_buffer_size.height());
   glBindFramebufferEXT(GL_FRAMEBUFFER, frame_buffer_);
-
-  // Create depth buffer.
-  glGenRenderbuffersEXT(1, &depth_render_buffer_);
-  glBindRenderbufferEXT(GL_RENDERBUFFER, depth_render_buffer_);
-  glRenderbufferStorageEXT(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16,
-                           frame_buffer_size.width(),
-                           frame_buffer_size.height());
-  glFramebufferRenderbufferEXT(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                               GL_RENDERBUFFER, depth_render_buffer_);
-  glBindRenderbufferEXT(GL_RENDERBUFFER, 0);
 }
 
 GlTestEnvironment::~GlTestEnvironment() {

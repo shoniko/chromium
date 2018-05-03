@@ -67,7 +67,10 @@ var FilesSafeMedia = Polymer({
       var data = {};
       data.type = this.type;
       data.src = this.src;
-      this.webview_.contentWindow.postMessage(data, FILES_APP_ORIGIN);
+      window.setTimeout(function() {
+        if (this.webview_ && this.webview_.contentWindow)
+          this.webview_.contentWindow.postMessage(data, FILES_APP_ORIGIN);
+      }.bind(this));
     }
   },
 

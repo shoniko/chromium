@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import os
 import sys
 
 
@@ -150,10 +151,7 @@ There are 68 section headers, starting at offset 0x5650:
 Section Headers:
   [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
   [ 0]                   NULL            00000000 000000 000000 00      0   0  0
-
-Section Headers:
-  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
-  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
+  [ 1] .rodata.str1.1    PROGBITS        00000000 000015 000005 01 AMS  0   0  1
 Key to Flags:
   W (write), A (alloc), X (execute), M (merge), S (strings)
   I (info), L (link order), G (group), T (TLS), E (exclude), x (unknown)
@@ -161,10 +159,6 @@ Key to Flags:
 
 File: obj/third_party/ffmpeg/libffmpeg_internal.a(fft_fixed.o)
 There are 68 section headers, starting at offset 0x5650:
-
-Section Headers:
-  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
-  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
 
 Section Headers:
   [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
@@ -183,10 +177,6 @@ There are 68 section headers, starting at offset 0x5650:
 Section Headers:
   [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
   [ 0]                   NULL            00000000 000000 000000 00      0   0  0
-
-Section Headers:
-  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
-  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
 Key to Flags:
   W (write), A (alloc), X (execute), M (merge), S (strings)
   I (info), L (link order), G (group), T (TLS), E (exclude), x (unknown)
@@ -195,10 +185,6 @@ Key to Flags:
 File: ../../third_party/gvr-android-sdk/libgvr_shim_static_arm.a(\
 libport_android_jni.a_jni_utils.o)
 There are 68 section headers, starting at offset 0x5650:
-
-Section Headers:
-  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
-  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
 
 Section Headers:
   [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
@@ -216,7 +202,7 @@ def _PrintHeader(path):
 
 
 def _PrintOutput(path):
-  payload = _OBJECT_OUTPUTS.get(path)
+  payload = _OBJECT_OUTPUTS.get(os.path.normpath(path))
   assert payload, 'No mock_nm.py entry for: ' + path
   sys.stdout.write(payload)
   sys.stdout.write('\n')

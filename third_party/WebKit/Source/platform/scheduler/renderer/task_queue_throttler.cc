@@ -11,12 +11,10 @@
 #include "base/optional.h"
 #include "platform/WebFrameScheduler.h"
 #include "platform/scheduler/base/real_time_domain.h"
-#include "platform/scheduler/child/scheduler_tqm_delegate.h"
 #include "platform/scheduler/renderer/budget_pool.h"
 #include "platform/scheduler/renderer/renderer_scheduler_impl.h"
 #include "platform/scheduler/renderer/throttled_time_domain.h"
 #include "platform/scheduler/renderer/web_frame_scheduler_impl.h"
-#include "platform/scheduler/util/tracing_helper.h"
 
 namespace blink {
 namespace scheduler {
@@ -66,9 +64,11 @@ base::Optional<T> Max(const base::Optional<T>& a, const base::Optional<T>& b) {
 }  // namespace
 
 TaskQueueThrottler::TaskQueueThrottler(
-    RendererSchedulerImpl* renderer_scheduler)
+    RendererSchedulerImpl* renderer_scheduler,
+    TraceableVariableController* tracing_controller)
     : control_task_queue_(renderer_scheduler->ControlTaskQueue()),
       renderer_scheduler_(renderer_scheduler),
+      tracing_controller_(tracing_controller),
       tick_clock_(renderer_scheduler->tick_clock()),
       time_domain_(new ThrottledTimeDomain()),
       allow_throttling_(true),
@@ -88,7 +88,7 @@ TaskQueueThrottler::~TaskQueueThrottler() {
   for (const TaskQueueMap::value_type& map_entry : queue_details_) {
     TaskQueue* task_queue = map_entry.first;
     if (IsThrottled(task_queue)) {
-      task_queue->SetTimeDomain(renderer_scheduler_->real_time_domain());
+      task_queue->SetTimeDomain(renderer_scheduler_->GetActiveTimeDomain());
       task_queue->RemoveFence();
     }
     if (map_entry.second.throttling_ref_count != 0)
@@ -120,7 +120,7 @@ void TaskQueueThrottler::IncreaseThrottleRefCount(TaskQueue* task_queue) {
   task_queue->SetTimeDomain(time_domain_.get());
   // This blocks any tasks from |task_queue| until PumpThrottledTasks() to
   // enforce task alignment.
-  task_queue->InsertFence(TaskQueue::InsertFencePosition::BEGINNING_OF_TIME);
+  task_queue->InsertFence(TaskQueue::InsertFencePosition::kBeginningOfTime);
 
   if (!task_queue->IsQueueEnabled())
     return;
@@ -152,7 +152,7 @@ void TaskQueueThrottler::DecreaseThrottleRefCount(TaskQueue* task_queue) {
   if (!allow_throttling_)
     return;
 
-  task_queue->SetTimeDomain(renderer_scheduler_->real_time_domain());
+  task_queue->SetTimeDomain(renderer_scheduler_->GetActiveTimeDomain());
   task_queue->RemoveFence();
 }
 
@@ -166,10 +166,15 @@ bool TaskQueueThrottler::IsThrottled(TaskQueue* task_queue) const {
   return find_it->second.throttling_ref_count > 0;
 }
 
-void TaskQueueThrottler::UnregisterTaskQueue(TaskQueue* task_queue) {
+void TaskQueueThrottler::ShutdownTaskQueue(TaskQueue* task_queue) {
   auto find_it = queue_details_.find(task_queue);
   if (find_it == queue_details_.end())
     return;
+
+  // Reset a time domain reference to a valid domain, otherwise it's possible
+  // to get a stale reference when deleting queue.
+  task_queue->SetTimeDomain(renderer_scheduler_->GetActiveTimeDomain());
+  task_queue->RemoveFence();
 
   std::unordered_set<BudgetPool*> budget_pools = find_it->second.budget_pools;
   for (BudgetPool* budget_pool : budget_pools) {
@@ -278,8 +283,11 @@ void TaskQueueThrottler::MaybeSchedulePumpThrottledTasks(
 
 CPUTimeBudgetPool* TaskQueueThrottler::CreateCPUTimeBudgetPool(
     const char* name) {
-  CPUTimeBudgetPool* time_budget_pool =
-      new CPUTimeBudgetPool(name, this, tick_clock_->NowTicks());
+  CPUTimeBudgetPool* time_budget_pool = new CPUTimeBudgetPool(
+      name,
+      this,
+      tracing_controller_,
+      tick_clock_->NowTicks());
   budget_pools_[time_budget_pool] = base::WrapUnique(time_budget_pool);
   return time_budget_pool;
 }
@@ -331,7 +339,7 @@ void TaskQueueThrottler::UpdateQueueThrottlingStateInternal(base::TimeTicks now,
     if (!unblock_until || unblock_until.value() > now) {
       queue->InsertFenceAt(unblock_until.value());
     } else if (unblock_until.value() == now) {
-      queue->InsertFence(TaskQueue::InsertFencePosition::NOW);
+      queue->InsertFence(TaskQueue::InsertFencePosition::kNow);
     } else {
       DCHECK_GE(unblock_until.value(), now);
     }
@@ -365,7 +373,7 @@ void TaskQueueThrottler::UpdateQueueThrottlingStateInternal(base::TimeTicks now,
 
   switch (block_type.value()) {
     case QueueBlockType::kAllTasks:
-      queue->InsertFence(TaskQueue::InsertFencePosition::BEGINNING_OF_TIME);
+      queue->InsertFence(TaskQueue::InsertFencePosition::kBeginningOfTime);
 
       {
         // Braces limit the scope for a declared variable. Does not compile
@@ -381,7 +389,7 @@ void TaskQueueThrottler::UpdateQueueThrottlingStateInternal(base::TimeTicks now,
       if (!queue->HasActiveFence()) {
         // Insert a new non-fully blocking fence only when there is no fence
         // already in order avoid undesired unblocking of old tasks.
-        queue->InsertFence(TaskQueue::InsertFencePosition::NOW);
+        queue->InsertFence(TaskQueue::InsertFencePosition::kNow);
       }
       break;
   }
@@ -535,7 +543,6 @@ void TaskQueueThrottler::DisableThrottling() {
     TaskQueue* queue = map_entry.first;
 
     queue->SetTimeDomain(renderer_scheduler_->GetActiveTimeDomain());
-
     queue->RemoveFence();
   }
 
@@ -561,7 +568,7 @@ void TaskQueueThrottler::EnableThrottling() {
 
     // Throttling is enabled and task queue should be blocked immediately
     // to enforce task alignment.
-    queue->InsertFence(TaskQueue::InsertFencePosition::BEGINNING_OF_TIME);
+    queue->InsertFence(TaskQueue::InsertFencePosition::kBeginningOfTime);
     queue->SetTimeDomain(time_domain_.get());
     UpdateQueueThrottlingState(lazy_now.Now(), queue);
   }

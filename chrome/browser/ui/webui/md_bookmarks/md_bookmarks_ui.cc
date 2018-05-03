@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/md_bookmarks/md_bookmarks_ui.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -68,6 +69,8 @@ content::WebUIDataSource* CreateMdBookmarksUIHTMLSource(Profile* profile) {
   AddLocalizedString(source, "menuDelete", IDS_DELETE);
   AddLocalizedString(source, "menuEdit", IDS_EDIT);
   AddLocalizedString(source, "menuExport", IDS_MD_BOOKMARK_MANAGER_MENU_EXPORT);
+  AddLocalizedString(source, "menuHelpCenter",
+                     IDS_MD_BOOKMARK_MANAGER_MENU_HELP_CENTER);
   AddLocalizedString(source, "menuImport", IDS_MD_BOOKMARK_MANAGER_MENU_IMPORT);
   AddLocalizedString(source, "menuOpenAllNewTab",
                      IDS_MD_BOOKMARK_MANAGER_MENU_OPEN_ALL);
@@ -89,8 +92,7 @@ content::WebUIDataSource* CreateMdBookmarksUIHTMLSource(Profile* profile) {
                      IDS_MD_BOOKMARK_MANAGER_MORE_ACTIONS);
   AddLocalizedString(source, "moreActionsButtonAxLabel",
                      IDS_MD_BOOKMARK_MANAGER_MORE_ACTIONS_AX_LABEL);
-  AddLocalizedString(source, "noSearchResults",
-                     IDS_MD_BOOKMARK_MANAGER_NO_SEARCH_RESULTS);
+  AddLocalizedString(source, "noSearchResults", IDS_SEARCH_NO_RESULTS);
   AddLocalizedString(source, "openDialogBody",
                      IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL);
   AddLocalizedString(source, "openDialogConfirm",
@@ -109,8 +111,7 @@ content::WebUIDataSource* CreateMdBookmarksUIHTMLSource(Profile* profile) {
                      IDS_MD_BOOKMARK_MANAGER_SIDEBAR_NODE_COLLAPSE_AX_LABEL);
   AddLocalizedString(source, "sidebarNodeExpandAxLabel",
                      IDS_MD_BOOKMARK_MANAGER_SIDEBAR_NODE_EXPAND_AX_LABEL);
-  AddLocalizedString(source, "searchResults",
-                     IDS_MD_BOOKMARK_MANAGER_SEARCH_RESULTS);
+  AddLocalizedString(source, "searchResults", IDS_SEARCH_RESULTS);
   AddLocalizedString(source, "saveEdit", IDS_SAVE);
   AddLocalizedString(source, "title", IDS_MD_BOOKMARK_MANAGER_TITLE);
   AddLocalizedString(source, "toastFolderSorted",
@@ -209,7 +210,7 @@ MdBookmarksUI::MdBookmarksUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   content::WebUIDataSource::Add(profile,
                                 CreateMdBookmarksUIHTMLSource(profile));
 
-  auto plural_string_handler = base::MakeUnique<PluralStringHandler>();
+  auto plural_string_handler = std::make_unique<PluralStringHandler>();
   plural_string_handler->AddLocalizedString(
       "listChanged", IDS_MD_BOOKMARK_MANAGER_FOLDER_LIST_CHANGED);
   plural_string_handler->AddLocalizedString(
@@ -218,8 +219,8 @@ MdBookmarksUI::MdBookmarksUI(content::WebUI* web_ui) : WebUIController(web_ui) {
       "toastItemsCopied", IDS_MD_BOOKMARK_MANAGER_TOAST_ITEMS_COPIED);
   web_ui->AddMessageHandler(std::move(plural_string_handler));
 
-  web_ui->AddMessageHandler(base::MakeUnique<BookmarksMessageHandler>());
-  web_ui->AddMessageHandler(base::MakeUnique<MetricsHandler>());
+  web_ui->AddMessageHandler(std::make_unique<BookmarksMessageHandler>());
+  web_ui->AddMessageHandler(std::make_unique<MetricsHandler>());
 }
 
 // static

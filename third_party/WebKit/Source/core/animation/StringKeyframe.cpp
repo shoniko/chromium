@@ -4,7 +4,9 @@
 
 #include "core/animation/StringKeyframe.h"
 
+#include "bindings/core/v8/V8ObjectBuilder.h"
 #include "core/StylePropertyShorthand.h"
+#include "core/animation/AnimationInputHelpers.h"
 #include "core/animation/css/CSSAnimations.h"
 #include "core/css/CSSCustomPropertyDeclaration.h"
 #include "core/css/resolver/StyleResolver.h"
@@ -19,46 +21,51 @@ StringKeyframe::StringKeyframe(const StringKeyframe& copy_from)
           copy_from.presentation_attribute_map_->MutableCopy()),
       svg_attribute_map_(copy_from.svg_attribute_map_) {}
 
-MutableStylePropertySet::SetResult StringKeyframe::SetCSSPropertyValue(
+MutableCSSPropertyValueSet::SetResult StringKeyframe::SetCSSPropertyValue(
     const AtomicString& property_name,
     const PropertyRegistry* registry,
     const String& value,
+    SecureContextMode secure_context_mode,
     StyleSheetContents* style_sheet_contents) {
   bool is_animation_tainted = true;
-  return css_property_map_->SetProperty(property_name, registry, value, false,
-                                        style_sheet_contents,
-                                        is_animation_tainted);
+  return css_property_map_->SetProperty(
+      property_name, registry, value, false, secure_context_mode,
+      style_sheet_contents, is_animation_tainted);
 }
 
-MutableStylePropertySet::SetResult StringKeyframe::SetCSSPropertyValue(
+MutableCSSPropertyValueSet::SetResult StringKeyframe::SetCSSPropertyValue(
     CSSPropertyID property,
     const String& value,
+    SecureContextMode secure_context_mode,
     StyleSheetContents* style_sheet_contents) {
   DCHECK_NE(property, CSSPropertyInvalid);
-  if (CSSAnimations::IsAnimationAffectingProperty(property)) {
+  if (CSSAnimations::IsAnimationAffectingProperty(CSSProperty::Get(property))) {
     bool did_parse = true;
     bool did_change = false;
-    return MutableStylePropertySet::SetResult{did_parse, did_change};
+    return MutableCSSPropertyValueSet::SetResult{did_parse, did_change};
   }
-  return css_property_map_->SetProperty(property, value, false,
-                                        style_sheet_contents);
+  return css_property_map_->SetProperty(
+      property, value, false, secure_context_mode, style_sheet_contents);
 }
 
-void StringKeyframe::SetCSSPropertyValue(CSSPropertyID property,
+void StringKeyframe::SetCSSPropertyValue(const CSSProperty& property,
                                          const CSSValue& value) {
-  DCHECK_NE(property, CSSPropertyInvalid);
+  DCHECK_NE(property.PropertyID(), CSSPropertyInvalid);
   DCHECK(!CSSAnimations::IsAnimationAffectingProperty(property));
-  css_property_map_->SetProperty(property, value, false);
+  css_property_map_->SetProperty(property.PropertyID(), value, false);
 }
 
 void StringKeyframe::SetPresentationAttributeValue(
-    CSSPropertyID property,
+    const CSSProperty& property,
     const String& value,
+    SecureContextMode secure_context_mode,
     StyleSheetContents* style_sheet_contents) {
-  DCHECK_NE(property, CSSPropertyInvalid);
-  if (!CSSAnimations::IsAnimationAffectingProperty(property))
-    presentation_attribute_map_->SetProperty(property, value, false,
+  DCHECK_NE(property.PropertyID(), CSSPropertyInvalid);
+  if (!CSSAnimations::IsAnimationAffectingProperty(property)) {
+    presentation_attribute_map_->SetProperty(property.PropertyID(), value,
+                                             false, secure_context_mode,
                                              style_sheet_contents);
+  }
 }
 
 void StringKeyframe::SetSVGAttributeValue(const QualifiedName& attribute_name,
@@ -71,22 +78,25 @@ PropertyHandleSet StringKeyframe::Properties() const {
   // worry about caching this result.
   PropertyHandleSet properties;
   for (unsigned i = 0; i < css_property_map_->PropertyCount(); ++i) {
-    StylePropertySet::PropertyReference property_reference =
+    CSSPropertyValueSet::PropertyReference property_reference =
         css_property_map_->PropertyAt(i);
-    DCHECK(!isShorthandProperty(property_reference.Id()))
+    const CSSProperty& property = property_reference.Property();
+    DCHECK(!property.IsShorthand())
         << "Web Animations: Encountered unexpanded shorthand CSS property ("
-        << property_reference.Id() << ").";
-    if (property_reference.Id() == CSSPropertyVariable)
+        << property.PropertyID() << ").";
+    if (property.IDEquals(CSSPropertyVariable)) {
       properties.insert(PropertyHandle(
           ToCSSCustomPropertyDeclaration(property_reference.Value())
               .GetName()));
-    else
-      properties.insert(PropertyHandle(property_reference.Id(), false));
+    } else {
+      properties.insert(PropertyHandle(property, false));
+    }
   }
 
-  for (unsigned i = 0; i < presentation_attribute_map_->PropertyCount(); ++i)
-    properties.insert(
-        PropertyHandle(presentation_attribute_map_->PropertyAt(i).Id(), true));
+  for (unsigned i = 0; i < presentation_attribute_map_->PropertyCount(); ++i) {
+    properties.insert(PropertyHandle(
+        presentation_attribute_map_->PropertyAt(i).Property(), true));
+  }
 
   for (auto* const key : svg_attribute_map_.Keys())
     properties.insert(PropertyHandle(*key));
@@ -94,31 +104,57 @@ PropertyHandleSet StringKeyframe::Properties() const {
   return properties;
 }
 
+void StringKeyframe::AddKeyframePropertiesToV8Object(
+    V8ObjectBuilder& object_builder) const {
+  Keyframe::AddKeyframePropertiesToV8Object(object_builder);
+  for (const PropertyHandle& property : Properties()) {
+    String property_name =
+        AnimationInputHelpers::PropertyHandleToKeyframeAttribute(property);
+    String value;
+    if (property.IsCSSProperty()) {
+      value = CssPropertyValue(property).CssText();
+    } else if (property.IsPresentationAttribute()) {
+      const auto& attribute = property.PresentationAttribute();
+      value = PresentationAttributeValue(attribute).CssText();
+    } else {
+      DCHECK(property.IsSVGAttribute());
+      value = SvgPropertyValue(property.SvgAttribute());
+    }
+
+    object_builder.Add(property_name, value);
+  }
+}
+
 scoped_refptr<Keyframe> StringKeyframe::Clone() const {
-  return WTF::AdoptRef(new StringKeyframe(*this));
+  return base::AdoptRef(new StringKeyframe(*this));
 }
 
 scoped_refptr<Keyframe::PropertySpecificKeyframe>
 StringKeyframe::CreatePropertySpecificKeyframe(
-    const PropertyHandle& property) const {
-  if (property.IsCSSProperty())
+    const PropertyHandle& property,
+    EffectModel::CompositeOperation effect_composite,
+    double offset) const {
+  EffectModel::CompositeOperation composite =
+      composite_.value_or(effect_composite);
+  if (property.IsCSSProperty()) {
     return CSSPropertySpecificKeyframe::Create(
-        Offset(), &Easing(), &CssPropertyValue(property), Composite());
+        offset, &Easing(), &CssPropertyValue(property), composite);
+  }
 
-  if (property.IsPresentationAttribute())
+  if (property.IsPresentationAttribute()) {
     return CSSPropertySpecificKeyframe::Create(
-        Offset(), &Easing(),
+        offset, &Easing(),
         &PresentationAttributeValue(property.PresentationAttribute()),
-        Composite());
+        composite);
+  }
 
   DCHECK(property.IsSVGAttribute());
   return SVGPropertySpecificKeyframe::Create(
-      Offset(), &Easing(), SvgPropertyValue(property.SvgAttribute()),
-      Composite());
+      offset, &Easing(), SvgPropertyValue(property.SvgAttribute()), composite);
 }
 
 bool StringKeyframe::CSSPropertySpecificKeyframe::PopulateAnimatableValue(
-    CSSPropertyID property,
+    const CSSProperty& property,
     Element& element,
     const ComputedStyle& base_style,
     const ComputedStyle* parent_style) const {

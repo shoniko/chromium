@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">תקופה</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{חודש אחד}two{חודשיים}many{# חודשים}other{# חודשים}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>
+<translation id="1812519734428420144">דירוג כוכבים: <ph name="RATING_SCORE" /></translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{שעה אחת ו }two{שעתיים ו }many{# שעות ו }other{# שעות ו }}</translation>
 <translation id="1842960171412779397">בחר</translation>
 <translation id="1860796786778352021">סגירת הודעה</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">פתח את התיקייה</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{לפני שנה אחת}two{לפני שנתיים}many{לפני # שנים}other{לפני # שנים}}</translation>
 <translation id="2931838996092594335">לחץ</translation>
-<translation id="2983818520079887040">הגדרות...</translation>
 <translation id="3036649622769666520">פתח קבצים</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3087734570205094154">תחתית</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">כל האפליקציות</translation>
 <translation id="4320177379694898372">אין חיבור לאינטרנט</translation>
 <translation id="4588090240171750605">גלול ימינה</translation>
+<translation id="4724120544754982507">מרכז הודעות, <ph name="UNREAD_NOTIFICATION_COUNT" /> הודעות שלא נקראו</translation>
 <translation id="4730374152663651037">בשימוש לעתים קרובות</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{נותר חודש אחד}two{נותרו חודשיים}many{נותרו # חודשים}other{נותרו # חודשים}}</translation>
 <translation id="4820616160060340806">פקודה+<ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">מזער</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{שעה אחת}two{שעתיים}many{# שעות}other{# שעות}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">כל האפליקציות</translation>
 <translation id="6012623610530968780">דף <ph name="SELECTED_PAGE" /> מתוך <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">נקה את הטקסט בתיבת החיפוש</translation>
 <translation id="6040143037577758943">סגור</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">פסיק</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{לפני שנ‘ אחת}two{לפני # שנ‘}many{לפני # שנ‘}other{לפני # שנ‘}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{לפני שנייה אחת}two{לפני # שניות}many{לפני # שניות}other{לפני # שניות}}</translation>
+<translation id="654149438358937226">חסימת כל ההודעות</translation>
 <translation id="6567071839949112727">לחיצה על אב</translation>
 <translation id="6612467943526193239">‏הקש על Esc כדי לצאת מהכיול.</translation>
 <translation id="6620110761915583480">שמור קובץ</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">ביטול</translation>
 <translation id="7781829728241885113">אתמול</translation>
 <translation id="7814458197256864873">&amp;העתק</translation>
+<translation id="7879499977785298635">ללא חסימה</translation>
 <translation id="7907591526440419938">פתח קובץ</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{לפני שעה אחת}two{לפני שעתיים}many{לפני # שעות}other{לפני # שעות}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{נותרה שנ‘ אחת}two{נותרו # שנ‘}many{נותרו # שנ‘}other{נותרו # שנ‘}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{שנה אחת}two{שנתיים}many{# שנים}other{# שנים}}</translation>
 <translation id="8371695176452482769">דבר עכשיו</translation>
 <translation id="838869780401515933">סמן</translation>
+<translation id="8393700583063109961">שלח הודעה</translation>
 <translation id="8394908167088220973">הפעלה/השהיה של המדיה</translation>
 <translation id="8400147561352026160">Shift+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{שנה}two{# שנ}many{# שנ}other{# שנ}}</translation>
 <translation id="8602707065186045623">קובץ <ph name="SAVEAS_EXTENSION_TYPE" />  (<ph name="SAVEAS_EXTENSION_NAME" />.)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s‎</translation>
 <translation id="8725488761726303204">ועוד <ph name="NUMBER" /></translation>
+<translation id="8730621377337864115">בוצע</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{שעה}two{# שע}many{# שע}other{# שע}}</translation>
 <translation id="8806053966018712535">תיקייה <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">רשום הערה לתמונה</translation>

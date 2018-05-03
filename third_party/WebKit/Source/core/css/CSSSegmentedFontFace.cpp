@@ -41,7 +41,7 @@ CSSSegmentedFontFace::CSSSegmentedFontFace(
       first_non_css_connected_face_(font_faces_.end()),
       approximate_character_count_(0) {}
 
-CSSSegmentedFontFace::~CSSSegmentedFontFace() {}
+CSSSegmentedFontFace::~CSSSegmentedFontFace() = default;
 
 void CSSSegmentedFontFace::PruneTable() {
   // Make sure the glyph page tree prunes out all uses of this custom font.
@@ -130,10 +130,10 @@ scoped_refptr<FontData> CSSSegmentedFontFace::GetFontData(
             (*it)->CssFontFace()->GetFontData(requested_font_description)) {
       DCHECK(!face_font_data->IsSegmented());
       if (face_font_data->IsCustomFont()) {
-        font_data->AppendFace(WTF::AdoptRef(new FontDataForRangeSet(
+        font_data->AppendFace(base::AdoptRef(new FontDataForRangeSet(
             std::move(face_font_data), (*it)->CssFontFace()->Ranges())));
       } else {
-        font_data->AppendFace(WTF::AdoptRef(new FontDataForRangeSetFromCache(
+        font_data->AppendFace(base::AdoptRef(new FontDataForRangeSetFromCache(
             std::move(face_font_data), (*it)->CssFontFace()->Ranges())));
       }
     }

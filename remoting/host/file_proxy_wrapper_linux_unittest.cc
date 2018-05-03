@@ -4,12 +4,14 @@
 
 #include "remoting/host/file_proxy_wrapper.h"
 
+#include <memory>
+#include <queue>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/containers/queue.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
 #include "net/base/io_buffer.h"
@@ -26,7 +28,7 @@ const std::string& kTestDataThree = "this is the third test string";
 
 std::unique_ptr<remoting::CompoundBuffer> ToBuffer(const std::string& data) {
   std::unique_ptr<remoting::CompoundBuffer> buffer =
-      base::MakeUnique<remoting::CompoundBuffer>();
+      std::make_unique<remoting::CompoundBuffer>();
   buffer->Append(new net::WrappedIOBuffer(data.data()), data.size());
   return buffer;
 }

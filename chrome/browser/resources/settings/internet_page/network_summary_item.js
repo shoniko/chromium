@@ -68,8 +68,8 @@ Polymer({
    * @private
    */
   getNetworkStateText_: function(activeNetworkState, deviceState) {
-    var state = activeNetworkState.ConnectionState;
-    var name = CrOnc.getNetworkName(activeNetworkState);
+    const state = activeNetworkState.ConnectionState;
+    const name = CrOnc.getNetworkName(activeNetworkState);
     if (state)
       return this.getConnectionStateText_(state, name);
     // No network state, use device state.
@@ -130,20 +130,27 @@ Polymer({
   },
 
   /**
-   * Show the <network-siminfo> element if this is a disabled and locked
-   * cellular device.
    * @param {!CrOnc.DeviceStateProperties|undefined} deviceState
    * @return {boolean}
    * @private
    */
   showSimInfo_: function(deviceState) {
-    if (!deviceState || deviceState.Type != CrOnc.Type.CELLULAR ||
-        this.deviceIsEnabled_(deviceState)) {
+    if (!deviceState || deviceState.Type != CrOnc.Type.CELLULAR)
       return false;
-    }
+    return this.simLockedOrAbsent_(deviceState);
+  },
+
+  /**
+   * @param {!CrOnc.DeviceStateProperties} deviceState
+   * @return {boolean}
+   * @private
+   */
+  simLockedOrAbsent_: function(deviceState) {
+    if (this.deviceIsEnabled_(deviceState))
+      return false;
     if (deviceState.SIMPresent === false)
       return true;
-    var simLockType =
+    const simLockType =
         deviceState.SIMLockStatus ? deviceState.SIMLockStatus.LockType : '';
     return simLockType == CrOnc.LockType.PIN ||
         simLockType == CrOnc.LockType.PUK;
@@ -184,10 +191,23 @@ Polymer({
    * @private
    */
   enableToggleIsVisible_: function(deviceState) {
-    return !!deviceState && deviceState.Type != CrOnc.Type.ETHERNET &&
-        deviceState.Type != CrOnc.Type.VPN &&
-        (deviceState.Type == CrOnc.Type.TETHER ||
-         deviceState.State != CrOnc.DeviceState.UNINITIALIZED);
+    if (!deviceState)
+      return false;
+    switch (deviceState.Type) {
+      case CrOnc.Type.ETHERNET:
+      case CrOnc.Type.VPN:
+        return false;
+      case CrOnc.Type.TETHER:
+        return true;
+      case CrOnc.Type.WI_FI:
+      case CrOnc.Type.WI_MAX:
+        return deviceState.State != CrOnc.DeviceState.UNINITIALIZED;
+      case CrOnc.Type.CELLULAR:
+        return deviceState.State != CrOnc.DeviceState.UNINITIALIZED &&
+            !this.simLockedOrAbsent_(deviceState);
+    }
+    assertNotReached();
+    return false;
   },
 
   /**
@@ -244,14 +264,14 @@ Polymer({
   shouldShowSubpage_: function(deviceState, networkStateList) {
     if (!deviceState)
       return false;
-    var type = deviceState.Type;
+    const type = deviceState.Type;
     if (type == CrOnc.Type.TETHER ||
         (type == CrOnc.Type.CELLULAR && this.tetherDeviceState)) {
       // The "Mobile data" subpage should always be shown if Tether networks are
       // available, even if there are currently no associated networks.
       return true;
     }
-    var minlen = (type == CrOnc.Type.WI_FI || type == CrOnc.Type.VPN) ? 1 : 2;
+    const minlen = (type == CrOnc.Type.WI_FI || type == CrOnc.Type.VPN) ? 1 : 2;
     return networkStateList.length >= minlen;
   },
 
@@ -302,8 +322,8 @@ Polymer({
    * @private
    */
   onDeviceEnabledTap_: function(event) {
-    var deviceIsEnabled = this.deviceIsEnabled_(this.deviceState);
-    var type = this.deviceState ? this.deviceState.Type : '';
+    const deviceIsEnabled = this.deviceIsEnabled_(this.deviceState);
+    const type = this.deviceState ? this.deviceState.Type : '';
     this.fire(
         'device-enabled-toggled', {enabled: !deviceIsEnabled, type: type});
     // Make sure this does not propagate to onDetailsTap_.

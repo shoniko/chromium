@@ -20,7 +20,6 @@
 #include "cc/trees/layer_tree_impl.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
-#include "components/viz/common/quads/texture_mailbox.h"
 #include "components/viz/service/display/software_output_device.h"
 #include "components/viz/test/paths.h"
 #include "components/viz/test/test_layer_tree_frame_sink.h"
@@ -36,14 +35,14 @@ LayerTreePixelTest::LayerTreePixelTest()
       test_type_(PIXEL_TEST_GL),
       pending_texture_mailbox_callbacks_(0) {}
 
-LayerTreePixelTest::~LayerTreePixelTest() {}
+LayerTreePixelTest::~LayerTreePixelTest() = default;
 
 std::unique_ptr<viz::TestLayerTreeFrameSink>
 LayerTreePixelTest::CreateLayerTreeFrameSink(
     const viz::RendererSettings& renderer_settings,
     double refresh_rate,
     scoped_refptr<viz::ContextProvider>,
-    scoped_refptr<viz::ContextProvider>) {
+    scoped_refptr<viz::RasterContextProvider>) {
   scoped_refptr<TestInProcessContextProvider> compositor_context_provider;
   scoped_refptr<TestInProcessContextProvider> worker_context_provider;
   if (test_type_ == PIXEL_TEST_GL) {
@@ -55,12 +54,16 @@ LayerTreePixelTest::CreateLayerTreeFrameSink(
   bool synchronous_composite =
       !HasImplThread() &&
       !layer_tree_host()->GetSettings().single_thread_proxy_scheduler;
+  viz::RendererSettings test_settings = renderer_settings;
+  // Keep texture sizes exactly matching the bounds of the RenderPass to avoid
+  // floating point badness in texcoords.
+  test_settings.dont_round_texture_sizes_for_pixel_tests = true;
   auto delegating_output_surface =
       std::make_unique<viz::TestLayerTreeFrameSink>(
-          compositor_context_provider, std::move(worker_context_provider),
-          shared_bitmap_manager(), gpu_memory_buffer_manager(),
-          renderer_settings, ImplThreadTaskRunner(), synchronous_composite,
-          disable_display_vsync, refresh_rate);
+          compositor_context_provider, worker_context_provider,
+          shared_bitmap_manager(), gpu_memory_buffer_manager(), test_settings,
+          ImplThreadTaskRunner(), synchronous_composite, disable_display_vsync,
+          refresh_rate);
   delegating_output_surface->SetEnlargePassTextureAmount(
       enlarge_texture_amount_);
   return delegating_output_surface;
@@ -136,10 +139,10 @@ scoped_refptr<SolidColorLayer> LayerTreePixelTest::CreateSolidColorLayer(
 }
 
 void LayerTreePixelTest::EndTest() {
-  // Drop TextureMailboxes on the main thread so that they can be cleaned up and
+  // Drop textures on the main thread so that they can be cleaned up and
   // the pending callbacks will fire.
   for (size_t i = 0; i < texture_layers_.size(); ++i) {
-    texture_layers_[i]->SetTextureMailbox(viz::TextureMailbox(), nullptr);
+    texture_layers_[i]->ClearTexture();
   }
 
   TryEndTest();
@@ -192,7 +195,7 @@ void LayerTreePixelTest::RunPixelTest(
     base::FilePath file_name) {
   test_type_ = test_type;
   content_root_ = content_root;
-  readback_target_ = NULL;
+  readback_target_ = nullptr;
   ref_file_ = file_name;
   RunTest(CompositorMode::THREADED);
 }
@@ -203,7 +206,7 @@ void LayerTreePixelTest::RunSingleThreadedPixelTest(
     base::FilePath file_name) {
   test_type_ = test_type;
   content_root_ = content_root;
-  readback_target_ = NULL;
+  readback_target_ = nullptr;
   ref_file_ = file_name;
   RunTest(CompositorMode::SINGLE_THREADED);
 }
@@ -228,28 +231,19 @@ void LayerTreePixelTest::SetupTree() {
   LayerTreeTest::SetupTree();
 }
 
-SkBitmap LayerTreePixelTest::CopyTextureMailboxToBitmap(
+SkBitmap LayerTreePixelTest::CopyMailboxToBitmap(
     const gfx::Size& size,
-    const viz::TextureMailbox& texture_mailbox) {
-  DCHECK(texture_mailbox.IsTexture());
-
+    const gpu::Mailbox& mailbox,
+    const gpu::SyncToken& sync_token) {
   SkBitmap bitmap;
-  if (!texture_mailbox.IsTexture())
-    return bitmap;
-
   std::unique_ptr<gpu::GLInProcessContext> context =
       CreateTestInProcessContext();
   GLES2Interface* gl = context->GetImplementation();
 
-  if (texture_mailbox.sync_token().HasData())
-    gl->WaitSyncTokenCHROMIUM(texture_mailbox.sync_token().GetConstData());
+  if (sync_token.HasData())
+    gl->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
 
-  gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  GLuint texture_id = gl->CreateAndConsumeTextureCHROMIUM(
-      texture_mailbox.target(), texture_mailbox.name());
+  GLuint texture_id = gl->CreateAndConsumeTextureCHROMIUM(mailbox.name);
 
   GLuint fbo = 0;
   gl->GenFramebuffers(1, &fbo);

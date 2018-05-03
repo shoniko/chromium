@@ -13,6 +13,10 @@
 #include "chrome/browser/ui/webui/print_preview/printer_handler.h"
 #include "printing/backend/print_backend.h"
 
+namespace content {
+class WebContents;
+}
+
 namespace printing {
 
 struct PrinterBasicInfo;
@@ -42,7 +46,7 @@ std::unique_ptr<base::DictionaryValue> GetSettingsOnBlockingPool(
 // converted list as the argument if it is not empty, and runs |done_callback|.
 void ConvertPrinterListForCallback(
     const PrinterHandler::AddedPrintersCallback& callback,
-    const PrinterHandler::GetPrintersDoneCallback& done_callback,
+    PrinterHandler::GetPrintersDoneCallback done_callback,
     const printing::PrinterList& printer_list);
 
 // Returns a unique_ptr to a sanitized version of |cdd| to prevent possible JS
@@ -50,6 +54,13 @@ void ConvertPrinterListForCallback(
 // and remove any lists/options that are empty or only contain null values.
 std::unique_ptr<base::DictionaryValue> ValidateCddForPrintPreview(
     const base::DictionaryValue& cdd);
+
+// Starts a local print of |print_data| with print settings dictionary
+// |ticket_json|. Runs |callback| on failure or success.
+void StartLocalPrint(const std::string& ticket_json,
+                     const scoped_refptr<base::RefCountedBytes>& print_data,
+                     content::WebContents* preview_web_contents,
+                     PrinterHandler::PrintCallback callback);
 }  // namespace printing
 
 #endif  // CHROME_BROWSER_UI_WEBUI_PRINT_PREVIEW_PRINTER_CAPABILITIES_H_

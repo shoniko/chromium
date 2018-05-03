@@ -4,6 +4,8 @@
 
 #include "chrome/browser/safe_browsing/chrome_password_protection_service.h"
 
+#include <memory>
+
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
@@ -159,8 +161,10 @@ ChromePasswordProtectionService::ChromePasswordProtectionService(
   pref_change_registrar_->Init(profile_->GetPrefs());
   pref_change_registrar_->Add(
       password_manager::prefs::kSyncPasswordHash,
-      base::Bind(&ChromePasswordProtectionService::OnGaiaPasswordChanged,
+      base::Bind(&ChromePasswordProtectionService::CheckGaiaPasswordChange,
                  base::Unretained(this)));
+  gaia_password_hash_ = profile_->GetPrefs()->GetString(
+      password_manager::prefs::kSyncPasswordHash);
 }
 
 ChromePasswordProtectionService::~ChromePasswordProtectionService() {
@@ -232,13 +236,20 @@ void ChromePasswordProtectionService::ShowModalWarning(
   if (IsModalWarningShowingInWebContents(web_contents))
     return;
 
+  // Exit fullscreen if this |web_contents| is showing in fullscreen mode.
+  if (web_contents->IsFullscreenForCurrentTab())
+    web_contents->ExitFullscreen(true);
+
   UpdateSecurityState(SB_THREAT_TYPE_PASSWORD_REUSE, web_contents);
   ShowPasswordReuseModalWarningDialog(
       web_contents, this,
       base::BindOnce(&ChromePasswordProtectionService::OnUserAction,
                      base::Unretained(this), web_contents,
                      PasswordProtectionService::MODAL_DIALOG));
-  OnWarningShown(web_contents, PasswordProtectionService::MODAL_DIALOG);
+  RecordWarningAction(PasswordProtectionService::MODAL_DIALOG,
+                      PasswordProtectionService::SHOWN);
+
+  // Updates prefs.
   GURL trigger_url = web_contents->GetLastCommittedURL();
   DCHECK(trigger_url.is_valid());
   DictionaryPrefUpdate update(profile_->GetPrefs(),
@@ -341,20 +352,13 @@ bool ChromePasswordProtectionService::IsIncognito() {
 }
 
 bool ChromePasswordProtectionService::IsPingingEnabled(
-    const base::Feature& feature,
+    LoginReputationClientRequest::TriggerType trigger_type,
     RequestOutcome* reason) {
   if (!IsSafeBrowsingEnabled())
     return false;
 
-  DCHECK(feature.name == kProtectedPasswordEntryPinging.name ||
-         feature.name == kPasswordFieldOnFocusPinging.name);
-  if (!base::FeatureList::IsEnabled(feature)) {
-    *reason = DISABLED_DUE_TO_FEATURE_DISABLED;
-    return false;
-  }
-
   // Protected password entry pinging is enabled for all users.
-  if (feature.name == kProtectedPasswordEntryPinging.name)
+  if (trigger_type == LoginReputationClientRequest::PASSWORD_REUSE_EVENT)
     return true;
 
   // Password field on focus pinging is enabled for !incognito &&
@@ -440,7 +444,7 @@ void ChromePasswordProtectionService::LogPasswordReuseDialogInteraction(
   user_event_service->RecordUserEvent(std::move(specifics));
 }
 
-PasswordProtectionService::SyncAccountType
+LoginReputationClientRequest::PasswordReuseEvent::SyncAccountType
 ChromePasswordProtectionService::GetSyncAccountType() {
   const AccountInfo account_info = GetAccountInfo();
   if (account_info.account_id.empty() || account_info.hosted_domain.empty()) {
@@ -461,7 +465,7 @@ ChromePasswordProtectionService::GetUserEventSpecificsWithNavigationId(
   if (navigation_id <= 0)
     return nullptr;
 
-  auto specifics = base::MakeUnique<UserEventSpecifics>();
+  auto specifics = std::make_unique<UserEventSpecifics>();
   specifics->set_event_time_usec(
       GetMicrosecondsSinceWindowsEpoch(base::Time::Now()));
   specifics->set_navigation_id(navigation_id);
@@ -610,6 +614,37 @@ void ChromePasswordProtectionService::UpdateSecurityState(
                                     /*is_pending=*/true, threat_type);
 }
 
+void ChromePasswordProtectionService::
+    RemoveUnhandledSyncPasswordReuseOnURLsDeleted(
+        bool all_history,
+        const history::URLRows& deleted_rows) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(all_history || !deleted_rows.empty());
+
+  DictionaryPrefUpdate unhandled_sync_password_reuses(
+      profile_->GetPrefs(), prefs::kSafeBrowsingUnhandledSyncPasswordReuses);
+  if (all_history) {
+    unhandled_sync_password_reuses->Clear();
+    return;
+  }
+
+  for (const history::URLRow& row : deleted_rows) {
+    if (!row.url().SchemeIsHTTPOrHTTPS())
+      continue;
+    unhandled_sync_password_reuses->RemoveKey(
+        Origin::Create(row.url()).Serialize());
+  }
+}
+
+void ChromePasswordProtectionService::CheckGaiaPasswordChange() {
+  std::string new_gaia_password_hash = profile_->GetPrefs()->GetString(
+      password_manager::prefs::kSyncPasswordHash);
+  if (gaia_password_hash_ != new_gaia_password_hash) {
+    gaia_password_hash_ = new_gaia_password_hash;
+    OnGaiaPasswordChanged();
+  }
+}
+
 void ChromePasswordProtectionService::OnGaiaPasswordChanged() {
   DictionaryPrefUpdate unhandled_sync_password_reuses(
       profile_->GetPrefs(), prefs::kSafeBrowsingUnhandledSyncPasswordReuses);
@@ -682,6 +717,8 @@ void ChromePasswordProtectionService::HandleUserActionOnModalWarning(
         navigation_id, PasswordReuseDialogInteraction::WARNING_ACTION_TAKEN);
     // Opens chrome://settings page in a new tab.
     OpenUrlInNewTab(GURL(chrome::kChromeUISettingsURL), web_contents);
+    RecordWarningAction(PasswordProtectionService::CHROME_SETTINGS,
+                        PasswordProtectionService::SHOWN);
   } else if (action == PasswordProtectionService::IGNORE_WARNING) {
     // No need to change state.
     LogPasswordReuseDialogInteraction(
@@ -713,6 +750,8 @@ void ChromePasswordProtectionService::HandleUserActionOnPageInfo(
 
     // Opens chrome://settings page in a new tab.
     OpenUrlInNewTab(GURL(chrome::kChromeUISettingsURL), web_contents);
+    RecordWarningAction(PasswordProtectionService::CHROME_SETTINGS,
+                        PasswordProtectionService::SHOWN);
     return;
   }
 

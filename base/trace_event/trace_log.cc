@@ -55,7 +55,7 @@ class DeleteTraceLogForTesting {
  public:
   static void Delete() {
     Singleton<trace_event::TraceLog,
-              LeakySingletonTraits<trace_event::TraceLog>>::OnExit(0);
+              LeakySingletonTraits<trace_event::TraceLog>>::OnExit(nullptr);
   }
 };
 
@@ -267,7 +267,7 @@ TraceLog::ThreadLocalEventBuffer::~ThreadLocalEventBuffer() {
     FlushWhileLocked();
     trace_log_->thread_message_loops_.erase(MessageLoop::current());
   }
-  trace_log_->thread_local_event_buffer_.Set(NULL);
+  trace_log_->thread_local_event_buffer_.Set(nullptr);
 }
 
 TraceEvent* TraceLog::ThreadLocalEventBuffer::AddTraceEvent(
@@ -285,7 +285,7 @@ TraceEvent* TraceLog::ThreadLocalEventBuffer::AddTraceEvent(
     trace_log_->CheckIfBufferIsFullWhileLocked();
   }
   if (!chunk_)
-    return NULL;
+    return nullptr;
 
   size_t event_index;
   TraceEvent* trace_event = chunk_->AddTraceEvent(&event_index);
@@ -327,7 +327,7 @@ void TraceLog::ThreadLocalEventBuffer::FlushWhileLocked() {
 struct TraceLog::RegisteredAsyncObserver {
   explicit RegisteredAsyncObserver(WeakPtr<AsyncEnabledStateObserver> observer)
       : observer(observer), task_runner(ThreadTaskRunnerHandle::Get()) {}
-  ~RegisteredAsyncObserver() {}
+  ~RegisteredAsyncObserver() = default;
 
   WeakPtr<AsyncEnabledStateObserver> observer;
   scoped_refptr<SequencedTaskRunner> task_runner;
@@ -335,7 +335,7 @@ struct TraceLog::RegisteredAsyncObserver {
 
 TraceLogStatus::TraceLogStatus() : event_capacity(0), event_count(0) {}
 
-TraceLogStatus::~TraceLogStatus() {}
+TraceLogStatus::~TraceLogStatus() = default;
 
 // static
 TraceLog* TraceLog::GetInstance() {
@@ -363,13 +363,22 @@ TraceLog::TraceLog()
   SetProcessID(static_cast<int>(GetCurrentProcId()));
 #endif
 
+// Linux renderer processes and Android O processes are not allowed to read
+// "proc/stat" file, crbug.com/788870.
+#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+  process_creation_time_ = CurrentProcessInfo::CreationTime();
+#else
+  // Use approximate time when creation time is not available.
+  process_creation_time_ = Time::Now();
+#endif
+
   logged_events_.reset(CreateTraceBuffer());
 
   MemoryDumpManager::GetInstance()->RegisterDumpProvider(this, "TraceLog",
                                                          nullptr);
 }
 
-TraceLog::~TraceLog() {}
+TraceLog::~TraceLog() = default;
 
 void TraceLog::InitializeThreadLocalEventBufferIfSupported() {
   // A ThreadLocalEventBuffer needs the message loop
@@ -384,7 +393,7 @@ void TraceLog::InitializeThreadLocalEventBufferIfSupported() {
   if (thread_local_event_buffer &&
       !CheckGeneration(thread_local_event_buffer->generation())) {
     delete thread_local_event_buffer;
-    thread_local_event_buffer = NULL;
+    thread_local_event_buffer = nullptr;
   }
   if (!thread_local_event_buffer) {
     thread_local_event_buffer = new ThreadLocalEventBuffer(this);
@@ -773,7 +782,7 @@ TraceEvent* TraceLog::AddEventToThreadSharedChunkWhileLocked(
       CheckIfBufferIsFullWhileLocked();
   }
   if (!thread_shared_chunk_)
-    return NULL;
+    return nullptr;
 
   size_t event_index;
   TraceEvent* trace_event = thread_shared_chunk_->AddTraceEvent(&event_index);
@@ -915,7 +924,7 @@ void TraceLog::FinishFlush(int generation, bool discard_events) {
     UseNextTraceBuffer();
     thread_message_loops_.clear();
 
-    flush_task_runner_ = NULL;
+    flush_task_runner_ = nullptr;
     flush_output_callback = flush_output_callback_;
     flush_output_callback_.Reset();
 
@@ -962,12 +971,19 @@ void TraceLog::FlushCurrentThread(int generation, bool discard_events) {
   // This will flush the thread local buffer.
   delete thread_local_event_buffer_.Get();
 
-  AutoLock lock(lock_);
-  if (!CheckGeneration(generation) || !flush_task_runner_ ||
-      !thread_message_loops_.empty())
-    return;
-
-  flush_task_runner_->PostTask(
+  // Scheduler uses TRACE_EVENT macros when posting a task, which can lead
+  // to acquiring a tracing lock. Given that posting a task requires grabbing
+  // a scheduler lock, we need to post this task outside tracing lock to avoid
+  // deadlocks.
+  scoped_refptr<SingleThreadTaskRunner> cached_flush_task_runner;
+  {
+    AutoLock lock(lock_);
+    cached_flush_task_runner = flush_task_runner_;
+    if (!CheckGeneration(generation) || !flush_task_runner_ ||
+        !thread_message_loops_.empty())
+      return;
+  }
+  cached_flush_task_runner->PostTask(
       FROM_HERE, BindOnce(&TraceLog::FinishFlush, Unretained(this), generation,
                           discard_events));
 }
@@ -1248,7 +1264,7 @@ TraceEventHandle TraceLog::AddTraceEventWithThreadIdAndTimestamp(
       !disabled_by_filters) {
     OptionalAutoLock lock(&lock_);
 
-    TraceEvent* trace_event = NULL;
+    TraceEvent* trace_event = nullptr;
     if (thread_local_event_buffer) {
       trace_event = thread_local_event_buffer->AddTraceEvent(&handle);
     } else {
@@ -1457,51 +1473,47 @@ void TraceLog::AddMetadataEventsWhileLocked() {
   }
 
 #if !defined(OS_NACL)  // NaCl shouldn't expose the process id.
-  InitializeMetadataEvent(AddEventToThreadSharedChunkWhileLocked(NULL, false),
-                          0, "num_cpus", "number",
-                          base::SysInfo::NumberOfProcessors());
+  InitializeMetadataEvent(
+      AddEventToThreadSharedChunkWhileLocked(nullptr, false), 0, "num_cpus",
+      "number", base::SysInfo::NumberOfProcessors());
 #endif
 
   int current_thread_id = static_cast<int>(base::PlatformThread::CurrentId());
   if (process_sort_index_ != 0) {
-    InitializeMetadataEvent(AddEventToThreadSharedChunkWhileLocked(NULL, false),
-                            current_thread_id, "process_sort_index",
-                            "sort_index", process_sort_index_);
+    InitializeMetadataEvent(
+        AddEventToThreadSharedChunkWhileLocked(nullptr, false),
+        current_thread_id, "process_sort_index", "sort_index",
+        process_sort_index_);
   }
 
   if (!process_name_.empty()) {
-    InitializeMetadataEvent(AddEventToThreadSharedChunkWhileLocked(NULL, false),
-                            current_thread_id, "process_name", "name",
-                            process_name_);
+    InitializeMetadataEvent(
+        AddEventToThreadSharedChunkWhileLocked(nullptr, false),
+        current_thread_id, "process_name", "name", process_name_);
   }
 
-// See https://crbug.com/726484 for Fuchsia.
-#if !defined(OS_NACL) && !defined(OS_IOS) && !defined(OS_FUCHSIA)
-  Time process_creation_time = CurrentProcessInfo::CreationTime();
-  if (!process_creation_time.is_null()) {
-    TimeDelta process_uptime = Time::Now() - process_creation_time;
-    InitializeMetadataEvent(AddEventToThreadSharedChunkWhileLocked(NULL, false),
-                            current_thread_id, "process_uptime_seconds",
-                            "uptime", process_uptime.InSeconds());
-  }
-#endif  // !defined(OS_NACL) && !defined(OS_IOS) && !defined(OS_FUCHSIA)
+  TimeDelta process_uptime = Time::Now() - process_creation_time_;
+  InitializeMetadataEvent(
+      AddEventToThreadSharedChunkWhileLocked(nullptr, false), current_thread_id,
+      "process_uptime_seconds", "uptime", process_uptime.InSeconds());
 
   if (!process_labels_.empty()) {
     std::vector<base::StringPiece> labels;
     for (const auto& it : process_labels_)
       labels.push_back(it.second);
-    InitializeMetadataEvent(AddEventToThreadSharedChunkWhileLocked(NULL, false),
-                            current_thread_id, "process_labels", "labels",
-                            base::JoinString(labels, ","));
+    InitializeMetadataEvent(
+        AddEventToThreadSharedChunkWhileLocked(nullptr, false),
+        current_thread_id, "process_labels", "labels",
+        base::JoinString(labels, ","));
   }
 
   // Thread sort indices.
   for (const auto& it : thread_sort_indices_) {
     if (it.second == 0)
       continue;
-    InitializeMetadataEvent(AddEventToThreadSharedChunkWhileLocked(NULL, false),
-                            it.first, "thread_sort_index", "sort_index",
-                            it.second);
+    InitializeMetadataEvent(
+        AddEventToThreadSharedChunkWhileLocked(nullptr, false), it.first,
+        "thread_sort_index", "sort_index", it.second);
   }
 
   // Thread names.
@@ -1509,16 +1521,17 @@ void TraceLog::AddMetadataEventsWhileLocked() {
   for (const auto& it : thread_names_) {
     if (it.second.empty())
       continue;
-    InitializeMetadataEvent(AddEventToThreadSharedChunkWhileLocked(NULL, false),
-                            it.first, "thread_name", "name", it.second);
+    InitializeMetadataEvent(
+        AddEventToThreadSharedChunkWhileLocked(nullptr, false), it.first,
+        "thread_name", "name", it.second);
   }
 
   // If buffer is full, add a metadata record to report this.
   if (!buffer_limit_reached_timestamp_.is_null()) {
-    InitializeMetadataEvent(AddEventToThreadSharedChunkWhileLocked(NULL, false),
-                            current_thread_id, "trace_buffer_overflowed",
-                            "overflowed_at_ts",
-                            buffer_limit_reached_timestamp_);
+    InitializeMetadataEvent(
+        AddEventToThreadSharedChunkWhileLocked(nullptr, false),
+        current_thread_id, "trace_buffer_overflowed", "overflowed_at_ts",
+        buffer_limit_reached_timestamp_);
   }
 }
 
@@ -1528,17 +1541,17 @@ void TraceLog::DeleteForTesting() {
 }
 
 TraceEvent* TraceLog::GetEventByHandle(TraceEventHandle handle) {
-  return GetEventByHandleInternal(handle, NULL);
+  return GetEventByHandleInternal(handle, nullptr);
 }
 
 TraceEvent* TraceLog::GetEventByHandleInternal(TraceEventHandle handle,
                                                OptionalAutoLock* lock) {
   if (!handle.chunk_seq)
-    return NULL;
+    return nullptr;
 
   DCHECK(handle.chunk_seq);
   DCHECK(handle.chunk_index <= TraceBufferChunk::kMaxChunkIndex);
-  DCHECK(handle.event_index < TraceBufferChunk::kTraceBufferChunkSize);
+  DCHECK(handle.event_index <= TraceBufferChunk::kTraceBufferChunkSize - 1);
 
   if (thread_local_event_buffer_.Get()) {
     TraceEvent* trace_event =
@@ -1556,7 +1569,7 @@ TraceEvent* TraceLog::GetEventByHandleInternal(TraceEventHandle handle,
       handle.chunk_index == thread_shared_chunk_index_) {
     return handle.chunk_seq == thread_shared_chunk_->seq()
                ? thread_shared_chunk_->GetEventAt(handle.event_index)
-               : NULL;
+               : nullptr;
   }
 
   return logged_events_->GetEventByHandle(handle);
@@ -1575,11 +1588,6 @@ void TraceLog::SetProcessID(int process_id) {
 void TraceLog::SetProcessSortIndex(int sort_index) {
   AutoLock lock(lock_);
   process_sort_index_ = sort_index;
-}
-
-void TraceLog::SetProcessName(const char* process_name) {
-  AutoLock lock(lock_);
-  process_name_ = process_name;
 }
 
 void TraceLog::UpdateProcessLabel(int label_id,

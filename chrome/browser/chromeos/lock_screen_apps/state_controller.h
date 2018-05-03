@@ -12,19 +12,24 @@
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/optional.h"
 #include "base/scoped_observer.h"
-#include "base/time/time.h"
 #include "chrome/browser/chromeos/lock_screen_apps/app_manager.h"
 #include "chrome/browser/chromeos/lock_screen_apps/state_observer.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "components/session_manager/core/session_manager_observer.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/common/api/app_runtime.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "ui/aura/window.h"
 #include "ui/events/devices/input_device_event_observer.h"
 
 class PrefRegistrySimple;
+class Profile;
+
+namespace aura {
+class Window;
+}
 
 namespace base {
 class TickClock;
@@ -56,6 +61,7 @@ namespace lock_screen_apps {
 
 class AppWindowMetricsTracker;
 class FocusCyclerDelegate;
+class LockScreenProfileCreator;
 class StateObserver;
 class FirstAppRunToastManager;
 
@@ -64,6 +70,7 @@ class FirstAppRunToastManager;
 // Currently assumes single supported action - NEW_NOTE.
 class StateController : public ash::mojom::TrayActionClient,
                         public session_manager::SessionManagerObserver,
+                        public aura::WindowObserver,
                         public extensions::AppWindowRegistry::Observer,
                         public ui::InputDeviceEventObserver,
                         public chromeos::PowerManagerClient::Observer {
@@ -97,6 +104,10 @@ class StateController : public ash::mojom::TrayActionClient,
   // Sets test AppManager implementation. Should be called before
   // |SetPrimaryProfile|
   void SetAppManagerForTesting(std::unique_ptr<AppManager> app_manager);
+  // Sets test LockScreenProfileCreator implementation. Should be called before
+  // |SetPrimaryProfile|
+  void SetLockScreenLockScreenProfileCreatorForTesting(
+      std::unique_ptr<LockScreenProfileCreator> profile_creator);
 
   // Initializes mojo bindings for the StateController - it creates binding to
   // ash's tray action interface and sets this object as the interface's client.
@@ -133,17 +144,18 @@ class StateController : public ash::mojom::TrayActionClient,
   // session_manager::SessionManagerObserver:
   void OnSessionStateChanged() override;
 
+  // aura::WindowObserver:
+  void OnWindowVisibilityChanged(aura::Window* window, bool visible) override;
+
   // extensions::AppWindowRegistry::Observer:
   void OnAppWindowAdded(extensions::AppWindow* app_window) override;
   void OnAppWindowRemoved(extensions::AppWindow* app_window) override;
 
   // ui::InputDeviceEventObserver:
-  void OnStylusStateChanged(ui::StylusState state) override;
   void OnTouchscreenDeviceConfigurationChanged() override;
 
   // chromeos::PowerManagerClient::Observer
-  void BrightnessChanged(int level, bool user_initiated) override;
-  void SuspendImminent() override;
+  void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
 
   // Creates and registers an app window as action handler for the action on
   // Chrome OS lock screen. The ownership of the returned app window is passed
@@ -173,25 +185,6 @@ class StateController : public ash::mojom::TrayActionClient,
   }
 
  private:
-  // The screen state determined by observing brightness changes from power
-  // manager client.
-  enum class ScreenState {
-    // The screen state has not yet been initialized.
-    kUnknown,
-    // The screen is on - i.e. not completely dimmed.
-    kOn,
-    // The screen is off - it's brightness level is 0.
-    kOff
-  };
-
-  // Called when profiles needed to run lock screen apps are ready - i.e. when
-  // primary user profile was set using |SetPrimaryProfile| and the profile in
-  // which app lock screen windows will be run creation is done.
-  // |status| - The lock screen profile creation status.
-  void OnProfilesReady(Profile* primary_profile,
-                       Profile* lock_screen_profile,
-                       Profile::CreateStatus status);
-
   // Gets the encryption key that should be used to encrypt user data created on
   // the lock screen. If a key hadn't previously been created and saved to
   // user prefs, a new key is created and saved.
@@ -236,16 +229,6 @@ class StateController : public ash::mojom::TrayActionClient,
   // It focuses the app window.
   void FocusAppWindow(bool reverse);
 
-  // Updates the screen state to match the current screen brightness - no-op
-  // unless the current screen state is unknown.
-  void SetInitialScreenState(double screen_brightness);
-
-  // Updates ths screen state - if the stylus was recently removed and screen
-  // has turned on, this will launch a new note action (stylus being removed
-  // should launch the note action, but this is deferred if the screen is off
-  // when the removal event occurs).
-  void SetScreenState(ScreenState screen_state);
-
   // Lock screen note action state.
   ash::mojom::TrayActionState lock_screen_note_state_ =
       ash::mojom::TrayActionState::kNotAvailable;
@@ -255,16 +238,7 @@ class StateController : public ash::mojom::TrayActionClient,
   mojo::Binding<ash::mojom::TrayActionClient> binding_;
   ash::mojom::TrayActionPtr tray_action_ptr_;
 
-  Profile* lock_screen_profile_ = nullptr;
-
-  // The current screen state.
-  ScreenState screen_state_ = ScreenState::kUnknown;
-
-  // The time-stamp of the last observed stylus eject event. This will get set
-  // if stylus was ejected while the screen was off, and the note action launch
-  // was thus deferred. If the screen is turned on soon after the stylus is
-  // ejected, lock screen note action will be launched.
-  base::TimeTicks stylus_eject_timestamp_;
+  std::unique_ptr<LockScreenProfileCreator> lock_screen_profile_creator_;
 
   // Whether sending app launch request to the note taking app (using
   // |app_manager_|) was delayed until the note action launch animation is
@@ -299,6 +273,7 @@ class StateController : public ash::mojom::TrayActionClient,
   // for the associated app has been previosly seen (and closed) by the user.
   std::unique_ptr<FirstAppRunToastManager> first_app_run_toast_manager_;
 
+  ScopedObserver<aura::Window, aura::WindowObserver> note_window_observer_;
   ScopedObserver<extensions::AppWindowRegistry,
                  extensions::AppWindowRegistry::Observer>
       app_window_observer_;

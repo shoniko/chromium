@@ -8,6 +8,8 @@
 
 #include "remoting/host/win/unprivileged_process_delegate.h"
 
+#include <windows.h>  // Must be in front of other Windows header files.
+
 #include <sddl.h>
 
 #include <utility>
@@ -287,7 +289,8 @@ void UnprivilegedProcessDelegate::LaunchProcess(
   std::string mojo_message_pipe_token = mojo::edk::GenerateRandomToken();
   std::unique_ptr<IPC::ChannelProxy> server = IPC::ChannelProxy::Create(
       invitation.AttachMessagePipe(mojo_message_pipe_token).release(),
-      IPC::Channel::MODE_SERVER, this, io_task_runner_);
+      IPC::Channel::MODE_SERVER, this, io_task_runner_,
+      base::ThreadTaskRunnerHandle::Get());
   base::CommandLine command_line(target_command_->argv());
   command_line.AppendSwitchASCII(kMojoPipeToken, mojo_message_pipe_token);
 

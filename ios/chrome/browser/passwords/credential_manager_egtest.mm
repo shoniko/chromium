@@ -8,6 +8,8 @@
 #import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
 
+#include <memory>
+
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/keyed_service/core/service_access_type.h"
@@ -20,6 +22,7 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/testing/earl_grey/disabled_test_macros.h"
 #import "ios/testing/wait_util.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
@@ -36,7 +39,7 @@ constexpr CFTimeInterval kDisappearanceTimeout = 4;
 std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
     const net::test_server::HttpRequest& request) {
   std::unique_ptr<net::test_server::BasicHttpResponse> http_response =
-      base::MakeUnique<net::test_server::BasicHttpResponse>();
+      std::make_unique<net::test_server::BasicHttpResponse>();
   http_response->set_code(net::HTTP_OK);
   http_response->set_content(
       "<head><title>Example website</title></head>"
@@ -123,6 +126,9 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
 // Tests that notification saying "Signing is as ..." appears on auto sign-in.
 - (void)testNotificationAppearsOnAutoSignIn {
+  // TODO(crbug.com/786960): re-enable when fixed.
+  EARL_GREY_TEST_DISABLED(@"Fails on iOS 11.0.");
+
   [self setAutosigninPreferences];
   [self loadSimplePageAndStoreACredential];
 
@@ -167,6 +173,9 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 // Tests that when navigator.credentials.get() was called from inactive tab, the
 // autosign-in notification appears once tab becomes active.
 - (void)testNotificationAppearsWhenTabIsActive {
+  // TODO(crbug.com/786960): re-enable when fixed.
+  EARL_GREY_TEST_DISABLED(@"Fails on iOS 11.0.");
+
   [self setAutosigninPreferences];
   [self loadSimplePageAndStoreACredential];
 

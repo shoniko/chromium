@@ -42,7 +42,7 @@ SVGGraphicsElement::SVGGraphicsElement(const QualifiedName& tag_name,
   AddToPropertyMap(transform_);
 }
 
-SVGGraphicsElement::~SVGGraphicsElement() {}
+SVGGraphicsElement::~SVGGraphicsElement() = default;
 
 void SVGGraphicsElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(transform_);
@@ -102,7 +102,7 @@ SVGMatrixTearOff* SVGGraphicsElement::getScreenCTM() {
 void SVGGraphicsElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == SVGNames::transformAttr) {
     AddPropertyToPresentationAttributeStyle(
         style, CSSPropertyTransform, transform_->CurrentValue()->CssValue());

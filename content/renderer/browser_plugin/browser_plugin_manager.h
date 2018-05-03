@@ -53,7 +53,6 @@ class CONTENT_EXPORT BrowserPluginManager : public RenderThreadObserver {
   // unique per process.
   int GetNextInstanceID();
 
-  void DidCommitCompositorFrame(int render_frame_routing_id);
   bool Send(IPC::Message* msg);
 
   // RenderThreadObserver override.

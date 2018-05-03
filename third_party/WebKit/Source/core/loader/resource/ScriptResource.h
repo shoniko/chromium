@@ -41,27 +41,18 @@ class KURL;
 class ResourceFetcher;
 class ScriptResource;
 
-class CORE_EXPORT ScriptResourceClient : public ResourceClient {
- public:
-  ~ScriptResourceClient() override {}
-  static bool IsExpectedType(ResourceClient* client) {
-    return client->GetResourceClientType() == kScriptType;
-  }
-  ResourceClientType GetResourceClientType() const final { return kScriptType; }
-
-  virtual void NotifyAppendData(ScriptResource* resource) {}
-};
-
 class CORE_EXPORT ScriptResource final : public TextResource {
  public:
-  using ClientType = ScriptResourceClient;
-  static ScriptResource* Fetch(FetchParameters&, ResourceFetcher*);
+  static ScriptResource* Fetch(FetchParameters&,
+                               ResourceFetcher*,
+                               ResourceClient*);
 
   // Public for testing
   static ScriptResource* CreateForTest(const KURL& url,
                                        const WTF::TextEncoding& encoding) {
     ResourceRequest request(url);
-    request.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeOmit);
+    request.SetFetchCredentialsMode(
+        network::mojom::FetchCredentialsMode::kOmit);
     ResourceLoaderOptions options;
     TextResourceDecoderOptions decoder_options(
         TextResourceDecoderOptions::kPlainTextContent, encoding);
@@ -70,9 +61,6 @@ class CORE_EXPORT ScriptResource final : public TextResource {
 
   ~ScriptResource() override;
 
-  void DidAddClient(ResourceClient*) override;
-  void AppendData(const char*, size_t) override;
-
   void OnMemoryDump(WebMemoryDumpLevelOfDetail,
                     WebProcessMemoryDump*) const override;
 
@@ -80,7 +68,7 @@ class CORE_EXPORT ScriptResource final : public TextResource {
 
   const String& SourceText();
 
-  AccessControlStatus CalculateAccessControlStatus() const;
+  AccessControlStatus CalculateAccessControlStatus(const SecurityOrigin*) const;
 
  private:
   class ScriptResourceFactory : public ResourceFactory {

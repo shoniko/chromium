@@ -10,6 +10,8 @@
 #include "platform/WaitableEvent.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/audio/AudioUtilities.h"
+#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/Functional.h"
 #include "public/platform/Platform.h"
@@ -34,10 +36,9 @@ class FIFOClient {
   WaitableEvent* Start(double duration_ms, double interval_ms) {
     duration_ms_ = duration_ms;
     interval_ms_ = interval_ms;
-    client_thread_->GetWebTaskRunner()->PostTask(
-        BLINK_FROM_HERE,
-        CrossThreadBind(&FIFOClient::RunTaskOnOwnThread,
-                        CrossThreadUnretained(this)));
+    PostCrossThreadTask(*client_thread_->GetWebTaskRunner(), FROM_HERE,
+                        CrossThreadBind(&FIFOClient::RunTaskOnOwnThread,
+                                        CrossThreadUnretained(this)));
     return done_event_.get();
   }
 
@@ -56,8 +57,8 @@ class FIFOClient {
     ++counter_;
     RunTask();
     if (elapsed_ms_ < duration_ms_) {
-      client_thread_->GetWebTaskRunner()->PostDelayedTask(
-          BLINK_FROM_HERE,
+      PostDelayedCrossThreadTask(
+          *client_thread_->GetWebTaskRunner(), FROM_HERE,
           CrossThreadBind(&FIFOClient::RunTaskOnOwnThread,
                           CrossThreadUnretained(this)),
           TimeDelta::FromMillisecondsD(interval_with_jitter));
@@ -67,8 +68,13 @@ class FIFOClient {
     }
   }
 
+  // Should be instantiated before calling Platform::Current()->CreateThread().
+  // Do not place this after the |client_thread_| below.
+  ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
+      platform_;
+
   PushPullFIFO* fifo_;
-  RefPtr<AudioBus> bus_;
+  scoped_refptr<AudioBus> bus_;
   std::unique_ptr<WebThread> client_thread_;
   std::unique_ptr<WaitableEvent> done_event_;
 

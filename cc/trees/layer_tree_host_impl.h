@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/time/time.h"
@@ -40,6 +41,7 @@
 #include "cc/trees/managed_memory_policy.h"
 #include "cc/trees/mutator_host_client.h"
 #include "cc/trees/task_runner_provider.h"
+#include "cc/trees/ukm_manager.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/gpu/context_cache_controller.h"
 #include "components/viz/common/quads/render_pass.h"
@@ -72,6 +74,7 @@ class PendingTreeDurationHistogramTimer;
 class PendingTreeRasterDurationHistogramTimer;
 class RasterTilePriorityQueue;
 class RasterBufferProvider;
+class RenderFrameMetadata;
 class RenderingStatsInstrumentation;
 class ResourcePool;
 class ScrollElasticityHelper;
@@ -137,6 +140,14 @@ class LayerTreeHostImplClient {
 
   virtual void RequestBeginMainFrameNotExpected(bool new_state) = 0;
 
+  // Called when a presentation time is requested. |source_frames| identifies
+  // the frames that correspond to the request.
+  virtual void DidPresentCompositorFrameOnImplThread(
+      const std::vector<int>& source_frames,
+      base::TimeTicks time,
+      base::TimeDelta refresh,
+      uint32_t flags) = 0;
+
  protected:
   virtual ~LayerTreeHostImplClient() {}
 };
@@ -183,7 +194,7 @@ class CC_EXPORT LayerTreeHostImpl
   void RequestUpdateForSynchronousInputHandler() override;
   void SetSynchronousInputHandlerRootScrollOffset(
       const gfx::ScrollOffset& root_offset) override;
-  void ScrollEnd(ScrollState* scroll_state) override;
+  void ScrollEnd(ScrollState* scroll_state, bool should_snap = false) override;
   InputHandler::ScrollStatus FlingScrollBegin() override;
 
   void MouseDown() override;
@@ -194,7 +205,7 @@ class CC_EXPORT LayerTreeHostImpl
   void PinchGestureBegin() override;
   void PinchGestureUpdate(float magnify_delta,
                           const gfx::Point& anchor) override;
-  void PinchGestureEnd() override;
+  void PinchGestureEnd(const gfx::Point& anchor, bool snap_to_min) override;
   void StartPageScaleAnimation(const gfx::Vector2d& target_offset,
                                bool anchor_point,
                                float page_scale,
@@ -238,6 +249,7 @@ class CC_EXPORT LayerTreeHostImpl
     void AsValueInto(base::trace_event::TracedValue* value) const;
 
     std::vector<viz::SurfaceId> activation_dependencies;
+    base::Optional<uint32_t> deadline_in_frames;
     std::vector<gfx::Rect> occluding_screen_space_rects;
     std::vector<gfx::Rect> non_occluding_screen_space_rects;
     viz::RenderPassList render_passes;
@@ -382,6 +394,11 @@ class CC_EXPORT LayerTreeHostImpl
       const gfx::Transform& transform) override;
   void DidLoseLayerTreeFrameSink() override;
   void DidReceiveCompositorFrameAck() override;
+  void DidPresentCompositorFrame(uint32_t presentation_token,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags) override;
+  void DidDiscardCompositorFrame(uint32_t presentation_token) override;
   void ReclaimResources(
       const std::vector<viz::ReturnedResource>& resources) override;
   void SetMemoryPolicy(const ManagedMemoryPolicy& policy) override;
@@ -557,7 +574,8 @@ class CC_EXPORT LayerTreeHostImpl
 
   void ScheduleMicroBenchmark(std::unique_ptr<MicroBenchmarkImpl> benchmark);
 
-  viz::CompositorFrameMetadata MakeCompositorFrameMetadata() const;
+  viz::CompositorFrameMetadata MakeCompositorFrameMetadata();
+  RenderFrameMetadata MakeRenderFrameMetadata();
 
   // Viewport rectangle and clip in device space.  These rects are used to
   // prioritize raster and determine what is submitted in a CompositorFrame.
@@ -619,9 +637,8 @@ class CC_EXPORT LayerTreeHostImpl
 
   LayerImpl* ViewportMainScrollLayer();
 
-  void QueueImageDecode(const PaintImage& image,
-                        const base::Callback<void(bool)>& embedder_callback);
-  std::vector<base::Closure> TakeCompletedImageDecodeCallbacks();
+  void QueueImageDecode(int request_id, const PaintImage& image);
+  std::vector<std::pair<int, bool>> TakeCompletedImageDecodeRequests();
 
   void ClearImageCacheOnNavigation();
 
@@ -631,6 +648,11 @@ class CC_EXPORT LayerTreeHostImpl
   void UpdateImageDecodingHints(
       base::flat_map<PaintImage::Id, PaintImage::DecodingMode>
           decoding_mode_map);
+
+  void InitializeUkm(std::unique_ptr<ukm::UkmRecorder> recorder);
+  UkmManager* ukm_manager() { return ukm_manager_.get(); }
+
+  void RenewTreePriorityForTesting() { client_->RenewTreePriority(); }
 
  protected:
   LayerTreeHostImpl(
@@ -644,7 +666,8 @@ class CC_EXPORT LayerTreeHostImpl
       scoped_refptr<base::SequencedTaskRunner> image_worker_task_runner);
 
   // Virtual for testing.
-  virtual bool AnimateLayers(base::TimeTicks monotonic_time);
+  virtual bool AnimateLayers(base::TimeTicks monotonic_time,
+                             bool is_active_tree);
 
   bool is_likely_to_require_a_draw() const {
     return is_likely_to_require_a_draw_;
@@ -675,7 +698,7 @@ class CC_EXPORT LayerTreeHostImpl
       const gfx::Vector2dF& viewport_delta,
       ScrollTree* scroll_tree);
 
-  void CleanUpTileManagerAndUIResources();
+  void CleanUpTileManagerResources();
   void CreateTileManagerResources();
   void ReleaseTreeResources();
   void ReleaseTileResources();
@@ -707,6 +730,12 @@ class CC_EXPORT LayerTreeHostImpl
 
   void UpdateTileManagerMemoryPolicy(const ManagedMemoryPolicy& policy);
 
+  // Returns true if the damage rect is non-empty. Takes as input whether or
+  // not the touch handle visibility has changed. This check includes damage
+  // from the HUD. Should only be called when the active tree's draw properties
+  // are valid and after updating the damage.
+  bool HasDamage(bool handle_visibility_changed) const;
+
   // This function should only be called from PrepareToDraw, as DidDrawAllLayers
   // must be called if this helper function is called.  Returns DRAW_SUCCESS if
   // the frame should be drawn.
@@ -735,9 +764,14 @@ class CC_EXPORT LayerTreeHostImpl
                                    const gfx::Vector2dF& scroll_delta,
                                    base::TimeDelta delayed_by);
 
+  void ScrollEndImpl(ScrollState* scroll_state);
+
+  // Creates an animation curve and returns true if we need to update the
+  // scroll position to a snap point. Otherwise returns false.
+  bool SnapAtScrollEnd();
+
   void SetContextVisibility(bool is_visible);
-  void ImageDecodeFinished(const base::Callback<void(bool)>& embedder_callback,
-                           bool decode_succeeded);
+  void ImageDecodeFinished(int request_id, bool decode_succeeded);
 
   // This function keeps track of sources of scrolls that are handled in the
   // compositor side. The information gets shared by the main thread as part of
@@ -830,6 +864,11 @@ class CC_EXPORT LayerTreeHostImpl
 
   gfx::Vector2dF accumulated_root_overscroll_;
 
+  // True iff some of the delta has been consumed for the current scroll
+  // sequence on the specific axis.
+  bool did_scroll_x_for_scroll_gesture_;
+  bool did_scroll_y_for_scroll_gesture_;
+
   bool pinch_gesture_active_;
   bool pinch_gesture_end_should_clear_scrolling_node_;
 
@@ -909,9 +948,10 @@ class CC_EXPORT LayerTreeHostImpl
   // in SetPropertyTrees.
   ElementId scroll_animating_latched_element_id_;
 
-  // These callbacks are stored here to be transfered to the main thread when we
-  // begin main frame. These callbacks must only be called on the main thread.
-  std::vector<base::Closure> completed_image_decode_callbacks_;
+  // These completion states to be transfered to the main thread when we
+  // begin main frame. The pair represents a request id and the completion (ie
+  // success) state.
+  std::vector<std::pair<int, bool>> completed_image_decode_requests_;
 
   // These are used to transfer usage of touch and wheel scrolls to the main
   // thread.
@@ -923,6 +963,19 @@ class CC_EXPORT LayerTreeHostImpl
   ImplThreadPhase impl_thread_phase_;
 
   base::Optional<ImageAnimationController> image_animation_controller_;
+
+  std::unique_ptr<UkmManager> ukm_manager_;
+
+  // Maps from presentation_token set on CF to the source frame that requested
+  // it. Presentation tokens are requested if the active tree has
+  // request_presentation_time() set.
+  base::flat_map<uint32_t, int> presentation_token_to_frame_;
+
+  // If non-zero identifies the presentation-token added to the last CF. Reset
+  // to zero when no more presentation tokens are in flight.
+  uint32_t last_presentation_token_ = 0u;
+
+  viz::LocalSurfaceId last_draw_local_surface_id_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerTreeHostImpl);
 };

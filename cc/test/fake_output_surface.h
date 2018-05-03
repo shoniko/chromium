@@ -77,6 +77,9 @@ class FakeOutputSurface : public viz::OutputSurface {
   bool IsDisplayedAsOverlayPlane() const override;
   unsigned GetOverlayTextureId() const override;
   gfx::BufferFormat GetOverlayBufferFormat() const override;
+#if BUILDFLAG(ENABLE_VULKAN)
+  gpu::VulkanSurface* GetVulkanSurface() override;
+#endif
 
   void set_framebuffer(GLint framebuffer, GLenum format) {
     framebuffer_ = framebuffer;
@@ -121,7 +124,7 @@ class FakeOutputSurface : public viz::OutputSurface {
   gfx::Rect last_set_draw_rectangle_;
 
  private:
-  void SwapBuffersAck();
+  void SwapBuffersAck(uint64_t swap_id);
 
   base::WeakPtrFactory<FakeOutputSurface> weak_ptr_factory_;
 };

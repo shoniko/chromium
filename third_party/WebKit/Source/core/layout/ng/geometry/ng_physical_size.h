@@ -6,8 +6,8 @@
 #define NGPhysicalSize_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/ng_writing_mode.h"
 #include "platform/LayoutUnit.h"
+#include "platform/text/WritingMode.h"
 
 namespace blink {
 
@@ -17,14 +17,14 @@ struct NGLogicalSize;
 // NGPhysicalSize is the size of a rect (typically a fragment) in the physical
 // coordinate system.
 struct CORE_EXPORT NGPhysicalSize {
-  NGPhysicalSize() {}
+  NGPhysicalSize() = default;
   NGPhysicalSize(LayoutUnit width, LayoutUnit height)
       : width(width), height(height) {}
 
   LayoutUnit width;
   LayoutUnit height;
 
-  NGLogicalSize ConvertToLogical(NGWritingMode mode) const;
+  NGLogicalSize ConvertToLogical(WritingMode mode) const;
 
   bool operator==(const NGPhysicalSize& other) const;
 

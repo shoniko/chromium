@@ -36,11 +36,11 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.ntp.LogoBridge.Logo;
 import org.chromium.chrome.browser.ntp.LogoBridge.LogoObserver;
+import org.chromium.chrome.browser.ntp.NewTabPage.FakeboxDelegate;
 import org.chromium.chrome.browser.ntp.NewTabPage.OnSearchBoxScrollListener;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageAdapter;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageRecyclerView;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
-import org.chromium.chrome.browser.omnibox.OmniboxPlaceholderFieldTrial;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.suggestions.DestructionObserver;
 import org.chromium.chrome.browser.suggestions.SiteSection;
@@ -90,6 +90,11 @@ public class NewTabPageView extends FrameLayout implements TileGroup.Observer {
      * Experiment parameter for the logo height in dp in the condensed layout.
      */
     private static final String PARAM_CONDENSED_LAYOUT_LOGO_HEIGHT = "condensed_layout_logo_height";
+
+    /**
+     * Default experiment parameter value for the logo height in dp in the condensed layout.
+     */
+    private static final int PARAM_DEFAULT_VALUE_CONDENSED_LAYOUT_LOGO_HEIGHT_DP = 100;
 
     private NewTabPageRecyclerView mRecyclerView;
 
@@ -270,7 +275,8 @@ public class NewTabPageView extends FrameLayout implements TileGroup.Observer {
 
         mSearchProviderLogoView = mNewTabPageLayout.findViewById(R.id.search_provider_logo);
         int experimentalLogoHeightDp = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                ChromeFeatureList.NTP_CONDENSED_LAYOUT, PARAM_CONDENSED_LAYOUT_LOGO_HEIGHT, 0);
+                ChromeFeatureList.NTP_CONDENSED_LAYOUT, PARAM_CONDENSED_LAYOUT_LOGO_HEIGHT,
+                PARAM_DEFAULT_VALUE_CONDENSED_LAYOUT_LOGO_HEIGHT_DP);
         if (experimentalLogoHeightDp > 0) {
             ViewGroup.LayoutParams logoParams = mSearchProviderLogoView.getLayoutParams();
             logoParams.height = dpToPx(getContext(), experimentalLogoHeightDp);
@@ -280,6 +286,9 @@ public class NewTabPageView extends FrameLayout implements TileGroup.Observer {
                 mManager.getNavigationDelegate(), mSearchProviderLogoView, profile);
 
         mSearchBoxView = mNewTabPageLayout.findViewById(R.id.search_box);
+        if (SuggestionsConfig.useModernLayout()) {
+            ViewUtils.setNinePatchBackgroundResource(mSearchBoxView, R.drawable.card_modern);
+        }
         mNoSearchLogoSpacer = mNewTabPageLayout.findViewById(R.id.no_search_logo_spacer);
 
         mSnapScrollRunnable = new SnapScrollRunnable();
@@ -297,9 +306,10 @@ public class NewTabPageView extends FrameLayout implements TileGroup.Observer {
         mRecyclerView.init(mUiConfig, mContextMenuManager);
 
         // Set up snippets
-        NewTabPageAdapter newTabPageAdapter = new NewTabPageAdapter(mManager, mNewTabPageLayout,
-                mUiConfig, offlinePageBridge, mContextMenuManager, /* tileGroupDelegate = */ null,
-                /* suggestionsCarousel = */ null);
+        NewTabPageAdapter newTabPageAdapter =
+                new NewTabPageAdapter(mManager, mNewTabPageLayout, /* logoView = */ null, mUiConfig,
+                        offlinePageBridge, mContextMenuManager, /* tileGroupDelegate = */ null,
+                        /* suggestionsCarousel = */ null);
         newTabPageAdapter.refreshSuggestions();
         mRecyclerView.setAdapter(newTabPageAdapter);
         mRecyclerView.getLinearLayoutManager().scrollToPosition(scrollPosition);
@@ -341,6 +351,15 @@ public class NewTabPageView extends FrameLayout implements TileGroup.Observer {
     }
 
     /**
+     * Sets the {@link FakeboxDelegate} associated with the new tab page.
+     * @param fakeboxDelegate The {@link FakeboxDelegate} used to determine whether the URL bar
+     *                        has focus.
+     */
+    public void setFakeboxDelegate(FakeboxDelegate fakeboxDelegate) {
+        mRecyclerView.setFakeboxDelegate(fakeboxDelegate);
+    }
+
+    /**
      * Sets up the hint text and event handlers for the search box text view.
      */
     private void initializeSearchBoxTextView() {
@@ -348,7 +367,7 @@ public class NewTabPageView extends FrameLayout implements TileGroup.Observer {
 
         final TextView searchBoxTextView =
                 (TextView) mSearchBoxView.findViewById(R.id.search_box_text);
-        String hintText = OmniboxPlaceholderFieldTrial.getOmniboxPlaceholder();
+        String hintText = getResources().getString(R.string.search_or_type_web_address);
         if (!DeviceFormFactor.isTablet()) {
             searchBoxTextView.setHint(hintText);
         } else {
@@ -953,7 +972,7 @@ public class NewTabPageView extends FrameLayout implements TileGroup.Observer {
         boolean condensedLayoutEnabled =
                 ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_CONDENSED_LAYOUT);
         boolean showLogoInCondensedLayout = ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.NTP_CONDENSED_LAYOUT, PARAM_CONDENSED_LAYOUT_SHOW_LOGO, false);
+                ChromeFeatureList.NTP_CONDENSED_LAYOUT, PARAM_CONDENSED_LAYOUT_SHOW_LOGO, true);
         return mSearchProviderHasLogo && (!condensedLayoutEnabled || showLogoInCondensedLayout);
     }
 

@@ -5,6 +5,7 @@
 #import "ios/chrome/browser/history/history_tab_helper.h"
 
 #include "base/memory/ptr_util.h"
+#include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/strings/grit/components_strings.h"
@@ -24,7 +25,9 @@
 
 DEFINE_WEB_STATE_USER_DATA_KEY(HistoryTabHelper);
 
-HistoryTabHelper::~HistoryTabHelper() {}
+HistoryTabHelper::~HistoryTabHelper() {
+  DCHECK(!web_state_);
+}
 
 void HistoryTabHelper::UpdateHistoryPageTitle(const web::NavigationItem& item) {
   DCHECK(!delay_notification_);
@@ -60,19 +63,22 @@ void HistoryTabHelper::SetDelayHistoryServiceNotification(
   std::swap(recorded_navigations_, empty_vector);
 
   web::NavigationItem* last_committed_item =
-      web_state()->GetNavigationManager()->GetLastCommittedItem();
+      web_state_->GetNavigationManager()->GetLastCommittedItem();
   if (last_committed_item) {
     UpdateHistoryPageTitle(*last_committed_item);
   }
 }
 
 HistoryTabHelper::HistoryTabHelper(web::WebState* web_state)
-    : web::WebStateObserver(web_state) {}
+    : web_state_(web_state) {
+  web_state_->AddObserver(this);
+}
 
 void HistoryTabHelper::DidFinishNavigation(
     web::WebState* web_state,
     web::NavigationContext* navigation_context) {
-  if (web_state->GetBrowserState()->IsOffTheRecord()) {
+  DCHECK_EQ(web_state_, web_state);
+  if (web_state_->GetBrowserState()->IsOffTheRecord()) {
     return;
   }
 
@@ -89,7 +95,7 @@ void HistoryTabHelper::DidFinishNavigation(
 
   DCHECK(web_state->GetNavigationManager()->GetVisibleItem());
   web::NavigationItem* visible_item =
-      web_state->GetNavigationManager()->GetVisibleItem();
+      web_state_->GetNavigationManager()->GetVisibleItem();
   DCHECK(!visible_item->GetTimestamp().is_null());
 
   // Do not update the history database for back/forward navigations.
@@ -133,9 +139,21 @@ void HistoryTabHelper::DidFinishNavigation(
       referrer_url != kNewTabPageReferrerURL &&
       referrer_url != kReadingListReferrerURL;
 
+  // Top-level frame navigations are visible; everything else is hidden.
+  // Also hide top-level navigations that result in an error in order to
+  // prevent the omnibox from suggesting URLs that have never been navigated
+  // to successfully.  (If a top-level navigation to the URL succeeds at some
+  // point, the URL will be unhidden and thus eligible to be suggested by the
+  // omnibox.)
+  const bool hidden =
+      navigation_context->GetError() ||
+      (navigation_context->GetResponseHeaders() &&
+       navigation_context->GetResponseHeaders()->response_code() >= 400 &&
+       navigation_context->GetResponseHeaders()->response_code() > 600) ||
+      !ui::PageTransitionIsMainFrame(navigation_context->GetPageTransition());
   history::HistoryAddPageArgs add_page_args(
       url, visible_item->GetTimestamp(), this, visible_item->GetUniqueID(),
-      referrer_url, redirects, transition, history::SOURCE_BROWSED,
+      referrer_url, redirects, transition, hidden, history::SOURCE_BROWSED,
       /*did_replace_entry=*/false, consider_for_ntp_most_visited);
 
   if (delay_notification_) {
@@ -151,22 +169,41 @@ void HistoryTabHelper::DidFinishNavigation(
   }
 }
 
+void HistoryTabHelper::PageLoaded(
+    web::WebState* web_state,
+    web::PageLoadCompletionStatus load_completion_status) {
+  last_load_completion_ = base::TimeTicks::Now();
+}
+
 void HistoryTabHelper::TitleWasSet(web::WebState* web_state) {
+  DCHECK_EQ(web_state_, web_state);
   if (delay_notification_) {
     return;
   }
 
-  web::NavigationItem* last_committed_item =
-      web_state->GetNavigationManager()->GetLastCommittedItem();
-
-  if (last_committed_item) {
-    UpdateHistoryPageTitle(*last_committed_item);
+  // Only store page titles into history if they were set while the page was
+  // loading or during a brief span after load is complete. This fixes the case
+  // where a page uses a title change to alert a user of a situation but that
+  // title change ends up saved in history.
+  if (web_state->IsLoading() ||
+      (base::TimeTicks::Now() - last_load_completion_ <
+       history::GetTitleSettingWindow())) {
+    web::NavigationItem* last_committed_item =
+        web_state_->GetNavigationManager()->GetLastCommittedItem();
+    if (last_committed_item)
+      UpdateHistoryPageTitle(*last_committed_item);
   }
+}
+
+void HistoryTabHelper::WebStateDestroyed(web::WebState* web_state) {
+  DCHECK_EQ(web_state_, web_state);
+  web_state_->RemoveObserver(this);
+  web_state_ = nullptr;
 }
 
 history::HistoryService* HistoryTabHelper::GetHistoryService() {
   ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(web_state()->GetBrowserState());
+      ios::ChromeBrowserState::FromBrowserState(web_state_->GetBrowserState());
   if (browser_state->IsOffTheRecord())
     return nullptr;
 

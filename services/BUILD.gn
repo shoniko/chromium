@@ -28,12 +28,15 @@ service_test("services_unittests") {
 
   if (!is_ios) {
     deps += [
+      "//services/audio:tests",
       "//services/data_decoder:tests",
       "//services/device:tests",
+      "//services/network:tests",
       "//services/preferences:tests",
       "//services/proxy_resolver:tests",
       "//services/resource_coordinator:tests",
       "//services/shape_detection:tests",
+      "//services/viz",
       "//services/viz/privileged/interfaces:unit_tests",
       "//services/viz/public/cpp/compositing:tests",
     ]
@@ -92,10 +95,12 @@ catalog("services_unittests_catalog") {
 
   if (!is_ios) {
     catalog_deps += [
+      "//services/audio:tests_catalog",
       "//services/device:tests_catalog",
       "//services/preferences:tests_catalog",
       "//services/resource_coordinator:tests_catalog",
       "//services/video_capture:tests_catalog",
+      "//services/viz:tests_catalog",
     ]
   }
 

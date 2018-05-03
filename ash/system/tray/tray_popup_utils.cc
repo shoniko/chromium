@@ -125,7 +125,7 @@ class BorderlessLabelButton : public views::LabelButton {
     TrayPopupUtils::ConfigureTrayPopupButton(this);
   }
 
-  ~BorderlessLabelButton() override {}
+  ~BorderlessLabelButton() override = default;
 
   // views::LabelButton:
   int GetHeightForWidth(int width) const override { return kMenuButtonSize; }
@@ -296,8 +296,7 @@ void TrayPopupUtils::ShowStickyHeaderSeparator(views::View* view,
 
 void TrayPopupUtils::ConfigureContainer(TriView::Container container,
                                         views::View* container_view) {
-  container_view->SetLayoutManager(
-      CreateDefaultLayoutManager(container).release());
+  container_view->SetLayoutManager(CreateDefaultLayoutManager(container));
 }
 
 views::LabelButton* TrayPopupUtils::CreateTrayPopupBorderlessButton(

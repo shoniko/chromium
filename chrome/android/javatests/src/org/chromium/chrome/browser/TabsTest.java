@@ -27,7 +27,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
@@ -62,7 +61,6 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelectorImpl;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.tabmodel.TabbedModeTabPersistencePolicy;
 import org.chromium.chrome.browser.toolbar.ToolbarPhone;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ApplicationTestUtils;
@@ -78,6 +76,7 @@ import org.chromium.content.browser.test.util.JavaScriptUtils;
 import org.chromium.content.browser.test.util.TouchCommon;
 import org.chromium.content.browser.test.util.UiUtils;
 import org.chromium.content.common.ContentSwitches;
+import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -94,10 +93,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * General Tab tests.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class TabsTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
@@ -389,10 +385,11 @@ public class TabsTest {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                final String actualText = mActivityTestRule.getActivity()
-                                                  .getActivityTab()
-                                                  .getContentViewCore()
-                                                  .getSelectedText();
+                WebContents webContents =
+                        mActivityTestRule.getActivity().getActivityTab().getWebContents();
+                SelectionPopupController controller =
+                        SelectionPopupController.fromWebContents(webContents);
+                final String actualText = controller.getSelectedText();
                 updateFailureReason(
                         "expected selected text: [" + text + "], but got: [" + actualText + "]");
                 return text.equals(actualText);
@@ -431,6 +428,7 @@ public class TabsTest {
     @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
     @Feature({"Android-TabSwitcher"})
     @RetryOnFailure
+    @DisabledTest(message = "crbug.com/799728")
     public void testTabSwitcherCollapseSelection() throws Exception {
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         ChromeTabUtils.fullyLoadUrlInNewTab(InstrumentationRegistry.getInstrumentation(),
@@ -835,7 +833,6 @@ public class TabsTest {
     /**
      * @return A stable read of allocated size (native + dalvik) after gc.
      */
-    @SuppressFBWarnings("DM_GC")
     private long getStableAllocatedSize() {
         // Measure the equivalent of allocated size native + dalvik in:
         // adb shell dumpsys meminfo | grep chrome -A 20
@@ -1516,6 +1513,7 @@ public class TabsTest {
     @Feature({"Android-TabSwitcher"})
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
     @RetryOnFailure
+    @DisabledTest(message = "crbug.com/802183")
     public void testToolbarSwipeNextTab() throws InterruptedException {
         ChromeTabUtils.newTabFromMenu(
                 InstrumentationRegistry.getInstrumentation(), mActivityTestRule.getActivity());
@@ -1871,7 +1869,6 @@ public class TabsTest {
 
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
-            @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
             public void run() {
                 @SuppressWarnings("unused") // Avoid GC of observer
                 WebContentsObserver observer = new WebContentsObserver(tab.getWebContents()) {

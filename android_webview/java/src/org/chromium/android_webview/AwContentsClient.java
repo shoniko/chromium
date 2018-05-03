@@ -22,7 +22,6 @@ import android.view.View;
 import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.content_public.common.ContentUrlConstants;
 
 import java.security.Principal;
@@ -96,7 +95,6 @@ public abstract class AwContentsClient {
     /**
      * Parameters for the {@link AwContentsClient#shouldInterceptRequest} method.
      */
-    @SuppressFBWarnings("URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD")
     public static class AwWebResourceRequest {
         // Url of the request.
         public String url;
@@ -210,6 +208,12 @@ public abstract class AwContentsClient {
         // same application can be opened in the same tab.
         intent.putExtra(Browser.EXTRA_APPLICATION_ID, context.getPackageName());
 
+        // Check whether the context is activity context.
+        if (AwContents.activityFromContext(context) == null) {
+            Log.w(TAG, "Cannot call startActivity on non-activity context.");
+            return false;
+        }
+
         try {
             context.startActivity(intent);
         } catch (ActivityNotFoundException ex) {
@@ -266,7 +270,7 @@ public abstract class AwContentsClient {
             if (mAcceptTypes == null) {
                 return new String[0];
             }
-            return mAcceptTypes.split(";");
+            return mAcceptTypes.split(",");
         }
 
         public boolean isCaptureEnabled() {
@@ -284,7 +288,7 @@ public abstract class AwContentsClient {
         public Intent createIntent() {
             String mimeType = "*/*";
             if (mAcceptTypes != null && !mAcceptTypes.trim().isEmpty()) {
-                mimeType = mAcceptTypes.split(";")[0];
+                mimeType = mAcceptTypes.split(",")[0];
             }
 
             Intent i = new Intent(Intent.ACTION_GET_CONTENT);

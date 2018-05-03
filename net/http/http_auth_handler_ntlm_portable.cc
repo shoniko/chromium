@@ -40,7 +40,7 @@ HttpAuthHandlerNTLM::HttpAuthHandlerNTLM(
     const HttpAuthPreferences* http_auth_preferences)
     : ntlm_client_(ntlm::NtlmFeatures(
           http_auth_preferences ? http_auth_preferences->NtlmV2Enabled()
-                                : false)) {}
+                                : true)) {}
 
 bool HttpAuthHandlerNTLM::NeedsIdentity() {
   // This gets called for each round-trip.  Only require identity on
@@ -59,7 +59,7 @@ int HttpAuthHandlerNTLM::InitializeBeforeFirstChallenge() {
   return OK;
 }
 
-HttpAuthHandlerNTLM::~HttpAuthHandlerNTLM() {}
+HttpAuthHandlerNTLM::~HttpAuthHandlerNTLM() = default;
 
 // static
 HttpAuthHandlerNTLM::GetMSTimeProc HttpAuthHandlerNTLM::SetGetMSTimeProc(
@@ -85,9 +85,9 @@ HttpAuthHandlerNTLM::HostNameProc HttpAuthHandlerNTLM::SetHostNameProc(
   return old_proc;
 }
 
-HttpAuthHandlerNTLM::Factory::Factory() {}
+HttpAuthHandlerNTLM::Factory::Factory() = default;
 
-HttpAuthHandlerNTLM::Factory::~Factory() {}
+HttpAuthHandlerNTLM::Factory::~Factory() = default;
 
 ntlm::Buffer HttpAuthHandlerNTLM::GetNextToken(const ntlm::Buffer& in_token) {
   // If in_token is non-empty, then assume it contains a challenge message,

@@ -12,10 +12,10 @@
 #include "base/android/jni_string.h"
 #include "base/android/path_utils.h"
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -31,16 +31,17 @@
 #include "chrome/browser/android/webapk/webapk_icon_hasher.h"
 #include "chrome/browser/android/webapk/webapk_install_service.h"
 #include "chrome/browser/android/webapk/webapk_metrics.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/browsing_data_remover.h"
 #include "content/public/common/manifest_util.h"
 #include "jni/WebApkInstaller_jni.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_fetcher.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_utils.h"
@@ -59,6 +60,44 @@ const char kProtoMimeType[] = "application/x-protobuf";
 // The default number of milliseconds to wait for the WebAPK download URL from
 // the WebAPK server.
 const int kWebApkDownloadUrlTimeoutMs = 60000;
+
+class CacheClearer : public content::BrowsingDataRemover::Observer {
+ public:
+  ~CacheClearer() override { remover_->RemoveObserver(this); }
+
+  // Clear Chrome's cache. Run |callback| once clearing the cache is complete.
+  static void FreeCacheAsync(content::BrowsingDataRemover* remover,
+                             base::OnceClosure callback) {
+    // CacheClearer manages its own lifetime and deletes itself when finished.
+    auto* cache_clearer = new CacheClearer(remover, std::move(callback));
+    remover->AddObserver(cache_clearer);
+    remover->RemoveAndReply(base::Time(), base::Time::Max(),
+                            content::BrowsingDataRemover::DATA_TYPE_CACHE,
+                            ChromeBrowsingDataRemoverDelegate::ALL_ORIGIN_TYPES,
+                            cache_clearer);
+  }
+
+ private:
+  CacheClearer(content::BrowsingDataRemover* remover,
+               base::OnceClosure callback)
+      : remover_(remover), install_callback_(std::move(callback)) {}
+
+  void OnBrowsingDataRemoverDone() override {
+    std::move(install_callback_).Run();
+    delete this;  // Matches the new in FreeCacheAsync()
+  }
+
+  content::BrowsingDataRemover* remover_;
+
+  base::OnceClosure install_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(CacheClearer);
+};
+
+net::URLRequestContextGetter* GetRequestContext(
+    content::BrowserContext* browser_context) {
+  return Profile::FromBrowserContext(browser_context)->GetRequestContext();
+}
 
 // Returns the WebAPK server URL based on the command line.
 GURL GetServerUrl() {
@@ -83,6 +122,36 @@ std::string ColorToString(int64_t color) {
     return "";
   SkColor sk_color = reinterpret_cast<uint32_t&>(color);
   return color_utils::SkColorToRgbaString(sk_color);
+}
+
+webapk::WebApk_UpdateReason ConvertUpdateReasonToProtoEnum(
+    WebApkUpdateReason update_reason) {
+  switch (update_reason) {
+    case WebApkUpdateReason::NONE:
+      return webapk::WebApk::NONE;
+    case WebApkUpdateReason::OLD_SHELL_APK:
+      return webapk::WebApk::OLD_SHELL_APK;
+    case WebApkUpdateReason::PRIMARY_ICON_HASH_DIFFERS:
+      return webapk::WebApk::PRIMARY_ICON_HASH_DIFFERS;
+    case WebApkUpdateReason::BADGE_ICON_HASH_DIFFERS:
+      return webapk::WebApk::BADGE_ICON_HASH_DIFFERS;
+    case WebApkUpdateReason::SCOPE_DIFFERS:
+      return webapk::WebApk::SCOPE_DIFFERS;
+    case WebApkUpdateReason::START_URL_DIFFERS:
+      return webapk::WebApk::START_URL_DIFFERS;
+    case WebApkUpdateReason::SHORT_NAME_DIFFERS:
+      return webapk::WebApk::SHORT_NAME_DIFFERS;
+    case WebApkUpdateReason::NAME_DIFFERS:
+      return webapk::WebApk::NAME_DIFFERS;
+    case WebApkUpdateReason::BACKGROUND_COLOR_DIFFERS:
+      return webapk::WebApk::BACKGROUND_COLOR_DIFFERS;
+    case WebApkUpdateReason::THEME_COLOR_DIFFERS:
+      return webapk::WebApk::THEME_COLOR_DIFFERS;
+    case WebApkUpdateReason::ORIENTATION_DIFFERS:
+      return webapk::WebApk::ORIENTATION_DIFFERS;
+    case WebApkUpdateReason::DISPLAY_MODE_DIFFERS:
+      return webapk::WebApk::DISPLAY_MODE_DIFFERS;
+  }
 }
 
 // Get Chrome's current ABI. It depends on whether Chrome is running as a 32 bit
@@ -122,7 +191,8 @@ std::unique_ptr<std::string> BuildProtoInBackground(
     const std::string& package_name,
     const std::string& version,
     const std::map<std::string, std::string>& icon_url_to_murmur2_hash,
-    bool is_manifest_stale) {
+    bool is_manifest_stale,
+    WebApkUpdateReason update_reason) {
   std::unique_ptr<webapk::WebApk> webapk(new webapk::WebApk);
   webapk->set_manifest_url(shortcut_info.manifest_url.spec());
   webapk->set_requester_application_package(
@@ -132,6 +202,7 @@ std::unique_ptr<std::string> BuildProtoInBackground(
   webapk->set_package_name(package_name);
   webapk->set_version(version);
   webapk->set_stale_manifest(is_manifest_stale);
+  webapk->set_update_reason(ConvertUpdateReasonToProtoEnum(update_reason));
 
   webapk::WebAppManifest* web_app_manifest = webapk->mutable_manifest();
   web_app_manifest->set_name(base::UTF16ToUTF8(shortcut_info.name));
@@ -147,6 +218,12 @@ std::unique_ptr<std::string> BuildProtoInBackground(
 
   std::string* scope = web_app_manifest->add_scopes();
   scope->assign(GetScope(shortcut_info).spec());
+
+  if (!shortcut_info.share_target_url_template.empty()) {
+    webapk::ShareTarget* share_target = web_app_manifest->add_share_targets();
+    share_target->set_url_template(
+        base::UTF16ToUTF8(shortcut_info.share_target_url_template));
+  }
 
   if (shortcut_info.best_primary_icon_url.is_empty()) {
     // Update when web manifest is no longer available.
@@ -179,7 +256,7 @@ std::unique_ptr<std::string> BuildProtoInBackground(
   }
 
   std::unique_ptr<std::string> serialized_proto =
-      base::MakeUnique<std::string>();
+      std::make_unique<std::string>();
   webapk->SerializeToString(serialized_proto.get());
   return serialized_proto;
 }
@@ -195,12 +272,13 @@ bool StoreUpdateRequestToFileInBackground(
     const std::string& package_name,
     const std::string& version,
     const std::map<std::string, std::string>& icon_url_to_murmur2_hash,
-    bool is_manifest_stale) {
+    bool is_manifest_stale,
+    WebApkUpdateReason update_reason) {
   base::AssertBlockingAllowed();
 
   std::unique_ptr<std::string> proto = BuildProtoInBackground(
       shortcut_info, primary_icon, badge_icon, package_name, version,
-      icon_url_to_murmur2_hash, is_manifest_stale);
+      icon_url_to_murmur2_hash, is_manifest_stale, update_reason);
 
   // Create directory if it does not exist.
   base::CreateDirectory(update_request_path.DirName());
@@ -214,7 +292,7 @@ bool StoreUpdateRequestToFileInBackground(
 // Reads |file| and returns contents. Must be called on a background thread.
 std::unique_ptr<std::string> ReadFileInBackground(const base::FilePath& file) {
   base::AssertBlockingAllowed();
-  std::unique_ptr<std::string> update_request = base::MakeUnique<std::string>();
+  std::unique_ptr<std::string> update_request = std::make_unique<std::string>();
   base::ReadFileToString(file, update_request.get());
   return update_request;
 }
@@ -297,7 +375,7 @@ void WebApkInstaller::BuildProto(
       GetBackgroundTaskRunner().get(), FROM_HERE,
       base::Bind(&BuildProtoInBackground, shortcut_info, primary_icon,
                  badge_icon, package_name, version, icon_url_to_murmur2_hash,
-                 is_manifest_stale),
+                 is_manifest_stale, WebApkUpdateReason::NONE),
       callback);
 }
 
@@ -311,12 +389,13 @@ void WebApkInstaller::StoreUpdateRequestToFile(
     const std::string& version,
     const std::map<std::string, std::string>& icon_url_to_murmur2_hash,
     bool is_manifest_stale,
+    WebApkUpdateReason update_reason,
     const base::Callback<void(bool)> callback) {
   base::PostTaskAndReplyWithResult(
       GetBackgroundTaskRunner().get(), FROM_HERE,
       base::Bind(&StoreUpdateRequestToFileInBackground, update_request_path,
                  shortcut_info, primary_icon, badge_icon, package_name, version,
-                 icon_url_to_murmur2_hash, is_manifest_stale),
+                 icon_url_to_murmur2_hash, is_manifest_stale, update_reason),
       callback);
 }
 
@@ -364,8 +443,7 @@ void WebApkInstaller::OnResult(WebApkInstallResult result) {
 }
 
 WebApkInstaller::WebApkInstaller(content::BrowserContext* browser_context)
-    : request_context_getter_(
-          Profile::FromBrowserContext(browser_context)->GetRequestContext()),
+    : browser_context_(browser_context),
       server_url_(GetServerUrl()),
       webapk_server_timeout_ms_(kWebApkDownloadUrlTimeoutMs),
       relax_updates_(false),
@@ -393,18 +471,33 @@ void WebApkInstaller::InstallAsync(const ShortcutInfo& shortcut_info,
   finish_callback_ = finish_callback;
   task_type_ = INSTALL;
 
-  // We need to take the hash of the bitmap at the icon URL prior to any
-  // transformations being applied to the bitmap (such as encoding/decoding
-  // the bitmap). The icon hash is used to determine whether the icon that
-  // the user sees matches the icon of a WebAPK that the WebAPK server
-  // generated for another user. (The icon can be dynamically generated.)
-  //
-  // We redownload the icon in order to take the Murmur2 hash. The redownload
-  // should be fast because the icon should be in the HTTP cache.
-  WebApkIconHasher::DownloadAndComputeMurmur2Hash(
-      request_context_getter_, install_shortcut_info_->best_primary_icon_url,
-      base::Bind(&WebApkInstaller::OnGotPrimaryIconMurmur2Hash,
-                 weak_ptr_factory_.GetWeakPtr()));
+  CheckFreeSpace();
+}
+
+void WebApkInstaller::CheckFreeSpace() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_WebApkInstaller_checkFreeSpace(env, java_ref_);
+}
+
+void WebApkInstaller::OnGotSpaceStatus(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj,
+    jint status) {
+  SpaceStatus space_status = static_cast<SpaceStatus>(status);
+
+  if (space_status == SpaceStatus::NOT_ENOUGH_SPACE) {
+    OnResult(WebApkInstallResult::FAILURE);
+    return;
+  }
+
+  if (space_status == SpaceStatus::ENOUGH_SPACE_AFTER_FREE_UP_CACHE) {
+    CacheClearer::FreeCacheAsync(
+        content::BrowserContext::GetBrowsingDataRemover(browser_context_),
+        base::BindOnce(&WebApkInstaller::OnHaveSufficientSpaceForInstall,
+                       weak_ptr_factory_.GetWeakPtr()));
+  } else {
+    OnHaveSufficientSpaceForInstall();
+  }
 }
 
 void WebApkInstaller::UpdateAsync(const base::FilePath& update_request_path,
@@ -474,6 +567,22 @@ void WebApkInstaller::OnURLFetchComplete(const net::URLFetcher* source) {
   InstallOrUpdateWebApk(response->package_name(), version, token);
 }
 
+void WebApkInstaller::OnHaveSufficientSpaceForInstall() {
+  // We need to take the hash of the bitmap at the icon URL prior to any
+  // transformations being applied to the bitmap (such as encoding/decoding
+  // the bitmap). The icon hash is used to determine whether the icon that
+  // the user sees matches the icon of a WebAPK that the WebAPK server
+  // generated for another user. (The icon can be dynamically generated.)
+  //
+  // We redownload the icon in order to take the Murmur2 hash. The redownload
+  // should be fast because the icon should be in the HTTP cache.
+  WebApkIconHasher::DownloadAndComputeMurmur2Hash(
+      GetRequestContext(browser_context_),
+      install_shortcut_info_->best_primary_icon_url,
+      base::Bind(&WebApkInstaller::OnGotPrimaryIconMurmur2Hash,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
 void WebApkInstaller::OnGotPrimaryIconMurmur2Hash(
     const std::string& primary_icon_hash) {
   // An empty hash indicates an error during hash calculation.
@@ -486,7 +595,8 @@ void WebApkInstaller::OnGotPrimaryIconMurmur2Hash(
       install_shortcut_info_->best_badge_icon_url !=
           install_shortcut_info_->best_primary_icon_url) {
     WebApkIconHasher::DownloadAndComputeMurmur2Hash(
-        request_context_getter_, install_shortcut_info_->best_badge_icon_url,
+        GetRequestContext(browser_context_),
+        install_shortcut_info_->best_badge_icon_url,
         base::Bind(&WebApkInstaller::OnGotBadgeIconMurmur2Hash,
                    weak_ptr_factory_.GetWeakPtr(), true, primary_icon_hash));
   } else {
@@ -531,7 +641,7 @@ void WebApkInstaller::SendRequest(
 
   url_fetcher_ =
       net::URLFetcher::Create(server_url_, net::URLFetcher::POST, this);
-  url_fetcher_->SetRequestContext(request_context_getter_);
+  url_fetcher_->SetRequestContext(GetRequestContext(browser_context_));
   url_fetcher_->SetUploadData(kProtoMimeType, *serialized_proto);
   url_fetcher_->SetLoadFlags(
       net::LOAD_DISABLE_CACHE | net::LOAD_DO_NOT_SEND_COOKIES |

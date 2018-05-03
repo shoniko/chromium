@@ -57,7 +57,7 @@ std::string AddHistogramSuffix(const ClientId& client_id,
 }
 
 void RecordErrorCauseUMA(const ClientId& client_id, int error_code) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
+  base::UmaHistogramSparse(
       AddHistogramSuffix(client_id,
                          "OfflinePages.Background.LoadingErrorStatusCode"),
       error_code);
@@ -219,7 +219,7 @@ bool BackgroundLoaderOffliner::LoadAndSave(
     // Set up PageRenovator for this offlining instance.
     auto script_injector = base::MakeUnique<RenderFrameScriptInjector>(
         loader_->web_contents()->GetMainFrame(),
-        chrome::ISOLATED_WORLD_ID_CHROME_INTERNAL);
+        ISOLATED_WORLD_ID_CHROME_INTERNAL);
     page_renovator_ = base::MakeUnique<PageRenovator>(
         page_renovation_loader_.get(), std::move(script_injector),
         request.url());

@@ -25,6 +25,12 @@ using chrome_test_util::SecondarySignInButton;
 @implementation SigninEarlGreyUtils
 
 + (void)checkSigninPromoVisibleWithMode:(SigninPromoViewMode)mode {
+  [self checkSigninPromoVisibleWithMode:mode closeButton:YES];
+}
+
++ (void)checkSigninPromoVisibleWithMode:(SigninPromoViewMode)mode
+                            closeButton:(BOOL)closeButton {
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
   [[EarlGrey
       selectElementWithMatcher:grey_allOf(
                                    grey_accessibilityID(kSigninPromoViewId),
@@ -48,11 +54,13 @@ using chrome_test_util::SecondarySignInButton;
           assertWithMatcher:grey_notNil()];
       break;
   }
-  [[EarlGrey
-      selectElementWithMatcher:grey_allOf(grey_accessibilityID(
-                                              kSigninPromoCloseButtonId),
-                                          grey_sufficientlyVisible(), nil)]
-      assertWithMatcher:grey_notNil()];
+  if (closeButton) {
+    [[EarlGrey
+        selectElementWithMatcher:grey_allOf(grey_accessibilityID(
+                                                kSigninPromoCloseButtonId),
+                                            grey_sufficientlyVisible(), nil)]
+        assertWithMatcher:grey_notNil()];
+  }
 }
 
 + (void)checkSigninPromoNotVisible {

@@ -67,17 +67,23 @@ ArcVolumeMounterBridge::~ArcVolumeMounterBridge() {
   arc_bridge_service_->volume_mounter()->RemoveObserver(this);
 }
 
-void ArcVolumeMounterBridge::OnInstanceReady() {
+void ArcVolumeMounterBridge::OnConnectionReady() {
   base::PostTaskWithTraits(FROM_HERE,
                            {base::TaskPriority::USER_BLOCKING,
                             base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
                            base::BindOnce(&SendAllMountEvents, this));
 }
 
-void ArcVolumeMounterBridge::OnDiskEvent(
+void ArcVolumeMounterBridge::OnAutoMountableDiskEvent(
     chromeos::disks::DiskMountManager::DiskEvent event,
-    const chromeos::disks::DiskMountManager::Disk* disk) {
+    const chromeos::disks::DiskMountManager::Disk& disk) {
   // Ignored. DiskEvents will be maintained in Vold during MountEvents.
+}
+
+void ArcVolumeMounterBridge::OnBootDeviceDiskEvent(
+    chromeos::disks::DiskMountManager::DiskEvent event,
+    const chromeos::disks::DiskMountManager::Disk& disk) {
+  // Ignored. ARC doesn't care about boot device disk events.
 }
 
 void ArcVolumeMounterBridge::OnDeviceEvent(

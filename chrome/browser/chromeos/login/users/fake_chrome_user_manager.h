@@ -30,6 +30,7 @@ class FakeChromeUserManager : public ChromeUserManager {
   ~FakeChromeUserManager() override;
 
   // Create and add various types of users.
+  user_manager::User* AddGuestUser();
   user_manager::User* AddKioskAppUser(const AccountId& account_id);
   user_manager::User* AddArcKioskAppUser(const AccountId& account_id);
   user_manager::User* AddSupervisedUser(const AccountId& account_id);
@@ -59,7 +60,8 @@ class FakeChromeUserManager : public ChromeUserManager {
   const AccountId& GetOwnerAccountId() const override;
   void UserLoggedIn(const AccountId& account_id,
                     const std::string& user_id_hash,
-                    bool browser_restart) override;
+                    bool browser_restart,
+                    bool is_child) override;
   void SwitchActiveUser(const AccountId& account_id) override;
   void SwitchToLastActiveUser() override;
   void OnSessionStarted() override;
@@ -85,8 +87,7 @@ class FakeChromeUserManager : public ChromeUserManager {
   void SaveUserDisplayEmail(const AccountId& account_id,
                             const std::string& display_email) override;
   std::string GetUserDisplayEmail(const AccountId& account_id) const override;
-  void SaveUserType(const AccountId& account_id,
-                    const user_manager::UserType& user_type) override;
+  void SaveUserType(const user_manager::User* user) override;
   void UpdateUserAccountData(const AccountId& account_id,
                              const UserAccountData& account_data) override;
   bool IsCurrentUserOwner() const override;
@@ -104,7 +105,6 @@ class FakeChromeUserManager : public ChromeUserManager {
   bool IsLoggedInAsStub() const override;
   bool IsUserNonCryptohomeDataEphemeral(
       const AccountId& account_id) const override;
-  void ChangeUserChildStatus(user_manager::User* user, bool is_child) override;
   bool AreSupervisedUsersAllowed() const override;
   bool IsGuestSessionAllowed() const override;
   bool IsGaiaUserAllowed(const user_manager::User& user) const override;
@@ -185,6 +185,10 @@ class FakeChromeUserManager : public ChromeUserManager {
 
   void set_current_user_new(bool new_user) { current_user_new_ = new_user; }
 
+  void set_is_enterprise_managed(bool is_enterprise_managed) {
+    is_enterprise_managed_ = is_enterprise_managed;
+  }
+
  private:
   // Lazily creates default user flow.
   UserFlow* GetDefaultUserFlow() const;
@@ -213,6 +217,9 @@ class FakeChromeUserManager : public ChromeUserManager {
   // Specific flows by user e-mail.
   // Keys should be canonicalized before access.
   FlowMap specific_flows_;
+
+  // Whether the device is enterprise managed.
+  bool is_enterprise_managed_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FakeChromeUserManager);
 };

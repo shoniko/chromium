@@ -46,6 +46,11 @@ ukm::UkmRecorder* TestAutofillClient::GetUkmRecorder() {
   return ukm::UkmRecorder::Get();
 }
 
+AddressNormalizer* TestAutofillClient::GetAddressNormalizer() {
+  // TODO(crbug.com/788432): Should use a TestAddressNormalizer.
+  return nullptr;
+}
+
 SaveCardBubbleController* TestAutofillClient::GetSaveCardBubbleController() {
 #if defined(OS_ANDROID)
   return nullptr;
@@ -127,8 +132,7 @@ void TestAutofillClient::DidFillOrPreviewField(
     const base::string16& profile_full_name) {
 }
 
-void TestAutofillClient::DidInteractWithNonsecureCreditCardInput(
-    content::RenderFrameHost* rfh) {}
+void TestAutofillClient::DidInteractWithNonsecureCreditCardInput() {}
 
 bool TestAutofillClient::IsContextSecure() {
   // Simplified secure context check for tests.

@@ -150,23 +150,19 @@ function testAutosizeHeight() {
   webview.maxheight = 200;
 
   var step = 1;
+  var finalWidth = 200;
+  var finalHeight = 50;
   webview.addEventListener('sizechanged', function(e) {
-    switch (step) {
-      case 1:
-        embedder.test.assertEq(200, e.newHeight);
-        // Change the maxheight to verify that we see the change.
-        webview.maxheight = 50;
-        break;
-      case 2:
-        embedder.test.assertEq(200, e.oldHeight);
-        embedder.test.assertEq(50, e.newHeight);
-        embedder.test.succeed();
-        break;
-      default:
-        window.console.log('Unexpected sizechanged event, step = ' + step);
-        embedder.test.fail();
-        break;
-    }
+    embedder.test.assertTrue(e.newHeight >= webview.minheight);
+    embedder.test.assertTrue(e.newHeight <= webview.maxheight);
+    embedder.test.assertTrue(e.newWidth >= webview.minwidth);
+    embedder.test.assertTrue(e.newWidth <= webview.maxwidth);
+    if (step == 1)
+      webview.maxheight = 50;
+
+    // We are done once the size settles on the final width and height.
+    if (e.newHeight == finalHeight && e.newWidth == finalWidth)
+      embedder.test.succeed();
     ++step;
   });
 
@@ -3119,6 +3115,56 @@ function testRendererNavigationRedirectWhileUnattached() {
   webview.src = 'about:blank';
 };
 
+function testWebViewAndEmbedderInNewWindow() {
+  var webview = document.createElement('webview');
+  webview.addEventListener('newwindow', function(e) {
+    e.preventDefault();
+    var url = 'new_window_main.html';
+    chrome.app.window.create(url, {}, function (app_new_window) {
+      if (chrome.runtime.lastError) {
+        console.log('Error:' + chrome.runtime.lastError.message);
+        embedder.test.fail();
+        return;
+      }
+
+      var new_window = app_new_window.contentWindow;
+      new_window.onload = function(evt) {
+        var newwebview = new_window.document.createElement('webview');
+        // We could use e.targetUrl here I suppose, but it's about:blank so
+        // it doesn't seem to trigger a loadstop.
+        newwebview.setAttribute('src', embedder.emptyGuestURL);
+        newwebview.addEventListener('loadstop', function (evt2) {
+          // After this test exits, we'll still need to compare embedders in the
+          // C++ part of this test.
+          embedder.test.succeed();
+        });
+        // Be sure to do the attach before appending to document.
+        e.window.attach(newwebview);
+        new_window.document.body.appendChild(newwebview);
+      };
+    });
+  });
+  webview.setAttribute('src', embedder.windowOpenGuestURL);
+  document.body.appendChild(webview);
+}
+
+function testSelectPopupPositionInMac() {
+  var webview = document.createElement('webview');
+  webview.id = 'popup-test-mac';
+  webview.partition = 'foobar';
+  // Offset the <webview> location inside the app so that the corner is almost
+  // 250 pixels off from app window's origin.
+  webview.style = 'position: fixed; left: 240px; top: 70px; border: solid;';
+  webview.addEventListener('loadstop', function() {
+    // This lets the browser know that it can start sending down input events
+    // for the remainder of the test.
+    embedder.test.succeed();
+  });
+
+  webview.setAttribute('src', chrome.runtime.getURL('guest_with_select.html'));
+  document.body.appendChild(webview);
+}
+
 embedder.test.testList = {
   'testAllowTransparencyAttribute': testAllowTransparencyAttribute,
   'testAutosizeHeight': testAutosizeHeight,
@@ -3239,7 +3285,9 @@ embedder.test.testList = {
   'testMailtoLink': testMailtoLink,
   'testRendererNavigationRedirectWhileUnattached':
        testRendererNavigationRedirectWhileUnattached,
-  'testBlobURL': testBlobURL
+  'testBlobURL': testBlobURL,
+  'testWebViewAndEmbedderInNewWindow': testWebViewAndEmbedderInNewWindow,
+  'testSelectPopupPositionInMac': testSelectPopupPositionInMac
 };
 
 onload = function() {

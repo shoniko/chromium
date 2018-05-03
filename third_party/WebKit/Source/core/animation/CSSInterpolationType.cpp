@@ -14,7 +14,7 @@
 #include "core/css/ComputedStyleCSSValueMapping.h"
 #include "core/css/PropertyRegistration.h"
 #include "core/css/parser/CSSTokenizer.h"
-#include "core/css/properties/CSSPropertyAPI.h"
+#include "core/css/properties/CSSProperty.h"
 #include "core/css/resolver/CSSVariableResolver.h"
 #include "core/css/resolver/StyleBuilder.h"
 #include "core/css/resolver/StyleResolverState.h"
@@ -137,7 +137,7 @@ CSSInterpolationType::CSSInterpolationType(
     const PropertyRegistration* registration)
     : InterpolationType(property), registration_(registration) {
   DCHECK(!GetProperty().IsCSSCustomProperty() || registration);
-  DCHECK(!isShorthandProperty(CssProperty()));
+  DCHECK(!CssProperty().IsShorthand());
 }
 
 InterpolationValue CSSInterpolationType::MaybeConvertSingle(
@@ -179,13 +179,13 @@ InterpolationValue CSSInterpolationType::MaybeConvertSingleInternal(
     bool omit_animation_tainted = false;
     const CSSValue* resolved_value =
         CSSVariableResolver(state).ResolveVariableReferences(
-            CssProperty(), *value, omit_animation_tainted);
-    conversion_checkers.push_back(
-        ResolvedVariableChecker::Create(CssProperty(), value, resolved_value));
+            CssProperty().PropertyID(), *value, omit_animation_tainted);
+    conversion_checkers.push_back(ResolvedVariableChecker::Create(
+        CssProperty().PropertyID(), value, resolved_value));
     value = resolved_value;
   }
 
-  bool is_inherited = CSSPropertyAPI::Get(CssProperty()).IsInherited();
+  bool is_inherited = CssProperty().IsInherited();
   if (value->IsInitialValue() || (value->IsUnsetValue() && !is_inherited)) {
     return MaybeConvertInitial(state, conversion_checkers);
   }
@@ -242,7 +242,9 @@ InterpolationValue CSSInterpolationType::MaybeConvertCustomPropertyDeclaration(
     resolved_tokens = declaration.Value();
   }
   const CSSValue* resolved_value =
-      resolved_tokens ? resolved_tokens->ParseForSyntax(registration_->Syntax())
+      resolved_tokens ? resolved_tokens->ParseForSyntax(
+                            registration_->Syntax(),
+                            state.GetDocument().GetSecureContextMode())
                       : nullptr;
   if (!resolved_value) {
     return nullptr;

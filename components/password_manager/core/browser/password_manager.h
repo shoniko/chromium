@@ -44,6 +44,10 @@ class PasswordFormManager;
 // for purposes of supporting HTTP authentication dialogs.
 class PasswordManager : public LoginModel {
  public:
+  // Expresses which navigation entry to use to check whether password manager
+  // is enabled.
+  enum class NavigationEntryToCheck { LAST_COMMITTED, VISIBLE };
+
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 #if defined(OS_WIN)
   static void RegisterLocalPrefs(PrefRegistrySimple* registry);
@@ -149,6 +153,12 @@ class PasswordManager : public LoginModel {
       password_manager::PasswordManagerDriver* driver,
       const autofill::PasswordForm& password_form);
 
+  // Handles a password form being submitted, assumes that submission is
+  // successful and does not do any checks on success of submission.
+  void OnPasswordFormSubmittedNoChecks(
+      password_manager::PasswordManagerDriver* driver,
+      const autofill::PasswordForm& password_form);
+
   // Handles a manual request to save password.
   void OnPasswordFormForceSaveRequested(
       password_manager::PasswordManagerDriver* driver,
@@ -166,6 +176,7 @@ class PasswordManager : public LoginModel {
   // Called if |password_form| was filled upon in-page navigation. This often
   // means history.pushState being called from JavaScript. If this causes false
   // positive in password saving, update http://crbug.com/357696.
+  // TODO(https://crbug.com/795462): find better name for this function.
   void OnInPageNavigation(password_manager::PasswordManagerDriver* driver,
                           const autofill::PasswordForm& password_form);
 
@@ -194,6 +205,8 @@ class PasswordManager : public LoginModel {
     return pending_login_managers_;
   }
 #endif
+
+  NavigationEntryToCheck entry_to_check() const { return entry_to_check_; }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(
@@ -286,6 +299,12 @@ class PasswordManager : public LoginModel {
 
   // The user-visible URL from the last time a password was provisionally saved.
   GURL main_frame_url_;
+
+  // |entry_to_check_| specifies which navigation entry is relevant for
+  // determining if password manager is enabled. The last commited one is
+  // relevant for HTML forms, the visible one is for HTTP auth.
+  NavigationEntryToCheck entry_to_check_ =
+      NavigationEntryToCheck::LAST_COMMITTED;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordManager);
 };

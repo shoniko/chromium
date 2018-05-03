@@ -4,13 +4,14 @@
 
 #include "core/css/cssom/FilteredComputedStylePropertyMap.h"
 
+#include "core/css/CSSCustomPropertyDeclaration.h"
+
 namespace blink {
 
 FilteredComputedStylePropertyMap::FilteredComputedStylePropertyMap(
-    CSSComputedStyleDeclaration* computed_style_declaration,
+    Node* node,
     const Vector<CSSPropertyID>& native_properties,
-    const Vector<AtomicString>& custom_properties,
-    Node* node)
+    const Vector<AtomicString>& custom_properties)
     : ComputedStylePropertyMap(node) {
   for (const auto& native_property : native_properties) {
     native_properties_.insert(native_property);
@@ -21,75 +22,48 @@ FilteredComputedStylePropertyMap::FilteredComputedStylePropertyMap(
   }
 }
 
-CSSStyleValue* FilteredComputedStylePropertyMap::get(
-    const String& property_name,
-    ExceptionState& exception_state) {
-  CSSPropertyID property_id = cssPropertyID(property_name);
-  if (property_id >= firstCSSProperty &&
-      native_properties_.Contains(property_id)) {
-    CSSStyleValueVector style_vector = GetAllInternal(property_id);
-    if (style_vector.IsEmpty())
-      return nullptr;
+const CSSValue* FilteredComputedStylePropertyMap::GetProperty(
+    CSSPropertyID property_id) {
+  if (!native_properties_.Contains(property_id))
+    return nullptr;
 
-    return style_vector[0];
-  }
-
-  if (property_id == CSSPropertyVariable &&
-      custom_properties_.Contains(AtomicString(property_name))) {
-    CSSStyleValueVector style_vector =
-        GetAllInternal(AtomicString(property_name));
-    if (style_vector.IsEmpty())
-      return nullptr;
-
-    return style_vector[0];
-  }
-
-  exception_state.ThrowTypeError("Invalid propertyName: " + property_name);
-  return nullptr;
+  return ComputedStylePropertyMap::GetProperty(property_id);
 }
 
-CSSStyleValueVector FilteredComputedStylePropertyMap::getAll(
-    const String& property_name,
-    ExceptionState& exception_state) {
-  CSSPropertyID property_id = cssPropertyID(property_name);
-  if (property_id >= firstCSSProperty &&
-      native_properties_.Contains(property_id))
-    return GetAllInternal(property_id);
+const CSSValue* FilteredComputedStylePropertyMap::GetCustomProperty(
+    AtomicString property_name) {
+  if (!custom_properties_.Contains(AtomicString(property_name)))
+    return nullptr;
 
-  if (property_id == CSSPropertyVariable &&
-      custom_properties_.Contains(AtomicString(property_name)))
-    return GetAllInternal(AtomicString(property_name));
-
-  exception_state.ThrowTypeError("Invalid propertyName: " + property_name);
-  return CSSStyleValueVector();
+  return ComputedStylePropertyMap::GetCustomProperty(property_name);
 }
 
-bool FilteredComputedStylePropertyMap::has(const String& property_name,
-                                           ExceptionState& exception_state) {
-  CSSPropertyID property_id = cssPropertyID(property_name);
-  if (property_id >= firstCSSProperty &&
-      native_properties_.Contains(property_id))
-    return !GetAllInternal(property_id).IsEmpty();
-
-  if (property_id == CSSPropertyVariable &&
-      custom_properties_.Contains(AtomicString(property_name)))
-    return !GetAllInternal(AtomicString(property_name)).IsEmpty();
-
-  exception_state.ThrowTypeError("Invalid propertyName: " + property_name);
-  return false;
-}
-
-Vector<String> FilteredComputedStylePropertyMap::getProperties() {
-  Vector<String> result;
-  for (const auto& native_property : native_properties_) {
-    result.push_back(getPropertyNameString(native_property));
+void FilteredComputedStylePropertyMap::ForEachProperty(
+    const IterationCallback& callback) {
+  // FIXME: We should be filtering out properties from ComputedStylePropertyMap,
+  // but native_properties_ may contain invalid properties (e.g. shorthands).
+  // The correct behaviour would be to ignore invalid properties, but there
+  // are a few tests that rely on this.
+  for (const auto property_id : native_properties_) {
+    const CSSValue* value = GetProperty(property_id);
+    if (value) {
+      callback(CSSProperty::Get(property_id).GetPropertyNameAtomicString(),
+               *value);
+    }
   }
 
-  for (const auto& custom_property : custom_properties_) {
-    result.push_back(custom_property);
+  for (const auto& name : custom_properties_) {
+    const CSSValue* value = GetCustomProperty(name);
+    // FIXME: If custom_properties_ contains an invalid custom property, the
+    // current behaviour is to treat it as valid. The best we can do here is
+    // returning a dummy 'initial' value until we fix this.
+    if (value) {
+      callback(name, *value);
+    } else {
+      callback(name,
+               *CSSCustomPropertyDeclaration::Create(name, CSSValueInitial));
+    }
   }
-
-  return result;
 }
 
 }  // namespace blink

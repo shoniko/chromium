@@ -27,8 +27,8 @@ class CORE_EXPORT TextPainter : public TextPainterBase {
               bool horizontal)
       : TextPainterBase(context, font, text_origin, text_bounds, horizontal),
         run_(run),
-        combined_text_(0) {}
-  ~TextPainter() {}
+        combined_text_(nullptr) {}
+  ~TextPainter() = default;
 
   void SetCombinedText(LayoutTextCombine* combined_text) {
     combined_text_ = combined_text;

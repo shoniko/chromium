@@ -7,7 +7,6 @@
 #include <algorithm>
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "chrome/browser/ui/views/harmony/harmony_layout_provider.h"
 #include "ui/base/material_design/material_design_controller.h"
@@ -39,8 +38,8 @@ ChromeLayoutProvider* ChromeLayoutProvider::Get() {
 std::unique_ptr<views::LayoutProvider>
 ChromeLayoutProvider::CreateLayoutProvider() {
   return ui::MaterialDesignController::IsSecondaryUiMaterial()
-             ? base::MakeUnique<HarmonyLayoutProvider>()
-             : base::MakeUnique<ChromeLayoutProvider>();
+             ? std::make_unique<HarmonyLayoutProvider>()
+             : std::make_unique<ChromeLayoutProvider>();
 }
 
 gfx::Insets ChromeLayoutProvider::GetInsetsMetric(int metric) const {
@@ -58,6 +57,10 @@ int ChromeLayoutProvider::GetDistanceMetric(int metric) const {
   switch (metric) {
     case DISTANCE_BUTTON_MINIMUM_WIDTH:
       return 48;
+    case DISTANCE_CONTENT_LIST_VERTICAL_SINGLE:
+      return 4;
+    case DISTANCE_CONTENT_LIST_VERTICAL_MULTI:
+      return 8;
     case DISTANCE_CONTROL_LIST_VERTICAL:
       return GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL);
     case DISTANCE_RELATED_CONTROL_HORIZONTAL_SMALL:
@@ -78,8 +81,10 @@ int ChromeLayoutProvider::GetDistanceMetric(int metric) const {
       return 8;
     case DISTANCE_TOAST_LABEL_VERTICAL:
       return 12;
-    case DISTANCE_MODAL_DIALOG_WIDTH_CONTAINING_MULTILINE_TEXT:
+    case DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH:
       return 400;
+    case DISTANCE_BUBBLE_PREFERRED_WIDTH:
+      return 320;
     default:
       return views::LayoutProvider::GetDistanceMetric(metric);
   }

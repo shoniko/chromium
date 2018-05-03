@@ -18,7 +18,9 @@
 #include "components/autofill/core/common/password_form_field_prediction_map.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "components/autofill/core/common/password_form_generation_data.h"
+#include "components/autofill/core/common/submission_source.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
+#include "url/origin.h"
 
 namespace mojo {
 
@@ -93,6 +95,15 @@ struct EnumTraits<autofill::mojom::PasswordFormSubmissionIndicatorEvent,
   static bool FromMojom(
       autofill::mojom::PasswordFormSubmissionIndicatorEvent input,
       autofill::PasswordForm::SubmissionIndicatorEvent* output);
+};
+
+template <>
+struct EnumTraits<autofill::mojom::SubmissionSource,
+                  autofill::SubmissionSource> {
+  static autofill::mojom::SubmissionSource ToMojom(
+      autofill::SubmissionSource input);
+  static bool FromMojom(autofill::mojom::SubmissionSource input,
+                        autofill::SubmissionSource* output);
 };
 
 template <>
@@ -190,6 +201,10 @@ struct StructTraits<autofill::mojom::FormDataDataView, autofill::FormData> {
   static const GURL& origin(const autofill::FormData& r) { return r.origin; }
 
   static const GURL& action(const autofill::FormData& r) { return r.action; }
+
+  static const url::Origin& main_frame_origin(const autofill::FormData& r) {
+    return r.main_frame_origin;
+  }
 
   static bool is_form_tag(const autofill::FormData& r) { return r.is_form_tag; }
 
@@ -519,6 +534,10 @@ struct StructTraits<autofill::mojom::PasswordFormDataView,
   static autofill::PasswordForm::SubmissionIndicatorEvent submission_event(
       const autofill::PasswordForm& r) {
     return r.submission_event;
+  }
+
+  static bool only_for_fallback_saving(const autofill::PasswordForm& r) {
+    return r.only_for_fallback_saving;
   }
 
   static bool Read(autofill::mojom::PasswordFormDataView data,

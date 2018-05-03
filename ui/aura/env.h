@@ -48,6 +48,7 @@ class WindowTreeClient;
 namespace aura {
 namespace test {
 class EnvTestHelper;
+class EnvWindowTreeClientSetter;
 }
 
 class EnvInputStateController;
@@ -117,6 +118,11 @@ class AURA_EXPORT Env : public ui::EventTarget,
   }
   ui::ContextFactory* context_factory() { return context_factory_; }
 
+  void set_throttle_input_on_resize_for_testing(bool throttle_input) {
+    throttle_input_on_resize_ = throttle_input;
+  }
+  bool throttle_input_on_resize() const { return throttle_input_on_resize_; }
+
   void set_context_factory_private(
       ui::ContextFactoryPrivate* context_factory_private) {
     context_factory_private_ = context_factory_private;
@@ -137,6 +143,7 @@ class AURA_EXPORT Env : public ui::EventTarget,
 
  private:
   friend class test::EnvTestHelper;
+  friend class test::EnvWindowTreeClientSetter;
   friend class EventInjector;
   friend class MusMouseLocationUpdater;
   friend class Window;
@@ -219,6 +226,8 @@ class AURA_EXPORT Env : public ui::EventTarget,
   // This is set to true when the WindowTreeClient is destroyed. It triggers
   // creating a different WindowPort implementation.
   bool in_mus_shutdown_ = false;
+
+  bool throttle_input_on_resize_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(Env);
 };

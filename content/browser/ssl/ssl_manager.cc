@@ -14,7 +14,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
 #include "content/browser/devtools/devtools_agent_host_impl.h"
-#include "content/browser/devtools/protocol/security_handler.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/resource_request_info_impl.h"
@@ -35,13 +34,6 @@ namespace content {
 namespace {
 
 const char kSSLManagerKeyName[] = "content_ssl_manager";
-
-// Events for UMA. Do not reorder or change!
-enum SSLGoodCertSeenEvent {
-  NO_PREVIOUS_EXCEPTION = 0,
-  HAD_PREVIOUS_EXCEPTION = 1,
-  SSL_GOOD_CERT_SEEN_EVENT_MAX = 2
-};
 
 void OnAllowCertificateWithRecordDecision(
     bool record_decision,
@@ -100,13 +92,15 @@ class SSLManagerSet : public base::SupportsUserData::Data {
 void HandleSSLErrorOnUI(
     const base::Callback<WebContents*(void)>& web_contents_getter,
     const base::WeakPtr<SSLErrorHandler::Delegate>& delegate,
+    BrowserThread::ID delegate_thread,
     const ResourceType resource_type,
     const GURL& url,
     const net::SSLInfo& ssl_info,
     bool fatal) {
   content::WebContents* web_contents = web_contents_getter.Run();
-  std::unique_ptr<SSLErrorHandler> handler(new SSLErrorHandler(
-      web_contents, delegate, resource_type, url, ssl_info, fatal));
+  std::unique_ptr<SSLErrorHandler> handler(
+      new SSLErrorHandler(web_contents, delegate, delegate_thread,
+                          resource_type, url, ssl_info, fatal));
 
   if (!web_contents) {
     // Requests can fail to dispatch because they don't have a WebContents. See
@@ -145,12 +139,18 @@ void SSLManager::OnSSLCertificateError(
            << " url: " << url.spec()
            << " cert_status: " << std::hex << ssl_info.cert_status;
 
-  // A certificate error occurred. Construct a SSLErrorHandler object
-  // on the UI thread for processing.
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    HandleSSLErrorOnUI(web_contents_getter, delegate, BrowserThread::UI,
+                       resource_type, url, ssl_info, fatal);
+    return;
+  }
+
+  // TODO(jam): remove the logic to call this from IO thread once the
+  // network service code path is the only one.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::BindOnce(&HandleSSLErrorOnUI, web_contents_getter, delegate,
-                     resource_type, url, ssl_info, fatal));
+                     BrowserThread::IO, resource_type, url, ssl_info, fatal));
 }
 
 // static
@@ -176,7 +176,7 @@ SSLManager::SSLManager(NavigationControllerImpl* controller)
   SSLManagerSet* managers = static_cast<SSLManagerSet*>(
       controller_->GetBrowserContext()->GetUserData(kSSLManagerKeyName));
   if (!managers) {
-    auto managers_owned = base::MakeUnique<SSLManagerSet>();
+    auto managers_owned = std::make_unique<SSLManagerSet>();
     managers = managers_owned.get();
     controller_->GetBrowserContext()->SetUserData(kSSLManagerKeyName,
                                                   std::move(managers_owned));
@@ -304,29 +304,22 @@ void SSLManager::OnCertError(std::unique_ptr<SSLErrorHandler> handler) {
 }
 
 void SSLManager::DidStartResourceResponse(const GURL& url,
-                                          bool has_certificate,
-                                          net::CertStatus ssl_cert_status) {
-  if (has_certificate && url.SchemeIsCryptographic() &&
-      !net::IsCertStatusError(ssl_cert_status)) {
-    // If the scheme is https: or wss: *and* the security info for the
-    // cert has been set (i.e. the cert id is not 0) and the cert did
-    // not have any errors, revoke any previous decisions that
-    // have occurred. If the cert info has not been set, do nothing since it
-    // isn't known if the connection was actually a valid connection or if it
-    // had a cert error.
-    SSLGoodCertSeenEvent event = NO_PREVIOUS_EXCEPTION;
-    if (ssl_host_state_delegate_ &&
-        ssl_host_state_delegate_->HasAllowException(url.host())) {
-      // If there's no certificate error, a good certificate has been seen, so
-      // clear out any exceptions that were made by the user for bad
-      // certificates. This intentionally does not apply to cached resources
-      // (see https://crbug.com/634553 for an explanation).
-      ssl_host_state_delegate_->RevokeUserAllowExceptions(url.host());
-      event = HAD_PREVIOUS_EXCEPTION;
-    }
-    UMA_HISTOGRAM_ENUMERATION("interstitial.ssl.good_cert_seen", event,
-                              SSL_GOOD_CERT_SEEN_EVENT_MAX);
+                                          bool has_certificate_errors) {
+  if (!url.SchemeIsCryptographic() || has_certificate_errors)
+    return;
+
+  // If the scheme is https: or wss and the cert did not have any errors, revoke
+  // any previous decisions that have occurred.
+  if (!ssl_host_state_delegate_ ||
+      !ssl_host_state_delegate_->HasAllowException(url.host())) {
+    return;
   }
+
+  // If there's no certificate error, a good certificate has been seen, so
+  // clear out any exceptions that were made by the user for bad
+  // certificates. This intentionally does not apply to cached resources
+  // (see https://crbug.com/634553 for an explanation).
+  ssl_host_state_delegate_->RevokeUserAllowExceptions(url.host());
 }
 
 void SSLManager::OnCertErrorInternal(std::unique_ptr<SSLErrorHandler> handler,
@@ -342,18 +335,11 @@ void SSLManager::OnCertErrorInternal(std::unique_ptr<SSLErrorHandler> handler,
       base::Bind(&OnAllowCertificate, base::Owned(handler.release()),
                  ssl_host_state_delegate_);
 
-  DevToolsAgentHostImpl* agent_host = static_cast<DevToolsAgentHostImpl*>(
-      DevToolsAgentHost::GetOrCreateFor(web_contents).get());
-  if (agent_host) {
-    for (auto* security_handler :
-         protocol::SecurityHandler::ForAgentHost(agent_host)) {
-      if (security_handler->NotifyCertificateError(
-              cert_error, request_url,
-              base::Bind(&OnAllowCertificateWithRecordDecision, false,
-                         callback))) {
-        return;
-      }
-    }
+  if (DevToolsAgentHostImpl::HandleCertificateError(
+          web_contents, cert_error, request_url,
+          base::BindRepeating(&OnAllowCertificateWithRecordDecision, false,
+                              callback))) {
+    return;
   }
 
   GetContentClient()->browser()->AllowCertificateError(

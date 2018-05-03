@@ -12,6 +12,7 @@
 namespace blink {
 
 class ComputedStyle;
+class Document;
 class LayoutObject;
 class LayoutBox;
 class NGBreakToken;
@@ -19,6 +20,7 @@ class NGConstraintSpace;
 class NGLayoutResult;
 struct MinMaxSize;
 struct NGLogicalSize;
+struct NGPhysicalSize;
 
 // Represents the input to a layout algorithm for a given node. The layout
 // engine should use the style, node type to determine which type of layout
@@ -37,6 +39,8 @@ class CORE_EXPORT NGLayoutInputNode {
 
   bool IsInline() const;
   bool IsBlock() const;
+
+  bool IsColumnSpanAll() const;
   bool IsFloating() const;
   bool IsOutOfFlowPositioned() const;
   bool IsReplaced() const;
@@ -68,6 +72,10 @@ class CORE_EXPORT NGLayoutInputNode {
 
   // Returns the next sibling.
   NGLayoutInputNode NextSibling();
+
+  Document& GetDocument() const;
+
+  NGPhysicalSize InitialContainingBlockSize() const;
 
   // Returns the LayoutObject which is associated with this node.
   LayoutObject* GetLayoutObject() const;

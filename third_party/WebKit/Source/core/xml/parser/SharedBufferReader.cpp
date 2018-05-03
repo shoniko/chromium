@@ -30,8 +30,8 @@
 
 #include "core/xml/parser/SharedBufferReader.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/SharedBuffer.h"
-#include "platform/wtf/RefPtr.h"
 
 #include <algorithm>
 #include <cstring>
@@ -41,7 +41,7 @@ namespace blink {
 SharedBufferReader::SharedBufferReader(scoped_refptr<const SharedBuffer> buffer)
     : buffer_(std::move(buffer)), current_offset_(0) {}
 
-SharedBufferReader::~SharedBufferReader() {}
+SharedBufferReader::~SharedBufferReader() = default;
 
 int SharedBufferReader::ReadData(char* output_buffer, int asked_to_read) {
   if (!buffer_ || current_offset_ > buffer_->size())

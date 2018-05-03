@@ -33,6 +33,7 @@
 
 #include "platform/heap/Heap.h"
 #include "platform/heap/HeapAllocator.h"
+#include "platform/heap/HeapTraits.h"
 #include "platform/heap/Member.h"
 #include "platform/heap/Persistent.h"
 #include "platform/heap/ThreadState.h"
@@ -40,6 +41,7 @@
 #include "platform/heap/Visitor.h"
 #include "platform/heap/VisitorImpl.h"
 #include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
 
 #if defined(LEAK_SANITIZER)
 #include "platform/wtf/LeakAnnotations.h"

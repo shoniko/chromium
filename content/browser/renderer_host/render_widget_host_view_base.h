@@ -27,6 +27,7 @@
 #include "content/public/common/screen_info.h"
 #include "ipc/ipc_listener.h"
 #include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
+#include "services/viz/public/interfaces/hit_test/hit_test_region_list.mojom.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationType.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "third_party/WebKit/public/web/WebTextDirection.h"
@@ -87,7 +88,6 @@ class TextInputManager;
 class TouchSelectionControllerClientManager;
 class WebContentsAccessibility;
 class WebCursor;
-struct NativeWebKeyboardEvent;
 struct TextInputState;
 
 // Basic implementation shared by concrete RenderWidgetHostView subclasses.
@@ -104,7 +104,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   RenderWidgetHostImpl* GetFocusedWidget() const;
 
   // RenderWidgetHostView implementation.
-  RenderWidgetHost* GetRenderWidgetHost() const override;
+  RenderWidgetHost* GetRenderWidgetHost() const final;
   void SetBackgroundColorToDefault() final;
   ui::TextInputClient* GetTextInputClient() override;
   void WasUnOccluded() override {}
@@ -128,6 +128,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   void EndFrameSubscription() override;
   void FocusedNodeTouched(const gfx::Point& location_dips_screen,
                           bool editable) override;
+  void GetScreenInfo(ScreenInfo* screen_info) override;
   TouchSelectionControllerClientManager*
   GetTouchSelectionControllerClientManager() override;
 
@@ -166,6 +167,11 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // to nullptr.
   void DidUnregisterFromTextInputManager(TextInputManager* text_input_manager);
 
+  // Informs the view that the renderer has resized to |new_size| because auto-
+  // resize is enabled.
+  virtual void ResizeDueToAutoResize(const gfx::Size& new_size,
+                                     uint64_t sequence_number);
+
   base::WeakPtr<RenderWidgetHostViewBase> GetWeakPtr();
 
   //----------------------------------------------------------------------------
@@ -192,6 +198,11 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
 
   // The height of the bottom bar.
   virtual float GetBottomControlsHeight() const;
+
+  // If mouse wheels can only specify the number of ticks of some static
+  // multiplier constant, this method returns that constant (in DIPs). If mouse
+  // wheels can specify an arbitrary delta this returns 0.
+  virtual int GetMouseWheelMinimumGranularity() const;
 
   // Called prior to forwarding input event messages to the renderer, giving
   // the view a chance to perform in-process event filtering or processing.
@@ -242,9 +253,16 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
       viz::mojom::CompositorFrameSinkClient*
           renderer_compositor_frame_sink) = 0;
 
+  // This is called by the RenderWidgetHostImpl to provide a new compositor
+  // frame that was received from the renderer process. if Viz service hit
+  // testing is enabled then a HitTestRegionList provides hit test data
+  // that is used for routing input events.
+  // TODO(kenrb): When Viz service is enabled on all platforms,
+  // |hit_test_region_list| should stop being an optional argument.
   virtual void SubmitCompositorFrame(
       const viz::LocalSurfaceId& local_surface_id,
-      viz::CompositorFrame frame) = 0;
+      viz::CompositorFrame frame,
+      viz::mojom::HitTestRegionListPtr hit_test_region_list) = 0;
 
   virtual void OnDidNotProduceFrame(const viz::BeginFrameAck& ack) {}
 
@@ -278,20 +296,27 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // methods are invoked on the RenderWidgetHostView that should be able to
   // properly handle the event (i.e. it has focus for keyboard events, or has
   // been identified by hit testing mouse, touch or gesture events).
+  // |out_query_renderer| is set if there is low confidence in the hit test
+  // result which means that renderer process hit testing could potentially
+  // give a different result. In that case the returned FrameSinkId and
+  // transformed point should be ignored.
   virtual viz::FrameSinkId FrameSinkIdAtPoint(
       viz::SurfaceHittestDelegate* delegate,
       const gfx::PointF& point,
-      gfx::PointF* transformed_point);
-  virtual void ProcessKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                    const ui::LatencyInfo& latency) {}
-  virtual void ProcessMouseEvent(const blink::WebMouseEvent& event,
-                                 const ui::LatencyInfo& latency) {}
-  virtual void ProcessMouseWheelEvent(const blink::WebMouseWheelEvent& event,
-                                      const ui::LatencyInfo& latency) {}
-  virtual void ProcessTouchEvent(const blink::WebTouchEvent& event,
-                                 const ui::LatencyInfo& latency) {}
+      gfx::PointF* transformed_point,
+      bool* out_query_renderer);
+
+  virtual void PreProcessMouseEvent(const blink::WebMouseEvent& event) {}
+  virtual void PreProcessTouchEvent(const blink::WebTouchEvent& event) {}
+
+  void ProcessMouseEvent(const blink::WebMouseEvent& event,
+                         const ui::LatencyInfo& latency);
+  void ProcessMouseWheelEvent(const blink::WebMouseWheelEvent& event,
+                              const ui::LatencyInfo& latency);
+  void ProcessTouchEvent(const blink::WebTouchEvent& event,
+                         const ui::LatencyInfo& latency);
   virtual void ProcessGestureEvent(const blink::WebGestureEvent& event,
-                                   const ui::LatencyInfo& latency) {}
+                                   const ui::LatencyInfo& latency);
 
   // Transform a point that is in the coordinate space of a Surface that is
   // embedded within the RenderWidgetHostViewBase's Surface to the
@@ -336,6 +361,13 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
 
   // Returns true if the current view is in virtual reality mode.
   virtual bool IsInVR() const;
+
+  // Obtains the root window FrameSinkId.
+  virtual viz::FrameSinkId GetRootFrameSinkId();
+
+  // Returns the SurfaceId currently in use by the renderer to submit compositor
+  // frames.
+  virtual viz::SurfaceId GetCurrentSurfaceId() const = 0;
 
   //----------------------------------------------------------------------------
   // The following methods are related to IME.
@@ -433,6 +465,12 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // changes.
   virtual void SetShowingContextMenu(bool showing) {}
 
+  // Returns the associated RenderWidgetHostImpl.
+  virtual RenderWidgetHostImpl* GetRenderWidgetHostImpl() const;
+
+  // Process swap messages sent before |frame_token| in RenderWidgetHostImpl.
+  void OnFrameTokenChangedForView(uint32_t frame_token);
+
   // Add and remove observers for lifetime event notifications. The order in
   // which notifications are sent to observers is undefined. Clients must be
   // sure to remove the observer before they go away.
@@ -468,10 +506,6 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
       ui::mojom::WindowTreeClientPtr renderer_window_tree_client);
   void OnChildFrameDestroyed(int routing_id);
 #endif
-
-  // Exposed for testing.
-  virtual bool IsChildFrameForTesting() const;
-  virtual viz::SurfaceId SurfaceIdForTesting() const;
 
  protected:
   // Interface class only, do not construct.
@@ -526,6 +560,12 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
                           int embed_id,
                           const base::UnguessableToken& token);
 #endif
+
+  // Called when display properties that need to be synchronized with the
+  // renderer process changes. This method is called before notifying
+  // RenderWidgetHostImpl in order to allow the view to allocate a new
+  // LocalSurfaceId.
+  virtual void OnSynchronizedDisplayPropertiesChanged() {}
 
   gfx::Rect current_display_area_;
 

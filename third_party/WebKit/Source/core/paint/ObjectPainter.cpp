@@ -14,6 +14,7 @@
 #include "platform/geometry/LayoutPoint.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -100,7 +101,7 @@ void ObjectPainter::AddPDFURLRectIfNeeded(const PaintInfo& paint_info,
     return;
 
   DrawingRecorder recorder(paint_info.context, layout_object_,
-                           DisplayItem::kPrintedContentPDFURLRect, rect);
+                           DisplayItem::kPrintedContentPDFURLRect);
   if (url.HasFragmentIdentifier() &&
       EqualIgnoringFragmentIdentifier(url,
                                       layout_object_.GetDocument().BaseURL())) {

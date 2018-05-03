@@ -49,19 +49,14 @@ void SVGMaskPainter::FinishEffect(const LayoutObject& object,
                                          1, &visual_rect, mask_layer_filter);
     Optional<ScopedPaintChunkProperties> scoped_paint_chunk_properties;
     if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-      DCHECK(object.FirstFragment());
-      const auto* object_paint_properties =
-          object.FirstFragment()->PaintProperties();
-      DCHECK(object_paint_properties && object_paint_properties->Mask());
-      PaintChunkProperties properties(
-          context.GetPaintController().CurrentPaintChunkProperties());
-      properties.property_tree_state.SetEffect(object_paint_properties->Mask());
+      const auto* properties = object.FirstFragment().PaintProperties();
+      DCHECK(properties && properties->Mask());
       scoped_paint_chunk_properties.emplace(context.GetPaintController(),
-                                            object, properties);
+                                            properties->Mask(), object,
+                                            DisplayItem::kSVGMask);
     }
 
-    DrawMaskForLayoutObject(context, object, object.ObjectBoundingBox(),
-                            visual_rect);
+    DrawMaskForLayoutObject(context, object, object.ObjectBoundingBox());
   }
 
   if (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
@@ -71,8 +66,7 @@ void SVGMaskPainter::FinishEffect(const LayoutObject& object,
 void SVGMaskPainter::DrawMaskForLayoutObject(
     GraphicsContext& context,
     const LayoutObject& layout_object,
-    const FloatRect& target_bounding_box,
-    const FloatRect& target_visual_rect) {
+    const FloatRect& target_bounding_box) {
   AffineTransform content_transformation;
   sk_sp<const PaintRecord> record = mask_.CreatePaintRecord(
       content_transformation, target_bounding_box, context);
@@ -81,8 +75,7 @@ void SVGMaskPainter::DrawMaskForLayoutObject(
                                                   DisplayItem::kSVGMask))
     return;
 
-  DrawingRecorder recorder(context, layout_object, DisplayItem::kSVGMask,
-                           target_visual_rect);
+  DrawingRecorder recorder(context, layout_object, DisplayItem::kSVGMask);
   context.Save();
   context.ConcatCTM(content_transformation);
   context.DrawRecord(std::move(record));

@@ -66,12 +66,11 @@ TestNetworkQualityEstimator::TestNetworkQualityEstimator(
           std::move(external_estimate_provider),
           std::make_unique<NetworkQualityEstimatorParams>(variation_params),
           net_log->bound().net_log()),
+      net_log_(std::move(net_log)),
       current_network_type_(NetworkChangeNotifier::CONNECTION_UNKNOWN),
       accuracy_recording_intervals_set_(false),
-      rand_double_(0.0),
       embedded_test_server_(base::FilePath(kTestFilePath)),
-      suppress_notifications_for_testing_(suppress_notifications_for_testing),
-      net_log_(std::move(net_log)) {
+      suppress_notifications_for_testing_(suppress_notifications_for_testing) {
   SetUseLocalHostRequestsForTesting(allow_local_host_requests_for_tests);
   SetUseSmallResponsesForTesting(allow_smaller_responses_for_tests);
 
@@ -90,17 +89,16 @@ TestNetworkQualityEstimator::TestNetworkQualityEstimator(
     : NetworkQualityEstimator(std::unique_ptr<ExternalEstimateProvider>(),
                               std::move(params),
                               net_log->bound().net_log()),
+      net_log_(std::move(net_log)),
       current_network_type_(NetworkChangeNotifier::CONNECTION_UNKNOWN),
       accuracy_recording_intervals_set_(false),
-      rand_double_(0.0),
       embedded_test_server_(base::FilePath(kTestFilePath)),
-      suppress_notifications_for_testing_(false),
-      net_log_(std::move(net_log)) {
+      suppress_notifications_for_testing_(false) {
   // Set up the embedded test server.
   EXPECT_TRUE(embedded_test_server_.Start());
 }
 
-TestNetworkQualityEstimator::~TestNetworkQualityEstimator() {}
+TestNetworkQualityEstimator::~TestNetworkQualityEstimator() = default;
 
 void TestNetworkQualityEstimator::RunOneRequest() {
   TestDelegate test_delegate;
@@ -151,16 +149,18 @@ TestNetworkQualityEstimator::GetRecentEffectiveConnectionTypeAndNetworkQuality(
     const base::TimeTicks& start_time,
     base::TimeDelta* http_rtt,
     base::TimeDelta* transport_rtt,
-    int32_t* downstream_throughput_kbps) const {
+    int32_t* downstream_throughput_kbps,
+    size_t* observations_count) const {
   if (recent_effective_connection_type_) {
     GetRecentHttpRTT(start_time, http_rtt);
-    GetRecentTransportRTT(start_time, transport_rtt);
+    GetRecentTransportRTT(start_time, transport_rtt, observations_count);
     GetRecentDownlinkThroughputKbps(start_time, downstream_throughput_kbps);
     return recent_effective_connection_type_.value();
   }
   return NetworkQualityEstimator::
       GetRecentEffectiveConnectionTypeAndNetworkQuality(
-          start_time, http_rtt, transport_rtt, downstream_throughput_kbps);
+          start_time, http_rtt, transport_rtt, downstream_throughput_kbps,
+          observations_count);
 }
 
 bool TestNetworkQualityEstimator::GetRecentHttpRTT(
@@ -182,20 +182,27 @@ bool TestNetworkQualityEstimator::GetRecentHttpRTT(
 
 bool TestNetworkQualityEstimator::GetRecentTransportRTT(
     const base::TimeTicks& start_time,
-    base::TimeDelta* rtt) const {
+    base::TimeDelta* rtt,
+    size_t* observations_count) const {
   if (start_time.is_null()) {
     if (start_time_null_transport_rtt_) {
       *rtt = start_time_null_transport_rtt_.value();
+      if (transport_rtt_observation_count_last_ect_computation_) {
+        *observations_count =
+            transport_rtt_observation_count_last_ect_computation_.value();
+      }
       return true;
     }
-    return NetworkQualityEstimator::GetRecentTransportRTT(start_time, rtt);
+    return NetworkQualityEstimator::GetRecentTransportRTT(start_time, rtt,
+                                                          observations_count);
   }
 
   if (recent_transport_rtt_) {
     *rtt = recent_transport_rtt_.value();
     return true;
   }
-  return NetworkQualityEstimator::GetRecentTransportRTT(start_time, rtt);
+  return NetworkQualityEstimator::GetRecentTransportRTT(start_time, rtt,
+                                                        observations_count);
 }
 
 base::Optional<base::TimeDelta> TestNetworkQualityEstimator::GetTransportRTT()
@@ -226,16 +233,17 @@ bool TestNetworkQualityEstimator::GetRecentDownlinkThroughputKbps(
 }
 
 base::TimeDelta TestNetworkQualityEstimator::GetRTTEstimateInternal(
-    const std::vector<NetworkQualityObservationSource>&
-        disallowed_observation_sources,
     base::TimeTicks start_time,
     const base::Optional<NetworkQualityEstimator::Statistic>& statistic,
-    int percentile) const {
+    nqe::internal::ObservationCategory observation_category,
+    int percentile,
+    size_t* observations_count) const {
   if (rtt_estimate_internal_)
     return rtt_estimate_internal_.value();
 
   return NetworkQualityEstimator::GetRTTEstimateInternal(
-      disallowed_observation_sources, start_time, statistic, percentile);
+      start_time, statistic, observation_category, percentile,
+      observations_count);
 }
 
 void TestNetworkQualityEstimator::SetAccuracyRecordingIntervals(
@@ -250,10 +258,6 @@ TestNetworkQualityEstimator::GetAccuracyRecordingIntervals() const {
     return accuracy_recording_intervals_;
 
   return NetworkQualityEstimator::GetAccuracyRecordingIntervals();
-}
-
-double TestNetworkQualityEstimator::RandDouble() const {
-  return rand_double_;
 }
 
 base::Optional<int32_t>
@@ -323,9 +327,15 @@ void TestNetworkQualityEstimator::NotifyObserversOfEffectiveConnectionType(
     observer.OnEffectiveConnectionTypeChanged(type);
 }
 
+const NetworkQualityEstimatorParams* TestNetworkQualityEstimator::params()
+    const {
+  return params_.get();
+}
+
 nqe::internal::NetworkID TestNetworkQualityEstimator::GetCurrentNetworkID()
     const {
-  return nqe::internal::NetworkID(current_network_type_, current_network_id_);
+  return nqe::internal::NetworkID(current_network_type_, current_network_id_,
+                                  INT32_MIN);
 }
 
 TestNetworkQualityEstimator::LocalHttpTestServer::LocalHttpTestServer(
@@ -349,6 +359,26 @@ void TestNetworkQualityEstimator::
 
   NetworkQualityEstimator::NotifyRTTAndThroughputEstimatesObserverIfPresent(
       observer);
+}
+
+void TestNetworkQualityEstimator::SetStartTimeNullHttpRtt(
+    const base::TimeDelta http_rtt) {
+  start_time_null_http_rtt_ = http_rtt;
+  // Force compute effective connection type so that the new RTT value is
+  // immediately picked up. This ensures that the next call to
+  // GetEffectiveConnectionType() returns the effective connnection type
+  // that was computed based on |http_rtt|.
+  ComputeEffectiveConnectionType();
+}
+
+void TestNetworkQualityEstimator::SetStartTimeNullTransportRtt(
+    const base::TimeDelta transport_rtt) {
+  start_time_null_transport_rtt_ = transport_rtt;
+  // Force compute effective connection type so that the new RTT value is
+  // immediately picked up. This ensures that the next call to
+  // GetEffectiveConnectionType() returns the effective connnection type
+  // that was computed based on |transport_rtt|.
+  ComputeEffectiveConnectionType();
 }
 
 }  // namespace net

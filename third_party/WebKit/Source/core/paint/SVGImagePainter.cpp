@@ -36,7 +36,7 @@ void SVGImagePainter::Paint(const PaintInfo& paint_info) {
   PaintInfo paint_info_before_filtering(paint_info);
   // Images cannot have children so do not call updateCullRect.
   SVGTransformContext transform_context(
-      paint_info_before_filtering.context, layout_svg_image_,
+      paint_info_before_filtering, layout_svg_image_,
       layout_svg_image_.LocalToSVGParentTransform());
   {
     SVGPaintContext paint_context(layout_svg_image_,
@@ -45,9 +45,9 @@ void SVGImagePainter::Paint(const PaintInfo& paint_info) {
         !DrawingRecorder::UseCachedDrawingIfPossible(
             paint_context.GetPaintInfo().context, layout_svg_image_,
             paint_context.GetPaintInfo().phase)) {
-      DrawingRecorder recorder(
-          paint_context.GetPaintInfo().context, layout_svg_image_,
-          paint_context.GetPaintInfo().phase, bounding_box);
+      DrawingRecorder recorder(paint_context.GetPaintInfo().context,
+                               layout_svg_image_,
+                               paint_context.GetPaintInfo().phase);
       PaintForeground(paint_context.GetPaintInfo());
     }
   }
@@ -66,7 +66,8 @@ void SVGImagePainter::PaintForeground(const PaintInfo& paint_info) {
   if (image_viewport_size.IsEmpty())
     return;
 
-  scoped_refptr<Image> image = image_resource->GetImage(image_viewport_size);
+  scoped_refptr<Image> image =
+      image_resource->GetImage(LayoutSize(image_viewport_size));
   FloatRect dest_rect = layout_svg_image_.ObjectBoundingBox();
   FloatRect src_rect(0, 0, image->width(), image->height());
 
@@ -103,13 +104,12 @@ FloatSize SVGImagePainter::ComputeImageViewportSize() const {
   // Avoid returning the size of the broken image.
   if (cached_image->ErrorOccurred())
     return FloatSize();
-
-  if (cached_image->GetImage()->IsSVGImage()) {
-    return ToSVGImage(cached_image->GetImage())
-        ->ConcreteObjectSize(layout_svg_image_.ObjectBoundingBox().Size());
+  Image* image = cached_image->GetImage();
+  if (image->IsSVGImage()) {
+    return ToSVGImage(image)->ConcreteObjectSize(
+        layout_svg_image_.ObjectBoundingBox().Size());
   }
-
-  return FloatSize(cached_image->GetImage()->Size());
+  return FloatSize(image->Size());
 }
 
 }  // namespace blink

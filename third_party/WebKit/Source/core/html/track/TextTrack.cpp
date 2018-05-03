@@ -97,7 +97,7 @@ TextTrack::TextTrack(const AtomicString& kind,
       rendered_track_index_(kInvalidTrackIndex),
       has_been_configured_(false) {}
 
-TextTrack::~TextTrack() {}
+TextTrack::~TextTrack() = default;
 
 bool TextTrack::IsValidKindKeyword(const String& value) {
   if (value == SubtitlesKeyword())
@@ -215,9 +215,7 @@ TextTrackCueList* TextTrack::activeCues() {
 void TextTrack::addCue(TextTrackCue* cue) {
   DCHECK(cue);
 
-  // TODO(93143): Add spec-compliant behavior for negative time values.
-  if (std::isnan(cue->startTime()) || std::isnan(cue->endTime()) ||
-      cue->startTime() < 0 || cue->endTime() < 0)
+  if (std::isnan(cue->startTime()) || std::isnan(cue->endTime()))
     return;
 
   // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-texttrack-addcue
@@ -286,14 +284,14 @@ void TextTrack::CueWillChange(TextTrackCue* cue) {
     GetCueTimeline()->RemoveCue(this, cue);
 }
 
-void TextTrack::CueDidChange(TextTrackCue* cue) {
+void TextTrack::CueDidChange(TextTrackCue* cue, bool update_cue_index) {
   // This method is called through cue->track(), which should imply that this
   // track has a list of cues.
   DCHECK(cues_ && cue->track() == this);
 
   // Make sure the TextTrackCueList order is up to date.
-  // FIXME: Only need to do this if the change was to any of the timestamps.
-  cues_->UpdateCueIndex(cue);
+  if (update_cue_index)
+    cues_->UpdateCueIndex(cue);
 
   // Since a call to cueDidChange is always preceded by a call to
   // cueWillChange, the cue should no longer be active when we reach this
@@ -382,5 +380,6 @@ void TextTrack::Trace(blink::Visitor* visitor) {
 void TextTrack::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(cues_);
   EventTargetWithInlineData::TraceWrappers(visitor);
+  TrackBase::TraceWrappers(visitor);
 }
 }  // namespace blink

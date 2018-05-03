@@ -13,6 +13,8 @@
 #include "base/sequenced_task_runner.h"
 #include "base/task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "content/renderer/media/media_stream_audio_source.h"
+#include "content/renderer/media/media_stream_constraints_util_audio.h"
 #include "content/renderer/media/media_stream_constraints_util_video_content.h"
 #include "content/renderer/media/media_stream_constraints_util_video_device.h"
 #include "content/renderer/media/media_stream_source.h"
@@ -25,22 +27,22 @@
 namespace content {
 namespace {
 
-::mojom::FacingMode GetMojoFacingMode(
+blink::mojom::FacingMode GetMojoFacingMode(
     const blink::WebMediaStreamTrack::FacingMode facing_mode) {
   switch (facing_mode) {
     case blink::WebMediaStreamTrack::FacingMode::kUser:
-      return ::mojom::FacingMode::USER;
+      return blink::mojom::FacingMode::USER;
     case blink::WebMediaStreamTrack::FacingMode::kEnvironment:
-      return ::mojom::FacingMode::ENVIRONMENT;
+      return blink::mojom::FacingMode::ENVIRONMENT;
     case blink::WebMediaStreamTrack::FacingMode::kLeft:
-      return ::mojom::FacingMode::LEFT;
+      return blink::mojom::FacingMode::LEFT;
     case blink::WebMediaStreamTrack::FacingMode::kRight:
-      return ::mojom::FacingMode::RIGHT;
+      return blink::mojom::FacingMode::RIGHT;
     case blink::WebMediaStreamTrack::FacingMode::kNone:
-      return ::mojom::FacingMode::NONE;
+      return blink::mojom::FacingMode::NONE;
   }
   NOTREACHED();
-  return ::mojom::FacingMode::NONE;
+  return blink::mojom::FacingMode::NONE;
 }
 
 void RequestFailed(blink::WebApplyConstraintsRequest request,
@@ -84,9 +86,28 @@ void ApplyConstraintsProcessor::ProcessRequest(
   } else {
     DCHECK_EQ(current_request_.Track().Source().GetType(),
               blink::WebMediaStreamSource::kTypeAudio);
-    // TODO(guidou): Implement applyConstraints() for audio tracks.
-    // http://crbug.com/763320
-    CannotApplyConstraints("applyConstraints not supported for audio tracks");
+    ProcessAudioRequest();
+  }
+}
+
+void ApplyConstraintsProcessor::ProcessAudioRequest() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(!current_request_.IsNull());
+  DCHECK_EQ(current_request_.Track().Source().GetType(),
+            blink::WebMediaStreamSource::kTypeAudio);
+  DCHECK(request_completed_cb_);
+  MediaStreamAudioSource* audio_source = GetCurrentAudioSource();
+  if (!audio_source) {
+    CannotApplyConstraints("The track is not connected to any source");
+    return;
+  }
+
+  AudioCaptureSettings settings =
+      SelectSettingsAudioCapture(audio_source, current_request_.Constraints());
+  if (settings.HasValue()) {
+    ApplyConstraintsSucceeded();
+  } else {
+    ApplyConstraintsFailed(settings.failed_constraint_name());
   }
 }
 
@@ -238,8 +259,8 @@ VideoCaptureSettings ApplyConstraintsProcessor::SelectVideoSettings(
   DCHECK(request_completed_cb_);
   DCHECK_GT(formats.size(), 0U);
 
-  ::mojom::VideoInputDeviceCapabilitiesPtr device_capabilities =
-      ::mojom::VideoInputDeviceCapabilities::New();
+  blink::mojom::VideoInputDeviceCapabilitiesPtr device_capabilities =
+      blink::mojom::VideoInputDeviceCapabilities::New();
   device_capabilities->device_id =
       current_request_.Track().Source().Id().Ascii();
   device_capabilities->facing_mode =
@@ -268,6 +289,12 @@ VideoCaptureSettings ApplyConstraintsProcessor::SelectVideoSettings(
   return SelectSettingsVideoDeviceCapture(
       video_capabilities, current_request_.Constraints(), settings.width,
       settings.height, settings.frame_rate);
+}
+
+MediaStreamAudioSource* ApplyConstraintsProcessor::GetCurrentAudioSource() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(!current_request_.Track().IsNull());
+  return MediaStreamAudioSource::From(current_request_.Track().Source());
 }
 
 MediaStreamVideoTrack* ApplyConstraintsProcessor::GetCurrentVideoTrack() {
@@ -340,7 +367,7 @@ void ApplyConstraintsProcessor::CleanupRequest(
   video_source_ = nullptr;
 }
 
-const ::mojom::MediaDevicesDispatcherHostPtr&
+const blink::mojom::MediaDevicesDispatcherHostPtr&
 ApplyConstraintsProcessor::GetMediaDevicesDispatcher() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return media_devices_dispatcher_cb_.Run();

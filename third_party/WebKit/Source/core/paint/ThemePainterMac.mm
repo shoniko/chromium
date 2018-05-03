@@ -33,7 +33,6 @@
 #import "platform/graphics/BitmapImage.h"
 #import "platform/graphics/GraphicsContextStateSaver.h"
 #import "platform/graphics/Image.h"
-#import "platform/graphics/ImageBuffer.h"
 #import "platform/graphics/paint/PaintCanvas.h"
 #import "platform/mac/BlockExceptions.h"
 #import "platform/mac/ColorMac.h"
@@ -66,7 +65,7 @@ bool ThemePainterMac::PaintTextField(const Node* node,
 
   bool use_ns_text_field_cell =
       style.HasAppearance() &&
-      style.VisitedDependentColor(CSSPropertyBackgroundColor) ==
+      style.VisitedDependentColor(GetCSSPropertyBackgroundColor()) ==
           Color::kWhite &&
       !style.HasBackgroundImage();
 
@@ -171,6 +170,7 @@ bool ThemePainterMac::PaintTextArea(const Node* node,
 }
 
 bool ThemePainterMac::PaintMenuList(const Node* node,
+                                    const Document&,
                                     const ComputedStyle& style,
                                     const PaintInfo& paint_info,
                                     const IntRect& r) {
@@ -262,6 +262,7 @@ bool ThemePainterMac::PaintProgressBar(const LayoutObject& layout_object,
 }
 
 bool ThemePainterMac::PaintMenuListButton(const Node* node,
+                                          const Document&,
                                           const ComputedStyle& style,
                                           const PaintInfo& paint_info,
                                           const IntRect& r) {
@@ -291,7 +292,7 @@ bool ThemePainterMac::PaintMenuListButton(const Node* node,
   if (bounds.Width() < arrow_width + scaled_padding_end)
     return false;
 
-  Color color = style.VisitedDependentColor(CSSPropertyColor);
+  Color color = style.VisitedDependentColor(GetCSSPropertyColor());
   PaintFlags flags = paint_info.context.FillFlags();
   flags.setAntiAlias(true);
   flags.setColor(color.Rgb());
@@ -551,21 +552,16 @@ bool ThemePainterMac::PaintSearchField(const Node* node,
   return false;
 }
 
-bool ThemePainterMac::PaintSearchFieldCancelButton(const LayoutObject& o,
-                                                   const PaintInfo& paint_info,
-                                                   const IntRect& r) {
-  if (!o.GetNode())
-    return false;
-  Element* input = o.GetNode()->OwnerShadowHost();
-  if (!input)
-    input = ToElement(o.GetNode());
-
-  if (!input->GetLayoutObject()->IsBox())
+bool ThemePainterMac::PaintSearchFieldCancelButton(
+    const LayoutObject& cancel_button,
+    const PaintInfo& paint_info,
+    const IntRect& r) {
+  if (!cancel_button.GetNode())
     return false;
 
   GraphicsContextStateSaver state_saver(paint_info.context);
 
-  float zoom_level = o.StyleRef().EffectiveZoom();
+  float zoom_level = cancel_button.StyleRef().EffectiveZoom();
   FloatRect unzoomed_rect(r);
   if (zoom_level != 1.0f) {
     unzoomed_rect.SetWidth(unzoomed_rect.Width() / zoom_level);
@@ -577,7 +573,7 @@ bool ThemePainterMac::PaintSearchFieldCancelButton(const LayoutObject& o,
 
   Color fill_color(200, 200, 200);
 
-  if (LayoutTheme::IsPressed(o.GetNode())) {
+  if (LayoutTheme::IsPressed(cancel_button.GetNode())) {
     Color tint_color(0, 0, 0, 32);
     fill_color = fill_color.Blend(tint_color);
   }
@@ -613,6 +609,7 @@ bool ThemePainterMac::PaintSearchFieldCancelButton(const LayoutObject& o,
 
 // FIXME: Share more code with radio buttons.
 bool ThemePainterMac::PaintCheckbox(const Node* node,
+                                    const Document& document,
                                     const ComputedStyle& style,
                                     const PaintInfo& paint_info,
                                     const IntRect& zoomed_rect) {
@@ -645,7 +642,7 @@ bool ThemePainterMac::PaintCheckbox(const Node* node,
 
   LocalCurrentGraphicsContext local_context(
       paint_info.context, ThemeMac::InflateRectForFocusRing(inflated_rect));
-  NSView* view = ThemeMac::EnsuredView(node->GetDocument().View());
+  NSView* view = ThemeMac::EnsuredView(document.View());
   [checkbox_cell drawWithFrame:NSRect(inflated_rect) inView:view];
   if (states & kFocusControlState)
     [checkbox_cell cr_drawFocusRingWithFrame:NSRect(inflated_rect) inView:view];
@@ -656,6 +653,7 @@ bool ThemePainterMac::PaintCheckbox(const Node* node,
 }
 
 bool ThemePainterMac::PaintRadio(const Node* node,
+                                 const Document& document,
                                  const ComputedStyle& style,
                                  const PaintInfo& paint_info,
                                  const IntRect& zoomed_rect) {
@@ -686,7 +684,7 @@ bool ThemePainterMac::PaintRadio(const Node* node,
   LocalCurrentGraphicsContext local_context(
       paint_info.context, ThemeMac::InflateRectForFocusRing(inflated_rect));
   BEGIN_BLOCK_OBJC_EXCEPTIONS
-  NSView* view = ThemeMac::EnsuredView(node->GetDocument().View());
+  NSView* view = ThemeMac::EnsuredView(document.View());
   [radio_cell drawWithFrame:NSRect(inflated_rect) inView:view];
   if (states & kFocusControlState)
     [radio_cell cr_drawFocusRingWithFrame:NSRect(inflated_rect) inView:view];
@@ -697,6 +695,7 @@ bool ThemePainterMac::PaintRadio(const Node* node,
 }
 
 bool ThemePainterMac::PaintButton(const Node* node,
+                                  const Document& document,
                                   const ComputedStyle& style,
                                   const PaintInfo& paint_info,
                                   const IntRect& zoomed_rect) {
@@ -742,7 +741,7 @@ bool ThemePainterMac::PaintButton(const Node* node,
 
   LocalCurrentGraphicsContext local_context(
       paint_info.context, ThemeMac::InflateRectForFocusRing(inflated_rect));
-  NSView* view = ThemeMac::EnsuredView(node->GetDocument().View());
+  NSView* view = ThemeMac::EnsuredView(document.View());
 
   [button_cell drawWithFrame:NSRect(inflated_rect) inView:view];
   if (states & kFocusControlState)

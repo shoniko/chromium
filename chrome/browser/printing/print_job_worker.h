@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
+#include "build/build_config.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "content/public/browser/browser_thread.h"
 #include "printing/page_number.h"
@@ -98,8 +99,17 @@ class PrintJobWorker {
   // and DEFAULT_INIT_DONE. These three are sent through PrintJob::InitDone().
   class NotificationTask;
 
+  // Posts a task to call OnNewPage(). Used to wait for pages/document to be
+  // available.
+  void PostWaitForPage();
+
+#if defined(OS_WIN)
   // Renders a page in the printer.
   void SpoolPage(PrintedPage* page);
+#else
+  // Renders the document to the printer.
+  void SpoolJob();
+#endif
 
   // Closes the job since spooling is done.
   void OnDocumentDone();
@@ -128,16 +138,14 @@ class PrintJobWorker {
   void UseDefaultSettings();
 
   // Printing context delegate.
-  std::unique_ptr<PrintingContext::Delegate> printing_context_delegate_;
+  const std::unique_ptr<PrintingContext::Delegate> printing_context_delegate_;
 
   // Information about the printer setting.
-  std::unique_ptr<PrintingContext> printing_context_;
+  const std::unique_ptr<PrintingContext> printing_context_;
 
   // The printed document. Only has read-only access.
   scoped_refptr<PrintedDocument> document_;
 
-  int render_process_id_;
-  int render_frame_id_;
   // The print job owning this worker thread. It is guaranteed to outlive this
   // object.
   PrintJobWorkerOwner* owner_;
@@ -148,7 +156,7 @@ class PrintJobWorker {
   // Thread to run worker tasks.
   base::Thread thread_;
 
-  // Tread-safe pointer to task runner of the |thread_|.
+  // Thread-safe pointer to task runner of the |thread_|.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   // Used to generate a WeakPtr for callbacks.

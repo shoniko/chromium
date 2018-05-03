@@ -134,7 +134,7 @@ void LayoutBlock::WillBeDestroyed() {
   if (!DocumentBeingDestroyed() && Parent())
     Parent()->DirtyLinesFromChangedChild(this);
 
-  if (LocalFrame* frame = this->GetFrame()) {
+  if (LocalFrame* frame = GetFrame()) {
     frame->Selection().LayoutBlockWillBeDestroyed(*this);
     frame->GetPage()->GetDragCaret().LayoutBlockWillBeDestroyed(*this);
   }
@@ -314,7 +314,7 @@ void LayoutBlock::AddChildBeforeDescendant(LayoutObject* new_child,
     // Insert the child into the anonymous block box instead of here.
     if (new_child->IsInline() || new_child->IsFloatingOrOutOfFlowPositioned() ||
         before_descendant->Parent()->SlowFirstChild() != before_descendant)
-      before_descendant->Parent()->AddChild(new_child, before_descendant);
+      before_descendant_container->AddChild(new_child, before_descendant);
     else
       AddChild(new_child, before_descendant->Parent());
     return;
@@ -422,8 +422,9 @@ void LayoutBlock::UpdateLayout() {
   if (needs_scroll_anchoring)
     GetScrollableArea()->GetScrollAnchor()->NotifyBeforeLayout();
 
-  // Table cells call layoutBlock directly, so don't add any logic here.  Put
-  // code into layoutBlock().
+  // Table cells call UpdateBlockLayout directly, as does
+  // PaintLayerScrollableArea for nested scrollbar layouts. Most logic should be
+  // in UpdateBlockLayout instead of UpdateLayout.
   UpdateBlockLayout(false);
 
   // It's safe to check for control clip here, since controls can never be table
@@ -478,6 +479,7 @@ void LayoutBlock::AddOverflowFromChildren() {
 
 DISABLE_CFI_PERF
 void LayoutBlock::ComputeOverflow(LayoutUnit old_client_after_edge, bool) {
+  LayoutRect previous_visual_overflow_rect = VisualOverflowRect();
   overflow_.reset();
 
   AddOverflowFromChildren();
@@ -507,12 +509,8 @@ void LayoutBlock::ComputeOverflow(LayoutUnit old_client_after_edge, bool) {
   AddVisualEffectOverflow();
   AddVisualOverflowFromTheme();
 
-  // An enclosing composited layer will need to update its bounds if we now
-  // overflow it.
-  PaintLayer* layer = EnclosingLayer();
-  if (!NeedsLayout() && layer->HasCompositedLayerMapping() &&
-      !layer->VisualRect().Contains(VisualOverflowRect()))
-    layer->SetNeedsCompositingInputsUpdate();
+  if (Layer() && VisualOverflowRect() != previous_visual_overflow_rect)
+    Layer()->SetNeedsCompositingInputsUpdate();
 }
 
 void LayoutBlock::AddOverflowFromBlockChildren() {
@@ -582,13 +580,12 @@ void LayoutBlock::UpdateBlockChildDirtyBitsBeforeLayout(bool relayout_children,
   // determine this, so that we can avoid the relayout.
   bool has_relative_logical_height =
       child.HasRelativeLogicalHeight() ||
-      (child.IsAnonymous() && this->HasRelativeLogicalHeight()) ||
+      (child.IsAnonymous() && HasRelativeLogicalHeight()) ||
       child.StretchesToViewport();
   if (relayout_children || (has_relative_logical_height && !IsLayoutView()) ||
       (height_available_to_children_changed_ &&
        ChangeInAvailableLogicalHeightAffectsChild(this, child)) ||
-      (child.IsListMarker() && IsListItem() &&
-       ToLayoutBlockFlow(this)->ContainsFloats())) {
+      (child.IsListMarker() && IsListItem())) {
     child.SetChildNeedsLayout(kMarkOnlyThis);
   }
 }
@@ -794,7 +791,8 @@ void LayoutBlock::LayoutPositionedObject(LayoutBox* positioned_object,
 
   if (!positioned_object->NormalChildNeedsLayout() &&
       (relayout_children || height_available_to_children_changed_ ||
-       NeedsLayoutDueToStaticPosition(positioned_object)))
+       (!IsLayoutNGBlockFlow() &&
+        NeedsLayoutDueToStaticPosition(positioned_object))))
     layout_scope.SetChildNeedsLayout(positioned_object);
 
   LayoutUnit logical_top_estimate;
@@ -964,6 +962,12 @@ void LayoutBlock::RemovePositionedObject(LayoutBox* o) {
     g_positioned_descendants_map->erase(container);
     container->has_positioned_objects_ = false;
   }
+
+  // Need to clear the anchor of the positioned object in its container box.
+  // The anchors are created in the logical container box, not in the CSS
+  // containing block.
+  if (LayoutObject* parent = o->Parent())
+    parent->MarkContainerNeedsCollectInlines();
 }
 
 PaintInvalidationReason LayoutBlock::InvalidatePaint(
@@ -1017,7 +1021,7 @@ void LayoutBlock::RemovePositionedObjects(
     }
   }
 
-  for (auto object : dead_objects) {
+  for (auto* object : dead_objects) {
     DCHECK_EQ(g_positioned_container_map->at(object), this);
     positioned_descendants->erase(object);
     g_positioned_container_map->erase(object);
@@ -1254,7 +1258,7 @@ PositionWithAffinity LayoutBlock::PositionForPointIfOutsideAtomicInlineLevel(
 static inline bool IsChildHitTestCandidate(LayoutBox* box) {
   return box->Size().Height() &&
          box->Style()->Visibility() == EVisibility::kVisible &&
-         !box->IsFloatingOrOutOfFlowPositioned() && !box->IsLayoutFlowThread();
+         !box->IsOutOfFlowPositioned() && !box->IsLayoutFlowThread();
 }
 
 PositionWithAffinity LayoutBlock::PositionForPoint(const LayoutPoint& point) {
@@ -1295,6 +1299,9 @@ PositionWithAffinity LayoutBlock::PositionForPoint(const LayoutPoint& point) {
         continue;
       LayoutUnit child_logical_bottom =
           LogicalTopForChild(*child_box) + LogicalHeightForChild(*child_box);
+      if (child_box->IsLayoutBlockFlow())
+          child_logical_bottom += ToLayoutBlockFlow(child_box)->LowestFloatLogicalBottom();
+
       // We hit child if our click is above the bottom of its padding box (like
       // IE6/7 and FF3).
       if (point_in_logical_contents.Y() < child_logical_bottom ||
@@ -1318,14 +1325,6 @@ void LayoutBlock::OffsetForContents(LayoutPoint& offset) const {
     offset += LayoutSize(ScrolledContentOffset());
 
   offset = FlipForWritingMode(offset);
-}
-
-int LayoutBlock::ColumnGap() const {
-  if (Style()->HasNormalColumnGap()) {
-    // "1em" is recommended as the normal gap setting. Matches <p> margins.
-    return Style()->GetFontDescription().ComputedPixelSize();
-  }
-  return static_cast<int>(Style()->ColumnGap());
 }
 
 void LayoutBlock::ScrollbarsChanged(bool horizontal_scrollbar_changed,
@@ -1414,6 +1413,11 @@ void LayoutBlock::ComputePreferredLogicalWidths() {
                      LayoutUnit(style_to_use.LogicalMinWidth().Value())));
   }
 
+  LayoutUnit border_and_padding = BorderAndPaddingLogicalWidth();
+  DCHECK_GE(border_and_padding, LayoutUnit());
+  min_preferred_logical_width_ += border_and_padding;
+  max_preferred_logical_width_ += border_and_padding;
+
   // Table layout uses integers, ceil the preferred widths to ensure that they
   // can contain the contents.
   if (IsTableCell()) {
@@ -1422,11 +1426,6 @@ void LayoutBlock::ComputePreferredLogicalWidths() {
     max_preferred_logical_width_ =
         LayoutUnit(max_preferred_logical_width_.Ceil());
   }
-
-  LayoutUnit border_and_padding = BorderAndPaddingLogicalWidth();
-  DCHECK_GE(border_and_padding, LayoutUnit());
-  min_preferred_logical_width_ += border_and_padding;
-  max_preferred_logical_width_ += border_and_padding;
 
   ClearPreferredLogicalWidthsDirty();
 }
@@ -1438,7 +1437,7 @@ void LayoutBlock::ComputeBlockPreferredLogicalWidths(
   bool nowrap = style_to_use.WhiteSpace() == EWhiteSpace::kNowrap;
 
   LayoutObject* child = FirstChild();
-  LayoutBlock* containing_block = this->ContainingBlock();
+  LayoutBlock* containing_block = ContainingBlock();
   LayoutUnit float_left_width, float_right_width;
   while (child) {
     // Positioned children don't affect the min/max width. Spanners only affect
@@ -1858,8 +1857,7 @@ void LayoutBlock::AddOutlineRects(
       !HasOverflowClip() && !HasControlClip()) {
     AddOutlineRectsForNormalChildren(rects, additional_offset,
                                      include_block_overflows);
-    if (TrackedLayoutBoxListHashSet* positioned_objects =
-            this->PositionedObjects()) {
+    if (TrackedLayoutBoxListHashSet* positioned_objects = PositionedObjects()) {
       for (auto* box : *positioned_objects)
         AddOutlineRectsForDescendant(*box, rects, additional_offset,
                                      include_block_overflows);
@@ -1985,15 +1983,13 @@ LayoutBlock* LayoutBlock::CreateAnonymousWithParentAndDisplay(
 
 bool LayoutBlock::RecalcNormalFlowChildOverflowIfNeeded(
     LayoutObject* layout_object) {
-  if (layout_object->IsOutOfFlowPositioned() ||
-      !layout_object->NeedsOverflowRecalcAfterStyleChange())
+  if (layout_object->IsOutOfFlowPositioned())
     return false;
-
-  DCHECK(layout_object->IsLayoutBlock());
-  return ToLayoutBlock(layout_object)->RecalcOverflowAfterStyleChange();
+  return layout_object->RecalcOverflowAfterStyleChange();
 }
 
 bool LayoutBlock::RecalcChildOverflowAfterStyleChange() {
+  DCHECK(!IsTable());
   DCHECK(ChildNeedsOverflowRecalcAfterStyleChange());
   ClearChildNeedsOverflowRecalcAfterStyleChange();
 
@@ -2022,21 +2018,13 @@ bool LayoutBlock::RecalcPositionedDescendantsOverflowAfterStyleChange() {
     return children_overflow_changed;
 
   for (auto* box : *positioned_descendants) {
-    if (!box->NeedsOverflowRecalcAfterStyleChange())
-      continue;
-    LayoutBlock* block = ToLayoutBlock(box);
-    if (!block->RecalcOverflowAfterStyleChange() ||
-        box->Style()->GetPosition() == EPosition::kFixed)
-      continue;
-
-    children_overflow_changed = true;
+    if (box->RecalcOverflowAfterStyleChange())
+      children_overflow_changed = true;
   }
   return children_overflow_changed;
 }
 
 bool LayoutBlock::RecalcOverflowAfterStyleChange() {
-  DCHECK(NeedsOverflowRecalcAfterStyleChange());
-
   bool children_overflow_changed = false;
   if (ChildNeedsOverflowRecalcAfterStyleChange())
     children_overflow_changed = RecalcChildOverflowAfterStyleChange();
@@ -2045,6 +2033,11 @@ bool LayoutBlock::RecalcOverflowAfterStyleChange() {
   if (!self_needs_overflow_recalc && !children_overflow_changed)
     return false;
 
+  return RecalcSelfOverflowAfterStyleChange();
+}
+
+bool LayoutBlock::RecalcSelfOverflowAfterStyleChange() {
+  bool self_needs_overflow_recalc = SelfNeedsOverflowRecalcAfterStyleChange();
   ClearSelfNeedsOverflowRecalcAfterStyleChange();
   // If the current block needs layout, overflow will be recalculated during
   // layout time anyway. We can safely exit here.

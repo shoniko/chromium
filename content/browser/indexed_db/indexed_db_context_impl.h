@@ -22,7 +22,6 @@
 #include "content/public/browser/indexed_db_context.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/quota/special_storage_policy.h"
-#include "storage/common/quota/quota_types.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -47,6 +46,8 @@ class CONTENT_EXPORT IndexedDBContextImpl : public IndexedDBContext {
     FORCE_CLOSE_BACKING_STORE_FAILURE,
     FORCE_CLOSE_INTERNALS_PAGE,
     FORCE_CLOSE_COPY_ORIGIN,
+    // Append new values here and update IDBContextForcedCloseReason in
+    // enums.xml.
     FORCE_CLOSE_REASON_MAX
   };
 

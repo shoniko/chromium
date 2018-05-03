@@ -10,12 +10,12 @@
 #include "base/macros.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#import "ios/chrome/browser/snapshots/snapshot_manager.h"
+#import "ios/chrome/browser/snapshots/snapshot_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #include "ios/chrome/browser/test/perf_test_with_bvc_ios.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
-#import "ios/chrome/browser/ui/fullscreen_controller.h"
+#import "ios/chrome/browser/ui/fullscreen/legacy_fullscreen_controller.h"
 #import "ios/chrome/browser/ui/stack_view/stack_view_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/web/public/referrer.h"
@@ -287,10 +287,15 @@ void StackViewControllerPerfTest::MainControllerShowTabSwitcher() {
   // expensive we activate snapshot coalescing in the scope of this function
   // which will cache the first snapshot for the tab and reuse it instead of
   // regenerating a new one each time.
-  [currentTab setSnapshotCoalescingEnabled:YES];
-  base::ScopedClosureRunner runner(base::BindBlockArc(^{
-    [currentTab setSnapshotCoalescingEnabled:NO];
-  }));
+  base::ScopedClosureRunner runner;
+  if (currentTab && currentTab.webState) {
+    SnapshotTabHelper::FromWebState(currentTab.webState)
+        ->SetSnapshotCoalescingEnabled(true);
+    runner.ReplaceClosure(base::BindBlockArc(^{
+      SnapshotTabHelper::FromWebState(currentTab.webState)
+          ->SetSnapshotCoalescingEnabled(false);
+    }));
+  }
 
   if (!view_controller_) {
     view_controller_ =
@@ -348,8 +353,9 @@ base::TimeDelta StackViewControllerPerfTest::CloseStackView() {
 
 base::TimeDelta StackViewControllerPerfTest::TakeSnapshot() {
   base::Time startTime = base::Time::NowFromSystemTime();
-  UIImage* image = [[tab_model_ currentTab] updateSnapshotWithOverlay:YES
-                                                     visibleFrameOnly:YES];
+  UIImage* image =
+      SnapshotTabHelper::FromWebState([tab_model_ currentTab].webState)
+          ->UpdateSnapshot(/*with_overlays=*/true, /*visible_frame_only=*/true);
   base::TimeDelta elapsed = base::Time::NowFromSystemTime() - startTime;
   EXPECT_TRUE(image);
   return elapsed;

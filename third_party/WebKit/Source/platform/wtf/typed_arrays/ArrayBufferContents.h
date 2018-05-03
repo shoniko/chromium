@@ -27,10 +27,10 @@
 #ifndef ArrayBufferContents_h
 #define ArrayBufferContents_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
 #include "platform/wtf/WTF.h"
 #include "platform/wtf/WTFExport.h"
@@ -38,7 +38,6 @@
 namespace WTF {
 
 class WTF_EXPORT ArrayBufferContents {
-  WTF_MAKE_NONCOPYABLE(ArrayBufferContents);
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
  public:
@@ -46,23 +45,23 @@ class WTF_EXPORT ArrayBufferContents {
   // Types that need to be used when injecting external memory.
   // DataHandle allows specifying a deleter which will be invoked when
   // DataHandle instance goes out of scope. If the data memory is allocated
-  // using ArrayBufferContents::allocateMemoryOrNull, it is necessary to
-  // specify ArrayBufferContents::freeMemory as the DataDeleter.
-  // Most clients would want to use ArrayBufferContents::createData, which
-  // allocates memory and specifies the correct deleter.
+  // using ArrayBufferContents::AllocateMemoryOrNull, it is necessary to specify
+  // ArrayBufferContents::FreeMemory as the DataDeleter. Most clients would want
+  // to use ArrayBufferContents::CreateDataHandle, which allocates memory and
+  // specifies the correct deleter.
   using DataDeleter = void (*)(void* data);
 
   enum class AllocationKind { kNormal, kReservation };
 
   class DataHandle {
-    WTF_MAKE_NONCOPYABLE(DataHandle);
+    DISALLOW_COPY_AND_ASSIGN(DataHandle);
 
    public:
-    DataHandle(void* data, DataDeleter deleter)
+    DataHandle(void* data, size_t length, DataDeleter deleter)
         : allocation_base_(data),
-          allocation_length_(0),
+          allocation_length_(length),
           data_(data),
-          data_length_(0),
+          data_length_(length),
           kind_(AllocationKind::kNormal),
           deleter_(deleter) {}
     DataHandle(void* allocation_base,
@@ -152,7 +151,6 @@ class WTF_EXPORT ArrayBufferContents {
                       SharingType is_shared,
                       InitializationPolicy);
   ArrayBufferContents(DataHandle,
-                      unsigned size_in_bytes,
                       SharingType is_shared);
   ArrayBufferContents(ArrayBufferContents&&) = default;
 
@@ -171,7 +169,7 @@ class WTF_EXPORT ArrayBufferContents {
     return DataMaybeShared();
   }
   void* DataMaybeShared() const { return holder_ ? holder_->Data() : nullptr; }
-  unsigned SizeInBytes() const { return holder_ ? holder_->SizeInBytes() : 0; }
+  size_t DataLength() const { return holder_ ? holder_->DataLength() : 0; }
   bool IsShared() const { return holder_ ? holder_->IsShared() : false; }
 
   void Transfer(ArrayBufferContents& other);
@@ -208,21 +206,21 @@ class WTF_EXPORT ArrayBufferContents {
       int64_t diff);
 
   class DataHolder : public ThreadSafeRefCounted<DataHolder> {
-    WTF_MAKE_NONCOPYABLE(DataHolder);
+    DISALLOW_COPY_AND_ASSIGN(DataHolder);
 
    public:
     DataHolder();
     ~DataHolder();
 
-    void AllocateNew(unsigned size_in_bytes,
+    void AllocateNew(size_t length,
                      SharingType is_shared,
                      InitializationPolicy);
-    void Adopt(DataHandle, unsigned size_in_bytes, SharingType is_shared);
+    void Adopt(DataHandle, SharingType is_shared);
     void CopyMemoryFrom(const DataHolder& source);
 
     const void* Data() const { return data_.Data(); }
     void* Data() { return data_.Data(); }
-    unsigned SizeInBytes() const { return size_in_bytes_; }
+    size_t DataLength() const { return data_.DataLength(); }
     bool IsShared() const { return is_shared_ == kShared; }
 
     void RegisterExternalAllocationWithCurrentContext();
@@ -237,7 +235,7 @@ class WTF_EXPORT ArrayBufferContents {
       adjust_amount_of_external_allocated_memory_function_(diff);
     }
 
-    void AdjustAmountOfExternalAllocatedMemory(unsigned diff) {
+    void AdjustAmountOfExternalAllocatedMemory(size_t diff) {
       AdjustAmountOfExternalAllocatedMemory(static_cast<int64_t>(diff));
     }
 
@@ -257,7 +255,6 @@ class WTF_EXPORT ArrayBufferContents {
     }
 
     DataHandle data_;
-    unsigned size_in_bytes_;
     SharingType is_shared_;
     bool has_registered_external_allocation_;
   };
@@ -269,6 +266,8 @@ class WTF_EXPORT ArrayBufferContents {
   static AdjustAmountOfExternalAllocatedMemoryFunction
       last_used_adjust_amount_of_external_allocated_memory_function_;
 #endif
+
+  DISALLOW_COPY_AND_ASSIGN(ArrayBufferContents);
 };
 
 }  // namespace WTF

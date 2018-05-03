@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/test/scoped_feature_list.h"
 #include "components/ukm/content/source_url_recorder.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "components/ukm/ukm_source.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/navigation_handle_observer.h"
@@ -19,6 +18,12 @@
 class SourceUrlRecorderWebContentsObserverBrowserTest
     : public content::ContentBrowserTest {
  protected:
+  SourceUrlRecorderWebContentsObserverBrowserTest() {
+    scoped_feature_list_.InitAndEnableFeature(ukm::kUkmFeature);
+  }
+
+  ~SourceUrlRecorderWebContentsObserverBrowserTest() override {}
+
   void SetUpOnMainThread() override {
     content::ContentBrowserTest::SetUpOnMainThread();
 
@@ -28,12 +33,6 @@ class SourceUrlRecorderWebContentsObserverBrowserTest
     ukm::InitializeSourceUrlRecorderForWebContents(shell()->web_contents());
   }
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    content::ContentBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(switches::kEnableFeatures,
-                                    ukm::kUkmFeature.name);
-  }
-
   const ukm::UkmSource* GetSourceForNavigationId(int64_t navigation_id) {
     CHECK_GT(navigation_id, 0);
     const ukm::SourceId source_id =
@@ -41,7 +40,17 @@ class SourceUrlRecorderWebContentsObserverBrowserTest
     return test_ukm_recorder_->GetSourceForSourceId(source_id);
   }
 
+  GURL GetAssociatedURLForWebContentsDocument() {
+    const ukm::UkmSource* src = test_ukm_recorder_->GetSourceForSourceId(
+        ukm::GetSourceIdForWebContentsDocument(shell()->web_contents()));
+    return src ? src->url() : GURL();
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
   std::unique_ptr<ukm::TestAutoSetUkmRecorder> test_ukm_recorder_;
+
+  DISALLOW_COPY_AND_ASSIGN(SourceUrlRecorderWebContentsObserverBrowserTest);
 };
 
 class SourceUrlRecorderWebContentsObserverDownloadBrowserTest
@@ -76,15 +85,8 @@ IN_PROC_BROWSER_TEST_F(SourceUrlRecorderWebContentsObserverBrowserTest, Basic) {
   EXPECT_NE(nullptr, source);
   EXPECT_EQ(url, source->url());
   EXPECT_TRUE(source->initial_url().is_empty());
-}
 
-IN_PROC_BROWSER_TEST_F(SourceUrlRecorderWebContentsObserverBrowserTest,
-                       IgnoreUnsupportedScheme) {
-  GURL url("about:blank");
-  content::NavigationHandleObserver observer(shell()->web_contents(), url);
-  content::NavigateToURL(shell(), url);
-  EXPECT_TRUE(observer.has_committed());
-  EXPECT_EQ(nullptr, GetSourceForNavigationId(observer.navigation_id()));
+  EXPECT_EQ(url, GetAssociatedURLForWebContentsDocument());
 }
 
 IN_PROC_BROWSER_TEST_F(SourceUrlRecorderWebContentsObserverBrowserTest,
@@ -108,6 +110,8 @@ IN_PROC_BROWSER_TEST_F(SourceUrlRecorderWebContentsObserverBrowserTest,
   EXPECT_EQ(main_url, source->url());
   EXPECT_EQ(nullptr,
             GetSourceForNavigationId(subframe_observer.navigation_id()));
+
+  EXPECT_EQ(main_url, GetAssociatedURLForWebContentsDocument());
 }
 
 IN_PROC_BROWSER_TEST_F(SourceUrlRecorderWebContentsObserverDownloadBrowserTest,
@@ -118,4 +122,5 @@ IN_PROC_BROWSER_TEST_F(SourceUrlRecorderWebContentsObserverDownloadBrowserTest,
   EXPECT_FALSE(observer.has_committed());
   EXPECT_TRUE(observer.is_download());
   EXPECT_EQ(nullptr, GetSourceForNavigationId(observer.navigation_id()));
+  EXPECT_EQ(GURL(), GetAssociatedURLForWebContentsDocument());
 }

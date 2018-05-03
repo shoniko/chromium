@@ -19,11 +19,15 @@
 namespace blink {
 struct WebFloatPoint;
 struct WebFloatSize;
-struct WebScrollBoundaryBehavior;
+struct WebOverscrollBehavior;
 }
 
 namespace ui {
 class LatencyInfo;
+}
+
+namespace viz {
+class FrameSinkId;
 }
 
 namespace content {
@@ -40,8 +44,8 @@ class CONTENT_EXPORT RenderWidgetInputHandler {
   virtual ~RenderWidgetInputHandler();
 
   // Hit test the given point to find out the frame underneath and
-  // return the routing id for that frame.
-  int GetWidgetRoutingIdAtPoint(const gfx::Point& point);
+  // returns the FrameSinkId for that frame.
+  viz::FrameSinkId GetFrameSinkIdAtPoint(const gfx::Point& point);
 
   // Handle input events from the input event provider.
   virtual void HandleInputEvent(
@@ -54,7 +58,7 @@ class CONTENT_EXPORT RenderWidgetInputHandler {
                               const blink::WebFloatSize& accumulatedOverscroll,
                               const blink::WebFloatPoint& position,
                               const blink::WebFloatSize& velocity,
-                              const blink::WebScrollBoundaryBehavior& behavior);
+                              const blink::WebOverscrollBehavior& behavior);
 
   bool handling_input_event() const { return handling_input_event_; }
   void set_handling_input_event(bool handling_input_event) {

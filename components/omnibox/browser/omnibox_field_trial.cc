@@ -4,7 +4,9 @@
 
 #include "components/omnibox/browser/omnibox_field_trial.h"
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <string>
 
 #include "base/command_line.h"
@@ -34,23 +36,26 @@ using metrics::OmniboxEventProto;
 
 namespace omnibox {
 
-// Feature used to enable the new set of answers in suggest types (currency,
-// dictionary, sports, translation, when is). Note that the state of this
-// Feature is not consulted anywhere in the code. It is only used to force a
-// Finch experiment arm which sends an experiment ID to GWS which triggers
-// serving the new types.
-const base::Feature kNewOmniboxAnswerTypes{"NewOmniboxAnswerTypes",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Feature used to enable the transmission of entity suggestions from GWS
 // to this client.
 const base::Feature kOmniboxEntitySuggestions{
     "OmniboxEntitySuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Feature used to enable entity suggestion images and enhanced presentation
+// showing more context and descriptive text about the entity.
+const base::Feature kOmniboxRichEntitySuggestions{
+    "OmniboxRichEntitySuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Feature used to force on the experiment of transmission of tail suggestions
 // from GWS to this client, currently testing for desktop.
 const base::Feature kOmniboxTailSuggestions{
     "OmniboxTailSuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to enable the identification of open tabs given URLs in
+// suggestions, and converting those suggestions to ones that allow switching to
+// the tab if found.  Currently only on the desktop.
+const base::Feature kOmniboxTabSwitchSuggestions{
+    "OmniboxTabSwitchSuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Feature used to enable clipboard provider, which provides the user with
 // suggestions of the URL in the user's clipboard (if any) upon omnibox focus.
@@ -62,18 +67,6 @@ const base::Feature kEnableClipboardProvider {
       base::FEATURE_DISABLED_BY_DEFAULT
 #endif
 };
-
-// Feature to enable demotion of URLs when the fakebox is selected.  Only used
-// on Android tablets unless kAndroidFakeboxDemotionOnPhones is also enabled.
-const base::Feature kAndroidFakeboxDemotion{"OmniboxAndroidFakeboxDemotion",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Feature to enable demotion of URLs when the fakebox is selected on a device
-// with a phone form factor.  Android phones have only one box on the NTP, so
-// the user doesn't have a choice between boxes.  This makes the case for
-// demoting URLs less clear, hence the separate feature flag.
-const base::Feature kAndroidFakeboxDemotionOnPhones{
-    "OmniboxAndroidFakeboxDemotionOnPhones", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Feature to enable personalized omnibox suggestions on focus when Android's
 // Chrome Home feature is enabled.
@@ -94,13 +87,6 @@ const base::Feature kSearchProviderWarmUpOnFocus{
       base::FEATURE_ENABLED_BY_DEFAULT
 #endif
 };
-
-// Feature used to enable the transmission of HTTPS URLs as part of the
-// context to the suggest server (assuming SearchProvider is permitted to
-// transmit URLs for context in the first place).
-const base::Feature kSearchProviderContextAllowHttpsUrls{
-    "OmniboixSearchProviderContextAllowHttpsUrls",
-    base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Feature used for the Zero Suggest Redirect to Chrome Field Trial.
 const base::Feature kZeroSuggestRedirectToChrome{
@@ -124,6 +110,12 @@ const base::Feature kUIExperimentMaxAutocompleteMatches{
 // experiment.
 const base::Feature kUIExperimentElideSuggestionUrlAfterHost{
     "OmniboxUIExperimentElideSuggestionUrlAfterHost",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Feature used to hide the scheme and trivial subdomains from steady state
+// URLs displayed in the Omnibox. Hidden portions are restored during editing.
+const base::Feature kUIExperimentHideSteadyStateUrlSchemeAndSubdomains{
+    "OmniboxUIExperimentHideSteadyStateUrlSchemeAndSubdomains",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Feature used for hiding the suggestion URL scheme as a UI experiment.
@@ -162,8 +154,18 @@ const base::Feature kUIExperimentVerticalMargin{
 // with the destination of the default match when the user's input looks like a
 // query.
 const base::Feature kSpeculativeServiceWorkerStartOnQueryInput{
-    "OmniboxSpeculativeServiceWorkerStartOnQueryInput",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+  "OmniboxSpeculativeServiceWorkerStartOnQueryInput",
+#if defined(OS_ANDROID)
+      base::FEATURE_ENABLED_BY_DEFAULT
+#else
+      base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+};
+
+// Feature used to allow breaking words at underscores in building
+// URLIndexPrivateData.
+const base::Feature kBreakWordsAtUnderscores{"OmniboxBreakWordsAtUnderscores",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
 #if defined(OS_IOS)
 // Feature used to enable ZeroSuggestProvider on iOS.
@@ -327,6 +329,7 @@ bool OmniboxFieldTrial::InZeroSuggestMostVisitedWithoutSerpFieldTrial(
 #endif
 }
 
+// static
 bool OmniboxFieldTrial::InZeroSuggestPersonalizedFieldTrial(
     PrefService* prefs) {
   std::string variant(variations::GetVariationParamValue(
@@ -547,15 +550,27 @@ float OmniboxFieldTrial::HQPExperimentalTopicalityThreshold() {
 
 int OmniboxFieldTrial::MaxNumHQPUrlsIndexedAtStartup() {
   const char* param = kMaxNumHQPUrlsIndexedAtStartupOnNonLowEndDevicesParam;
-  if (base::SysInfo::IsLowEndDevice())
+  const bool is_low_end_device = base::SysInfo::IsLowEndDevice();
+  if (is_low_end_device)
     param = kMaxNumHQPUrlsIndexedAtStartupOnLowEndDevicesParam;
   std::string param_value(variations::GetVariationParamValue(
       kBundledExperimentFieldTrialName, param));
   int num_urls;
   if (base::StringToInt(param_value, &num_urls))
     return num_urls;
+
+#if defined(OS_ANDROID)
+  // Limits on Android are chosen based on experiment results. See
+  // crbug.com/715852#c18.
+  constexpr int kMaxNumHQPUrlsIndexedAtStartupOnLowEndDevices = 100;
+  constexpr int kMaxNumHQPUrlsIndexedAtStartupOnNonLowEndDevices = 1000;
+  if (is_low_end_device)
+    return kMaxNumHQPUrlsIndexedAtStartupOnLowEndDevices;
+  return kMaxNumHQPUrlsIndexedAtStartupOnNonLowEndDevices;
+#else
   // Default value is set to -1 for unlimited number of urls.
   return -1;
+#endif  // defined(OS_ANDROID)
 }
 
 size_t OmniboxFieldTrial::HQPMaxVisitsToScore() {

@@ -31,8 +31,8 @@
 #include "core/CSSValueKeywords.h"
 #include "core/css/CSSColorValue.h"
 #include "core/css/CSSMarkup.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/StyleChangeReason.h"
-#include "core/css/StylePropertySet.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/ElementShadow.h"
 #include "core/dom/ElementTraversal.h"
@@ -58,6 +58,7 @@
 #include "core/html/forms/HTMLInputElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html_names.h"
+#include "core/layout/AdjustForAbsoluteZoom.h"
 #include "core/layout/LayoutBoxModelObject.h"
 #include "core/layout/LayoutObject.h"
 #include "core/mathml_names.h"
@@ -182,8 +183,9 @@ unsigned HTMLElement::ParseBorderWidthAttribute(
   return border_width;
 }
 
-void HTMLElement::ApplyBorderAttributeToStyle(const AtomicString& value,
-                                              MutableStylePropertySet* style) {
+void HTMLElement::ApplyBorderAttributeToStyle(
+    const AtomicString& value,
+    MutableCSSPropertyValueSet* style) {
   AddPropertyToPresentationAttributeStyle(style, CSSPropertyBorderWidth,
                                           ParseBorderWidthAttribute(value),
                                           CSSPrimitiveValue::UnitType::kPixels);
@@ -191,8 +193,9 @@ void HTMLElement::ApplyBorderAttributeToStyle(const AtomicString& value,
                                           CSSValueSolid);
 }
 
-void HTMLElement::MapLanguageAttributeToLocale(const AtomicString& value,
-                                               MutableStylePropertySet* style) {
+void HTMLElement::MapLanguageAttributeToLocale(
+    const AtomicString& value,
+    MutableCSSPropertyValueSet* style) {
   if (!value.IsEmpty()) {
     // Have to quote so the locale id is treated as a string instead of as a CSS
     // keyword.
@@ -245,7 +248,7 @@ static inline bool IsValidDirAttribute(const AtomicString& value) {
 void HTMLElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == alignAttr) {
     if (DeprecatedEqualIgnoringCase(value, "middle"))
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyTextAlign,
@@ -597,7 +600,7 @@ void HTMLElement::ParseAttribute(const AttributeModificationParams& params) {
   if (triggers->web_feature != kNoWebFeature) {
     // Count usage of attributes but ignore attributes in user agent shadow DOM.
     if (ShadowRoot* shadow = ContainingShadowRoot()) {
-      if (shadow->GetType() != ShadowRootType::kUserAgent)
+      if (shadow->IsUserAgent())
         UseCounter::Count(GetDocument(), triggers->web_feature);
     }
   }
@@ -718,7 +721,7 @@ void HTMLElement::setOuterText(const String& text,
 
 void HTMLElement::ApplyAlignmentAttributeToStyle(
     const AtomicString& alignment,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   // Vertical alignment with respect to the current baseline of the text
   // right or left means floating images.
   CSSValueID float_value = CSSValueInvalid;
@@ -1042,7 +1045,7 @@ Node::InsertionNotificationRequest HTMLElement::InsertedInto(
   return kInsertionDone;
 }
 
-void HTMLElement::AddHTMLLengthToStyle(MutableStylePropertySet* style,
+void HTMLElement::AddHTMLLengthToStyle(MutableCSSPropertyValueSet* style,
                                        CSSPropertyID property_id,
                                        const String& value,
                                        AllowPercentage allow_percentage) {
@@ -1164,7 +1167,7 @@ bool HTMLElement::ParseColorWithLegacyRules(const String& attribute_value,
   return success;
 }
 
-void HTMLElement::AddHTMLColorToStyle(MutableStylePropertySet* style,
+void HTMLElement::AddHTMLColorToStyle(MutableCSSPropertyValueSet* style,
                                       CSSPropertyID property_id,
                                       const String& attribute_value) {
   Color parsed_color;
@@ -1233,7 +1236,7 @@ int HTMLElement::offsetLeftForBinding() {
   GetDocument().EnsurePaintLocationDataValidForNode(this);
   Element* offset_parent = unclosedOffsetParent();
   if (LayoutBoxModelObject* layout_object = GetLayoutBoxModelObject())
-    return AdjustLayoutUnitForAbsoluteZoom(
+    return AdjustForAbsoluteZoom::AdjustLayoutUnit(
                LayoutUnit(layout_object->PixelSnappedOffsetLeft(offset_parent)),
                layout_object->StyleRef())
         .Round();
@@ -1244,7 +1247,7 @@ int HTMLElement::offsetTopForBinding() {
   GetDocument().EnsurePaintLocationDataValidForNode(this);
   Element* offset_parent = unclosedOffsetParent();
   if (LayoutBoxModelObject* layout_object = GetLayoutBoxModelObject())
-    return AdjustLayoutUnitForAbsoluteZoom(
+    return AdjustForAbsoluteZoom::AdjustLayoutUnit(
                LayoutUnit(layout_object->PixelSnappedOffsetTop(offset_parent)),
                layout_object->StyleRef())
         .Round();
@@ -1255,7 +1258,7 @@ int HTMLElement::offsetWidthForBinding() {
   GetDocument().EnsurePaintLocationDataValidForNode(this);
   Element* offset_parent = unclosedOffsetParent();
   if (LayoutBoxModelObject* layout_object = GetLayoutBoxModelObject())
-    return AdjustLayoutUnitForAbsoluteZoom(
+    return AdjustForAbsoluteZoom::AdjustLayoutUnit(
                LayoutUnit(
                    layout_object->PixelSnappedOffsetWidth(offset_parent)),
                layout_object->StyleRef())
@@ -1268,7 +1271,7 @@ int HTMLElement::offsetHeightForBinding() {
   GetDocument().EnsurePaintLocationDataValidForNode(this);
   Element* offset_parent = unclosedOffsetParent();
   if (LayoutBoxModelObject* layout_object = GetLayoutBoxModelObject())
-    return AdjustLayoutUnitForAbsoluteZoom(
+    return AdjustForAbsoluteZoom::AdjustLayoutUnit(
                LayoutUnit(
                    layout_object->PixelSnappedOffsetHeight(offset_parent)),
                layout_object->StyleRef())
@@ -1279,7 +1282,7 @@ int HTMLElement::offsetHeightForBinding() {
 Element* HTMLElement::unclosedOffsetParent() {
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheetsForNode(this);
 
-  LayoutObject* layout_object = this->GetLayoutObject();
+  LayoutObject* layout_object = GetLayoutObject();
   if (!layout_object)
     return nullptr;
 

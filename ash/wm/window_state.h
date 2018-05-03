@@ -13,6 +13,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/optional.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/ui_base_types.h"
 
@@ -33,6 +34,7 @@ class WindowState;
 class WindowStateDelegate;
 class WindowStateObserver;
 class WMEvent;
+class ClientControlledState;
 
 // Returns the WindowState for the active window, null if there is no active
 // window.
@@ -82,6 +84,9 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
     // window, so that it can save the various states it is interested in.
     // Note: This only gets called when the state object gets changed.
     virtual void DetachState(WindowState* window_state) = 0;
+
+    // Called when the window is being destroyed.
+    virtual void OnWindowDestroying(WindowState* window_state) {}
 
    private:
     DISALLOW_COPY_AND_ASSIGN(State);
@@ -191,6 +196,12 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   // by this object and the returned object will be owned by the caller.
   std::unique_ptr<State> SetStateObject(std::unique_ptr<State> new_state);
 
+  // Updates |snapped_width_ratio_| based on |event|.
+  void UpdateSnappedWidthRatio(const WMEvent* event);
+  base::Optional<float> snapped_width_ratio() const {
+    return snapped_width_ratio_;
+  }
+
   // True if the window should be unminimized to the restore bounds, as
   // opposed to the window's current bounds. |unminimized_to_restore_bounds_| is
   // reset to the default value after the window is unminimized.
@@ -203,13 +214,8 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   // Gets/sets whether the shelf should be hidden when this window is
   // fullscreen.
-  bool hide_shelf_when_fullscreen() const {
-    return hide_shelf_when_fullscreen_;
-  }
-
-  void set_hide_shelf_when_fullscreen(bool value) {
-    hide_shelf_when_fullscreen_ = value;
-  }
+  bool GetHideShelfWhenFullscreen() const;
+  void SetHideShelfWhenFullscreen(bool value);
 
   // Gets/sets whether the shelf should be autohidden when this window is
   // fullscreen or active.
@@ -226,7 +232,7 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   // If the minimum visibility is true, ash will try to keep a
   // minimum amount of the window is always visible on the work area
   // when shown.
-  // TODO(oshima): Consolidate this and window_position_managed
+  // TODO(oshima): Consolidate this and GetWindowPositionManaged
   // into single parameter to control the window placement.
   bool minimum_visibility() const { return minimum_visibility_; }
   void set_minimum_visibility(bool minimum_visibility) {
@@ -241,10 +247,16 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   // Gets/Sets the bounds of the window before it was moved by the auto window
   // management. As long as it was not auto-managed, it will return NULL.
-  const gfx::Rect* pre_auto_manage_window_bounds() const {
-    return pre_auto_manage_window_bounds_.get();
+  base::Optional<gfx::Rect> pre_auto_manage_window_bounds() const {
+    return pre_auto_manage_window_bounds_;
   }
   void SetPreAutoManageWindowBounds(const gfx::Rect& bounds);
+
+  // Gets/Sets the property that is used on window added to workspace event.
+  base::Optional<gfx::Rect> pre_added_to_workspace_window_bounds() const {
+    return pre_added_to_workspace_window_bounds_;
+  }
+  void SetPreAddedToWorkspaceWindowBounds(const gfx::Rect& bounds);
 
   // Layout related properties
 
@@ -256,10 +268,8 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   // Whether or not the window's position can be managed by the
   // auto management logic.
-  bool window_position_managed() const { return window_position_managed_; }
-  void set_window_position_managed(bool window_position_managed) {
-    window_position_managed_ = window_position_managed;
-  }
+  bool GetWindowPositionManaged() const;
+  void SetWindowPositionManaged(bool managed);
 
   // Whether or not the window's position or size was changed by a user.
   bool bounds_changed_by_user() const { return bounds_changed_by_user_; }
@@ -275,19 +285,15 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   // True if the window should be offered a chance to consume special system
   // keys such as brightness, volume, etc. that are usually handled by the
   // shell.
-  bool can_consume_system_keys() const { return can_consume_system_keys_; }
-  void set_can_consume_system_keys(bool can_consume_system_keys) {
-    can_consume_system_keys_ = can_consume_system_keys;
-  }
+  bool CanConsumeSystemKeys() const;
+  void SetCanConsumeSystemKeys(bool can_consume_system_keys);
 
   // True if the window is in "immersive full screen mode" which is slightly
   // different from the normal fullscreen mode by allowing the user to reveal
   // the top portion of the window through a touch / mouse gesture. It might
   // also allow the shelf to be shown in some situations.
-  bool in_immersive_fullscreen() const { return in_immersive_fullscreen_; }
-  void set_in_immersive_fullscreen(bool enable) {
-    in_immersive_fullscreen_ = enable;
-  }
+  bool IsInImmersiveFullscreen() const;
+  void SetInImmersiveFullscreen(bool enabled);
 
   // True if the window should not adjust the window's bounds when
   // virtual keyboard bounds changes.
@@ -319,12 +325,28 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   // Sets the currently stored restore bounds and clears the restore bounds.
   void SetAndClearRestoreBounds();
 
+  // Notifies that the drag operation has been started.
+  void OnDragStarted(int window_component);
+
+  // Notifies that the drag operation has been either completed or reverted.
+  // |location| is the last position of the pointer device used to drag.
+  void OnCompleteDrag(const gfx::Point& location);
+  void OnRevertDrag(const gfx::Point& location);
+
   // Returns a pointer to DragDetails during drag operations.
   const DragDetails* drag_details() const { return drag_details_.get(); }
   DragDetails* drag_details() { return drag_details_.get(); }
 
+  class TestApi {
+   public:
+    static State* GetStateImpl(WindowState* window_state) {
+      return window_state->current_state_.get();
+    }
+  };
+
  private:
   friend class DefaultState;
+  friend class ash::wm::ClientControlledState;
   friend class ash::LockWindowState;
   friend class ash::TabletModeWindowState;
   friend WindowState* GetWindowState(aura::Window*);
@@ -349,7 +371,8 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   void SetBoundsInScreen(const gfx::Rect& bounds_in_screen);
 
   // Adjusts the |bounds| so that they are flush with the edge of the
-  // workspace if the window represented by |window_state| is side snapped.
+  // workspace if the window represented by |window_state| is side snapped. It
+  // is called for workspace events.
   void AdjustSnappedBounds(gfx::Rect* bounds);
 
   // Updates the window properties(show state, pin type) according to the
@@ -379,19 +402,19 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   void OnWindowPropertyChanged(aura::Window* window,
                                const void* key,
                                intptr_t old) override;
+  void OnWindowAddedToRootWindow(aura::Window* window) override;
+  void OnWindowDestroying(aura::Window* window) override;
 
   // The owner of this window settings.
   aura::Window* window_;
   std::unique_ptr<WindowStateDelegate> delegate_;
 
-  bool window_position_managed_;
   bool bounds_changed_by_user_;
   bool ignored_by_shelf_;
   bool can_consume_system_keys_;
   std::unique_ptr<DragDetails> drag_details_;
 
   bool unminimize_to_restore_bounds_;
-  bool in_immersive_fullscreen_;
   bool ignore_keyboard_bounds_change_ = false;
   bool hide_shelf_when_fullscreen_;
   bool autohide_shelf_when_maximized_or_fullscreen_;
@@ -400,10 +423,19 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   bool cached_always_on_top_;
   bool allow_set_bounds_direct_ = false;
 
+  // A property to save the ratio between snapped window width and display
+  // workarea width. It is used to update snapped window width on
+  // AdjustSnappedBounds() when handling workspace events.
+  base::Optional<float> snapped_width_ratio_;
+
   // A property to remember the window position which was set before the
   // auto window position manager changed the window bounds, so that it can get
   // restored when only this one window gets shown.
-  std::unique_ptr<gfx::Rect> pre_auto_manage_window_bounds_;
+  base::Optional<gfx::Rect> pre_auto_manage_window_bounds_;
+
+  // A property which resets when bounds is changed by user and sets when it is
+  // nullptr, and window is removing from a workspace.
+  base::Optional<gfx::Rect> pre_added_to_workspace_window_bounds_;
 
   base::ObserverList<WindowStateObserver> observer_list_;
 

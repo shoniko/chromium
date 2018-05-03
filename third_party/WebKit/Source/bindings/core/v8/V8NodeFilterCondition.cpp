@@ -43,7 +43,7 @@ namespace blink {
 
 V8NodeFilterCondition::V8NodeFilterCondition(v8::Local<v8::Value> filter,
                                              ScriptState* script_state)
-    : script_state_(script_state), filter_(this) {
+    : script_state_(script_state), active_flag_(false) {
   // ..acceptNode(..) will only dispatch filter_ if filter_->IsObject().
   // We'll make sure filter_ is either usable by acceptNode or empty.
   // (See the fast/dom/node-filter-gc test for a case where 'empty' happens.)
@@ -51,16 +51,21 @@ V8NodeFilterCondition::V8NodeFilterCondition(v8::Local<v8::Value> filter,
     filter_.Set(script_state->GetIsolate(), filter.As<v8::Object>());
 }
 
-V8NodeFilterCondition::~V8NodeFilterCondition() {}
+V8NodeFilterCondition::~V8NodeFilterCondition() = default;
 
 void V8NodeFilterCondition::TraceWrappers(
     const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(filter_.Cast<v8::Value>());
 }
 
-unsigned V8NodeFilterCondition::acceptNode(
-    Node* node,
-    ExceptionState& exception_state) const {
+unsigned V8NodeFilterCondition::acceptNode(Node* node,
+                                           ExceptionState& exception_state) {
+  if (active_flag_) {
+    exception_state.ThrowDOMException(kInvalidStateError,
+                                      "Filter function can't be recursive");
+    return NodeFilter::kFilterReject;
+  }
+  WTF::AutoReset<bool> set_active_flag(&active_flag_, true);
   v8::Isolate* isolate = script_state_->GetIsolate();
   DCHECK(!script_state_->GetContext().IsEmpty());
   v8::HandleScope handle_scope(isolate);
@@ -111,7 +116,6 @@ unsigned V8NodeFilterCondition::acceptNode(
     exception_state.RethrowV8Exception(exception_catcher.Exception());
     return NodeFilter::kFilterReject;
   }
-
   DCHECK(!result.IsEmpty());
 
   uint32_t uint32_value;

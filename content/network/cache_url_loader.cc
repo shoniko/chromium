@@ -20,11 +20,11 @@ class CacheURLLoader {
  public:
   CacheURLLoader(const GURL& url,
                  net::URLRequestContext* request_context,
-                 mojom::URLLoaderClientPtr client)
+                 network::mojom::URLLoaderClientPtr client)
       : client_(std::move(client)) {
     scoped_refptr<net::HttpResponseHeaders> headers(
         new net::HttpResponseHeaders("HTTP/1.1 200 OK"));
-    ResourceResponseHead resource_response;
+    network::ResourceResponseHead resource_response;
     resource_response.headers = headers;
     resource_response.mime_type = "text/html";
     client_->OnReceiveResponse(resource_response, base::nullopt, nullptr);
@@ -61,7 +61,7 @@ class CacheURLLoader {
         mojo::common::BlockingCopyFromString(data_, data_pipe.producer_handle));
 
     client_->OnStartLoadingResponseBody(std::move(data_pipe.consumer_handle));
-    ResourceRequestCompletionStatus status(net::OK);
+    network::URLLoaderCompletionStatus status(net::OK);
     status.encoded_data_length = data_.size();
     status.encoded_body_length = data_.size();
     client_->OnComplete(status);
@@ -71,7 +71,7 @@ class CacheURLLoader {
   }
 
   std::string data_;
-  mojom::URLLoaderClientPtr client_;
+  network::mojom::URLLoaderClientPtr client_;
   net::ViewCacheHelper cache_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(CacheURLLoader);
@@ -80,7 +80,7 @@ class CacheURLLoader {
 
 void StartCacheURLLoader(const GURL& url,
                          net::URLRequestContext* request_context,
-                         mojom::URLLoaderClientPtr client) {
+                         network::mojom::URLLoaderClientPtr client) {
   new CacheURLLoader(url, request_context, std::move(client));
 }
 

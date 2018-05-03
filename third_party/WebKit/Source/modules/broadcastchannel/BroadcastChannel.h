@@ -5,10 +5,10 @@
 #ifndef BroadcastChannel_h
 #define BroadcastChannel_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/events/EventTarget.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/modules/broadcastchannel/broadcast_channel.mojom-blink.h"
 
@@ -62,7 +62,7 @@ class BroadcastChannel final : public EventTargetWithInlineData,
   // Called when the mojo binding disconnects.
   void OnError();
 
-  scoped_refptr<SecurityOrigin> origin_;
+  scoped_refptr<const SecurityOrigin> origin_;
   String name_;
 
   mojo::AssociatedBinding<mojom::blink::BroadcastChannelClient> binding_;

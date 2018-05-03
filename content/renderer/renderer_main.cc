@@ -12,7 +12,6 @@
 #include "base/i18n/rtl.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/statistics_recorder.h"
 #include "base/pending_task.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
@@ -43,8 +42,8 @@
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID) && \
     !defined(OS_FUCHSIA)
 #include "content/common/font_config_ipc_linux.h"
-#include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/public/common/common_sandbox_support_linux.h"
+#include "services/service_manager/sandbox/linux/sandbox_linux.h"
 #include "third_party/skia/include/ports/SkFontConfigInterface.h"
 #endif
 
@@ -96,7 +95,7 @@ int RendererMain(const MainFunctionParams& parameters) {
   // expect synchronous events around the main loop of a thread.
   TRACE_EVENT_ASYNC_BEGIN0("startup", "RendererMain", 0);
 
-  base::trace_event::TraceLog::GetInstance()->SetProcessName("Renderer");
+  base::trace_event::TraceLog::GetInstance()->set_process_name("Renderer");
   base::trace_event::TraceLog::GetInstance()->SetProcessSortIndex(
       kTraceEventRendererProcessSortIndex);
 
@@ -167,9 +166,6 @@ int RendererMain(const MainFunctionParams& parameters) {
   base::PlatformThread::SetName("CrRendererMain");
 
   bool no_sandbox = parsed_command_line.HasSwitch(switches::kNoSandbox);
-
-  // Initialize histogram statistics gathering system.
-  base::StatisticsRecorder::Initialize();
 
 #if defined(OS_ANDROID)
   // If we have any pending LibraryLoader histograms, record them.

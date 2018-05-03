@@ -10,6 +10,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "components/history/core/browser/history_types.h"
 #include "sql/connection.h"
 #include "sql/init_status.h"
@@ -186,15 +187,26 @@ class ThumbnailDatabase {
   // Returns true if there are icon mappings for the given page and icon types.
   // The matched icon mappings are returned in the |mapping_data| parameter if
   // it is not NULL.
-  bool GetIconMappingsForPageURL(const GURL& page_url,
-                                 int required_icon_types,
-                                 std::vector<IconMapping>* mapping_data);
+  bool GetIconMappingsForPageURL(
+      const GURL& page_url,
+      const favicon_base::IconTypeSet& required_icon_types,
+      std::vector<IconMapping>* mapping_data);
 
   // Returns true if there is any matched icon mapping for the given page.
   // All matched icon mappings are returned in descent order of IconType if
   // mapping_data is not NULL.
   bool GetIconMappingsForPageURL(const GURL& page_url,
                                  std::vector<IconMapping>* mapping_data);
+
+  // Given |url|, returns the |page_url| page mapped to an icon with
+  // |required_icon_types|, where |page_url| has host = url.host(). This allows
+  // for icons to be retrieved when a full URL is not available. For example,
+  // |url| = http://www.google.com would match
+  // |page_url| = https://www.google.com/search. The returned optional will be
+  // empty if no such |page_url| exists.
+  base::Optional<GURL> FindFirstPageURLForHost(
+      const GURL& url,
+      const favicon_base::IconTypeSet& required_icon_types);
 
   // Adds a mapping between the given page_url and icon_id.
   // Returns the new mapping id if the adding succeeds, otherwise 0 is returned.
@@ -244,6 +256,12 @@ class ThumbnailDatabase {
   // Returns false in case of failure.  A nested transaction is used,
   // so failure causes any outer transaction to be rolled back.
   bool RetainDataForPageUrls(const std::vector<GURL>& urls_to_keep);
+
+  // For historical reasons, and for backward compatibility, the icon type
+  // values stored in the DB are powers of two. Conversion functions
+  // exposed publicly for testing.
+  static int ToPersistedIconType(favicon_base::IconType icon_type);
+  static favicon_base::IconType FromPersistedIconType(int icon_type);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, RetainDataForPageUrls);

@@ -26,18 +26,17 @@
 #ifndef Timer_h
 #define Timer_h
 
+#include "base/location.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "platform/PlatformExport.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/AddressSanitizer.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/Threading.h"
-#include "platform/wtf/Vector.h"
-#include "platform/wtf/WeakPtr.h"
-#include "public/platform/WebTraceLocation.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
@@ -47,74 +46,85 @@ class PLATFORM_EXPORT TimerBase {
   WTF_MAKE_NONCOPYABLE(TimerBase);
 
  public:
-  explicit TimerBase(RefPtr<WebTaskRunner>);
+  explicit TimerBase(scoped_refptr<WebTaskRunner>);
   virtual ~TimerBase();
 
+  void Start(TimeDelta next_fire_interval,
+             TimeDelta repeat_interval,
+             const base::Location&);
   void Start(double next_fire_interval,
              double repeat_interval,
-             const WebTraceLocation&);
+             const base::Location& from_here) {
+    Start(TimeDelta::FromSecondsD(next_fire_interval),
+          TimeDelta::FromSecondsD(repeat_interval), from_here);
+  }
 
-  void StartRepeating(double repeat_interval, const WebTraceLocation& caller) {
+  void StartRepeating(TimeDelta repeat_interval, const base::Location& caller) {
     Start(repeat_interval, repeat_interval, caller);
   }
-  void StartRepeating(base::TimeDelta repeat_interval,
-                      const WebTraceLocation& caller) {
-    StartRepeating(repeat_interval.InSecondsF(), caller);
+
+  void StartOneShot(TimeDelta interval, const base::Location& caller) {
+    Start(interval, TimeDelta(), caller);
   }
-  void StartOneShot(double interval, const WebTraceLocation& caller) {
-    Start(interval, 0, caller);
-  }
-  void StartOneShot(base::TimeDelta interval, const WebTraceLocation& caller) {
-    StartOneShot(interval.InSecondsF(), caller);
+  void StartOneShot(double interval, const base::Location& caller) {
+    StartOneShot(TimeDelta::FromSecondsD(interval), caller);
   }
 
   // Timer cancellation is fast enough that you shouldn't have to worry
   // about it unless you're canceling tens of thousands of tasks.
   virtual void Stop();
   bool IsActive() const;
-  const WebTraceLocation& GetLocation() const { return location_; }
+  const base::Location& GetLocation() const { return location_; }
 
-  double NextFireInterval() const;
-  double RepeatInterval() const { return repeat_interval_; }
-
-  void AugmentRepeatInterval(double delta) {
-    double now = TimerMonotonicallyIncreasingTime();
-    SetNextFireTime(now, std::max(next_fire_time_ - now + delta, 0.0));
-    repeat_interval_ += delta;
+  TimeDelta NextFireIntervalDelta() const;
+  double NextFireInterval() const {
+    return NextFireIntervalDelta().InSecondsF();
   }
 
-  void MoveToNewTaskRunner(RefPtr<WebTaskRunner>);
+  TimeDelta RepeatIntervalDelta() const { return repeat_interval_; }
+  double RepeatInterval() const { return RepeatIntervalDelta().InSecondsF(); }
+
+  void AugmentRepeatInterval(TimeDelta delta) {
+    TimeTicks now = TimerCurrentTimeTicksInSeconds();
+    SetNextFireTime(now, std::max(next_fire_time_ - now + delta, TimeDelta()));
+    repeat_interval_ += delta;
+  }
+  void AugmentRepeatInterval(double delta) {
+    AugmentRepeatInterval(TimeDelta::FromSecondsD(delta));
+  }
+
+  void MoveToNewTaskRunner(scoped_refptr<WebTaskRunner>);
 
   struct PLATFORM_EXPORT Comparator {
     bool operator()(const TimerBase* a, const TimerBase* b) const;
   };
 
  protected:
-  static RefPtr<WebTaskRunner> GetTimerTaskRunner();
+  static scoped_refptr<WebTaskRunner> GetTimerTaskRunner();
 
  private:
   virtual void Fired() = 0;
 
-  virtual RefPtr<WebTaskRunner> TimerTaskRunner() const;
+  virtual scoped_refptr<WebTaskRunner> TimerTaskRunner() const;
 
   NO_SANITIZE_ADDRESS
   virtual bool CanFire() const { return true; }
 
-  double TimerMonotonicallyIncreasingTime() const;
+  TimeTicks TimerCurrentTimeTicksInSeconds() const;
 
-  void SetNextFireTime(double now, double delay);
+  void SetNextFireTime(TimeTicks now, TimeDelta delay);
 
   void RunInternal();
 
-  double next_fire_time_;   // 0 if inactive
-  double repeat_interval_;  // 0 if not repeating
-  WebTraceLocation location_;
-  RefPtr<WebTaskRunner> web_task_runner_;
+  TimeTicks next_fire_time_;   // 0 if inactive
+  TimeDelta repeat_interval_;  // 0 if not repeating
+  base::Location location_;
+  scoped_refptr<WebTaskRunner> web_task_runner_;
 
 #if DCHECK_IS_ON()
   ThreadIdentifier thread_;
 #endif
-  WTF::WeakPtrFactory<TimerBase> weak_ptr_factory_;
+  base::WeakPtrFactory<TimerBase> weak_ptr_factory_;
 
   friend class ThreadTimers;
   friend class TimerHeapLessThanFunction;
@@ -140,12 +150,12 @@ class TaskRunnerTimer : public TimerBase {
  public:
   using TimerFiredFunction = void (TimerFiredClass::*)(TimerBase*);
 
-  TaskRunnerTimer(RefPtr<WebTaskRunner> web_task_runner,
+  TaskRunnerTimer(scoped_refptr<WebTaskRunner> web_task_runner,
                   TimerFiredClass* o,
                   TimerFiredFunction f)
       : TimerBase(std::move(web_task_runner)), object_(o), function_(f) {}
 
-  ~TaskRunnerTimer() override {}
+  ~TaskRunnerTimer() override = default;
 
  protected:
   void Fired() override { (object_->*function_)(this); }
@@ -176,7 +186,7 @@ class Timer : public TaskRunnerTimer<TimerFiredClass> {
   using TimerFiredFunction =
       typename TaskRunnerTimer<TimerFiredClass>::TimerFiredFunction;
 
-  ~Timer() override {}
+  ~Timer() override = default;
 
   Timer(TimerFiredClass* timer_fired_class,
         TimerFiredFunction timer_fired_function)

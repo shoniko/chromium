@@ -20,6 +20,14 @@ bundle_data("resources_unit_tests") {
   ]
 }
 
+source_set("switches") {
+  configs += [ "//build/config/compiler:enable_arc" ]
+  sources = [
+    "switches.cc",
+    "switches.h",
+  ]
+}
+
 source_set("contextual_search") {
   configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
@@ -34,8 +42,6 @@ source_set("contextual_search") {
     "contextual_search_metrics.h",
     "contextual_search_metrics.mm",
     "contextual_search_panel_state.h",
-    "contextual_search_web_state_observer.h",
-    "contextual_search_web_state_observer.mm",
     "js_contextual_search_manager.h",
     "js_contextual_search_manager.mm",
     "touch_to_search_permissions_mediator.h",
@@ -45,6 +51,7 @@ source_set("contextual_search") {
   ]
   deps = [
     ":injected_js",
+    ":switches",
     "//base",
     "//components/google/core/browser",
     "//components/prefs",
@@ -101,6 +108,7 @@ source_set("unit_tests") {
   deps = [
     ":contextual_search",
     ":resources_unit_tests",
+    ":switches",
     ":test_support",
     "//base",
     "//base/test:test_support",

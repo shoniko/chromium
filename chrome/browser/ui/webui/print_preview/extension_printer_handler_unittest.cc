@@ -17,7 +17,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
@@ -53,7 +52,7 @@ using extensions::Extension;
 using extensions::PrinterProviderAPI;
 using extensions::PrinterProviderPrintJob;
 using extensions::TestExtensionEnvironment;
-using printing::PWGRasterConverter;
+using printing::PwgRasterConverter;
 
 namespace {
 
@@ -217,8 +216,8 @@ void RecordCapability(size_t* call_count,
   ++(*call_count);
   const base::Value* capabilities = nullptr;
   if (capability) {
-    capabilities = capability->FindPathOfType({printing::kSettingCapabilities},
-                                              base::Value::Type::DICTIONARY);
+    capabilities = capability->FindKeyOfType(printing::kSettingCapabilities,
+                                             base::Value::Type::DICTIONARY);
   }
   *capability_out =
       capabilities ? base::DictionaryValue::From(
@@ -276,26 +275,26 @@ std::string RefCountedMemoryToString(
   return std::string(memory->front_as<char>(), memory->size());
 }
 
-// Fake PWGRasterConverter used in the tests.
-class FakePWGRasterConverter : public PWGRasterConverter {
+// Fake PwgRasterConverter used in the tests.
+class FakePwgRasterConverter : public PwgRasterConverter {
  public:
-  FakePWGRasterConverter() : fail_conversion_(false), initialized_(false) {}
-  ~FakePWGRasterConverter() override = default;
+  FakePwgRasterConverter() : fail_conversion_(false), initialized_(false) {}
+  ~FakePwgRasterConverter() override = default;
 
-  // PWGRasterConverter implementation. It writes |data| to a temp file.
+  // PwgRasterConverter implementation. It writes |data| to a temp file.
   // Also, remembers conversion and bitmap settings passed into the method.
   void Start(base::RefCountedMemory* data,
              const printing::PdfRenderSettings& conversion_settings,
              const printing::PwgRasterSettings& bitmap_settings,
-             const ResultCallback& callback) override {
+             ResultCallback callback) override {
     if (fail_conversion_) {
-      callback.Run(false, base::FilePath());
+      std::move(callback).Run(false, base::FilePath());
       return;
     }
 
     if (!initialized_ && !temp_dir_.CreateUniqueTempDir()) {
       ADD_FAILURE() << "Unable to create target dir for cenverter";
-      callback.Run(false, base::FilePath());
+      std::move(callback).Run(false, base::FilePath());
       return;
     }
 
@@ -306,14 +305,14 @@ class FakePWGRasterConverter : public PWGRasterConverter {
     int written = WriteFile(path_, data_str.c_str(), data_str.size());
     if (written != static_cast<int>(data_str.size())) {
       ADD_FAILURE() << "Failed to write pwg raster file.";
-      callback.Run(false, base::FilePath());
+      std::move(callback).Run(false, base::FilePath());
       return;
     }
 
     conversion_settings_ = conversion_settings;
     bitmap_settings_ = bitmap_settings;
 
-    callback.Run(true, path_);
+    std::move(callback).Run(true, path_);
   }
 
   // Makes |Start| method always return an error.
@@ -337,7 +336,7 @@ class FakePWGRasterConverter : public PWGRasterConverter {
   bool fail_conversion_;
   bool initialized_;
 
-  DISALLOW_COPY_AND_ASSIGN(FakePWGRasterConverter);
+  DISALLOW_COPY_AND_ASSIGN(FakePwgRasterConverter);
 };
 
 // Information about received print requests.
@@ -361,27 +360,27 @@ class FakePrinterProviderAPI : public PrinterProviderAPI {
 
   void DispatchGetCapabilityRequested(
       const std::string& destination_id,
-      const PrinterProviderAPI::GetCapabilityCallback& callback) override {
-    pending_capability_callbacks_.push(callback);
+      PrinterProviderAPI::GetCapabilityCallback callback) override {
+    pending_capability_callbacks_.push(std::move(callback));
   }
 
   void DispatchPrintRequested(
       const PrinterProviderPrintJob& job,
-      const PrinterProviderAPI::PrintCallback& callback) override {
+      PrinterProviderAPI::PrintCallback callback) override {
     PrintRequestInfo request_info;
-    request_info.callback = callback;
+    request_info.callback = std::move(callback);
     request_info.job = job;
 
-    pending_print_requests_.push(request_info);
+    pending_print_requests_.push(std::move(request_info));
   }
 
   void DispatchGetUsbPrinterInfoRequested(
       const std::string& extension_id,
       scoped_refptr<device::UsbDevice> device,
-      const PrinterProviderAPI::GetPrinterInfoCallback& callback) override {
+      PrinterProviderAPI::GetPrinterInfoCallback callback) override {
     EXPECT_EQ("fake extension id", extension_id);
     EXPECT_TRUE(device);
-    pending_usb_info_callbacks_.push(callback);
+    pending_usb_info_callbacks_.push(std::move(callback));
   }
 
   size_t pending_get_printers_count() const {
@@ -409,7 +408,7 @@ class FakePrinterProviderAPI : public PrinterProviderAPI {
   void TriggerNextGetCapabilityCallback(
       const base::DictionaryValue& description) {
     ASSERT_GT(pending_get_capability_count(), 0u);
-    pending_capability_callbacks_.front().Run(description);
+    std::move(pending_capability_callbacks_.front()).Run(description);
     pending_capability_callbacks_.pop();
   }
 
@@ -427,7 +426,7 @@ class FakePrinterProviderAPI : public PrinterProviderAPI {
     base::Value result_value;
     if (result != kPrintRequestSuccess)
       result_value = base::Value(result);
-    pending_print_requests_.front().callback.Run(result_value);
+    std::move(pending_print_requests_.front().callback).Run(result_value);
     pending_print_requests_.pop();
   }
 
@@ -438,7 +437,7 @@ class FakePrinterProviderAPI : public PrinterProviderAPI {
   void TriggerNextUsbPrinterInfoCallback(
       const base::DictionaryValue& printer_info) {
     ASSERT_GT(pending_usb_info_count(), 0u);
-    pending_usb_info_callbacks_.front().Run(printer_info);
+    std::move(pending_usb_info_callbacks_.front()).Run(printer_info);
     pending_usb_info_callbacks_.pop();
   }
 
@@ -456,7 +455,7 @@ class FakePrinterProviderAPI : public PrinterProviderAPI {
 
 std::unique_ptr<KeyedService> BuildTestingPrinterProviderAPI(
     content::BrowserContext* context) {
-  return base::MakeUnique<FakePrinterProviderAPI>();
+  return std::make_unique<FakePrinterProviderAPI>();
 }
 
 }  // namespace
@@ -470,11 +469,11 @@ class ExtensionPrinterHandlerTest : public testing::Test {
     extensions::PrinterProviderAPIFactory::GetInstance()->SetTestingFactory(
         env_.profile(), &BuildTestingPrinterProviderAPI);
     extension_printer_handler_ =
-        base::MakeUnique<ExtensionPrinterHandler>(env_.profile());
+        std::make_unique<ExtensionPrinterHandler>(env_.profile());
 
-    auto pwg_raster_converter = base::MakeUnique<FakePWGRasterConverter>();
+    auto pwg_raster_converter = std::make_unique<FakePwgRasterConverter>();
     pwg_raster_converter_ = pwg_raster_converter.get();
-    extension_printer_handler_->SetPWGRasterConverterForTesting(
+    extension_printer_handler_->SetPwgRasterConverterForTesting(
         std::move(pwg_raster_converter));
   }
 
@@ -494,7 +493,7 @@ class ExtensionPrinterHandlerTest : public testing::Test {
   std::unique_ptr<ExtensionPrinterHandler> extension_printer_handler_;
 
   // Owned by |extension_printer_handler_|.
-  FakePWGRasterConverter* pwg_raster_converter_ = nullptr;
+  FakePwgRasterConverter* pwg_raster_converter_ = nullptr;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ExtensionPrinterHandlerTest);
@@ -800,6 +799,7 @@ TEST_F(ExtensionPrinterHandlerTest, Print_Pwg) {
             pwg_raster_converter_->bitmap_settings().odd_page_transform);
   EXPECT_FALSE(pwg_raster_converter_->bitmap_settings().rotate_all_pages);
   EXPECT_FALSE(pwg_raster_converter_->bitmap_settings().reverse_page_order);
+  EXPECT_TRUE(pwg_raster_converter_->bitmap_settings().use_color);
 
   EXPECT_EQ(printing::kDefaultPdfDpi,
             pwg_raster_converter_->conversion_settings().dpi);
@@ -853,6 +853,7 @@ TEST_F(ExtensionPrinterHandlerTest, Print_Pwg_NonDefaultSettings) {
             pwg_raster_converter_->bitmap_settings().odd_page_transform);
   EXPECT_TRUE(pwg_raster_converter_->bitmap_settings().rotate_all_pages);
   EXPECT_TRUE(pwg_raster_converter_->bitmap_settings().reverse_page_order);
+  EXPECT_TRUE(pwg_raster_converter_->bitmap_settings().use_color);
 
   EXPECT_EQ(200,  // max(vertical_dpi, horizontal_dpi)
             pwg_raster_converter_->conversion_settings().dpi);

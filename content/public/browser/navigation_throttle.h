@@ -110,7 +110,7 @@ class CONTENT_EXPORT NavigationThrottle {
 
     ThrottleAction action() const { return action_; }
     net::Error net_error_code() const { return net_error_code_; }
-    base::Optional<std::string> error_page_content() {
+    const base::Optional<std::string>& error_page_content() {
       return error_page_content_;
     }
 
@@ -148,9 +148,6 @@ class CONTENT_EXPORT NavigationThrottle {
   // method. Failing to do so will result in use-after-free bugs. Should the
   // implementer need to destroy the WebContents, it should return CANCEL,
   // CANCEL_AND_IGNORE or DEFER and perform the destruction asynchronously.
-  //
-  // TODO(crbug.com/752370): Use this method outside //content, in
-  // SSLErrorNavigationThrottle (crrev.com/c/621236).
   virtual ThrottleCheckResult WillFailRequest();
 
   // Called when a response's headers and metadata are available.

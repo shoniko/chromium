@@ -31,7 +31,7 @@
 #include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/text/StringBuilder.h"
-#include "public/web/WebSandboxFlags.h"
+#include "third_party/WebKit/common/sandbox_flags.h"
 
 namespace blink {
 
@@ -69,12 +69,15 @@ SandboxFlags ParseSandboxPolicy(const SpaceSplitString& policy,
     } else if (EqualIgnoringASCIICase(sandbox_token, "allow-modals")) {
       flags &= ~kSandboxModals;
     } else if (EqualIgnoringASCIICase(sandbox_token, "allow-presentation")) {
-      flags &= ~kSandboxPresentation;
+      flags &= ~kSandboxPresentationController;
     } else if (EqualIgnoringASCIICase(
                    sandbox_token, "allow-top-navigation-by-user-activation") &&
                RuntimeEnabledFeatures::
                    TopNavByUserActivationInSandboxEnabled()) {
       flags &= ~kSandboxTopNavigationByUserActivation;
+    } else if (EqualIgnoringASCIICase(sandbox_token, "allow-downloads") &&
+               RuntimeEnabledFeatures::BlockingDownloadsInSandboxEnabled()) {
+      flags &= ~kSandboxDownloads;
     } else {
       token_errors.Append(token_errors.IsEmpty() ? "'" : ", '");
       token_errors.Append(sandbox_token);
@@ -109,5 +112,10 @@ STATIC_ASSERT_ENUM(WebSandboxFlags::kOrientationLock, kSandboxOrientationLock);
 STATIC_ASSERT_ENUM(WebSandboxFlags::kPropagatesToAuxiliaryBrowsingContexts,
                    kSandboxPropagatesToAuxiliaryBrowsingContexts);
 STATIC_ASSERT_ENUM(WebSandboxFlags::kModals, kSandboxModals);
+STATIC_ASSERT_ENUM(WebSandboxFlags::kPresentationController,
+                   kSandboxPresentationController);
+STATIC_ASSERT_ENUM(WebSandboxFlags::kTopNavigationByUserActivation,
+                   kSandboxTopNavigationByUserActivation);
+STATIC_ASSERT_ENUM(WebSandboxFlags::kDownloads, kSandboxDownloads);
 
 }  // namespace blink

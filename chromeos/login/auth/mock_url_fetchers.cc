@@ -29,8 +29,7 @@ ExpectCanceledFetcher::ExpectCanceledFetcher(
     : net::TestURLFetcher(0, url, d), weak_factory_(this) {
 }
 
-ExpectCanceledFetcher::~ExpectCanceledFetcher() {
-}
+ExpectCanceledFetcher::~ExpectCanceledFetcher() = default;
 
 void ExpectCanceledFetcher::Start() {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
@@ -58,8 +57,7 @@ GotCanceledFetcher::GotCanceledFetcher(
   set_response_code(net::HTTP_FORBIDDEN);
 }
 
-GotCanceledFetcher::~GotCanceledFetcher() {
-}
+GotCanceledFetcher::~GotCanceledFetcher() = default;
 
 void GotCanceledFetcher::Start() {
   delegate()->OnURLFetchComplete(this);
@@ -76,10 +74,15 @@ SuccessFetcher::SuccessFetcher(bool success,
   set_response_code(net::HTTP_OK);
 }
 
-SuccessFetcher::~SuccessFetcher() {
-}
+SuccessFetcher::~SuccessFetcher() = default;
 
 void SuccessFetcher::Start() {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&SuccessFetcher::RunDelegate, weak_factory_.GetWeakPtr()));
+}
+
+void SuccessFetcher::RunDelegate() {
   delegate()->OnURLFetchComplete(this);
 }
 
@@ -94,8 +97,7 @@ FailFetcher::FailFetcher(bool success,
   set_response_code(net::HTTP_OK);
 }
 
-FailFetcher::~FailFetcher() {
-}
+FailFetcher::~FailFetcher() = default;
 
 void FailFetcher::Start() {
   delegate()->OnURLFetchComplete(this);
@@ -130,8 +132,7 @@ CaptchaFetcher::CaptchaFetcher(bool success,
       kCaptchaToken));
 }
 
-CaptchaFetcher::~CaptchaFetcher() {
-}
+CaptchaFetcher::~CaptchaFetcher() = default;
 
 // static
 std::string CaptchaFetcher::GetCaptchaToken() {
@@ -163,8 +164,7 @@ HostedFetcher::HostedFetcher(bool success,
   set_response_code(net::HTTP_OK);
 }
 
-HostedFetcher::~HostedFetcher() {
-}
+HostedFetcher::~HostedFetcher() = default;
 
 void HostedFetcher::Start() {
   VLOG(1) << upload_data();

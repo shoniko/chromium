@@ -10,7 +10,7 @@
 #include "ash/focus_cycler.h"
 #include "ash/lock_screen_action/lock_screen_action_background_controller.h"
 #include "ash/lock_screen_action/test_lock_screen_action_background_controller.h"
-#include "ash/login/mock_lock_screen_client.h"
+#include "ash/login/mock_login_screen_client.h"
 #include "ash/login/ui/login_test_base.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
@@ -59,8 +59,8 @@ void ExpectNotFocused(views::View* view) {
 
 class LoginShelfViewTest : public LoginTestBase {
  public:
-  LoginShelfViewTest() {}
-  ~LoginShelfViewTest() override {}
+  LoginShelfViewTest() = default;
+  ~LoginShelfViewTest() override = default;
 
   void SetUp() override {
     action_background_controller_factory_ =
@@ -156,7 +156,9 @@ TEST_F(LoginShelfViewTest, ShouldUpdateUiAfterSessionStateChange) {
   EXPECT_TRUE(ShowsShelfButtons({LoginShelfView::kShutdown}));
 
   NotifySessionStateChanged(SessionState::LOGIN_PRIMARY);
-  EXPECT_TRUE(ShowsShelfButtons({LoginShelfView::kShutdown}));
+  EXPECT_TRUE(ShowsShelfButtons({LoginShelfView::kShutdown,
+                                 LoginShelfView::kBrowseAsGuest,
+                                 LoginShelfView::kAddUser}));
 
   NotifySessionStateChanged(SessionState::LOGGED_IN_NOT_ACTIVE);
   EXPECT_TRUE(ShowsShelfButtons({LoginShelfView::kShutdown}));
@@ -296,9 +298,15 @@ TEST_F(LoginShelfViewTest, ClickUnlockButton) {
 }
 
 TEST_F(LoginShelfViewTest, ClickCancelButton) {
-  std::unique_ptr<MockLockScreenClient> client = BindMockLockScreenClient();
+  std::unique_ptr<MockLoginScreenClient> client = BindMockLoginScreenClient();
   EXPECT_CALL(*client, CancelAddUser());
   Click(LoginShelfView::kCancel);
+}
+
+TEST_F(LoginShelfViewTest, ClickBrowseAsGuestButton) {
+  std::unique_ptr<MockLoginScreenClient> client = BindMockLoginScreenClient();
+  EXPECT_CALL(*client, LoginAsGuest());
+  Click(LoginShelfView::kBrowseAsGuest);
 }
 
 TEST_F(LoginShelfViewTest, TabGoesFromShelfToStatusAreaAndBackToShelf) {

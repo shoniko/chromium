@@ -214,7 +214,7 @@ DeferredTaskHandler::DeferredTaskHandler()
     : automatic_pull_nodes_need_updating_(false), audio_thread_(0) {}
 
 scoped_refptr<DeferredTaskHandler> DeferredTaskHandler::Create() {
-  return WTF::AdoptRef(new DeferredTaskHandler());
+  return base::AdoptRef(new DeferredTaskHandler());
 }
 
 DeferredTaskHandler::~DeferredTaskHandler() {
@@ -266,8 +266,8 @@ void DeferredTaskHandler::RequestToDeleteHandlersOnMainThread() {
     return;
   deletable_orphan_handlers_.AppendVector(rendering_orphan_handlers_);
   rendering_orphan_handlers_.clear();
-  Platform::Current()->MainThread()->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE,
+  PostCrossThreadTask(
+      *Platform::Current()->MainThread()->GetWebTaskRunner(), FROM_HERE,
       CrossThreadBind(&DeferredTaskHandler::DeleteHandlersOnMainThread,
                       scoped_refptr<DeferredTaskHandler>(this)));
 }

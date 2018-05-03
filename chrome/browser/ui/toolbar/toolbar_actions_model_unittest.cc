@@ -74,6 +74,8 @@ class ToolbarActionsModelTestObserver : public ToolbarActionsModel::Observer {
     ++removed_count_;
   }
 
+  void OnToolbarActionLoadFailed() override {}
+
   void OnToolbarActionMoved(const std::string& id, int index) override {
     ++moved_count_;
   }
@@ -223,7 +225,7 @@ void ToolbarActionsModelUnitTest::Init() {
       extensions::extension_action_test_util::CreateToolbarModelForProfile(
           profile());
   model_observer_ =
-      base::MakeUnique<ToolbarActionsModelTestObserver>(toolbar_model_);
+      std::make_unique<ToolbarActionsModelTestObserver>(toolbar_model_);
 }
 
 void ToolbarActionsModelUnitTest::InitWithMockActionsFactory() {
@@ -231,7 +233,7 @@ void ToolbarActionsModelUnitTest::InitWithMockActionsFactory() {
   toolbar_model_ = extensions::extension_action_test_util::
       CreateToolbarModelForProfileWithoutWaitingForReady(profile());
   toolbar_model_->SetMockActionsFactoryForTest(
-      base::MakeUnique<MockComponentToolbarActionsFactory>(profile()));
+      std::make_unique<MockComponentToolbarActionsFactory>(profile()));
 
   // Trigger ToolbarActionsModel::OnReady() after the actions factory has been
   // swapped out for a mock one.
@@ -241,7 +243,7 @@ void ToolbarActionsModelUnitTest::InitWithMockActionsFactory() {
   base::RunLoop().RunUntilIdle();
 
   model_observer_ =
-      base::MakeUnique<ToolbarActionsModelTestObserver>(toolbar_model_);
+      std::make_unique<ToolbarActionsModelTestObserver>(toolbar_model_);
 }
 
 void ToolbarActionsModelUnitTest::TearDown() {
@@ -519,7 +521,6 @@ TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarUnloadDisableAndUninstall) {
   // Uninstall Extension B.
   service()->UninstallExtension(browser_action_b()->id(),
                                 extensions::UNINSTALL_REASON_FOR_TESTING,
-                                base::Bind(&base::DoNothing),
                                 NULL);  // Ignore error.
   // List contains only A and C now. Validate that.
   EXPECT_EQ(2u, num_toolbar_items());
@@ -758,7 +759,6 @@ TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarHighlightModeRemove) {
   // highlight mode exiting.
   service()->UninstallExtension(browser_action_b()->id(),
                                 extensions::UNINSTALL_REASON_FOR_TESTING,
-                                base::Bind(&base::DoNothing),
                                 NULL);  // Ignore error.
   EXPECT_FALSE(toolbar_model()->is_highlighting());
   EXPECT_EQ(0, observer()->highlight_mode_count());
@@ -781,7 +781,6 @@ TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarHighlightModeRemove) {
   // Uninstalling B should not have visible impact.
   service()->UninstallExtension(browser_action_b()->id(),
                                 extensions::UNINSTALL_REASON_FOR_TESTING,
-                                base::Bind(&base::DoNothing),
                                 NULL);  // Ignore error.
   EXPECT_TRUE(toolbar_model()->is_highlighting());
   EXPECT_EQ(1, observer()->highlight_mode_count());
@@ -1400,7 +1399,6 @@ TEST_F(ToolbarActionsModelUnitTest,
   service()->UninstallExtension(
       browser_action_b()->id(),
       extensions::UNINSTALL_REASON_FOR_TESTING,
-      base::Bind(&base::DoNothing),
       nullptr);
   base::RunLoop().RunUntilIdle();
 
@@ -1420,4 +1418,27 @@ TEST_F(ToolbarActionsModelUnitTest, AddComponentActionBeforeInitialization) {
   toolbar_model->AddComponentAction(component_action_id());
   EXPECT_EQ(0u, toolbar_model->toolbar_items().size());
   EXPECT_FALSE(toolbar_model->HasComponentAction(component_action_id()));
+}
+
+// Test that user-script extensions show up on the toolbar.
+TEST_F(ToolbarActionsModelUnitTest, AddUserScriptExtension) {
+  Init();
+
+  scoped_refptr<const extensions::Extension> extension =
+      extensions::ExtensionBuilder("a")
+          .SetLocation(extensions::Manifest::INTERNAL)
+          .MergeManifest(extensions::DictionaryBuilder()
+                             .SetBoolean("converted_from_user_script", true)
+                             .Build())
+          .Build();
+
+  // We should start off without any actions.
+  EXPECT_EQ(0u, num_toolbar_items());
+  EXPECT_EQ(0u, toolbar_model()->visible_icon_count());
+
+  // Add the extension. It should be visible.
+  service()->AddExtension(extension.get());
+  EXPECT_EQ(1u, num_toolbar_items());
+  EXPECT_EQ(1u, toolbar_model()->visible_icon_count());
+  EXPECT_EQ(extension.get()->id(), GetActionIdAtIndex(0u));
 }

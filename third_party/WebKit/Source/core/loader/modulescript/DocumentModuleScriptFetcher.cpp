@@ -6,6 +6,7 @@
 
 #include "core/dom/ExecutionContext.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/loader/SubresourceIntegrityHelper.h"
 #include "platform/loader/fetch/FetchUtils.h"
 #include "platform/network/mime/MIMETypeRegistry.h"
 
@@ -13,13 +14,23 @@ namespace blink {
 
 namespace {
 
-bool WasModuleLoadSuccessful(Resource* resource,
-                             ConsoleMessage** error_message) {
+bool WasModuleLoadSuccessful(
+    Resource* resource,
+    HeapVector<Member<ConsoleMessage>>* error_messages) {
   // Implements conditions in Step 7 of
   // https://html.spec.whatwg.org/#fetch-a-single-module-script
 
+  DCHECK(error_messages);
+
+  if (resource) {
+    SubresourceIntegrityHelper::GetConsoleMessages(
+        resource->IntegrityReportInfo(), error_messages);
+  }
+
   // - response's type is "error"
-  if (!resource || resource->ErrorOccurred()) {
+  if (!resource || resource->ErrorOccurred() ||
+      resource->IntegrityDisposition() !=
+          ResourceIntegrityDisposition::kPassed) {
     return false;
   }
 
@@ -38,17 +49,15 @@ bool WasModuleLoadSuccessful(Resource* resource,
   // MimeType() may be rewritten by mime sniffer.
   if (!MIMETypeRegistry::IsSupportedJavaScriptMIMEType(
           response.HttpContentType())) {
-    if (error_message) {
-      String message =
-          "Failed to load module script: The server responded with a "
-          "non-JavaScript MIME type of \"" +
-          response.HttpContentType() +
-          "\". Strict MIME type checking is enforced for module scripts per "
-          "HTML spec.";
-      *error_message = ConsoleMessage::CreateForRequest(
-          kJSMessageSource, kErrorMessageLevel, message,
-          response.Url().GetString(), resource->Identifier());
-    }
+    String message =
+        "Failed to load module script: The server responded with a "
+        "non-JavaScript MIME type of \"" +
+        response.HttpContentType() +
+        "\". Strict MIME type checking is enforced for module scripts per "
+        "HTML spec.";
+    error_messages->push_back(ConsoleMessage::CreateForRequest(
+        kJSMessageSource, kErrorMessageLevel, message,
+        response.Url().GetString(), nullptr, resource->Identifier()));
     return false;
   }
 
@@ -66,49 +75,38 @@ DocumentModuleScriptFetcher::DocumentModuleScriptFetcher(
 void DocumentModuleScriptFetcher::Fetch(FetchParameters& fetch_params,
                                         ModuleScriptFetcher::Client* client) {
   SetClient(client);
-  ScriptResource* resource = ScriptResource::Fetch(fetch_params, fetcher_);
-  if (was_fetched_) {
-    // ScriptResource::Fetch() has succeeded synchronously,
-    // ::NotifyFinished() already took care of the |resource|.
-    return;
-  }
-  if (!resource) {
-    // ScriptResource::Fetch() has failed synchronously.
+  if (!ScriptResource::Fetch(fetch_params, fetcher_, this))
     NotifyFinished(nullptr /* resource */);
-    return;
-  }
-
-  // ScriptResource::Fetch() is processed asynchronously.
-  SetResource(resource);
 }
 
 void DocumentModuleScriptFetcher::NotifyFinished(Resource* resource) {
   ClearResource();
 
   ScriptResource* script_resource = ToScriptResource(resource);
-  ConsoleMessage* error_message = nullptr;
-  if (!WasModuleLoadSuccessful(script_resource, &error_message)) {
-    Finalize(WTF::nullopt, error_message);
+
+  HeapVector<Member<ConsoleMessage>> error_messages;
+  if (!WasModuleLoadSuccessful(script_resource, &error_messages)) {
+    Finalize(WTF::nullopt, error_messages);
     return;
   }
 
   ModuleScriptCreationParams params(
       script_resource->GetResponse().Url(), script_resource->SourceText(),
       script_resource->GetResourceRequest().GetFetchCredentialsMode(),
-      script_resource->CalculateAccessControlStatus());
-  Finalize(params, nullptr /* error_message */);
+      script_resource->CalculateAccessControlStatus(
+          fetcher_->Context().GetSecurityOrigin()));
+  Finalize(params, error_messages);
 }
 
 void DocumentModuleScriptFetcher::Finalize(
     const WTF::Optional<ModuleScriptCreationParams>& params,
-    ConsoleMessage* error_message) {
-  was_fetched_ = true;
-  NotifyFetchFinished(params, error_message);
+    const HeapVector<Member<ConsoleMessage>>& error_messages) {
+  NotifyFetchFinished(params, error_messages);
 }
 
 void DocumentModuleScriptFetcher::Trace(blink::Visitor* visitor) {
   visitor->Trace(fetcher_);
-  ResourceOwner<ScriptResource>::Trace(visitor);
+  ResourceClient::Trace(visitor);
   ModuleScriptFetcher::Trace(visitor);
 }
 

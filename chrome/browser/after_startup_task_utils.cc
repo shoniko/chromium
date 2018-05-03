@@ -25,6 +25,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "third_party/WebKit/common/page/page_visibility_state.mojom.h"
 
 using content::BrowserThread;
 using content::WebContents;
@@ -54,7 +55,7 @@ base::LazyInstance<base::circular_deque<AfterStartupTask*>>::Leaky
 bool IsBrowserStartupComplete() {
   // Be sure to initialize the LazyInstance on the main thread since the flag
   // may only be set on it's initializing thread.
-  if (g_startup_complete_flag == nullptr)
+  if (!g_startup_complete_flag.IsCreated())
     return false;
   return g_startup_complete_flag.Get().IsSet();
 }
@@ -178,7 +179,7 @@ void StartupObserver::Start() {
     contents = browser->tab_strip_model()->GetActiveWebContents();
     if (contents && contents->GetMainFrame() &&
         contents->GetMainFrame()->GetVisibilityState() ==
-            blink::kWebPageVisibilityStateVisible) {
+            blink::mojom::PageVisibilityState::kVisible) {
       break;
     }
   }

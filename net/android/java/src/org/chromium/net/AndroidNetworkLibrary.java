@@ -5,7 +5,6 @@
 package org.chromium.net;
 
 import android.annotation.TargetApi;
-import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -14,21 +13,31 @@ import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
+import android.net.TrafficStats;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
-import android.security.KeyChain;
+import android.os.ParcelFileDescriptor;
 import android.security.NetworkSecurityPolicy;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.CalledByNativeUnchecked;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.Socket;
+import java.net.SocketAddress;
 import java.net.SocketException;
+import java.net.SocketImpl;
 import java.net.URLConnection;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -42,35 +51,6 @@ import java.util.List;
 class AndroidNetworkLibrary {
 
     private static final String TAG = "AndroidNetworkLibrary";
-
-    /**
-     * Stores the key pair through the CertInstaller activity.
-     * @param publicKey The public key bytes as DER-encoded SubjectPublicKeyInfo (X.509)
-     * @param privateKey The private key as DER-encoded PrivateKeyInfo (PKCS#8).
-     * @return: true on success, false on failure.
-     *
-     * Note that failure means that the function could not launch the CertInstaller
-     * activity. Whether the keys are valid or properly installed will be indicated
-     * by the CertInstaller UI itself.
-     */
-    @CalledByNative
-    public static boolean storeKeyPair(byte[] publicKey, byte[] privateKey) {
-        // TODO(digit): Use KeyChain official extra values to pass the public and private
-        // keys when they're available. The "KEY" and "PKEY" hard-coded constants were taken
-        // from the platform sources, since there are no official KeyChain.EXTRA_XXX definitions
-        // for them. b/5859651
-        try {
-            Intent intent = KeyChain.createInstallIntent();
-            intent.putExtra("PKEY", privateKey);
-            intent.putExtra("KEY", publicKey);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            ContextUtils.getApplicationContext().startActivity(intent);
-            return true;
-        } catch (ActivityNotFoundException e) {
-            Log.w(TAG, "could not store key pair: " + e);
-        }
-        return false;
-    }
 
     /**
      * @return the mime type (if any) that is associated with the file
@@ -250,21 +230,48 @@ class AndroidNetworkLibrary {
         return "";
     }
 
+    public static class NetworkSecurityPolicyProxy {
+        private static NetworkSecurityPolicyProxy sInstance = new NetworkSecurityPolicyProxy();
+
+        public static NetworkSecurityPolicyProxy getInstance() {
+            return sInstance;
+        }
+
+        @VisibleForTesting
+        public static void setInstanceForTesting(
+                NetworkSecurityPolicyProxy networkSecurityPolicyProxy) {
+            sInstance = networkSecurityPolicyProxy;
+        }
+
+        @TargetApi(Build.VERSION_CODES.N)
+        public boolean isCleartextTrafficPermitted(String host) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+                // No per-host configuration before N.
+                return isCleartextTrafficPermitted();
+            }
+            return NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(host);
+        }
+
+        @TargetApi(Build.VERSION_CODES.M)
+        public boolean isCleartextTrafficPermitted() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                // Always true before M.
+                return true;
+            }
+            return NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted();
+        }
+    }
+
     /**
-     * Returns true if cleartext traffic to |host| is allowed by the current app. Always true on L
-     * and older.
+     * Returns true if cleartext traffic to |host| is allowed by the current app.
      */
-    @TargetApi(Build.VERSION_CODES.N)
     @CalledByNative
     private static boolean isCleartextPermitted(String host) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            NetworkSecurityPolicy policy = NetworkSecurityPolicy.getInstance();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                return policy.isCleartextTrafficPermitted(host);
-            }
-            return policy.isCleartextTrafficPermitted();
+        try {
+            return NetworkSecurityPolicyProxy.getInstance().isCleartextTrafficPermitted(host);
+        } catch (IllegalArgumentException e) {
+            return NetworkSecurityPolicyProxy.getInstance().isCleartextTrafficPermitted();
         }
-        return true;
     }
 
     @TargetApi(Build.VERSION_CODES.M)
@@ -290,5 +297,153 @@ class AndroidNetworkLibrary {
             dnsServers[i] = dnsServersList.get(i).getAddress();
         }
         return dnsServers;
+    }
+
+    /** Socket that exists only to provide a file descriptor when queried. */
+    private static class SocketFd extends Socket {
+        /** SocketImpl that exists only to provide a file descriptor when queried. */
+        private static class SocketImplFd extends SocketImpl {
+            private final ParcelFileDescriptor mPfd;
+
+            /**
+             * Create a {@link SocketImpl} that sets {@code fd} as the underlying file descriptor.
+             * Does not take ownership of {@code fd}, i.e. {@link #close()} is a no-op.
+             */
+            SocketImplFd(int fd) {
+                mPfd = ParcelFileDescriptor.adoptFd(fd);
+                this.fd = mPfd.getFileDescriptor();
+            }
+
+            @Override
+            protected void accept(SocketImpl s) {
+                throw new RuntimeException("accept not implemented");
+            }
+            @Override
+            protected int available() {
+                throw new RuntimeException("accept not implemented");
+            }
+            @Override
+            protected void bind(InetAddress host, int port) {
+                throw new RuntimeException("accept not implemented");
+            }
+            @Override
+            protected void close() {
+                // Detach from |fd| to avoid leak detection false positives without closing |fd|.
+                mPfd.detachFd();
+            }
+            @Override
+            protected void connect(InetAddress address, int port) {
+                throw new RuntimeException("connect not implemented");
+            }
+            @Override
+            protected void connect(SocketAddress address, int timeout) {
+                throw new RuntimeException("connect not implemented");
+            }
+            @Override
+            protected void connect(String host, int port) {
+                throw new RuntimeException("connect not implemented");
+            }
+            @Override
+            protected void create(boolean stream) {
+                throw new RuntimeException("create not implemented");
+            }
+            @Override
+            protected InputStream getInputStream() {
+                throw new RuntimeException("getInputStream not implemented");
+            }
+            @Override
+            protected OutputStream getOutputStream() {
+                throw new RuntimeException("getOutputStream not implemented");
+            }
+            @Override
+            protected void listen(int backlog) {
+                throw new RuntimeException("listen not implemented");
+            }
+            @Override
+            protected void sendUrgentData(int data) {
+                throw new RuntimeException("sendUrgentData not implemented");
+            }
+            @Override
+            public Object getOption(int optID) {
+                throw new RuntimeException("getOption not implemented");
+            }
+            @Override
+            public void setOption(int optID, Object value) {
+                throw new RuntimeException("setOption not implemented");
+            }
+        }
+
+        /**
+         * Creates a {@link Socket} that sets {@code fd} as the underlying file descriptor.
+         * Does not take ownership of {@code fd}, i.e. {@link #close()} is a no-op.
+         */
+        SocketFd(int fd) throws IOException {
+            super(new SocketImplFd(fd));
+        }
+    }
+
+    /**
+     * Class to wrap TrafficStats.setThreadStatsUid(int uid) and TrafficStats.clearThreadStatsUid()
+     * which are hidden and so must be accessed via reflection.
+     */
+    private static class ThreadStatsUid {
+        // Reference to TrafficStats.setThreadStatsUid(int uid).
+        private static final Method sSetThreadStatsUid;
+        // Reference to TrafficStats.clearThreadStatsUid().
+        private static final Method sClearThreadStatsUid;
+
+        // Get reference to TrafficStats.setThreadStatsUid(int uid) and
+        // TrafficStats.clearThreadStatsUid() via reflection.
+        static {
+            try {
+                sSetThreadStatsUid =
+                        TrafficStats.class.getMethod("setThreadStatsUid", Integer.TYPE);
+                sClearThreadStatsUid = TrafficStats.class.getMethod("clearThreadStatsUid");
+            } catch (NoSuchMethodException | SecurityException e) {
+                throw new RuntimeException("Unable to get TrafficStats methods", e);
+            }
+        }
+
+        /** Calls TrafficStats.setThreadStatsUid(uid) */
+        public static void set(int uid) throws IllegalAccessException, InvocationTargetException {
+            sSetThreadStatsUid.invoke(null, uid); // Pass null for "this" as it's a static method.
+        }
+
+        /** Calls TrafficStats.clearThreadStatsUid() */
+        public static void clear() throws IllegalAccessException, InvocationTargetException {
+            sClearThreadStatsUid.invoke(null); // Pass null for "this" as it's a static method.
+        }
+    }
+
+    /**
+     * Tag socket referenced by {@code fd} with {@code tag} for UID {@code uid}.
+     *
+     * Assumes thread UID tag isn't set upon entry, and ensures thread UID tag isn't set upon exit.
+     * Unfortunately there is no TrafficStatis.getThreadStatsUid().
+     */
+    @CalledByNative
+    private static void tagSocket(int fd, int uid, int tag)
+            throws IOException, IllegalAccessException, InvocationTargetException {
+        // Set thread tags.
+        int oldTag = TrafficStats.getThreadStatsTag();
+        if (tag != oldTag) {
+            TrafficStats.setThreadStatsTag(tag);
+        }
+        if (uid != TrafficStatsUid.UNSET) {
+            ThreadStatsUid.set(uid);
+        }
+
+        // Apply thread tags to socket.
+        SocketFd s = new SocketFd(fd);
+        TrafficStats.tagSocket(s);
+        s.close(); // No-op, just to avoid leak detection false positives.
+
+        // Restore prior thread tags.
+        if (tag != oldTag) {
+            TrafficStats.setThreadStatsTag(oldTag);
+        }
+        if (uid != TrafficStatsUid.UNSET) {
+            ThreadStatsUid.clear();
+        }
     }
 }

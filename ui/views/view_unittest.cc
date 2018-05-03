@@ -18,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/icu_test_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "cc/paint/display_item_list.h"
@@ -193,18 +194,6 @@ void ScrambleTree(views::View* view) {
     view->SetVisible(!view->visible());
 }
 
-class ScopedRTL {
- public:
-  ScopedRTL() {
-    locale_ = base::i18n::GetConfiguredLocale();
-    base::i18n::SetICUDefaultLocale("he");
-  }
-  ~ScopedRTL() { base::i18n::SetICUDefaultLocale(locale_); }
-
- private:
-  std::string locale_;
-};
-
 }  // namespace
 
 namespace views {
@@ -273,6 +262,8 @@ class TestView : public View {
 
   void OnNativeThemeChanged(const ui::NativeTheme* native_theme) override;
 
+  void OnAccessibilityEvent(ui::AXEvent event_type) override;
+
   // OnBoundsChanged.
   bool did_change_bounds_;
   gfx::Rect new_bounds_;
@@ -299,6 +290,9 @@ class TestView : public View {
 
   // Value to return from CanProcessEventsWithinSubtree().
   bool can_process_events_within_subtree_;
+
+  // Accessibility events
+  ui::AXEvent last_a11y_event_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -333,6 +327,31 @@ TEST_F(ViewTest, LayoutCalledInvalidateAndOriginChanges) {
 ////////////////////////////////////////////////////////////////////////////////
 // OnBoundsChanged
 ////////////////////////////////////////////////////////////////////////////////
+
+void TestView::OnAccessibilityEvent(ui::AXEvent event_type) {
+  last_a11y_event_ = event_type;
+}
+
+TEST_F(ViewTest, OnBoundsChangedFiresA11yEvent) {
+  TestView v;
+
+  // Should change when scaled or moved.
+  gfx::Rect initial(0, 0, 200, 200);
+  gfx::Rect scaled(0, 0, 250, 250);
+  gfx::Rect moved(100, 100, 250, 250);
+
+  v.last_a11y_event_ = ui::AX_EVENT_NONE;
+  v.SetBoundsRect(initial);
+  EXPECT_EQ(v.last_a11y_event_, ui::AX_EVENT_LOCATION_CHANGED);
+
+  v.last_a11y_event_ = ui::AX_EVENT_NONE;
+  v.SetBoundsRect(scaled);
+  EXPECT_EQ(v.last_a11y_event_, ui::AX_EVENT_LOCATION_CHANGED);
+
+  v.last_a11y_event_ = ui::AX_EVENT_NONE;
+  v.SetBoundsRect(moved);
+  EXPECT_EQ(v.last_a11y_event_, ui::AX_EVENT_LOCATION_CHANGED);
+}
 
 void TestView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   did_change_bounds_ = true;
@@ -620,7 +639,7 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCache) {
 }
 
 TEST_F(ViewTest, PaintWithMovedViewUsesCacheInRTL) {
-  ScopedRTL rtl;
+  base::test::ScopedRestoreICUDefaultLocale scoped_locale_("he");
   ScopedTestPaintWidget widget(CreateParams(Widget::InitParams::TYPE_POPUP));
   View* root_view = widget->GetRootView();
   TestView* v1 = new TestView;
@@ -775,7 +794,7 @@ TEST_F(ViewTest, PaintContainsChildren) {
 }
 
 TEST_F(ViewTest, PaintContainsChildrenInRTL) {
-  ScopedRTL rtl;
+  base::test::ScopedRestoreICUDefaultLocale scoped_locale_("he");
   ScopedTestPaintWidget widget(CreateParams(Widget::InitParams::TYPE_POPUP));
   View* root_view = widget->GetRootView();
 
@@ -855,7 +874,7 @@ TEST_F(ViewTest, PaintIntersectsChildren) {
 }
 
 TEST_F(ViewTest, PaintIntersectsChildrenInRTL) {
-  ScopedRTL rtl;
+  base::test::ScopedRestoreICUDefaultLocale scoped_locale_("he");
   ScopedTestPaintWidget widget(CreateParams(Widget::InitParams::TYPE_POPUP));
   View* root_view = widget->GetRootView();
 
@@ -935,7 +954,7 @@ TEST_F(ViewTest, PaintIntersectsChildButNotGrandChild) {
 }
 
 TEST_F(ViewTest, PaintIntersectsChildButNotGrandChildInRTL) {
-  ScopedRTL rtl;
+  base::test::ScopedRestoreICUDefaultLocale scoped_locale_("he");
   ScopedTestPaintWidget widget(CreateParams(Widget::InitParams::TYPE_POPUP));
   View* root_view = widget->GetRootView();
 
@@ -1015,7 +1034,7 @@ TEST_F(ViewTest, PaintIntersectsNoChildren) {
 }
 
 TEST_F(ViewTest, PaintIntersectsNoChildrenInRTL) {
-  ScopedRTL rtl;
+  base::test::ScopedRestoreICUDefaultLocale scoped_locale_("he");
   ScopedTestPaintWidget widget(CreateParams(Widget::InitParams::TYPE_POPUP));
   View* root_view = widget->GetRootView();
 
@@ -1108,7 +1127,7 @@ TEST_F(ViewTest, PaintIntersectsOneChild) {
 }
 
 TEST_F(ViewTest, PaintIntersectsOneChildInRTL) {
-  ScopedRTL rtl;
+  base::test::ScopedRestoreICUDefaultLocale scoped_locale_("he");
   ScopedTestPaintWidget widget(CreateParams(Widget::InitParams::TYPE_POPUP));
   View* root_view = widget->GetRootView();
 
@@ -3939,8 +3958,7 @@ TEST_F(ViewLayerTest, BoundsChangeWithLayer) {
 
 // Make sure layers are positioned correctly in RTL.
 TEST_F(ViewLayerTest, BoundInRTL) {
-  ScopedRTL rtl;
-
+  base::test::ScopedRestoreICUDefaultLocale scoped_locale_("he");
   View* view = new View;
   widget()->SetContentsView(view);
 
@@ -3994,8 +4012,7 @@ TEST_F(ViewLayerTest, BoundInRTL) {
 
 // Make sure that resizing a parent in RTL correctly repositions its children.
 TEST_F(ViewLayerTest, ResizeParentInRTL) {
-  ScopedRTL rtl;
-
+  base::test::ScopedRestoreICUDefaultLocale scoped_locale_("he");
   View* view = new View;
   widget()->SetContentsView(view);
 
@@ -4458,7 +4475,8 @@ TEST_F(ViewLayerTest, SnapLayerToPixel) {
   widget()->SetContentsView(v1);
 
   const gfx::Size& size = GetRootLayer()->GetCompositor()->size();
-  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.25f, size);
+  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.25f, size,
+                                                   viz::LocalSurfaceId());
 
   v11->SetBoundsRect(gfx::Rect(1, 1, 10, 10));
   v1->SetBoundsRect(gfx::Rect(1, 1, 10, 10));
@@ -4472,7 +4490,8 @@ TEST_F(ViewLayerTest, SnapLayerToPixel) {
   EXPECT_EQ("-0.20 -0.20", ToString(v11->layer()->subpixel_position_offset()));
 
   // DSF change should get propagated and update offsets.
-  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.5f, size);
+  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.5f, size,
+                                                   viz::LocalSurfaceId());
   EXPECT_EQ("0.33 0.33", ToString(v1->layer()->subpixel_position_offset()));
   EXPECT_EQ("0.33 0.33", ToString(v11->layer()->subpixel_position_offset()));
 
@@ -4485,7 +4504,8 @@ TEST_F(ViewLayerTest, SnapLayerToPixel) {
   EXPECT_EQ("0.33 0.33", ToString(v11->layer()->subpixel_position_offset()));
 
   // Setting integral DSF should reset the offset.
-  GetRootLayer()->GetCompositor()->SetScaleAndSize(2.0f, size);
+  GetRootLayer()->GetCompositor()->SetScaleAndSize(2.0f, size,
+                                                   viz::LocalSurfaceId());
   EXPECT_EQ("0.00 0.00", ToString(v11->layer()->subpixel_position_offset()));
 }
 
@@ -4554,7 +4574,8 @@ TEST_F(ViewLayerPixelCanvasTest, SnapLayerToPixel) {
   widget()->SetContentsView(v1);
 
   const gfx::Size& size = GetRootLayer()->GetCompositor()->size();
-  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.6f, size);
+  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.6f, size,
+                                                   viz::LocalSurfaceId());
 
   v3->SetBoundsRect(gfx::Rect(14, 13, 13, 5));
   v2->SetBoundsRect(gfx::Rect(7, 7, 50, 50));
@@ -4569,7 +4590,8 @@ TEST_F(ViewLayerPixelCanvasTest, SnapLayerToPixel) {
   EXPECT_EQ("-0.37 -0.00", ToString(v3->layer()->subpixel_position_offset()));
 
   // DSF change should get propagated and update offsets.
-  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.5f, size);
+  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.5f, size,
+                                                   viz::LocalSurfaceId());
 
   EXPECT_EQ("0.33 0.33", ToString(v1->layer()->subpixel_position_offset()));
   EXPECT_EQ("0.33 0.67", ToString(v3->layer()->subpixel_position_offset()));
@@ -4578,7 +4600,8 @@ TEST_F(ViewLayerPixelCanvasTest, SnapLayerToPixel) {
   PaintRecordingSizeTest(v3, gfx::Size(20, 7));  // Enclosing Rect = (20, 8)
   v1->SetPaintToLayer();
 
-  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.33f, size);
+  GetRootLayer()->GetCompositor()->SetScaleAndSize(1.33f, size,
+                                                   viz::LocalSurfaceId());
 
   EXPECT_EQ("0.02 0.02", ToString(v1->layer()->subpixel_position_offset()));
   EXPECT_EQ("0.05 -0.45", ToString(v3->layer()->subpixel_position_offset()));
@@ -4594,7 +4617,8 @@ TEST_F(ViewLayerPixelCanvasTest, SnapLayerToPixel) {
   EXPECT_EQ("0.06 -0.44", ToString(v3->layer()->subpixel_position_offset()));
 
   // Setting integral DSF should reset the offset.
-  GetRootLayer()->GetCompositor()->SetScaleAndSize(2.0f, size);
+  GetRootLayer()->GetCompositor()->SetScaleAndSize(2.0f, size,
+                                                   viz::LocalSurfaceId());
   EXPECT_EQ("0.00 0.00", ToString(v3->layer()->subpixel_position_offset()));
 }
 
@@ -4773,6 +4797,7 @@ class TestNativeTheme : public ui::NativeTheme {
   gfx::Rect GetNinePatchAperture(Part part) const override {
     return gfx::Rect();
   }
+  bool UsesHighContrastColors() const override { return false; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestNativeTheme);
@@ -4917,6 +4942,41 @@ TEST_F(ViewTest, ChildViewZOrderChanged) {
     EXPECT_EQ(view->child_at(expected_order[i]), children[i]);
     EXPECT_EQ(view->child_at(expected_order[i])->layer(), layers[i]);
   }
+}
+
+TEST_F(ViewTest, AttachChildViewWithComplicatedLayers) {
+  std::unique_ptr<View> grand_parent_view(new View());
+  grand_parent_view->SetPaintToLayer();
+
+  View* parent_view = new OrderableView();
+  parent_view->SetPaintToLayer();
+
+  // child_view1 has layer and has id OrderableView::VIEW_ID_RAISED.
+  View* child_view1 = new View;
+  child_view1->SetPaintToLayer();
+  child_view1->set_id(OrderableView::VIEW_ID_RAISED);
+  parent_view->AddChildView(child_view1);
+
+  // child_view2 has no layer.
+  View* child_view2 = new View;
+  // grand_child_view has layer.
+  View* grand_child_view = new View();
+  grand_child_view->SetPaintToLayer();
+  child_view2->AddChildView(grand_child_view);
+  parent_view->AddChildView(child_view2);
+  const std::vector<ui::Layer*>& layers = parent_view->layer()->children();
+  EXPECT_EQ(2u, layers.size());
+  EXPECT_EQ(layers[0], grand_child_view->layer());
+  EXPECT_EQ(layers[1], child_view1->layer());
+
+  // Attach parent_view to grand_parent_view. children layers of parent_view
+  // should not change.
+  grand_parent_view->AddChildView(parent_view);
+  const std::vector<ui::Layer*>& layers_after_attached
+      = parent_view->layer()->children();
+  EXPECT_EQ(2u, layers_after_attached.size());
+  EXPECT_EQ(layers_after_attached[0], grand_child_view->layer());
+  EXPECT_EQ(layers_after_attached[1], child_view1->layer());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -154,7 +154,7 @@ void ShellDevToolsBindings::ReadyToCommitNavigation(
 #endif
 }
 
-void ShellDevToolsBindings::DocumentAvailableInMainFrame() {
+void ShellDevToolsBindings::Attach() {
   if (agent_host_)
     agent_host_->DetachClient(this);
   agent_host_ = DevToolsAgentHost::GetOrCreateFor(inspected_contents_);
@@ -174,28 +174,11 @@ void ShellDevToolsBindings::WebContentsDestroyed() {
   }
 }
 
-void ShellDevToolsBindings::SetPreferences(const std::string& json) {
-  preferences_.Clear();
-  if (json.empty())
-    return;
-  base::DictionaryValue* dict = nullptr;
-  std::unique_ptr<base::Value> parsed = base::JSONReader::Read(json);
-  if (!parsed || !parsed->GetAsDictionary(&dict))
-    return;
-  for (base::DictionaryValue::Iterator it(*dict); !it.IsAtEnd(); it.Advance()) {
-    if (!it.value().IsType(base::Value::Type::STRING))
-      continue;
-    preferences_.SetWithoutPathExpansion(it.key(), it.value().CreateDeepCopy());
-  }
-}
-
 void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
     const std::string& message) {
-  if (!agent_host_)
-    return;
   std::string method;
-  base::ListValue* params = NULL;
-  base::DictionaryValue* dict = NULL;
+  base::ListValue* params = nullptr;
+  base::DictionaryValue* dict = nullptr;
   std::unique_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
   if (!parsed_message || !parsed_message->GetAsDictionary(&dict) ||
       !dict->GetString("method", &method)) {
@@ -207,7 +190,7 @@ void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
 
   if (method == "dispatchProtocolMessage" && params && params->GetSize() == 1) {
     std::string protocol_message;
-    if (!params->GetString(0, &protocol_message))
+    if (!agent_host_ || !params->GetString(0, &protocol_message))
       return;
     agent_host_->DispatchProtocolMessage(this, protocol_message);
   } else if (method == "loadCompleted") {
@@ -289,6 +272,8 @@ void ShellDevToolsBindings::HandleMessageFromDevToolsFrontend(
     web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
         base::ASCIIToUTF16("DevToolsAPI.fileSystemsLoaded([]);"));
   } else if (method == "reattach") {
+    if (!agent_host_)
+      return;
     agent_host_->DetachClient(this);
     agent_host_->AttachClient(this);
   } else if (method == "registerExtensionsAPI") {
@@ -337,7 +322,7 @@ void ShellDevToolsBindings::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(it != pending_requests_.end());
 
   base::DictionaryValue response;
-  auto headers = base::MakeUnique<base::DictionaryValue>();
+  auto headers = std::make_unique<base::DictionaryValue>();
   net::HttpResponseHeaders* rh = source->GetResponseHeaders();
   response.SetInteger("statusCode", rh ? rh->response_code() : 200);
 
@@ -382,8 +367,7 @@ void ShellDevToolsBindings::SendMessageAck(int request_id,
   CallClientFunction("DevToolsAPI.embedderMessageAck", &id_value, arg, nullptr);
 }
 
-void ShellDevToolsBindings::AgentHostClosed(DevToolsAgentHost* agent_host,
-                                            bool replaced) {
+void ShellDevToolsBindings::AgentHostClosed(DevToolsAgentHost* agent_host) {
   agent_host_ = nullptr;
   if (delegate_)
     delegate_->Close();

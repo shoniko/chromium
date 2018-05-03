@@ -11,10 +11,10 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/environment.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -40,6 +40,12 @@ using ::testing::Gt;
 using ::testing::NotNull;
 
 namespace media {
+
+namespace {
+
+void LogCallbackDummy(const std::string& /* message */) {}
+
+}  // namespace
 
 ACTION_P4(CheckCountAndPostQuitTask, count, limit, task_runner, quit_closure) {
   if (++*count >= limit)
@@ -207,7 +213,7 @@ class AudioInputStreamWrapper {
     params.set_frames_per_buffer(frames_per_buffer_);
     AudioInputStream* ais = audio_man_->MakeAudioInputStream(
         params, AudioDeviceDescription::kDefaultDeviceId,
-        AudioManager::LogCallback());
+        base::BindRepeating(&LogCallbackDummy));
     EXPECT_TRUE(ais);
     return ais;
   }
@@ -259,7 +265,7 @@ class WinAudioInputTest : public ::testing::Test {
  public:
   WinAudioInputTest() {
     audio_manager_ =
-        AudioManager::CreateForTesting(base::MakeUnique<TestAudioThread>());
+        AudioManager::CreateForTesting(std::make_unique<TestAudioThread>());
     base::RunLoop().RunUntilIdle();
   }
   ~WinAudioInputTest() override { audio_manager_->Shutdown(); }
@@ -453,7 +459,7 @@ TEST_F(WinAudioInputTest, WASAPIAudioInputStreamLoopback) {
 
   ScopedAudioInputStream stream(audio_manager_->MakeAudioInputStream(
       params, AudioDeviceDescription::kLoopbackInputDeviceId,
-      AudioManager::LogCallback()));
+      base::BindRepeating(&LogCallbackDummy)));
   ASSERT_TRUE(stream->Open());
   FakeAudioInputCallback sink;
   stream->Start(&sink);

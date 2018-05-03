@@ -11,6 +11,7 @@
 #include "components/safe_browsing/common/safe_browsing.mojom.h"
 #include "content/public/common/url_loader_throttle.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "url/gurl.h"
 
 namespace safe_browsing {
 
@@ -31,12 +32,13 @@ class RendererURLLoaderThrottle : public content::URLLoaderThrottle,
  private:
   // content::URLLoaderThrottle implementation.
   void DetachFromCurrentSequence() override;
-  void WillStartRequest(const content::ResourceRequest& request,
+  void WillStartRequest(network::ResourceRequest* request,
                         bool* defer) override;
   void WillRedirectRequest(const net::RedirectInfo& redirect_info,
+                           const network::ResourceResponseHead& response_head,
                            bool* defer) override;
   void WillProcessResponse(const GURL& response_url,
-                           const content::ResourceResponseHead& response_head,
+                           const network::ResourceResponseHead& response_head,
                            bool* defer) override;
 
   // mojom::UrlCheckNotifier implementation.
@@ -73,7 +75,15 @@ class RendererURLLoaderThrottle : public content::URLLoaderThrottle,
   base::TimeTicks defer_start_time_;
   bool deferred_ = false;
 
+  // The total delay caused by SafeBrowsing deferring the resource load.
+  base::TimeDelta total_delay_;
+  // Whether the interstitial page has been shown and therefore user action has
+  // been involved.
+  bool user_action_involved_ = false;
+
   std::unique_ptr<mojo::BindingSet<mojom::UrlCheckNotifier>> notifier_bindings_;
+
+  GURL original_url_;
 
   base::WeakPtrFactory<RendererURLLoaderThrottle> weak_factory_;
 };

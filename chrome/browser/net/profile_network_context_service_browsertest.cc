@@ -27,12 +27,12 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/url_loader_factory.mojom.h"
 #include "content/public/test/simple_url_loader_test_helper.h"
 #include "content/public/test/test_url_loader_client.h"
 #include "mojo/common/data_pipe_utils.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "services/network/public/interfaces/url_loader_factory.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -64,27 +64,29 @@ class ProfileNetworkContextServiceBrowsertest
                           ->GetURLLoaderFactoryForBrowserProcess();
   }
 
-  content::mojom::URLLoaderFactory* loader_factory() const {
+  network::mojom::URLLoaderFactory* loader_factory() const {
     return loader_factory_;
   }
 
  private:
   base::test::ScopedFeatureList feature_list_;
-  content::mojom::URLLoaderFactory* loader_factory_ = nullptr;
+  network::mojom::URLLoaderFactory* loader_factory_ = nullptr;
 };
 
 IN_PROC_BROWSER_TEST_P(ProfileNetworkContextServiceBrowsertest,
                        DiskCacheLocation) {
   // Run a request that caches the response, to give the network service time to
   // create a cache directory.
+  std::unique_ptr<network::ResourceRequest> request =
+      std::make_unique<network::ResourceRequest>();
+  request->url = embedded_test_server()->GetURL("/cachetime");
   content::SimpleURLLoaderTestHelper simple_loader_helper;
   std::unique_ptr<content::SimpleURLLoader> simple_loader =
-      content::SimpleURLLoader::Create();
-  content::ResourceRequest request;
-  request.url = embedded_test_server()->GetURL("/cachetime");
+      content::SimpleURLLoader::Create(std::move(request),
+                                       TRAFFIC_ANNOTATION_FOR_TESTS);
+
   simple_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      request, loader_factory(), TRAFFIC_ANNOTATION_FOR_TESTS,
-      simple_loader_helper.GetCallback());
+      loader_factory(), simple_loader_helper.GetCallback());
   simple_loader_helper.WaitForCallback();
   ASSERT_TRUE(simple_loader_helper.response_body());
 
@@ -103,21 +105,21 @@ IN_PROC_BROWSER_TEST_P(ProfileNetworkContextServiceBrowsertest, BrotliEnabled) {
       base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
-  content::SimpleURLLoaderTestHelper simple_loader_helper;
-  std::unique_ptr<content::SimpleURLLoader> simple_loader =
-      content::SimpleURLLoader::Create();
-
-  content::ResourceRequest request;
-  request.url = https_server.GetURL("/echoheader?accept-encoding");
+  std::unique_ptr<network::ResourceRequest> request =
+      std::make_unique<network::ResourceRequest>();
+  request->url = https_server.GetURL("/echoheader?accept-encoding");
 // On OSX, test certs aren't currently hooked up correctly when using the
 // network service.
 // TODO(mmenke): Remove this line once that's fixed.
 #if defined(OS_MACOSX)
-  request.load_flags |= net::LOAD_IGNORE_ALL_CERT_ERRORS;
+  request->load_flags |= net::LOAD_IGNORE_ALL_CERT_ERRORS;
 #endif  // !defined(OS_MACOSX)
+  content::SimpleURLLoaderTestHelper simple_loader_helper;
+  std::unique_ptr<content::SimpleURLLoader> simple_loader =
+      content::SimpleURLLoader::Create(std::move(request),
+                                       TRAFFIC_ANNOTATION_FOR_TESTS);
   simple_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      request, loader_factory(), TRAFFIC_ANNOTATION_FOR_TESTS,
-      simple_loader_helper.GetCallback());
+      loader_factory(), simple_loader_helper.GetCallback());
   simple_loader_helper.WaitForCallback();
   ASSERT_TRUE(simple_loader_helper.response_body());
   std::vector<std::string> encodings =
@@ -158,14 +160,16 @@ IN_PROC_BROWSER_TEST_P(ProfileNetworkContextServiceDiskCacheDirBrowsertest,
 
   // Run a request that caches the response, to give the network service time to
   // create a cache directory.
+  std::unique_ptr<network::ResourceRequest> request =
+      std::make_unique<network::ResourceRequest>();
+  request->url = embedded_test_server()->GetURL("/cachetime");
   content::SimpleURLLoaderTestHelper simple_loader_helper;
   std::unique_ptr<content::SimpleURLLoader> simple_loader =
-      content::SimpleURLLoader::Create();
-  content::ResourceRequest request;
-  request.url = embedded_test_server()->GetURL("/cachetime");
+      content::SimpleURLLoader::Create(std::move(request),
+                                       TRAFFIC_ANNOTATION_FOR_TESTS);
+
   simple_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      request, loader_factory(), TRAFFIC_ANNOTATION_FOR_TESTS,
-      simple_loader_helper.GetCallback());
+      loader_factory(), simple_loader_helper.GetCallback());
   simple_loader_helper.WaitForCallback();
   ASSERT_TRUE(simple_loader_helper.response_body());
 

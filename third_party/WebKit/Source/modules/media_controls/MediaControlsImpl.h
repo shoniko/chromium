@@ -36,6 +36,7 @@
 namespace blink {
 
 class Event;
+class HTMLVideoElement;
 class MediaControlsMediaEventListener;
 class MediaControlsOrientationLockDelegate;
 class MediaControlsRotateToFullscreenDelegate;
@@ -45,6 +46,7 @@ class MediaControlCastButtonElement;
 class MediaControlCurrentTimeDisplayElement;
 class MediaControlDownloadButtonElement;
 class MediaControlFullscreenButtonElement;
+class MediaControlLoadingPanelElement;
 class MediaControlMuteButtonElement;
 class MediaControlOverflowMenuButtonElement;
 class MediaControlOverflowMenuListElement;
@@ -52,6 +54,7 @@ class MediaControlOverlayEnclosureElement;
 class MediaControlOverlayPlayButtonElement;
 class MediaControlPanelElement;
 class MediaControlPanelEnclosureElement;
+class MediaControlPictureInPictureButtonElement;
 class MediaControlPlayButtonElement;
 class MediaControlRemainingTimeDisplayElement;
 class MediaControlTextTrackListElement;
@@ -71,6 +74,9 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
  public:
   static MediaControlsImpl* Create(HTMLMediaElement&, ShadowRoot&);
   ~MediaControlsImpl() = default;
+
+  // Returns whether the ModernMediaControlsEnabled runtime flag is on.
+  static bool IsModern();
 
   // Node override.
   Node::InsertionNotificationRequest InsertedInto(ContainerNode*) override;
@@ -128,37 +134,6 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   virtual void Trace(blink::Visitor*);
 
- private:
-  // MediaControlsMediaEventListener is a component that is listening to events
-  // and calling the appropriate callback on MediaControlsImpl. The object is
-  // split from MedaiControlsImpl to reduce boilerplate and ease reading. In
-  // order to not expose accessors only for this component, a friendship is
-  // declared.
-  friend class MediaControlsMediaEventListener;
-  // Same as above but handles the menus hiding when the window is interacted
-  // with, allowing MediaControlsImpl to not have the boilerplate.
-  friend class MediaControlsWindowEventListener;
-
-  // For tests.
-  friend class MediaControlsOrientationLockDelegateTest;
-  friend class MediaControlsOrientationLockAndRotateToFullscreenDelegateTest;
-  friend class MediaControlsRotateToFullscreenDelegateTest;
-  friend class MediaControlsImplTest;
-  friend class MediaControlsImplInProductHelpTest;
-
-  // Need to be members of MediaControls for private member access.
-  class BatchedControlUpdate;
-  class MediaControlsResizeObserverDelegate;
-  class MediaElementMutationCallback;
-
-  void Invalidate(Element*);
-
-  // Notify us that our controls enclosure has changed size.
-  void NotifyElementSizeChanged(DOMRectReadOnly* new_size);
-
-  // Update the CSS class when we think the state has updated.
-  void UpdateCSSClassFromState();
-
   // Track the state of the controls.
   enum ControlsState {
     // There is no video source.
@@ -180,14 +155,56 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
     // Playback has stopped to buffer.
     kBuffering,
+
+    // The media is being scrubbed.
+    kScrubbing,
   };
   ControlsState State() const;
+
+  void MaybeToggleControlsFromTap();
+
+ private:
+  // MediaControlsMediaEventListener is a component that is listening to events
+  // and calling the appropriate callback on MediaControlsImpl. The object is
+  // split from MedaiControlsImpl to reduce boilerplate and ease reading. In
+  // order to not expose accessors only for this component, a friendship is
+  // declared.
+  friend class MediaControlsMediaEventListener;
+  // Same as above but handles the menus hiding when the window is interacted
+  // with, allowing MediaControlsImpl to not have the boilerplate.
+  friend class MediaControlsWindowEventListener;
+
+  // For tests.
+  friend class MediaControlsOrientationLockDelegateTest;
+  friend class MediaControlsOrientationLockAndRotateToFullscreenDelegateTest;
+  friend class MediaControlsRotateToFullscreenDelegateTest;
+  friend class MediaControlsImplTest;
+  friend class MediaControlsImplInProductHelpTest;
+  friend class MediaControlTimelineElementTest;
+
+  // Need to be members of MediaControls for private member access.
+  class BatchedControlUpdate;
+  class MediaControlsResizeObserverDelegate;
+  class MediaElementMutationCallback;
+
+  void Invalidate(Element*);
+
+  // Notify us that our controls enclosure has changed size.
+  void NotifyElementSizeChanged(DOMRectReadOnly* new_size);
+
+  // Update the CSS class when we think the state has updated.
+  void UpdateCSSClassFromState();
+
+  // Get the HTMLVideoElement that the controls are attached to. The caller must
+  // check that the element is a video element first.
+  HTMLVideoElement& VideoElement();
 
   explicit MediaControlsImpl(HTMLMediaElement&);
 
   void InitializeControls();
 
   void MakeOpaque();
+  void MakeOpaqueFromPointerEvent();
   void MakeTransparent();
   bool IsVisible() const;
 
@@ -218,6 +235,9 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   // do fit.  This requires that m_effectiveWidth and m_effectiveHeight are
   // current.
   void ComputeWhichControlsFit();
+
+  void UpdateOverflowMenuWanted() const;
+  void MaybeRecordElementsDisplayed() const;
 
   // Takes a popup menu (caption, overflow) and position on the screen. This is
   // used because these menus use a fixed position in order to appear over all
@@ -253,6 +273,7 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   void OnMediaKeyboardEvent(Event* event) { DefaultEventHandler(event); }
   void OnWaiting();
   void OnLoadingProgress();
+  void OnLoadedData();
 
   // Media control elements.
   Member<MediaControlOverlayEnclosureElement> overlay_enclosure_;
@@ -272,6 +293,8 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   Member<MediaControlOverflowMenuButtonElement> overflow_menu_;
   Member<MediaControlOverflowMenuListElement> overflow_list_;
   Member<MediaControlButtonPanelElement> media_button_panel_;
+  Member<MediaControlLoadingPanelElement> loading_panel_;
+  Member<MediaControlPictureInPictureButtonElement> picture_in_picture_button_;
 
   Member<MediaControlCastButtonElement> cast_button_;
   Member<MediaControlFullscreenButtonElement> fullscreen_button_;
@@ -287,6 +310,7 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   unsigned hide_timer_behavior_flags_;
   bool is_mouse_over_controls_ : 1;
   bool is_paused_for_scrubbing_ : 1;
+  bool is_scrubbing_ = false;
 
   // Watches the video element for resize and updates media controls as
   // necessary.
@@ -300,6 +324,8 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   IntSize size_;
 
   bool keep_showing_until_timer_fires_ : 1;
+
+  bool pointer_event_did_show_controls_ = false;
 
   Member<MediaDownloadInProductHelpManager> download_iph_manager_;
 };

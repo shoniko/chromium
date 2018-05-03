@@ -12,6 +12,7 @@
 #include "core/loader/DocumentLoader.h"
 #include "core/timing/PerformanceBase.h"
 #include "platform/loader/fetch/ResourceTimingInfo.h"
+#include "third_party/WebKit/common/page/page_visibility_state.mojom-blink.h"
 
 namespace blink {
 
@@ -19,20 +20,18 @@ PerformanceNavigationTiming::PerformanceNavigationTiming(
     LocalFrame* frame,
     ResourceTimingInfo* info,
     double time_origin,
-    PerformanceServerTimingVector& serverTiming)
+    const WebVector<WebServerTimingInfo>& server_timing)
     : PerformanceResourceTiming(info ? info->InitialURL().GetString() : "",
                                 "navigation",
                                 time_origin,
-                                0.0,
-                                0.0,
-                                serverTiming),
+                                server_timing),
       ContextClient(frame),
       resource_timing_info_(info) {
   DCHECK(frame);
   DCHECK(info);
 }
 
-PerformanceNavigationTiming::~PerformanceNavigationTiming() {}
+PerformanceNavigationTiming::~PerformanceNavigationTiming() = default;
 
 void PerformanceNavigationTiming::Trace(blink::Visitor* visitor) {
   ContextClient::Trace(visitor);
@@ -90,8 +89,8 @@ unsigned long long PerformanceNavigationTiming::GetDecodedBodySize() const {
 AtomicString PerformanceNavigationTiming::GetNavigationType(
     NavigationType type,
     const Document* document) {
-  if (document &&
-      document->GetPageVisibilityState() == kPageVisibilityStatePrerender) {
+  if (document && document->GetPageVisibilityState() ==
+                      mojom::PageVisibilityState::kPrerender) {
     return "prerender";
   }
   switch (type) {
@@ -115,7 +114,7 @@ AtomicString PerformanceNavigationTiming::initiatorType() const {
 
 bool PerformanceNavigationTiming::GetAllowRedirectDetails() const {
   ExecutionContext* context = GetFrame() ? GetFrame()->GetDocument() : nullptr;
-  SecurityOrigin* security_origin = nullptr;
+  const SecurityOrigin* security_origin = nullptr;
   if (context)
     security_origin = context->GetSecurityOrigin();
   if (!security_origin)
@@ -266,9 +265,8 @@ DOMHighResTimeStamp PerformanceNavigationTiming::duration() const {
 }
 
 void PerformanceNavigationTiming::BuildJSONValue(
-    ScriptState* script_state,
     V8ObjectBuilder& builder) const {
-  PerformanceResourceTiming::BuildJSONValue(script_state, builder);
+  PerformanceResourceTiming::BuildJSONValue(builder);
   builder.AddNumber("unloadEventStart", unloadEventStart());
   builder.AddNumber("unloadEventEnd", unloadEventEnd());
   builder.AddNumber("domInteractive", domInteractive());

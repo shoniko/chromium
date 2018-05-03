@@ -36,40 +36,55 @@ from name_utilities import lower_first
 import template_expander
 
 
-def calculate_functions_to_declare(property_):
+def calculate_apply_functions_to_declare(property_):
     property_['should_declare_functions'] = \
-        not property_['use_handlers_for'] \
-        and not property_['longhands'] \
+        not property_['longhands'] \
         and not property_['direction_aware_options'] \
         and not property_['builder_skip'] \
         and property_['is_property']
-    # Functions should only be used in StyleBuilder if the CSSPropertyAPI
-    # class is shared or not implemented yet (shared classes are denoted by
-    # api_class = "some string").
-    property_['use_api_in_stylebuilder'] = \
+    property_['use_property_class_in_stylebuilder'] = \
         property_['should_declare_functions'] \
-        and not (property_['api_custom_apply_functions_initial'] or
-                 property_['api_custom_apply_functions_inherit'] or
-                 property_['api_custom_apply_functions_value']) \
-        and property_['api_class'] \
-        and isinstance(property_['api_class'], types.BooleanType)
+        and not (property_['custom_apply_functions_initial'] or
+                 property_['custom_apply_functions_inherit'] or
+                 property_['custom_apply_functions_value'])
+    # TODO(crbug.com/751354): Remove this hard coded list of supported
+    # properties once all of them have been implemented
+    if property_['custom_apply_functions_all']:
+        if (property_['upper_camel_name'] in [
+                'BackgroundAttachment', 'BackgroundBlendMode', 'BackgroundClip', 'BackgroundImage', 'BackgroundOrigin',
+                'BackgroundPositionX', 'BackgroundPositionY', 'BackgroundRepeatX', 'BackgroundRepeatY', 'BackgroundSize',
+                'BorderImageOutset', 'BorderImageRepeat', 'BorderImageSlice', 'BorderImageWidth', 'Clip', 'ColumnCount',
+                'ColumnGap', 'ColumnWidth', 'MaskSourceType', 'WebkitMaskBoxImageOutset', 'WebkitMaskBoxImageRepeat',
+                'WebkitMaskBoxImageSlice', 'WebkitMaskBoxImageWidth', 'WebkitMaskClip', 'WebkitMaskComposite', 'WebkitMaskImage',
+                'WebkitMaskOrigin', 'WebkitMaskPositionX', 'WebkitMaskPositionY', 'WebkitMaskRepeatX', 'WebkitMaskRepeatY',
+                'WebkitMaskSize', 'ZIndex']):
+            property_['use_property_class_in_stylebuilder'] = True
 
 
-class StyleBuilderWriter(css_properties.CSSProperties):
+class StyleBuilderWriter(json5_generator.Writer):
     filters = {
         'lower_first': lower_first,
     }
 
     def __init__(self, json5_file_paths):
-        super(StyleBuilderWriter, self).__init__(json5_file_paths)
+        super(StyleBuilderWriter, self).__init__([])
         self._outputs = {
-            ('StyleBuilderFunctions.h'): self.generate_style_builder_functions_h,
-            ('StyleBuilderFunctions.cpp'): self.generate_style_builder_functions_cpp,
-            ('StyleBuilder.cpp'): self.generate_style_builder,
+            'StyleBuilderFunctions.h': self.generate_style_builder_functions_h,
+            'StyleBuilderFunctions.cpp':
+                self.generate_style_builder_functions_cpp,
+            'StyleBuilder.cpp': self.generate_style_builder,
         }
 
-        for property_ in self._properties.values():
-            calculate_functions_to_declare(property_)
+        self._json5_properties = css_properties.CSSProperties(json5_file_paths)
+        self._input_files = json5_file_paths
+        self._properties = self._json5_properties.longhands + \
+            self._json5_properties.shorthands
+        for property_ in self._properties:
+            calculate_apply_functions_to_declare(property_)
+
+    @property
+    def css_properties(self):
+        return self._json5_properties
 
     @template_expander.use_jinja('templates/StyleBuilderFunctions.h.tmpl',
                                  filters=filters)
@@ -85,13 +100,16 @@ class StyleBuilderWriter(css_properties.CSSProperties):
         return {
             'input_files': self._input_files,
             'properties': self._properties,
+            'properties_by_id': self._json5_properties.properties_by_id,
         }
 
-    @template_expander.use_jinja('templates/StyleBuilder.cpp.tmpl', filters=filters)
+    @template_expander.use_jinja(
+        'templates/StyleBuilder.cpp.tmpl', filters=filters)
     def generate_style_builder(self):
         return {
             'input_files': self._input_files,
             'properties': self._properties,
+            'properties_by_id': self._json5_properties.properties_by_id,
         }
 
 

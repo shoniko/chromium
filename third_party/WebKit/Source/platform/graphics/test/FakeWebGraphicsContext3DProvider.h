@@ -19,12 +19,13 @@ class FakeWebGraphicsContext3DProvider : public WebGraphicsContext3DProvider {
  public:
   FakeWebGraphicsContext3DProvider(gpu::gles2::GLES2Interface* gl) : gl_(gl) {
     sk_sp<const GrGLInterface> gl_interface(GrGLCreateNullInterface());
-    gr_context_.reset(GrContext::Create(
-        kOpenGL_GrBackend,
-        reinterpret_cast<GrBackendContext>(gl_interface.get())));
+    gr_context_ = GrContext::MakeGL(std::move(gl_interface));
   }
 
   GrContext* GetGrContext() override { return gr_context_.get(); }
+  void InvalidateGrContext(uint32_t state) override {
+    gr_context_->resetContext(state);
+  }
 
   const gpu::Capabilities& GetCapabilities() const override {
     return capabilities_;
@@ -34,15 +35,17 @@ class FakeWebGraphicsContext3DProvider : public WebGraphicsContext3DProvider {
     return gpu_feature_info_;
   }
 
+  viz::GLHelper* GetGLHelper() override { return nullptr; }
+
   bool IsSoftwareRendering() const override { return false; }
 
   gpu::gles2::GLES2Interface* ContextGL() override { return gl_; }
 
   bool BindToCurrentThread() override { return false; }
-  void SetLostContextCallback(const base::Closure&) override {}
+  void SetLostContextCallback(base::Closure) override {}
   void SetErrorMessageCallback(
-      const base::Callback<void(const char*, int32_t id)>&) {}
-  void SignalQuery(uint32_t, const base::Closure&) override {}
+      base::RepeatingCallback<void(const char*, int32_t id)>) {}
+  void SignalQuery(uint32_t, base::OnceClosure) override {}
 
  private:
   gpu::gles2::GLES2Interface* gl_;

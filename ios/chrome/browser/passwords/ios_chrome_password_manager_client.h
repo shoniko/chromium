@@ -14,6 +14,7 @@
 
 namespace ios {
 class ChromeBrowserState;
+class LogManager;
 }
 
 namespace password_manager {
@@ -86,7 +87,7 @@ class IOSChromePasswordManagerClient
   const GURL& GetLastCommittedEntryURL() const override;
   const password_manager::CredentialsFilter* GetStoreResultFilter()
       const override;
-  ukm::UkmRecorder* GetUkmRecorder() override;
+  const password_manager::LogManager* GetLogManager() const override;
   ukm::SourceId GetUkmSourceId() override;
   password_manager::PasswordManagerMetricsRecorder& GetMetricsRecorder()
       override;
@@ -103,6 +104,8 @@ class IOSChromePasswordManagerClient
   BooleanPrefMember saving_passwords_enabled_;
 
   const password_manager::SyncCredentialsFilter credentials_filter_;
+
+  std::unique_ptr<password_manager::LogManager> log_manager_;
 
   // The URL to which the ukm_source_id_ was bound.
   GURL ukm_source_url_;

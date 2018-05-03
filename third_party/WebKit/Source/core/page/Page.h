@@ -23,6 +23,9 @@
 #ifndef Page_h
 #define Page_h
 
+#include <memory>
+
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/ViewportDescription.h"
 #include "core/frame/Deprecation.h"
@@ -32,6 +35,7 @@
 #include "core/frame/UseCounter.h"
 #include "core/page/Page.h"
 #include "core/page/PageAnimator.h"
+#include "core/page/PageLifecycleState.h"
 #include "core/page/PageVisibilityNotifier.h"
 #include "core/page/PageVisibilityObserver.h"
 #include "core/page/PageVisibilityState.h"
@@ -41,7 +45,6 @@
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/web/WebWindowFeatures.h"
 
@@ -50,13 +53,11 @@ namespace blink {
 class AutoscrollController;
 class BrowserControls;
 class ChromeClient;
-class ContextMenuClient;
 class ContextMenuController;
 class Document;
 class DOMRectList;
 class DragCaret;
 class DragController;
-class EditorClient;
 class EventHandlerRegistry;
 class FocusController;
 class Frame;
@@ -72,7 +73,6 @@ class ScrollbarTheme;
 class SmoothScrollSequencer;
 class Settings;
 class ConsoleMessageStorage;
-class SpellCheckerClient;
 class TopDocumentRootScrollerController;
 class ValidationMessageClient;
 class VisualViewport;
@@ -87,7 +87,6 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
                                public PageVisibilityNotifier,
                                public SettingsDelegate {
   USING_GARBAGE_COLLECTED_MIXIN(Page);
-  WTF_MAKE_NONCOPYABLE(Page);
   friend class Settings;
 
  public:
@@ -95,16 +94,13 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   // required.
   struct CORE_EXPORT PageClients final {
     STACK_ALLOCATED();
-    WTF_MAKE_NONCOPYABLE(PageClients);
 
    public:
     PageClients();
     ~PageClients();
 
     Member<ChromeClient> chrome_client;
-    ContextMenuClient* context_menu_client;
-    EditorClient* editor_client;
-    SpellCheckerClient* spell_checker_client;
+    DISALLOW_COPY_AND_ASSIGN(PageClients);
   };
 
   static Page* Create(PageClients& page_clients) {
@@ -112,7 +108,7 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   }
 
   // An "ordinary" page is a fully-featured page owned by a web view.
-  static Page* CreateOrdinary(PageClients&);
+  static Page* CreateOrdinary(PageClients&, Page* opener);
 
   ~Page() override;
 
@@ -128,6 +124,11 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   // (SVGImages, inspector overlays, page popups etc.)
   static PageSet& OrdinaryPages();
 
+  // Returns pages related to the current browsing context (excluding the
+  // current page).  See also
+  // https://html.spec.whatwg.org/multipage/browsers.html#unit-of-related-browsing-contexts
+  HeapVector<Member<Page>> RelatedPages();
+
   static void PlatformColorsChanged();
 
   void SetNeedsRecalcStyleInAllFrames();
@@ -136,7 +137,7 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   ViewportDescription GetViewportDescription() const;
 
   // Returns the plugin data associated with |main_frame_origin|.
-  PluginData* GetPluginData(SecurityOrigin* main_frame_origin);
+  PluginData* GetPluginData(const SecurityOrigin* main_frame_origin);
 
   // Refreshes the browser-side plugin cache.
   static void RefreshPlugins();
@@ -144,11 +145,6 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   // Resets the plugin data for all pages in the renderer process and notifies
   // PluginsChangedObservers.
   static void ResetPluginData();
-
-  EditorClient& GetEditorClient() const { return *editor_client_; }
-  SpellCheckerClient& GetSpellCheckerClient() const {
-    return *spell_checker_client_;
-  }
 
   void SetMainFrame(Frame*);
   Frame* MainFrame() const { return main_frame_; }
@@ -262,9 +258,12 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   static void AllVisitedStateChanged(bool invalidate_visited_link_hashes);
   static void VisitedStateChanged(LinkHash visited_hash);
 
-  void SetVisibilityState(PageVisibilityState, bool);
-  PageVisibilityState VisibilityState() const;
+  void SetVisibilityState(mojom::PageVisibilityState, bool);
+  mojom::PageVisibilityState VisibilityState() const;
   bool IsPageVisible() const;
+
+  void SetLifecycleState(PageLifecycleState);
+  PageLifecycleState LifecycleState() const;
 
   bool IsCursorVisible() const;
   void SetIsCursorVisible(bool is_visible) { is_cursor_visible_ = is_visible; }
@@ -356,8 +355,6 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
 
   Member<PluginData> plugin_data_;
 
-  EditorClient* const editor_client_;
-  SpellCheckerClient* const spell_checker_client_;
   Member<ValidationMessageClient> validation_message_client_;
 
   UseCounter use_counter_;
@@ -378,7 +375,9 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
 
   float device_scale_factor_;
 
-  PageVisibilityState visibility_state_;
+  mojom::PageVisibilityState visibility_state_;
+
+  PageLifecycleState page_lifecycle_state_;
 
   bool is_cursor_visible_;
 
@@ -389,6 +388,13 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   int subframe_count_;
 
   HeapHashSet<WeakMember<PluginsChangedObserver>> plugins_changed_observers_;
+
+  // A circular, double-linked list of pages that are related to the current
+  // browsing context.  See also RelatedPages method.
+  Member<Page> next_related_page_;
+  Member<Page> prev_related_page_;
+
+  DISALLOW_COPY_AND_ASSIGN(Page);
 };
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT Supplement<Page>;

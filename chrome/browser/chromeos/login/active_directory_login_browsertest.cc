@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/location.h"
+#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
@@ -16,16 +17,20 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/settings/stub_install_attributes.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
+#include "chromeos/chromeos_paths.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_auth_policy_client.h"
+#include "chromeos/dbus/fake_cryptohome_client.h"
+#include "chromeos/login/auth/authpolicy_login_helper.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_names.h"
 #include "content/public/test/browser_test_utils.h"
@@ -42,9 +47,10 @@ const char kPassword[] = "password";
 
 constexpr char kAdOfflineAuthId[] = "offline-ad-auth";
 
-constexpr char kDeviceId[] = "device_id";
+constexpr char kAdMachineName[] = "machine_name";
 constexpr char kTestActiveDirectoryUser[] = "test-user";
 constexpr char kAdMachineInput[] = "machineNameInput";
+constexpr char kAdMoreOptionsButton[] = "moreOptionsBtn";
 constexpr char kAdUserInput[] = "userInput";
 constexpr char kAdPasswordInput[] = "passwordInput";
 constexpr char kAdButton[] = "button";
@@ -65,16 +71,17 @@ class TestAuthPolicyClient : public FakeAuthPolicyClient {
  public:
   TestAuthPolicyClient() { FakeAuthPolicyClient::set_started(true); }
 
-  void AuthenticateUser(const std::string& user_principal_name,
-                        const std::string& object_guid,
+  void AuthenticateUser(const authpolicy::AuthenticateUserRequest& request,
                         int password_fd,
                         AuthCallback callback) override {
     authpolicy::ActiveDirectoryAccountInfo account_info;
     if (auth_error_ == authpolicy::ERROR_NONE) {
-      if (object_guid.empty())
-        account_info.set_account_id(base::MD5String(user_principal_name));
-      else
-        account_info.set_account_id(object_guid);
+      if (request.account_id().empty()) {
+        account_info.set_account_id(
+            base::MD5String(request.user_principal_name()));
+      } else {
+        account_info.set_account_id(request.account_id());
+      }
     }
     base::SequencedTaskRunnerHandle::Get()->PostNonNestableTask(
         FROM_HERE,
@@ -91,17 +98,22 @@ class ActiveDirectoryLoginTest : public LoginManagerTest {
       : LoginManagerTest(true),
         // Using the same realm as supervised user domain. Should be treated as
         // normal realm.
-        test_realm_(user_manager::kSupervisedUserDomain),
-        install_attributes_(
-            ScopedStubInstallAttributes::CreateActiveDirectoryManaged(
-                test_realm_,
-                kDeviceId)) {}
+        test_realm_(user_manager::kSupervisedUserDomain) {}
 
   ~ActiveDirectoryLoginTest() override = default;
 
   void SetUp() override {
     SetupTestAuthPolicyClient();
     LoginManagerTest::SetUp();
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    LoginManagerTest::SetUpInProcessBrowserTestFixture();
+    base::FilePath user_data_dir;
+    ASSERT_TRUE(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
+    chromeos::RegisterStubPathOverrides(user_data_dir);
+    DBusThreadManager::GetSetterForTesting()->SetCryptohomeClient(
+        std::make_unique<FakeCryptohomeClient>());
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -123,11 +135,34 @@ class ActiveDirectoryLoginTest : public LoginManagerTest {
 
   void MarkAsActiveDirectoryEnterprise() {
     StartupUtils::MarkOobeCompleted();
-    base::RunLoop loop;
-    fake_auth_policy_client()->RefreshDevicePolicy(
-        base::BindOnce(&ActiveDirectoryLoginTest::OnRefreshedPolicy,
-                       base::Unretained(this), loop.QuitClosure()));
-    loop.Run();
+    AuthPolicyLoginHelper helper;
+    {
+      base::RunLoop loop;
+      helper.JoinAdDomain(
+          kAdMachineName, "" /* distinguished_name */,
+          kTestActiveDirectoryUser + ("@" + test_realm_), "" /* password */,
+          base::BindOnce(
+              [](base::OnceClosure closure, const std::string& expected_domain,
+                 authpolicy::ErrorType error, const std::string& domain) {
+                EXPECT_EQ(authpolicy::ERROR_NONE, error);
+                EXPECT_EQ(expected_domain, domain);
+                std::move(closure).Run();
+              },
+              loop.QuitClosure(), test_realm_));
+      loop.Run();
+    }
+    ASSERT_TRUE(AuthPolicyLoginHelper::LockDeviceActiveDirectoryForTesting(
+        test_realm_));
+    {
+      base::RunLoop loop;
+      fake_auth_policy_client()->RefreshDevicePolicy(base::BindOnce(
+          [](base::OnceClosure closure, authpolicy::ErrorType error) {
+            EXPECT_EQ(authpolicy::ERROR_NONE, error);
+            std::move(closure).Run();
+          },
+          loop.QuitClosure()));
+      loop.Run();
+    }
   }
 
   void TriggerPasswordChangeScreen() {
@@ -147,7 +182,7 @@ class ActiveDirectoryLoginTest : public LoginManagerTest {
   }
 
   void SetupTestAuthPolicyClient() {
-    auto test_client = base::MakeUnique<TestAuthPolicyClient>();
+    auto test_client = std::make_unique<TestAuthPolicyClient>();
     fake_auth_policy_client_ = test_client.get();
     DBusThreadManager::GetSetterForTesting()->SetAuthPolicyClient(
         std::move(test_client));
@@ -163,6 +198,7 @@ class ActiveDirectoryLoginTest : public LoginManagerTest {
     // Checks if Active Directory signin is visible.
     JSExpect("!document.querySelector('#offline-ad-auth').hidden");
     JSExpect(JSElement(kAdOfflineAuthId, kAdMachineInput) + ".hidden");
+    JSExpect(JSElement(kAdOfflineAuthId, kAdMoreOptionsButton) + ".hidden");
     JSExpect("!" + JSElement(kAdOfflineAuthId, kAdUserInput) + ".hidden");
     JSExpect("!" + JSElement(kAdOfflineAuthId, kAdPasswordInput) + ".hidden");
 
@@ -301,13 +337,6 @@ class ActiveDirectoryLoginTest : public LoginManagerTest {
   const std::string test_realm_;
 
  private:
-  // Used for the callback from FakeAuthPolicy::RefreshDevicePolicy.
-  void OnRefreshedPolicy(const base::Closure& closure, bool status) {
-    EXPECT_TRUE(status);
-    closure.Run();
-  }
-
-  ScopedStubInstallAttributes install_attributes_;
   TestAuthPolicyClient* fake_auth_policy_client_;
 
   DISALLOW_COPY_AND_ASSIGN(ActiveDirectoryLoginTest);

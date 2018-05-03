@@ -52,7 +52,7 @@ PlatformSpeechSynthesizer::PlatformSpeechSynthesizer(
       web_speech_synthesizer_client_);
 }
 
-PlatformSpeechSynthesizer::~PlatformSpeechSynthesizer() {}
+PlatformSpeechSynthesizer::~PlatformSpeechSynthesizer() = default;
 
 void PlatformSpeechSynthesizer::Speak(
     PlatformSpeechSynthesisUtterance* utterance) {
@@ -76,7 +76,7 @@ void PlatformSpeechSynthesizer::Cancel() {
 }
 
 void PlatformSpeechSynthesizer::SetVoiceList(
-    Vector<RefPtr<PlatformSpeechSynthesisVoice>>& voices) {
+    Vector<scoped_refptr<PlatformSpeechSynthesisVoice>>& voices) {
   voice_list_ = voices;
 }
 

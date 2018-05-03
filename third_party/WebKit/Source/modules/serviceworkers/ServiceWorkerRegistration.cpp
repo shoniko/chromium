@@ -6,6 +6,8 @@
 
 #include <memory>
 #include <utility>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "core/dom/DOMException.h"
@@ -16,8 +18,8 @@
 #include "modules/serviceworkers/ServiceWorkerContainerClient.h"
 #include "modules/serviceworkers/ServiceWorkerError.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom-blink.h"
 
 namespace blink {
 
@@ -44,7 +46,7 @@ void ServiceWorkerRegistration::SetInstalling(
   if (!GetExecutionContext())
     return;
   installing_ = ServiceWorker::From(GetExecutionContext(),
-                                    WTF::WrapUnique(handle.release()));
+                                    base::WrapUnique(handle.release()));
 }
 
 void ServiceWorkerRegistration::SetWaiting(
@@ -52,7 +54,7 @@ void ServiceWorkerRegistration::SetWaiting(
   if (!GetExecutionContext())
     return;
   waiting_ = ServiceWorker::From(GetExecutionContext(),
-                                 WTF::WrapUnique(handle.release()));
+                                 base::WrapUnique(handle.release()));
 }
 
 void ServiceWorkerRegistration::SetActive(
@@ -60,7 +62,7 @@ void ServiceWorkerRegistration::SetActive(
   if (!GetExecutionContext())
     return;
   active_ = ServiceWorker::From(GetExecutionContext(),
-                                WTF::WrapUnique(handle.release()));
+                                base::WrapUnique(handle.release()));
 }
 
 ServiceWorkerRegistration* ServiceWorkerRegistration::GetOrCreate(
@@ -88,6 +90,19 @@ String ServiceWorkerRegistration::scope() const {
   return handle_->Registration()->Scope().GetString();
 }
 
+String ServiceWorkerRegistration::updateViaCache() const {
+  switch (handle_->Registration()->UpdateViaCache()) {
+    case mojom::ServiceWorkerUpdateViaCache::kImports:
+      return "imports";
+    case mojom::ServiceWorkerUpdateViaCache::kAll:
+      return "all";
+    case mojom::ServiceWorkerUpdateViaCache::kNone:
+      return "none";
+  }
+  NOTREACHED();
+  return "";
+}
+
 ScriptPromise ServiceWorkerRegistration::update(ScriptState* script_state) {
   ServiceWorkerContainerClient* client =
       ServiceWorkerContainerClient::From(GetExecutionContext());
@@ -101,8 +116,7 @@ ScriptPromise ServiceWorkerRegistration::update(ScriptState* script_state) {
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
   handle_->Registration()->Update(
-      client->Provider(),
-      WTF::MakeUnique<
+      std::make_unique<
           CallbackPromiseAdapter<void, ServiceWorkerErrorForUpdate>>(resolver));
   return promise;
 }
@@ -121,8 +135,7 @@ ScriptPromise ServiceWorkerRegistration::unregister(ScriptState* script_state) {
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
   handle_->Registration()->Unregister(
-      client->Provider(),
-      WTF::MakeUnique<CallbackPromiseAdapter<bool, ServiceWorkerError>>(
+      std::make_unique<CallbackPromiseAdapter<bool, ServiceWorkerError>>(
           resolver));
   return promise;
 }
@@ -141,7 +154,7 @@ ServiceWorkerRegistration::ServiceWorkerRegistration(
   handle_->Registration()->SetProxy(this);
 }
 
-ServiceWorkerRegistration::~ServiceWorkerRegistration() {}
+ServiceWorkerRegistration::~ServiceWorkerRegistration() = default;
 
 void ServiceWorkerRegistration::Dispose() {
   // Promptly clears a raw reference from content/ to an on-heap object

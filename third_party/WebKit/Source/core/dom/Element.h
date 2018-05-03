@@ -31,6 +31,7 @@
 #include "core/dom/ContainerNode.h"
 #include "core/dom/ElementData.h"
 #include "core/dom/WhitespaceAttacher.h"
+#include "core/html/FocusOptions.h"
 #include "core/html_names.h"
 #include "core/resize_observer/ResizeObserver.h"
 #include "platform/bindings/TraceWrapperMember.h"
@@ -43,6 +44,7 @@ namespace blink {
 class AccessibleNode;
 class Attr;
 class Attribute;
+class ComputedAccessibleNode;
 class CSSStyleDeclaration;
 class CustomElementDefinition;
 class DOMRect;
@@ -55,10 +57,11 @@ class ElementRareData;
 class ElementShadow;
 class ExceptionState;
 class FloatQuad;
+class FocusOptions;
 class Image;
 class InputDeviceCapabilities;
 class Locale;
-class MutableStylePropertySet;
+class MutableCSSPropertyValueSet;
 class NamedNodeMap;
 class ElementIntersectionObserverData;
 class PseudoElement;
@@ -74,7 +77,7 @@ class ShadowRootInit;
 class SpaceSplitString;
 class StringOrTrustedHTML;
 class StringOrTrustedScriptURL;
-class StylePropertySet;
+class CSSPropertyValueSet;
 class StylePropertyMap;
 class V0CustomElementDefinition;
 
@@ -115,18 +118,21 @@ enum class NamedItemType {
 struct FocusParams {
   STACK_ALLOCATED();
 
-  FocusParams() {}
+  FocusParams() = default;
   FocusParams(SelectionBehaviorOnFocus selection,
               WebFocusType focus_type,
-              InputDeviceCapabilities* capabilities)
+              InputDeviceCapabilities* capabilities,
+              FocusOptions focus_options = FocusOptions())
       : selection_behavior(selection),
         type(focus_type),
-        source_capabilities(capabilities) {}
+        source_capabilities(capabilities),
+        options(focus_options) {}
 
   SelectionBehaviorOnFocus selection_behavior =
       SelectionBehaviorOnFocus::kRestore;
   WebFocusType type = kWebFocusTypeNone;
   Member<InputDeviceCapabilities> source_capabilities = nullptr;
+  FocusOptions options = FocusOptions();
 };
 
 typedef HeapVector<TraceWrapperMember<Attr>> AttrNodeList;
@@ -289,6 +295,8 @@ class CORE_EXPORT Element : public ContainerNode {
   AccessibleNode* ExistingAccessibleNode() const;
   AccessibleNode* accessibleNode();
 
+  ComputedAccessibleNode* GetComputedAccessibleNode();
+
   void DidMoveToNewDocument(Document&) override;
 
   void removeAttribute(const AtomicString& name);
@@ -310,7 +318,7 @@ class CORE_EXPORT Element : public ContainerNode {
   AttrNodeList* GetAttrNodeList();
 
   CSSStyleDeclaration* style();
-  StylePropertyMap* styleMap();
+  StylePropertyMap* attributeStyleMap();
 
   const QualifiedName& TagQName() const { return tag_name_; }
   String tagName() const { return nodeName(); }
@@ -349,12 +357,12 @@ class CORE_EXPORT Element : public ContainerNode {
 
   void SetBooleanAttribute(const QualifiedName&, bool);
 
-  virtual const StylePropertySet* AdditionalPresentationAttributeStyle() {
+  virtual const CSSPropertyValueSet* AdditionalPresentationAttributeStyle() {
     return nullptr;
   }
   void InvalidateStyleAttribute();
 
-  const StylePropertySet* InlineStyle() const {
+  const CSSPropertyValueSet* InlineStyle() const {
     return GetElementData() ? GetElementData()->inline_style_.Get() : nullptr;
   }
 
@@ -365,26 +373,27 @@ class CORE_EXPORT Element : public ContainerNode {
                               double value,
                               CSSPrimitiveValue::UnitType,
                               bool important = false);
-  // TODO(sashab): Make this take a const CSSValue&.
   void SetInlineStyleProperty(CSSPropertyID,
-                              const CSSValue*,
+                              const CSSValue&,
                               bool important = false);
   bool SetInlineStyleProperty(CSSPropertyID,
                               const String& value,
                               bool important = false);
 
   bool RemoveInlineStyleProperty(CSSPropertyID);
+  bool RemoveInlineStyleProperty(const AtomicString&);
   void RemoveAllInlineStyleProperties();
 
   void SynchronizeStyleAttributeInternal() const;
 
-  const StylePropertySet* PresentationAttributeStyle();
+  const CSSPropertyValueSet* PresentationAttributeStyle();
   virtual bool IsPresentationAttribute(const QualifiedName&) const {
     return false;
   }
-  virtual void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                                    const AtomicString&,
-                                                    MutableStylePropertySet*) {}
+  virtual void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) {}
 
   // For exposing to DOM only.
   NamedNodeMap* attributesForBindings() const;
@@ -454,10 +463,14 @@ class CORE_EXPORT Element : public ContainerNode {
   virtual LayoutObject* CreateLayoutObject(const ComputedStyle&);
   virtual bool LayoutObjectIsNeeded(const ComputedStyle&);
   void RecalcStyle(StyleRecalcChange);
+  void RecalcStyleForReattach();
   bool NeedsRebuildLayoutTree(
       const WhitespaceAttacher& whitespace_attacher) const {
+    // TODO(futhark@chromium.org): !CanParticipateInFlatTree() can be replaced
+    // by IsActiveV0InsertionPoint() when slots are always part of the flat
+    // tree, and removed completely when Shadow DOM V0 support is removed.
     return NeedsReattachLayoutTree() || ChildNeedsReattachLayoutTree() ||
-           IsActiveSlotOrActiveV0InsertionPoint() ||
+           !CanParticipateInFlatTree() ||
            (whitespace_attacher.TraverseIntoDisplayContents() &&
             HasDisplayContentsStyle());
   }
@@ -484,7 +497,7 @@ class CORE_EXPORT Element : public ContainerNode {
                            const ShadowRootInit&,
                            ExceptionState&);
   ShadowRoot& CreateShadowRootInternal();
-  ShadowRoot& CreateUserAgentShadowRoot();
+  ShadowRoot& CreateUserAgentShadowRootV1();
   ShadowRoot& AttachShadowRootInternal(ShadowRootType,
                                        bool delegates_focus = false);
 
@@ -497,7 +510,7 @@ class CORE_EXPORT Element : public ContainerNode {
 
   ShadowRoot* ShadowRootIfV1() const;
 
-  ShadowRoot& EnsureUserAgentShadowRoot();
+  ShadowRoot& EnsureUserAgentShadowRootV1();
 
   bool IsInDescendantTreeOf(const Element* shadow_host) const;
 
@@ -567,7 +580,11 @@ class CORE_EXPORT Element : public ContainerNode {
   virtual Image* ImageContents() { return nullptr; }
 
   virtual void focus(const FocusParams& = FocusParams());
-  virtual void UpdateFocusAppearance(SelectionBehaviorOnFocus);
+  void focus(FocusOptions);
+
+  void UpdateFocusAppearance(SelectionBehaviorOnFocus);
+  virtual void UpdateFocusAppearanceWithOptions(SelectionBehaviorOnFocus,
+                                                const FocusOptions&);
   virtual void blur();
 
   void setDistributeScroll(ScrollStateCallback*, String native_scroll_behavior);
@@ -726,6 +743,11 @@ class CORE_EXPORT Element : public ContainerNode {
   virtual bool IsClearButtonElement() const { return false; }
   virtual bool IsScriptElement() const { return false; }
 
+  // Elements that may have an insertion mode other than "in body" should
+  // override this and return true.
+  // https://html.spec.whatwg.org/multipage/parsing.html#reset-the-insertion-mode-appropriately
+  virtual bool HasNonInBodyInsertionMode() const { return false; }
+
   bool CanContainRangeEndPoint() const override { return true; }
 
   // Used for disabled form elements; if true, prevents mouse events from being
@@ -770,6 +792,7 @@ class CORE_EXPORT Element : public ContainerNode {
   bool HasID() const;
   bool HasClass() const;
   const SpaceSplitString& ClassNames() const;
+  bool HasClassName(const AtomicString& class_name) const;
 
   ScrollOffset SavedLayerScrollOffset() const;
   void SetSavedLayerScrollOffset(const ScrollOffset&);
@@ -780,7 +803,7 @@ class CORE_EXPORT Element : public ContainerNode {
 
   void SynchronizeAttribute(const AtomicString& local_name) const;
 
-  MutableStylePropertySet& EnsureMutableInlineStyle();
+  MutableCSSPropertyValueSet& EnsureMutableInlineStyle();
   void ClearMutableInlineStyleIfEmpty();
 
   void setTabIndex(int);
@@ -822,18 +845,18 @@ class CORE_EXPORT Element : public ContainerNode {
   const ElementData* GetElementData() const { return element_data_.Get(); }
   UniqueElementData& EnsureUniqueElementData();
 
-  void AddPropertyToPresentationAttributeStyle(MutableStylePropertySet*,
+  void AddPropertyToPresentationAttributeStyle(MutableCSSPropertyValueSet*,
                                                CSSPropertyID,
                                                CSSValueID identifier);
-  void AddPropertyToPresentationAttributeStyle(MutableStylePropertySet*,
+  void AddPropertyToPresentationAttributeStyle(MutableCSSPropertyValueSet*,
                                                CSSPropertyID,
                                                double value,
                                                CSSPrimitiveValue::UnitType);
-  void AddPropertyToPresentationAttributeStyle(MutableStylePropertySet*,
+  void AddPropertyToPresentationAttributeStyle(MutableCSSPropertyValueSet*,
                                                CSSPropertyID,
                                                const String& value);
   // TODO(sashab): Make this take a const CSSValue&.
-  void AddPropertyToPresentationAttributeStyle(MutableStylePropertySet*,
+  void AddPropertyToPresentationAttributeStyle(MutableCSSPropertyValueSet*,
                                                CSSPropertyID,
                                                const CSSValue*);
 
@@ -842,7 +865,7 @@ class CORE_EXPORT Element : public ContainerNode {
   void ChildrenChanged(const ChildrenChange&) override;
 
   virtual void WillRecalcStyle(StyleRecalcChange);
-  virtual void DidRecalcStyle();
+  virtual void DidRecalcStyle(StyleRecalcChange);
   virtual scoped_refptr<ComputedStyle> CustomStyleForLayoutObject();
 
   virtual NamedItemType GetNamedItemType() const {
@@ -861,6 +884,8 @@ class CORE_EXPORT Element : public ContainerNode {
   // don't have layoutObjects. e.g., HTMLOptionElement.
   // TODO(tkent): Rename this to isFocusableStyle.
   virtual bool LayoutObjectIsFocusable() const;
+
+  virtual bool ChildrenCanHaveStyle() const { return true; }
 
   // classAttributeChanged() exists to share code between
   // parseAttribute (called via setAttribute()) and
@@ -912,6 +937,10 @@ class CORE_EXPORT Element : public ContainerNode {
   scoped_refptr<ComputedStyle> PropagateInheritedProperties(StyleRecalcChange);
 
   StyleRecalcChange RecalcOwnStyle(StyleRecalcChange);
+  void RecalcOwnStyleForReattach();
+  void RecalcShadowIncludingDescendantStylesForReattach();
+  void RecalcShadowRootStylesForReattach();
+
   void RebuildPseudoElementLayoutTree(PseudoId, WhitespaceAttacher&);
   void RebuildShadowRootLayoutTree(WhitespaceAttacher&);
   inline void CheckForEmptyStyleChange();
@@ -1168,6 +1197,10 @@ inline const SpaceSplitString& Element::ClassNames() const {
   return GetElementData()->ClassNames();
 }
 
+inline bool Element::HasClassName(const AtomicString& class_name) const {
+  return HasClass() && ClassNames().Contains(class_name);
+}
+
 inline bool Element::HasID() const {
   return GetElementData() && GetElementData()->HasID();
 }
@@ -1187,7 +1220,7 @@ inline void Element::InvalidateStyleAttribute() {
   GetElementData()->style_attribute_is_dirty_ = true;
 }
 
-inline const StylePropertySet* Element::PresentationAttributeStyle() {
+inline const CSSPropertyValueSet* Element::PresentationAttributeStyle() {
   if (!GetElementData())
     return nullptr;
   if (GetElementData()->presentation_attribute_style_is_dirty_)

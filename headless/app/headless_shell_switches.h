@@ -17,6 +17,7 @@ extern const char kDisableCrashReporter[];
 extern const char kDumpDom[];
 extern const char kEnableCrashReporter[];
 extern const char kHideScrollbars[];
+extern const char kPasswordStore[];
 extern const char kPrintToPDF[];
 extern const char kProxyBypassList[];
 extern const char kProxyServer[];
@@ -31,6 +32,7 @@ extern const char kUserAgent[];
 extern const char kUserDataDir[];
 extern const char kVirtualTimeBudget[];
 extern const char kWindowSize[];
+extern const char kAuthServerWhitelist[];
 
 // Switches which are replicated from content.
 using ::switches::kHostResolverRules;

@@ -23,6 +23,8 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
+#include "base/memory/protected_memory.h"
+#include "base/memory/protected_memory_cfi.h"
 #include "base/native_library.h"
 #include "base/pickle.h"
 #include "base/posix/eintr_wrapper.h"
@@ -33,13 +35,11 @@
 #include "base/sys_info.h"
 #include "build/build_config.h"
 #include "content/common/font_config_ipc_linux.h"
-#include "content/common/sandbox_linux/sandbox_debug_handling_linux.h"
-#include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/common/zygote_commands_linux.h"
 #include "content/public/common/common_sandbox_support_linux.h"
+#include "content/public/common/content_descriptors.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
-#include "content/public/common/sandbox_linux.h"
 #include "content/public/common/zygote_fork_delegate_linux.h"
 #include "content/zygote/zygote_linux.h"
 #include "media/media_features.h"
@@ -49,6 +49,9 @@
 #include "sandbox/linux/services/namespace_sandbox.h"
 #include "sandbox/linux/services/thread_helpers.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
+#include "services/service_manager/sandbox/linux/sandbox_debug_handling_linux.h"
+#include "services/service_manager/sandbox/linux/sandbox_linux.h"
+#include "services/service_manager/sandbox/sandbox.h"
 #include "third_party/WebKit/public/web/linux/WebFontRendering.h"
 #include "third_party/boringssl/src/include/openssl/crypto.h"
 #include "third_party/boringssl/src/include/openssl/rand.h"
@@ -151,7 +154,7 @@ static void ProxyLocaltimeCallToBrowser(time_t input, struct tm* output,
                                         char* timezone_out,
                                         size_t timezone_out_len) {
   base::Pickle request;
-  request.WriteInt(SandboxLinux::METHOD_LOCALTIME);
+  request.WriteInt(service_manager::SandboxLinux::METHOD_LOCALTIME);
   request.WriteString(
       std::string(reinterpret_cast<char*>(&input), sizeof(input)));
 
@@ -159,7 +162,7 @@ static void ProxyLocaltimeCallToBrowser(time_t input, struct tm* output,
 
   uint8_t reply_buf[512];
   const ssize_t r = base::UnixDomainSocket::SendRecvMsg(
-      GetSandboxFD(), reply_buf, sizeof(reply_buf), NULL, request);
+      GetSandboxFD(), reply_buf, sizeof(reply_buf), nullptr, request);
   if (r == -1) {
     return;
   }
@@ -214,23 +217,32 @@ typedef struct tm* (*LocaltimeFunction)(const time_t* timep);
 typedef struct tm* (*LocaltimeRFunction)(const time_t* timep,
                                          struct tm* result);
 
-static pthread_once_t g_libc_localtime_funcs_guard = PTHREAD_ONCE_INIT;
-static LocaltimeFunction g_libc_localtime;
-static LocaltimeFunction g_libc_localtime64;
-static LocaltimeRFunction g_libc_localtime_r;
-static LocaltimeRFunction g_libc_localtime64_r;
+struct LibcFunctions {
+  LocaltimeFunction localtime;
+  LocaltimeFunction localtime64;
+  LocaltimeRFunction localtime_r;
+  LocaltimeRFunction localtime64_r;
+};
+
+static pthread_once_t g_libc_funcs_guard = PTHREAD_ONCE_INIT;
+// The libc function pointers are stored in read-only memory after being
+// dynamically resolved as a security mitigation to prevent the pointer from
+// being tampered with. See crbug.com/771365 for details.
+static PROTECTED_MEMORY_SECTION base::ProtectedMemory<LibcFunctions>
+    g_libc_funcs;
 
 static void InitLibcLocaltimeFunctions() {
-  g_libc_localtime = reinterpret_cast<LocaltimeFunction>(
-      dlsym(RTLD_NEXT, "localtime"));
-  g_libc_localtime64 = reinterpret_cast<LocaltimeFunction>(
-      dlsym(RTLD_NEXT, "localtime64"));
-  g_libc_localtime_r = reinterpret_cast<LocaltimeRFunction>(
-      dlsym(RTLD_NEXT, "localtime_r"));
-  g_libc_localtime64_r = reinterpret_cast<LocaltimeRFunction>(
-      dlsym(RTLD_NEXT, "localtime64_r"));
+  auto writer = base::AutoWritableMemory::Create(g_libc_funcs);
+  g_libc_funcs->localtime =
+      reinterpret_cast<LocaltimeFunction>(dlsym(RTLD_NEXT, "localtime"));
+  g_libc_funcs->localtime64 =
+      reinterpret_cast<LocaltimeFunction>(dlsym(RTLD_NEXT, "localtime64"));
+  g_libc_funcs->localtime_r =
+      reinterpret_cast<LocaltimeRFunction>(dlsym(RTLD_NEXT, "localtime_r"));
+  g_libc_funcs->localtime64_r =
+      reinterpret_cast<LocaltimeRFunction>(dlsym(RTLD_NEXT, "localtime64_r"));
 
-  if (!g_libc_localtime || !g_libc_localtime_r) {
+  if (!g_libc_funcs->localtime || !g_libc_funcs->localtime_r) {
     // http://code.google.com/p/chromium/issues/detail?id=16800
     //
     // Nvidia's libGL.so overrides dlsym for an unknown reason and replaces
@@ -242,14 +254,14 @@ static void InitLibcLocaltimeFunctions() {
                   "http://code.google.com/p/chromium/issues/detail?id=16800";
   }
 
-  if (!g_libc_localtime)
-    g_libc_localtime = gmtime;
-  if (!g_libc_localtime64)
-    g_libc_localtime64 = g_libc_localtime;
-  if (!g_libc_localtime_r)
-    g_libc_localtime_r = gmtime_r;
-  if (!g_libc_localtime64_r)
-    g_libc_localtime64_r = g_libc_localtime_r;
+  if (!g_libc_funcs->localtime)
+    g_libc_funcs->localtime = gmtime;
+  if (!g_libc_funcs->localtime64)
+    g_libc_funcs->localtime64 = g_libc_funcs->localtime;
+  if (!g_libc_funcs->localtime_r)
+    g_libc_funcs->localtime_r = gmtime_r;
+  if (!g_libc_funcs->localtime64_r)
+    g_libc_funcs->localtime64_r = g_libc_funcs->localtime_r;
 }
 
 // Define localtime_override() function with asm name "localtime", so that all
@@ -269,9 +281,9 @@ struct tm* localtime_override(const time_t* timep) {
     return &time_struct;
   }
 
-  CHECK_EQ(0, pthread_once(&g_libc_localtime_funcs_guard,
-                           InitLibcLocaltimeFunctions));
-  struct tm* res = g_libc_localtime(timep);
+  CHECK_EQ(0, pthread_once(&g_libc_funcs_guard, InitLibcLocaltimeFunctions));
+  struct tm* res =
+      base::UnsanitizedCfiCall(g_libc_funcs, &LibcFunctions::localtime)(timep);
 #if defined(MEMORY_SANITIZER)
   if (res) __msan_unpoison(res, sizeof(*res));
   if (res->tm_zone) __msan_unpoison_string(res->tm_zone);
@@ -293,9 +305,9 @@ struct tm* localtime64_override(const time_t* timep) {
     return &time_struct;
   }
 
-  CHECK_EQ(0, pthread_once(&g_libc_localtime_funcs_guard,
-                           InitLibcLocaltimeFunctions));
-  struct tm* res = g_libc_localtime64(timep);
+  CHECK_EQ(0, pthread_once(&g_libc_funcs_guard, InitLibcLocaltimeFunctions));
+  struct tm* res = base::UnsanitizedCfiCall(g_libc_funcs,
+                                            &LibcFunctions::localtime64)(timep);
 #if defined(MEMORY_SANITIZER)
   if (res) __msan_unpoison(res, sizeof(*res));
   if (res->tm_zone) __msan_unpoison_string(res->tm_zone);
@@ -310,13 +322,13 @@ struct tm* localtime_r_override(const time_t* timep,
 __attribute__ ((__visibility__("default")))
 struct tm* localtime_r_override(const time_t* timep, struct tm* result) {
   if (g_am_zygote_or_renderer && g_use_localtime_override) {
-    ProxyLocaltimeCallToBrowser(*timep, result, NULL, 0);
+    ProxyLocaltimeCallToBrowser(*timep, result, nullptr, 0);
     return result;
   }
 
-  CHECK_EQ(0, pthread_once(&g_libc_localtime_funcs_guard,
-                           InitLibcLocaltimeFunctions));
-  struct tm* res = g_libc_localtime_r(timep, result);
+  CHECK_EQ(0, pthread_once(&g_libc_funcs_guard, InitLibcLocaltimeFunctions));
+  struct tm* res = base::UnsanitizedCfiCall(
+      g_libc_funcs, &LibcFunctions::localtime_r)(timep, result);
 #if defined(MEMORY_SANITIZER)
   if (res) __msan_unpoison(res, sizeof(*res));
   if (res->tm_zone) __msan_unpoison_string(res->tm_zone);
@@ -331,13 +343,13 @@ struct tm* localtime64_r_override(const time_t* timep,
 __attribute__ ((__visibility__("default")))
 struct tm* localtime64_r_override(const time_t* timep, struct tm* result) {
   if (g_am_zygote_or_renderer && g_use_localtime_override) {
-    ProxyLocaltimeCallToBrowser(*timep, result, NULL, 0);
+    ProxyLocaltimeCallToBrowser(*timep, result, nullptr, 0);
     return result;
   }
 
-  CHECK_EQ(0, pthread_once(&g_libc_localtime_funcs_guard,
-                           InitLibcLocaltimeFunctions));
-  struct tm* res = g_libc_localtime64_r(timep, result);
+  CHECK_EQ(0, pthread_once(&g_libc_funcs_guard, InitLibcLocaltimeFunctions));
+  struct tm* res = base::UnsanitizedCfiCall(
+      g_libc_funcs, &LibcFunctions::localtime64_r)(timep, result);
 #if defined(MEMORY_SANITIZER)
   if (res) __msan_unpoison(res, sizeof(*res));
   if (res->tm_zone) __msan_unpoison_string(res->tm_zone);
@@ -502,7 +514,7 @@ static bool EnterSuidSandbox(sandbox::SetuidSandboxClient* setuid_sandbox,
     CHECK(CreateInitProcessReaper(post_fork_parent_callback));
   }
 
-  CHECK(SandboxDebugHandling::SetDumpableStatusAndHandlers());
+  CHECK(service_manager::SandboxDebugHandling::SetDumpableStatusAndHandlers());
   return true;
 }
 
@@ -510,10 +522,9 @@ static void DropAllCapabilities(int proc_fd) {
   CHECK(sandbox::Credentials::DropAllCapabilities(proc_fd));
 }
 
-static void EnterNamespaceSandbox(SandboxLinux* linux_sandbox,
+static void EnterNamespaceSandbox(service_manager::SandboxLinux* linux_sandbox,
                                   base::Closure* post_fork_parent_callback) {
-  linux_sandbox->EngageNamespaceSandbox();
-
+  linux_sandbox->EngageNamespaceSandbox(true /* from_zygote */);
   if (getpid() == 1) {
     base::Closure drop_all_caps_callback =
         base::Bind(&DropAllCapabilities, linux_sandbox->proc_fd());
@@ -523,7 +534,7 @@ static void EnterNamespaceSandbox(SandboxLinux* linux_sandbox,
   }
 }
 
-static void EnterLayerOneSandbox(SandboxLinux* linux_sandbox,
+static void EnterLayerOneSandbox(service_manager::SandboxLinux* linux_sandbox,
                                  const bool using_layer1_sandbox,
                                  base::Closure* post_fork_parent_callback) {
   DCHECK(linux_sandbox);
@@ -555,8 +566,7 @@ bool ZygoteMain(
   g_am_zygote_or_renderer = true;
 
   std::vector<int> fds_to_close_post_fork;
-
-  SandboxLinux* linux_sandbox = SandboxLinux::GetInstance();
+  auto* linux_sandbox = service_manager::SandboxLinux::GetInstance();
 
   // Skip pre-initializing sandbox under --no-sandbox for crbug.com/444900.
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -608,21 +618,20 @@ bool ZygoteMain(
   EnterLayerOneSandbox(linux_sandbox, using_layer1_sandbox,
                        &post_fork_parent_callback);
 
-  // Extra children and file descriptors created that the Zygote must have
-  // knowledge of.
-  std::vector<pid_t> extra_children;
-  std::vector<int> extra_fds;
-
   const int sandbox_flags = linux_sandbox->GetStatus();
 
-  const bool setuid_sandbox_engaged = sandbox_flags & kSandboxLinuxSUID;
+  const bool setuid_sandbox_engaged =
+      !!(sandbox_flags & service_manager::SandboxLinux::kSUID);
   CHECK_EQ(using_setuid_sandbox, setuid_sandbox_engaged);
 
-  const bool namespace_sandbox_engaged = sandbox_flags & kSandboxLinuxUserNS;
+  const bool namespace_sandbox_engaged =
+      !!(sandbox_flags & service_manager::SandboxLinux::kUserNS);
   CHECK_EQ(using_namespace_sandbox, namespace_sandbox_engaged);
 
-  Zygote zygote(sandbox_flags, std::move(fork_delegates), extra_children,
-                extra_fds);
+  Zygote zygote(sandbox_flags, std::move(fork_delegates),
+                base::GlobalDescriptors::Descriptor(
+                    static_cast<uint32_t>(kSandboxIPCChannel), GetSandboxFD()));
+
   // This function call can return multiple times, once per fork().
   return zygote.ProcessRequests();
 }

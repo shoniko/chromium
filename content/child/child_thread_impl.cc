@@ -34,12 +34,12 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/tracing/child/child_trace_message_filter.h"
 #include "content/child/child_histogram_fetcher_impl.h"
 #include "content/child/child_process.h"
 #include "content/child/thread_safe_sender.h"
-#include "content/common/child_process_messages.h"
 #include "content/common/field_trial_recorder.mojom.h"
 #include "content/common/in_process_child_thread_params.h"
 #include "content/public/common/connection_filter.h"
@@ -77,10 +77,6 @@
 
 #if defined(OS_MACOSX)
 #include "base/allocator/allocator_interception_mac.h"
-#endif
-
-#if defined(OS_WIN)
-#include "content/child/dwrite_font_proxy/dwrite_font_proxy_init_impl_win.h"
 #endif
 
 namespace content {
@@ -236,6 +232,7 @@ base::LazyInstance<QuitClosure>::DestructorAtExit g_quit_closure =
 
 std::unique_ptr<mojo::edk::IncomingBrokerClientInvitation>
 InitializeMojoIPCChannel() {
+  TRACE_EVENT0("startup", "InitializeMojoIPCChannel");
   mojo::edk::ScopedPlatformHandle platform_channel;
 #if defined(OS_WIN)
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -341,6 +338,13 @@ ChildThreadImpl::Options::Builder::AddStartupFilter(
   return *this;
 }
 
+ChildThreadImpl::Options::Builder&
+ChildThreadImpl::Options::Builder::IPCTaskRunner(
+    scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner) {
+  options_.ipc_task_runner = ipc_task_runner;
+  return *this;
+}
+
 ChildThreadImpl::Options ChildThreadImpl::Options::Builder::Build() {
   return options_;
 }
@@ -381,6 +385,7 @@ ChildThreadImpl::ChildThreadImpl(const Options& options)
       browser_process_io_runner_(options.browser_process_io_runner),
       channel_connected_factory_(
           new base::WeakPtrFactory<ChildThreadImpl>(this)),
+      ipc_task_runner_(options.ipc_task_runner),
       weak_factory_(this) {
   Init(options);
 }
@@ -413,15 +418,18 @@ void ChildThreadImpl::ConnectChannel(
   mojo::ScopedMessagePipeHandle handle =
       mojo::MakeRequest(&bootstrap).PassMessagePipe();
   service_manager_connection_->AddConnectionFilter(
-      base::MakeUnique<ChannelBootstrapFilter>(bootstrap.PassInterface()));
+      std::make_unique<ChannelBootstrapFilter>(bootstrap.PassInterface()));
 
   channel_->Init(
       IPC::ChannelMojo::CreateClientFactory(
-          std::move(handle), ChildProcess::current()->io_task_runner()),
+          std::move(handle), ChildProcess::current()->io_task_runner(),
+          ipc_task_runner_ ? ipc_task_runner_
+                           : base::ThreadTaskRunnerHandle::Get()),
       true /* create_pipe_now */);
 }
 
 void ChildThreadImpl::Init(const Options& options) {
+  TRACE_EVENT0("startup", "ChildThreadImpl::Init");
   g_lazy_tls.Pointer()->Set(this);
   on_channel_error_called_ = false;
   message_loop_ = base::MessageLoop::current();
@@ -432,9 +440,10 @@ void ChildThreadImpl::Init(const Options& options) {
   IPC::Logging::GetInstance();
 #endif
 
-  channel_ =
-      IPC::SyncChannel::Create(this, ChildProcess::current()->io_task_runner(),
-                               ChildProcess::current()->GetShutDownEvent());
+  channel_ = IPC::SyncChannel::Create(
+      this, ChildProcess::current()->io_task_runner(),
+      ipc_task_runner_ ? ipc_task_runner_ : base::ThreadTaskRunnerHandle::Get(),
+      ChildProcess::current()->GetShutDownEvent());
 #if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
   if (!IsInBrowserProcess())
     IPC::Logging::GetInstance()->SetIPCSender(this);
@@ -470,11 +479,14 @@ void ChildThreadImpl::Init(const Options& options) {
   thread_safe_sender_ = new ThreadSafeSender(
       message_loop_->task_runner(), sync_message_filter_.get());
 
-  auto registry = base::MakeUnique<service_manager::BinderRegistry>();
+  auto registry = std::make_unique<service_manager::BinderRegistry>();
   registry->AddInterface(base::Bind(&ChildHistogramFetcherFactoryImpl::Create),
                          GetIOTaskRunner());
+  registry->AddInterface(base::Bind(&ChildThreadImpl::OnChildControlRequest,
+                                    base::Unretained(this)),
+                         base::ThreadTaskRunnerHandle::Get());
   GetServiceManagerConnection()->AddConnectionFilter(
-      base::MakeUnique<SimpleConnectionFilter>(std::move(registry)));
+      std::make_unique<SimpleConnectionFilter>(std::move(registry)));
 
   InitTracing();
 
@@ -507,7 +519,7 @@ void ChildThreadImpl::Init(const Options& options) {
   // not create the power monitor.
   if (!base::PowerMonitor::Get() && service_manager_connection_) {
     auto power_monitor_source =
-        base::MakeUnique<device::PowerMonitorBroadcastSource>(
+        std::make_unique<device::PowerMonitorBroadcastSource>(
             GetConnector(), GetIOTaskRunner());
     power_monitor_.reset(
         new base::PowerMonitor(std::move(power_monitor_source)));
@@ -570,10 +582,6 @@ void ChildThreadImpl::Init(const Options& options) {
     field_trial_syncer_->InitFieldTrialObserving(
         *base::CommandLine::ForCurrentProcess());
   }
-
-#if defined(OS_WIN)
-  UpdateDWriteFontProxySender(thread_safe_sender());
-#endif
 }
 
 void ChildThreadImpl::InitTracing() {
@@ -595,7 +603,7 @@ void ChildThreadImpl::InitTracing() {
       ChildProcess::current()->io_task_runner()));
 
   chrome_trace_event_agent_ =
-      base::MakeUnique<tracing::ChromeTraceEventAgent>(GetConnector());
+      std::make_unique<tracing::ChromeTraceEventAgent>(GetConnector());
 }
 
 ChildThreadImpl::~ChildThreadImpl() {
@@ -614,7 +622,7 @@ ChildThreadImpl::~ChildThreadImpl() {
   // automatically.  We used to watch the object handle on Windows to do this,
   // but it wasn't possible to do so on POSIX.
   channel_->ClearIPCTaskRunner();
-  g_lazy_tls.Pointer()->Set(NULL);
+  g_lazy_tls.Pointer()->Set(nullptr);
 }
 
 void ChildThreadImpl::Shutdown() {
@@ -650,11 +658,19 @@ bool ChildThreadImpl::Send(IPC::Message* msg) {
 
 #if defined(OS_WIN)
 void ChildThreadImpl::PreCacheFont(const LOGFONT& log_font) {
-  Send(new ChildProcessHostMsg_PreCacheFont(log_font));
+  GetFontCacheWin()->PreCacheFont(log_font);
 }
 
 void ChildThreadImpl::ReleaseCachedFonts() {
-  Send(new ChildProcessHostMsg_ReleaseCachedFonts());
+  GetFontCacheWin()->ReleaseCachedFonts();
+}
+
+mojom::FontCacheWin* ChildThreadImpl::GetFontCacheWin() {
+  if (!font_cache_win_ptr_) {
+    GetConnector()->BindInterface(mojom::kBrowserServiceName,
+                                  &font_cache_win_ptr_);
+  }
+  return font_cache_win_ptr_.get();
 }
 #endif
 
@@ -704,35 +720,10 @@ std::unique_ptr<base::SharedMemory> ChildThreadImpl::AllocateSharedMemory(
     return nullptr;
   }
 
-  return base::MakeUnique<base::SharedMemory>(shared_buf, false);
+  return std::make_unique<base::SharedMemory>(shared_buf, false);
 }
-
-#if defined(OS_LINUX)
-void ChildThreadImpl::SetThreadPriority(base::PlatformThreadId id,
-                                        base::ThreadPriority priority) {
-  Send(new ChildProcessHostMsg_SetThreadPriority(id, priority));
-}
-#endif
 
 bool ChildThreadImpl::OnMessageReceived(const IPC::Message& msg) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ChildThreadImpl, msg)
-    IPC_MESSAGE_HANDLER(ChildProcessMsg_Shutdown, OnShutdown)
-#if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
-    IPC_MESSAGE_HANDLER(ChildProcessMsg_SetIPCLoggingEnabled,
-                        OnSetIPCLoggingEnabled)
-#endif
-    IPC_MESSAGE_HANDLER(ChildProcessMsg_SetProcessBackgrounded,
-                        OnProcessBackgrounded)
-    IPC_MESSAGE_HANDLER(ChildProcessMsg_PurgeAndSuspend,
-                        OnProcessPurgeAndSuspend)
-    IPC_MESSAGE_HANDLER(ChildProcessMsg_Resume, OnProcessResume)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-
-  if (handled)
-    return true;
-
   if (msg.routing_id() == MSG_ROUTING_CONTROL)
     return OnControlMessageReceived(msg);
 
@@ -763,31 +754,23 @@ bool ChildThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
   return false;
 }
 
-void ChildThreadImpl::OnProcessBackgrounded(bool backgrounded) {
-  // Set timer slack to maximum on main thread when in background.
-  base::TimerSlack timer_slack = base::TIMER_SLACK_NONE;
-  if (backgrounded)
-    timer_slack = base::TIMER_SLACK_MAXIMUM;
-  base::MessageLoop::current()->SetTimerSlack(timer_slack);
-}
-
-void ChildThreadImpl::OnProcessPurgeAndSuspend() {
-}
-
-void ChildThreadImpl::OnProcessResume() {}
-
-void ChildThreadImpl::OnShutdown() {
+void ChildThreadImpl::ProcessShutdown() {
   base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
+void ChildThreadImpl::SetIPCLoggingEnabled(bool enable) {
 #if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
-void ChildThreadImpl::OnSetIPCLoggingEnabled(bool enable) {
   if (enable)
     IPC::Logging::GetInstance()->Enable();
   else
     IPC::Logging::GetInstance()->Disable();
-}
 #endif  //  IPC_MESSAGE_LOG_ENABLED
+}
+
+void ChildThreadImpl::OnChildControlRequest(
+    mojom::ChildControlRequest request) {
+  child_control_bindings_.AddBinding(this, std::move(request));
+}
 
 ChildThreadImpl* ChildThreadImpl::current() {
   return g_lazy_tls.Pointer()->Get();
@@ -807,13 +790,7 @@ void ChildThreadImpl::OnProcessFinalRelease() {
   if (on_channel_error_called_)
     return;
 
-  // The child process shutdown sequence is a request response based mechanism,
-  // where we send out an initial feeler request to the child process host
-  // instance in the browser to verify if it's ok to shutdown the child process.
-  // The browser then sends back a response if it's ok to shutdown. This avoids
-  // race conditions if the process refcount is 0 but there's an IPC message
-  // inflight that would addref it.
-  Send(new ChildProcessHostMsg_ShutdownRequest);
+  ProcessShutdown();
 }
 
 void ChildThreadImpl::EnsureConnected() {

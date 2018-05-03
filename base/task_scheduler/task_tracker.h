@@ -15,6 +15,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_base.h"
+#include "base/strings/string_piece.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task_scheduler/can_schedule_sequence_observer.h"
 #include "base/task_scheduler/scheduler_lock.h"
@@ -84,9 +85,11 @@ namespace internal {
 // TaskPriority::USER_BLOCKING.
 class BASE_EXPORT TaskTracker {
  public:
+  // |histogram_label| is used as a suffix for histograms, it must not be empty.
   // |max_num_scheduled_background_sequences| is the maximum number of
-  // background sequences that be scheduled concurrently.
-  TaskTracker(int max_num_scheduled_background_sequences =
+  // background sequences that can be scheduled concurrently (default to max())
+  TaskTracker(StringPiece histogram_label,
+              int max_num_scheduled_background_sequences =
                   std::numeric_limits<int>::max());
   virtual ~TaskTracker();
 
@@ -99,7 +102,7 @@ class BASE_EXPORT TaskTracker {
   // This can only be called once.
   void Shutdown();
 
-  // Waits until there are no pending undelayed tasks. May be called in tests
+  // Waits until there are no incomplete undelayed tasks. May be called in tests
   // to validate that a condition is met after all undelayed tasks have run.
   //
   // Does not wait for delayed tasks. Waits for undelayed tasks posted from
@@ -108,7 +111,7 @@ class BASE_EXPORT TaskTracker {
 
   // Informs this TaskTracker that |task| is about to be posted. Returns true if
   // this operation is allowed (|task| should be posted if-and-only-if it is).
-  bool WillPostTask(const Task* task);
+  bool WillPostTask(const Task& task);
 
   // Informs this TaskTracker that |sequence| is about to be scheduled. If this
   // returns |sequence|, it is expected that RunNextTask() will soon be called
@@ -155,9 +158,7 @@ class BASE_EXPORT TaskTracker {
   // have run. |sequence| is the sequence from which |task| was extracted. An
   // override is expected to call its parent's implementation but is free to
   // perform extra work before and after doing so.
-  virtual void RunOrSkipTask(std::unique_ptr<Task> task,
-                             Sequence* sequence,
-                             bool can_run_task);
+  virtual void RunOrSkipTask(Task task, Sequence* sequence, bool can_run_task);
 
 #if DCHECK_IS_ON()
   // Returns true if this context should be exempt from blocking shutdown
@@ -166,13 +167,10 @@ class BASE_EXPORT TaskTracker {
   virtual bool IsPostingBlockShutdownTaskAfterShutdownAllowed();
 #endif
 
-  // Called at the very end of RunNextTask() after the completion of all task
-  // metrics accounting.
-  virtual void OnRunNextTaskCompleted() {}
-
-  // Returns the number of undelayed tasks that haven't completed their
-  // execution.
-  int GetNumPendingUndelayedTasksForTesting() const;
+  // Returns true if there are undelayed tasks that haven't completed their
+  // execution (still queued or in progress). If it returns false: the side-
+  // effects of all completed tasks are guaranteed to be visible to the caller.
+  bool HasIncompleteUndelayedTasksForTesting() const;
 
  private:
   class State;
@@ -199,9 +197,9 @@ class BASE_EXPORT TaskTracker {
   // shutdown has started.
   void OnBlockingShutdownTasksComplete();
 
-  // Decrements the number of pending undelayed tasks and signals |flush_cv_| if
-  // it reaches zero.
-  void DecrementNumPendingUndelayedTasks();
+  // Decrements the number of incomplete undelayed tasks and signals |flush_cv_|
+  // if it reaches zero.
+  void DecrementNumIncompleteUndelayedTasks();
 
   // To be called after running a background task from |just_ran_sequence|.
   // Performs the following actions:
@@ -223,7 +221,7 @@ class BASE_EXPORT TaskTracker {
 
   // Records the TaskScheduler.TaskLatency.[task priority].[may block] histogram
   // for |task|.
-  void RecordTaskLatencyHistogram(Task* task);
+  void RecordTaskLatencyHistogram(const Task& task);
 
   // Number of tasks blocking shutdown and boolean indicating whether shutdown
   // has started.
@@ -233,15 +231,15 @@ class BASE_EXPORT TaskTracker {
   // decremented with a memory barrier after a task runs. Is accessed with an
   // acquire memory barrier in Flush(). The memory barriers ensure that the
   // memory written by flushed tasks is visible when Flush() returns.
-  subtle::Atomic32 num_pending_undelayed_tasks_ = 0;
+  subtle::Atomic32 num_incomplete_undelayed_tasks_ = 0;
 
   // Lock associated with |flush_cv_|. Partially synchronizes access to
-  // |num_pending_undelayed_tasks_|. Full synchronization isn't needed because
-  // it's atomic, but synchronization is needed to coordinate waking and
+  // |num_incomplete_undelayed_tasks_|. Full synchronization isn't needed
+  // because it's atomic, but synchronization is needed to coordinate waking and
   // sleeping at the right time.
   mutable SchedulerLock flush_lock_;
 
-  // Signaled when |num_pending_undelayed_tasks_| is zero or when shutdown
+  // Signaled when |num_incomplete_undelayed_tasks_| is zero or when shutdown
   // completes.
   const std::unique_ptr<ConditionVariable> flush_cv_;
 

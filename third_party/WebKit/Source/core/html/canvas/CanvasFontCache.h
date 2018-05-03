@@ -7,11 +7,11 @@
 
 #include <memory>
 #include "core/CoreExport.h"
-#include "core/css/StylePropertySet.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "platform/fonts/Font.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/ListHashSet.h"
+#include "platform/wtf/LinkedHashSet.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebThread.h"
 
@@ -29,7 +29,7 @@ class CORE_EXPORT CanvasFontCache final
     return new CanvasFontCache(document);
   }
 
-  MutableStylePropertySet* ParseFont(const String&);
+  MutableCSSPropertyValueSet* ParseFont(const String&);
   void PruneAll();
   unsigned size();
 
@@ -53,12 +53,12 @@ class CORE_EXPORT CanvasFontCache final
  private:
   explicit CanvasFontCache(Document&);
   void SchedulePruningIfNeeded();
-  typedef HeapHashMap<String, Member<MutableStylePropertySet>>
+  typedef HeapHashMap<String, Member<MutableCSSPropertyValueSet>>
       MutableStylePropertyMap;
 
   HashMap<String, Font> fonts_resolved_using_default_style_;
   MutableStylePropertyMap fetched_fonts_;
-  ListHashSet<String> font_lru_list_;
+  LinkedHashSet<String> font_lru_list_;
   std::unique_ptr<FontCachePurgePreventer> main_cache_purge_preventer_;
   Member<Document> document_;
   scoped_refptr<ComputedStyle> default_font_style_;

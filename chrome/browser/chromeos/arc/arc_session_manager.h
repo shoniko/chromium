@@ -15,6 +15,7 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/arc/arc_support_host.h"
 #include "chrome/browser/chromeos/policy/android_management_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "components/arc/arc_session_runner.h"
 #include "components/arc/arc_stop_reason.h"
 
@@ -32,7 +33,8 @@ enum class ProvisioningResult : int;
 
 // This class is responsible for handing stages of ARC life-cycle.
 class ArcSessionManager : public ArcSessionRunner::Observer,
-                          public ArcSupportHost::ErrorDelegate {
+                          public ArcSupportHost::ErrorDelegate,
+                          public chromeos::SessionManagerClient::Observer {
  public:
   // Represents each State of ARC session.
   // NOT_INITIALIZED: represents the state that the Profile is not yet ready
@@ -106,6 +108,9 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
     // during the opt-in flow.
     virtual void OnArcOptInManagementCheckStarted() {}
 
+    // Called to notify that ARC begins to start.
+    virtual void OnArcStarted() {}
+
     // Called to notify that ARC has been initialized successfully.
     virtual void OnArcInitialStart() {}
 
@@ -136,9 +141,6 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   ~ArcSessionManager() override;
 
   static ArcSessionManager* Get();
-
-  // Returns true if OOBE flow is active currently.
-  static bool IsOobeOptInActive();
 
   static void DisableUIForTesting();
   static void EnableCheckAndroidManagementForTesting();
@@ -197,8 +199,10 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // this.
   void RequestArcDataRemoval();
 
-  // Called from the Chrome OS metrics provider to record Arc.State
-  // periodically.
+  // Called from the Chrome OS metrics provider to record Arc.State and similar
+  // values strictly once per every metrics recording interval. This way they
+  // are in every record uploaded to the server and therefore can be used to
+  // split and compare analysis data for all other metrics.
   void RecordArcState();
 
   // ArcSupportHost:::ErrorDelegate:
@@ -249,6 +253,7 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // Injectors for testing.
   void SetArcSessionRunnerForTesting(
       std::unique_ptr<ArcSessionRunner> arc_session_runner);
+  ArcSessionRunner* GetArcSessionRunnerForTesting();
   void SetAttemptUserExitCallbackForTesting(const base::Closure& callback);
 
   // Returns whether the Play Store app is requested to be launched by this
@@ -311,7 +316,7 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   void OnBackgroundAndroidManagementChecked(
       policy::AndroidManagementClient::Result result);
 
-  // Requests to starts ARC instance. Also, update the internal state to
+  // Requests to start ARC instance. Also, updates the internal state to
   // ACTIVE.
   void StartArc();
 
@@ -344,6 +349,9 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   void ShowArcSupportHostError(ArcSupportHost::Error error,
                                bool should_show_send_feedback);
 
+  // chromeos::SessionManagerClient::Observer:
+  void EmitLoginPromptVisibleCalled() override;
+
   std::unique_ptr<ArcSessionRunner> arc_session_runner_;
 
   // Unowned pointer. Keeps current profile.
@@ -361,9 +369,9 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   bool reenable_arc_ = false;
   bool provisioning_reported_ = false;
   // In case ARC is started from OOBE |oobe_start_|, set to true. This flag is
-  // used to remember |IsOobeOptInActive| state when ARC start request was made.
-  // |IsOobeOptInActive| will be changed by the time when |oobe_start_| is
-  // checked to prevent the Play Store auto-launch.
+  // used to remember |IsArcOobeOptInActive| state when ARC start request was
+  // made.  |IsArcOobeOptInActive| will be changed by the time when
+  // |oobe_start_| is checked to prevent the Play Store auto-launch.
   bool oobe_start_ = false;
   bool directly_started_ = false;
   base::OneShotTimer arc_sign_in_timer_;

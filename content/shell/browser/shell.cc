@@ -75,9 +75,9 @@ class Shell::DevToolsWebContentsObserver : public WebContentsObserver {
 Shell::Shell(WebContents* web_contents)
     : WebContentsObserver(web_contents),
       web_contents_(web_contents),
-      devtools_frontend_(NULL),
+      devtools_frontend_(nullptr),
       is_fullscreen_(false),
-      window_(NULL),
+      window_(nullptr),
 #if defined(OS_MACOSX)
       url_edit_view_(NULL),
 #endif
@@ -172,7 +172,7 @@ Shell* Shell::FromRenderViewHost(RenderViewHost* rvh) {
       return windows_[i];
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 // static
@@ -318,12 +318,12 @@ void Shell::CloseDevTools() {
     return;
   devtools_observer_.reset();
   devtools_frontend_->Close();
-  devtools_frontend_ = NULL;
+  devtools_frontend_ = nullptr;
 }
 
 gfx::NativeView Shell::GetContentView() {
   if (!web_contents_)
-    return NULL;
+    return nullptr;
   return web_contents_->GetNativeView();
 }
 
@@ -474,10 +474,9 @@ JavaScriptDialogManager* Shell::GetJavaScriptDialogManager(
 std::unique_ptr<BluetoothChooser> Shell::RunBluetoothChooser(
     RenderFrameHost* frame,
     const BluetoothChooser::EventHandler& event_handler) {
-  if (switches::IsRunLayoutTestSwitchPresent()) {
-    return BlinkTestController::Get()->RunBluetoothChooser(frame,
-                                                           event_handler);
-  }
+  BlinkTestController* blink_test_controller = BlinkTestController::Get();
+  if (blink_test_controller && switches::IsRunLayoutTestSwitchPresent())
+    return blink_test_controller->RunBluetoothChooser(frame, event_handler);
   return nullptr;
 }
 
@@ -489,11 +488,10 @@ bool Shell::DidAddMessageToConsole(WebContents* source,
   return switches::IsRunLayoutTestSwitchPresent();
 }
 
-void Shell::RendererUnresponsive(
-    WebContents* source,
-    const WebContentsUnresponsiveState& unresponsive_state) {
-  if (switches::IsRunLayoutTestSwitchPresent())
-    BlinkTestController::Get()->RendererUnresponsive();
+void Shell::RendererUnresponsive(WebContents* source) {
+  BlinkTestController* blink_test_controller = BlinkTestController::Get();
+  if (blink_test_controller && switches::IsRunLayoutTestSwitchPresent())
+    blink_test_controller->RendererUnresponsive();
 }
 
 void Shell::ActivateContents(WebContents* contents) {
@@ -506,11 +504,12 @@ bool Shell::ShouldAllowRunningInsecureContent(
     const url::Origin& origin,
     const GURL& resource_url) {
   bool allowed_by_test = false;
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+  BlinkTestController* blink_test_controller = BlinkTestController::Get();
+  if (blink_test_controller &&
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kRunLayoutTest)) {
     const base::DictionaryValue& test_flags =
-        BlinkTestController::Get()
-            ->accumulated_layout_test_runtime_flags_changes();
+        blink_test_controller->accumulated_layout_test_runtime_flags_changes();
     test_flags.GetBoolean("running_insecure_content_allowed", &allowed_by_test);
   }
 
@@ -542,7 +541,7 @@ void Shell::TitleWasSet(NavigationEntry* entry) {
 
 void Shell::OnDevToolsWebContentsDestroyed() {
   devtools_observer_.reset();
-  devtools_frontend_ = NULL;
+  devtools_frontend_ = nullptr;
 }
 
 }  // namespace content

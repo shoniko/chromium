@@ -18,20 +18,12 @@ class MODULES_EXPORT NavigatorContentUtilsClient
     : public GarbageCollectedFinalized<NavigatorContentUtilsClient> {
  public:
   static NavigatorContentUtilsClient* Create(WebLocalFrameImpl*);
-  virtual ~NavigatorContentUtilsClient() {}
+  virtual ~NavigatorContentUtilsClient() = default;
 
   virtual void RegisterProtocolHandler(const String& scheme,
                                        const KURL&,
                                        const String& title);
 
-  enum CustomHandlersState {
-    kCustomHandlersNew,
-    kCustomHandlersRegistered,
-    kCustomHandlersDeclined
-  };
-
-  virtual CustomHandlersState IsProtocolHandlerRegistered(const String& scheme,
-                                                          const KURL&);
   virtual void UnregisterProtocolHandler(const String& scheme, const KURL&);
 
   virtual void Trace(blink::Visitor*);

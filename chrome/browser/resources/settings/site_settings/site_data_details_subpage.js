@@ -5,7 +5,7 @@
 (function() {
 'use strict';
 
-var categoryLabels = {
+const categoryLabels = {
   app_cache: loadTimeData.getString('cookieAppCache'),
   cache_storage: loadTimeData.getString('cookieCacheStorage'),
   channel_id: loadTimeData.getString('cookieChannelId'),
@@ -15,6 +15,7 @@ var categoryLabels = {
   indexed_db: loadTimeData.getString('cookieDatabaseStorage'),
   local_storage: loadTimeData.getString('cookieLocalStorage'),
   service_worker: loadTimeData.getString('cookieServiceWorker'),
+  shared_worker: loadTimeData.getString('cookieSharedWorker'),
   media_license: loadTimeData.getString('cookieMediaLicense'),
 };
 
@@ -70,7 +71,7 @@ Polymer({
     if (settings.getCurrentRoute() !=
         settings.routes.SITE_SETTINGS_DATA_DETAILS)
       return;
-    var site = settings.getQueryParameters().get('site');
+    const site = settings.getQueryParameters().get('site');
     if (!site)
       return;
     this.site_ = site;

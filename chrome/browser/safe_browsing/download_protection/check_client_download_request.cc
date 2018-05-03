@@ -4,6 +4,9 @@
 
 #include "chrome/browser/safe_browsing/download_protection/check_client_download_request.h"
 
+#include <memory>
+
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/task_scheduler/post_task.h"
@@ -14,11 +17,13 @@
 #include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
 #include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
 #include "chrome/browser/safe_browsing/download_protection/ppapi_download_request.h"
+#include "chrome/common/safe_browsing/archive_analyzer_results.h"
 #include "chrome/common/safe_browsing/download_protection_util.h"
 #include "chrome/common/safe_browsing/file_type_policies.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/safe_browsing/common/utils.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/common/service_manager_connection.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_status_code.h"
 
@@ -31,12 +36,12 @@ const char kUnsupportedSchemeUmaPrefix[] = "SBClientDownload.UnsupportedScheme";
 
 void RecordFileExtensionType(const std::string& metric_name,
                              const base::FilePath& file) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
+  base::UmaHistogramSparse(
       metric_name, FileTypePolicies::GetInstance()->UmaValueForFile(file));
 }
 
 void RecordArchivedArchiveFileExtensionType(const base::FilePath& file) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY(
+  base::UmaHistogramSparse(
       "SBClientDownload.ArchivedArchiveExtensions",
       FileTypePolicies::GetInstance()->UmaValueForFile(file));
 }
@@ -187,11 +192,11 @@ void CheckClientDownloadRequest::OnURLFetchComplete(
            << ": success=" << source->GetStatus().is_success()
            << " response_code=" << source->GetResponseCode();
   if (source->GetStatus().is_success()) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("SBClientDownload.DownloadRequestResponseCode",
-                                source->GetResponseCode());
+    base::UmaHistogramSparse("SBClientDownload.DownloadRequestResponseCode",
+                             source->GetResponseCode());
   }
-  UMA_HISTOGRAM_SPARSE_SLOWLY("SBClientDownload.DownloadRequestNetError",
-                              -source->GetStatus().error());
+  base::UmaHistogramSparse("SBClientDownload.DownloadRequestNetError",
+                           -source->GetStatus().error());
   DownloadCheckResultReason reason = REASON_SERVER_PING_FAILED;
   DownloadCheckResult result = DownloadCheckResult::UNKNOWN;
   std::string token;
@@ -478,8 +483,23 @@ void CheckClientDownloadRequest::StartExtractZipFeatures() {
   analyzer_ = new SandboxedZipAnalyzer(
       item_->GetFullPath(),
       base::Bind(&CheckClientDownloadRequest::OnZipAnalysisFinished,
-                 weakptr_factory_.GetWeakPtr()));
+                 weakptr_factory_.GetWeakPtr()),
+      content::ServiceManagerConnection::GetForProcess()->GetConnector());
   analyzer_->Start();
+}
+
+// static
+void CheckClientDownloadRequest::CopyArchivedBinaries(
+    const ArchivedBinaries& src_binaries,
+    ArchivedBinaries* dest_binaries) {
+  // Limit the number of entries so we don't clog the backend.
+  // We can expand this limit by pushing a new download_file_types update.
+  int limit = FileTypePolicies::GetInstance()->GetMaxArchivedBinariesToReport();
+
+  dest_binaries->Clear();
+  for (int i = 0; i < limit && i < src_binaries.size(); i++) {
+    *dest_binaries->Add() = src_binaries[i];
+  }
 }
 
 void CheckClientDownloadRequest::OnZipAnalysisFinished(
@@ -499,12 +519,16 @@ void CheckClientDownloadRequest::OnZipAnalysisFinished(
   archive_is_valid_ =
       (results.success ? ArchiveValid::VALID : ArchiveValid::INVALID);
   archived_executable_ = results.has_executable;
-  archived_binary_.CopyFrom(results.archived_binary);
+  CopyArchivedBinaries(results.archived_binary, &archived_binaries_);
   DVLOG(1) << "Zip analysis finished for " << item_->GetFullPath().value()
            << ", has_executable=" << results.has_executable
            << ", has_archive=" << results.has_archive
            << ", success=" << results.success;
 
+  if (archived_executable_) {
+    UMA_HISTOGRAM_COUNTS("SBClientDownload.ZipFileArchivedBinariesCount",
+                         results.archived_binary.size());
+  }
   UMA_HISTOGRAM_BOOLEAN("SBClientDownload.ZipFileSuccess", results.success);
   UMA_HISTOGRAM_BOOLEAN("SBClientDownload.ZipFileHasExecutable",
                         archived_executable_);
@@ -553,7 +577,8 @@ void CheckClientDownloadRequest::StartExtractDmgFeatures() {
     dmg_analyzer_ = new SandboxedDMGAnalyzer(
         item_->GetFullPath(),
         base::Bind(&CheckClientDownloadRequest::OnDmgAnalysisFinished,
-                   weakptr_factory_.GetWeakPtr()));
+                   weakptr_factory_.GetWeakPtr()),
+        content::ServiceManagerConnection::GetForProcess()->GetConnector());
     dmg_analyzer_->Start();
     dmg_analysis_start_time_ = base::TimeTicks::Now();
   }
@@ -578,7 +603,7 @@ void CheckClientDownloadRequest::ExtractFileOrDmgFeatures(
 }
 
 void CheckClientDownloadRequest::OnDmgAnalysisFinished(
-    const ArchiveAnalyzerResults& results) {
+    const safe_browsing::ArchiveAnalyzerResults& results) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(ClientDownloadRequest::MAC_EXECUTABLE, type_);
   if (item_ == nullptr) {
@@ -590,14 +615,15 @@ void CheckClientDownloadRequest::OnDmgAnalysisFinished(
 
   if (results.signature_blob.size() > 0) {
     disk_image_signature_ =
-        base::MakeUnique<std::vector<uint8_t>>(results.signature_blob);
+        std::make_unique<std::vector<uint8_t>>(results.signature_blob);
   }
 
   // Even if !results.success, some of the DMG may have been parsed.
   archive_is_valid_ =
       (results.success ? ArchiveValid::VALID : ArchiveValid::INVALID);
   archived_executable_ = results.has_executable;
-  archived_binary_.CopyFrom(results.archived_binary);
+  CopyArchivedBinaries(results.archived_binary, &archived_binaries_);
+
   DVLOG(1) << "DMG analysis has finished for " << item_->GetFullPath().value()
            << ", has_executable=" << results.has_executable
            << ", success=" << results.success;
@@ -606,19 +632,21 @@ void CheckClientDownloadRequest::OnDmgAnalysisFinished(
       item_->GetTargetFilePath());
 
   if (results.success) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("SBClientDownload.DmgFileSuccessByType",
-                                uma_file_type);
+    base::UmaHistogramSparse("SBClientDownload.DmgFileSuccessByType",
+                             uma_file_type);
   } else {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("SBClientDownload.DmgFileFailureByType",
-                                uma_file_type);
+    base::UmaHistogramSparse("SBClientDownload.DmgFileFailureByType",
+                             uma_file_type);
   }
 
   if (archived_executable_) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("SBClientDownload.DmgFileHasExecutableByType",
-                                uma_file_type);
+    base::UmaHistogramSparse("SBClientDownload.DmgFileHasExecutableByType",
+                             uma_file_type);
+    UMA_HISTOGRAM_COUNTS("SBClientDownload.DmgFileArchivedBinariesCount",
+                         results.archived_binary.size());
   } else {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("SBClientDownload.DmgFileHasNoExecutableByType",
-                                uma_file_type);
+    base::UmaHistogramSparse("SBClientDownload.DmgFileHasNoExecutableByType",
+                             uma_file_type);
   }
 
   UMA_HISTOGRAM_TIMES("SBClientDownload.ExtractDmgFeaturesTime",
@@ -654,7 +682,6 @@ void CheckClientDownloadRequest::CheckUrlAgainstWhitelist() {
   }
 
   const GURL& url = url_chain_.back();
-  // TODO(vakh): This may acquire a lock on the SB DB on the IO thread.
   if (url.is_valid() && database_manager_->MatchDownloadWhitelistUrl(url)) {
     DVLOG(2) << url << " is on the download whitelist.";
     RecordCountOfWhitelistedDownload(URL_WHITELIST);
@@ -843,14 +870,20 @@ void CheckClientDownloadRequest::SendRequest() {
   request.set_download_type(type_);
 
   ReferrerChainData* referrer_chain_data = static_cast<ReferrerChainData*>(
-      item_->GetUserData(kDownloadReferrerChainDataKey));
+      item_->GetUserData(ReferrerChainData::kDownloadReferrerChainDataKey));
   if (referrer_chain_data &&
       !referrer_chain_data->GetReferrerChain()->empty()) {
     request.mutable_referrer_chain()->Swap(
         referrer_chain_data->GetReferrerChain());
-    if (type_ == ClientDownloadRequest::SAMPLED_UNSUPPORTED_FILE)
+    request.mutable_referrer_chain_options()->set_recent_navigations_to_collect(
+        referrer_chain_data->recent_navigations_to_collect());
+    UMA_HISTOGRAM_COUNTS_100(
+        "SafeBrowsing.ReferrerURLChainSize.DownloadAttribution",
+        referrer_chain_data->referrer_chain_length());
+    if (type_ == ClientDownloadRequest::SAMPLED_UNSUPPORTED_FILE) {
       SafeBrowsingNavigationObserverManager::SanitizeReferrerChain(
           request.mutable_referrer_chain());
+    }
   }
 
 #if defined(OS_MACOSX)
@@ -870,8 +903,8 @@ void CheckClientDownloadRequest::SendRequest() {
   request.mutable_signature()->CopyFrom(signature_info_);
   if (image_headers_)
     request.set_allocated_image_headers(image_headers_.release());
-  if (!archived_binary_.empty())
-    request.mutable_archived_binary()->Swap(&archived_binary_);
+  if (!archived_binaries_.empty())
+    request.mutable_archived_binary()->Swap(&archived_binaries_);
   if (!request.SerializeToString(&client_download_request_data_)) {
     FinishRequest(DownloadCheckResult::UNKNOWN, REASON_INVALID_REQUEST_PROTO);
     return;
@@ -890,7 +923,7 @@ void CheckClientDownloadRequest::SendRequest() {
   service_->client_download_request_callbacks_.Notify(item_, &request);
   DVLOG(2) << "Sending a request for URL: " << item_->GetUrlChain().back();
   DVLOG(2) << "Detected " << request.archived_binary().size() << " archived "
-           << "binaries";
+           << "binaries (may be capped)";
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("client_download_request", R"(
           semantics {

@@ -6,18 +6,12 @@
 
 #include <algorithm>
 #include "core/dom/FirstLetterPseudoElement.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/iterators/TextIteratorTextState.h"
 #include "core/layout/LayoutTextFragment.h"
 #include "core/layout/line/InlineTextBox.h"
 #include "core/layout/line/RootInlineBox.h"
-#include "core/layout/ng/inline/ng_inline_node.h"
-#include "core/layout/ng/inline/ng_offset_mapping_result.h"
-
-// TODO(layout-dev): Try not to include them. They are not needed by this file,
-// but are only included from ng_inline_node.h as partial classes.
-// However, Windows debug compiler requires complete classes to compile.
-#include "core/layout/ng/ng_layout_result.h"
-#include "core/layout/ng/ng_unpositioned_float.h"
+#include "core/layout/ng/inline/ng_offset_mapping.h"
 
 namespace blink {
 
@@ -42,22 +36,27 @@ bool ShouldSkipInvisibleTextAt(const Text& text,
   return layout_object->Style()->Visibility() != EVisibility::kVisible;
 }
 
-std::pair<String, std::pair<unsigned, unsigned>>
-ComputeTextAndOffsetsForEmission(const NGInlineNode& inline_node,
-                                 const NGOffsetMappingUnit& unit,
-                                 unsigned run_start,
-                                 unsigned run_end,
-                                 const TextIteratorBehavior& behavior) {
+struct StringAndOffsetRange {
+  String string;
+  unsigned start;
+  unsigned end;
+};
+
+StringAndOffsetRange ComputeTextAndOffsetsForEmission(
+    const NGOffsetMapping& mapping,
+    const NGOffsetMappingUnit& unit,
+    unsigned run_start,
+    unsigned run_end,
+    const TextIteratorBehavior& behavior) {
   // TODO(xiaochengh): Handle EmitsOriginalText.
   unsigned text_content_start = unit.ConvertDOMOffsetToTextContent(run_start);
   unsigned text_content_end = unit.ConvertDOMOffsetToTextContent(run_end);
+  unsigned length = text_content_end - text_content_start;
   if (behavior.EmitsSpaceForNbsp()) {
-    String string = inline_node.Text(text_content_start, text_content_end)
-                        .ToString()
-                        .Replace(kNoBreakSpaceCharacter, kSpaceCharacter);
-    return {string, {0u, 0u}};
+    String string = mapping.GetText().Substring(text_content_start, length);
+    return {string, 0, 0};
   }
-  return {inline_node.Text(), {text_content_start, text_content_end}};
+  return {mapping.GetText(), text_content_start, text_content_end};
 }
 
 }  // namespace
@@ -98,21 +97,20 @@ void TextIteratorTextNodeHandler::HandleTextNodeWithLayoutNG() {
   }
 
   while (offset_ < end_offset_ && !text_state_.PositionNode()) {
-    // We may go through multiple inline nodes, which happens when there is
+    const EphemeralRange range_to_emit(Position(text_node_, offset_),
+                                       Position(text_node_, end_offset_));
+
+    // We may go through multiple mappings, which happens when there is
     // ::first-letter and blockifying style.
-    Optional<NGInlineNode> inline_node =
-        GetNGInlineNodeFor(*text_node_, offset_);
-    if (!inline_node) {
+    auto* mapping = NGOffsetMapping::GetFor(range_to_emit.StartPosition());
+    if (!mapping) {
       offset_ = end_offset_;
       return;
     }
 
-    const NGOffsetMappingResult& mapping =
-        inline_node->ComputeOffsetMappingIfNeeded();
     const unsigned initial_offset = offset_;
     for (const NGOffsetMappingUnit& unit :
-         mapping.GetMappingUnitsForDOMOffsetRange(*text_node_, offset_,
-                                                  end_offset_)) {
+         mapping->GetMappingUnitsForDOMRange(range_to_emit)) {
       const unsigned run_start = std::max(offset_, unit.DOMStart());
       const unsigned run_end = std::min(end_offset_, unit.DOMEnd());
       if (run_start >= run_end ||
@@ -123,10 +121,10 @@ void TextIteratorTextNodeHandler::HandleTextNodeWithLayoutNG() {
       }
 
       auto string_and_offsets = ComputeTextAndOffsetsForEmission(
-          *inline_node, unit, run_start, run_end, behavior_);
-      const String& string = string_and_offsets.first;
-      const unsigned text_content_start = string_and_offsets.second.first;
-      const unsigned text_content_end = string_and_offsets.second.second;
+          *mapping, unit, run_start, run_end, behavior_);
+      const String& string = string_and_offsets.string;
+      const unsigned text_content_start = string_and_offsets.start;
+      const unsigned text_content_end = string_and_offsets.end;
       text_state_.EmitText(text_node_, run_start, run_end, string,
                            text_content_start, text_content_end);
       offset_ = run_end;
@@ -153,14 +151,14 @@ bool TextIteratorTextNodeHandler::ShouldHandleFirstLetter(
   return offset_ < text_fragment.TextStartOffset();
 }
 
-static bool HasVisibleTextNode(LayoutText* layout_object) {
+static bool HasVisibleTextNode(const LayoutText* layout_object) {
   if (layout_object->Style()->Visibility() == EVisibility::kVisible)
     return true;
 
   if (!layout_object->IsTextFragment())
     return false;
 
-  LayoutTextFragment* fragment = ToLayoutTextFragment(layout_object);
+  const LayoutTextFragment* fragment = ToLayoutTextFragment(layout_object);
   if (!fragment->IsRemainingTextLayoutObject())
     return false;
 
@@ -224,7 +222,7 @@ void TextIteratorTextNodeHandler::HandlePreFormattedTextNode() {
   EmitText(text_node_, text_node_->GetLayoutObject(), run_start, run_end);
 }
 
-void TextIteratorTextNodeHandler::HandleTextNodeInRange(Text* node,
+void TextIteratorTextNodeHandler::HandleTextNodeInRange(const Text* node,
                                                         unsigned start_offset,
                                                         unsigned end_offset) {
   DCHECK(node);
@@ -239,7 +237,7 @@ void TextIteratorTextNodeHandler::HandleTextNodeInRange(Text* node,
   first_letter_text_ = nullptr;
   uses_layout_ng_ = false;
 
-  if (GetNGInlineNodeFor(*node, offset_)) {
+  if (NGOffsetMapping::GetFor(Position(node, offset_))) {
     // Restore end offset from magic value.
     if (end_offset_ == kMaxOffset)
       end_offset_ = node->data().length();
@@ -298,17 +296,17 @@ void TextIteratorTextNodeHandler::HandleTextNodeInRange(Text* node,
 }
 
 void TextIteratorTextNodeHandler::HandleTextNodeStartFrom(
-    Text* node,
+    const Text* node,
     unsigned start_offset) {
   HandleTextNodeInRange(node, start_offset, kMaxOffset);
 }
 
-void TextIteratorTextNodeHandler::HandleTextNodeEndAt(Text* node,
+void TextIteratorTextNodeHandler::HandleTextNodeEndAt(const Text* node,
                                                       unsigned end_offset) {
   HandleTextNodeInRange(node, 0, end_offset);
 }
 
-void TextIteratorTextNodeHandler::HandleTextNodeWhole(Text* node) {
+void TextIteratorTextNodeHandler::HandleTextNodeWhole(const Text* node) {
   HandleTextNodeStartFrom(node, 0);
 }
 
@@ -519,7 +517,7 @@ void TextIteratorTextNodeHandler::HandleTextNodeFirstLetter(
 }
 
 bool TextIteratorTextNodeHandler::FixLeadingWhiteSpaceForReplacedElement(
-    Node* parent) {
+    const Node* parent) {
   // This is a hacky way for white space fixup in legacy layout. With LayoutNG,
   // we can get rid of this function.
   if (uses_layout_ng_)
@@ -549,8 +547,8 @@ void TextIteratorTextNodeHandler::ResetCollapsedWhiteSpaceFixup() {
 }
 
 void TextIteratorTextNodeHandler::SpliceBuffer(UChar c,
-                                               Node* text_node,
-                                               Node* offset_base_node,
+                                               const Node* text_node,
+                                               const Node* offset_base_node,
                                                unsigned text_start_offset,
                                                unsigned text_end_offset) {
   text_state_.SpliceBuffer(c, text_node, offset_base_node, text_start_offset,
@@ -558,8 +556,8 @@ void TextIteratorTextNodeHandler::SpliceBuffer(UChar c,
   ResetCollapsedWhiteSpaceFixup();
 }
 
-void TextIteratorTextNodeHandler::EmitText(Node* text_node,
-                                           LayoutText* layout_object,
+void TextIteratorTextNodeHandler::EmitText(const Node* text_node,
+                                           const LayoutText* layout_object,
                                            unsigned text_start_offset,
                                            unsigned text_end_offset) {
   String string = behavior_.EmitsOriginalText() ? layout_object->OriginalText()

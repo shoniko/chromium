@@ -49,10 +49,12 @@ namespace blink {
 class CORE_EXPORT WebDocumentLoaderImpl final : public DocumentLoader,
                                                 public WebDocumentLoader {
  public:
-  static WebDocumentLoaderImpl* Create(LocalFrame*,
-                                       const ResourceRequest&,
-                                       const SubstituteData&,
-                                       ClientRedirectPolicy);
+  static WebDocumentLoaderImpl* Create(
+      LocalFrame*,
+      const ResourceRequest&,
+      const SubstituteData&,
+      ClientRedirectPolicy,
+      const base::UnguessableToken& devtools_navigation_token);
 
   static WebDocumentLoaderImpl* FromDocumentLoader(DocumentLoader* loader) {
     return static_cast<WebDocumentLoaderImpl*>(loader);
@@ -82,16 +84,19 @@ class CORE_EXPORT WebDocumentLoaderImpl final : public DocumentLoader,
   WebServiceWorkerNetworkProvider* GetServiceWorkerNetworkProvider() override;
   void SetSourceLocation(const WebSourceLocation&) override;
   void ResetSourceLocation() override;
+  void SetUserActivated() override;
 
   static WebNavigationType ToWebNavigationType(NavigationType);
 
   virtual void Trace(blink::Visitor*);
 
  private:
-  WebDocumentLoaderImpl(LocalFrame*,
-                        const ResourceRequest&,
-                        const SubstituteData&,
-                        ClientRedirectPolicy);
+  WebDocumentLoaderImpl(
+      LocalFrame*,
+      const ResourceRequest&,
+      const SubstituteData&,
+      ClientRedirectPolicy,
+      const base::UnguessableToken& devtools_navigation_token);
   ~WebDocumentLoaderImpl() override;
   void DetachFromFrame() override;
   String DebugName() const override { return "WebDocumentLoaderImpl"; }

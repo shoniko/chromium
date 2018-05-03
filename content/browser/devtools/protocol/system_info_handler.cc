@@ -12,11 +12,15 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/config/gpu_switches.h"
+#if defined(OS_CHROMEOS)
+#include "gpu/config/gpu_util.h"
+#endif
 
 namespace content {
 namespace protocol {
@@ -28,7 +32,12 @@ using SystemInfo::GPUInfo;
 using GetInfoCallback = SystemInfo::Backend::GetInfoCallback;
 
 // Give the GPU process a few seconds to provide GPU info.
+// Linux Debug builds need more time -- see Issue 796437.
+#if defined(OS_LINUX) && !defined(NDEBUG)
+const int kGPUInfoWatchdogTimeoutMs = 20000;
+#else
 const int kGPUInfoWatchdogTimeoutMs = 5000;
+#endif
 
 class AuxGPUInfoEnumerator : public gpu::GPUInfo::Enumerator {
  public:
@@ -154,6 +163,7 @@ class SystemInfoHandlerGpuObserver : public content::GpuDataManagerObserver {
         base::TimeDelta::FromMilliseconds(kGPUInfoWatchdogTimeoutMs));
 
     GpuDataManagerImpl::GetInstance()->AddObserver(this);
+    OnGpuInfoUpdate();
   }
 
   void OnGpuInfoUpdate() override {
@@ -167,7 +177,15 @@ class SystemInfoHandlerGpuObserver : public content::GpuDataManagerObserver {
 
   void ObserverWatchdogCallback() {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
+#if defined(OS_CHROMEOS)
+    // TODO(zmo): CHECK everywhere once https://crbug.com/796386 is fixed.
+    gpu::GpuFeatureInfo gpu_feature_info =
+        gpu::ComputeGpuFeatureInfoWithHardwareAccelerationDisabled();
+    GpuDataManagerImpl::GetInstance()->UpdateGpuFeatureInfo(gpu_feature_info);
     UnregisterAndSendResponse();
+#else
+    CHECK(false) << "Gathering system GPU info took more than 5 seconds.";
+#endif
   }
 
   void UnregisterAndSendResponse() {
@@ -192,29 +210,11 @@ void SystemInfoHandler::Wire(UberDispatcher* dispatcher) {
   SystemInfo::Dispatcher::wire(dispatcher, this);
 }
 
-void SystemInfoHandler::GetInfo(
-    std::unique_ptr<GetInfoCallback> callback) {
-  std::string reason;
-  if (!GpuDataManagerImpl::GetInstance()->GpuAccessAllowed(&reason) ||
-      GpuDataManagerImpl::GetInstance()->IsGpuFeatureInfoAvailable() ||
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kGpuTestingNoCompleteInfoCollection)) {
-    // The GpuDataManager already has all of the information needed to make
-    // GPU-based blacklisting decisions. Post a task to give it to the
-    // client asynchronously.
-    //
-    // Waiting for complete GPU info in the if-test above seems to
-    // frequently hit internal timeouts in the launching of the unsandboxed
-    // GPU process in debug builds on Windows.
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::BindOnce(&SendGetInfoResponse,
-                                           base::Passed(std::move(callback))));
-  } else {
-    // We will be able to get more information from the GpuDataManager.
-    // Register a transient observer with it to call us back when the
-    // information is available.
-    new SystemInfoHandlerGpuObserver(std::move(callback));
-  }
+void SystemInfoHandler::GetInfo(std::unique_ptr<GetInfoCallback> callback) {
+  // We will be able to get more information from the GpuDataManager.
+  // Register a transient observer with it to call us back when the
+  // information is available.
+  new SystemInfoHandlerGpuObserver(std::move(callback));
 }
 
 }  // namespace protocol

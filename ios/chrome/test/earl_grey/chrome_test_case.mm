@@ -8,10 +8,12 @@
 
 #import <EarlGrey/EarlGrey.h>
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/mac/scoped_block.h"
 #include "base/strings/sys_string_conversions.h"
-#include "components/signin/core/common/signin_switches.h"
+#include "components/signin/core/browser/signin_switches.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #include "ios/chrome/test/app/settings_test_util.h"
 #include "ios/chrome/test/app/signin_test_util.h"
@@ -164,7 +166,7 @@ const CFTimeInterval kDrainTimeout = 5;
 
 - (net::EmbeddedTestServer*)testServer {
   if (!_testServer) {
-    _testServer = base::MakeUnique<net::EmbeddedTestServer>();
+    _testServer = std::make_unique<net::EmbeddedTestServer>();
     _testServer->AddDefaultHandlers(base::FilePath(
         FILE_PATH_LITERAL("ios/testing/data/http_server_files/")));
   }

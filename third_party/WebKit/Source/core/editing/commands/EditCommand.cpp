@@ -32,7 +32,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/layout/LayoutText.h"
 #include "core/layout/line/InlineTextBox.h"
-#include "core/layout/ng/inline/ng_offset_mapping_result.h"
+#include "core/layout/ng/inline/ng_offset_mapping.h"
 
 namespace blink {
 
@@ -42,7 +42,7 @@ EditCommand::EditCommand(Document& document)
   DCHECK(document_->GetFrame());
 }
 
-EditCommand::~EditCommand() {}
+EditCommand::~EditCommand() = default;
 
 InputEvent::InputType EditCommand::GetInputType() const {
   return InputEvent::InputType::kNone;
@@ -65,16 +65,14 @@ bool EditCommand::IsRenderedCharacter(const Position& position) {
   if (!layout_object || !layout_object->IsText())
     return false;
 
-  const int offset_in_node = position.OffsetInContainerNode();
-
   // Use NG offset mapping when LayoutNG is enabled.
-  if (const NGOffsetMappingResult* mapping =
-          GetNGOffsetMappingFor(node, offset_in_node)) {
-    return mapping->IsBeforeNonCollapsedCharacter(node, offset_in_node);
+  if (auto* mapping = NGOffsetMapping::GetFor(position)) {
+    return mapping->IsBeforeNonCollapsedContent(position);
   }
 
   // TODO(editing-dev): This doesn't handle first-letter correctly. Fix it.
   const LayoutText* layout_text = ToLayoutText(layout_object);
+  const int offset_in_node = position.OffsetInContainerNode();
   for (InlineTextBox* box : InlineTextBoxesOf(*layout_text)) {
     if (offset_in_node < static_cast<int>(box->Start()) &&
         !layout_text->ContainsReversedText()) {

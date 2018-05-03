@@ -6,8 +6,9 @@
 
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 
+#include <memory>
+
 #include "base/lazy_instance.h"
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_constants.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
@@ -22,7 +23,6 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/event_router.h"
@@ -388,6 +388,8 @@ void WebNavigationTabObserver::DidOpenRequestedURL(
 
   WebNavigationAPI* api = WebNavigationAPI::GetFactoryInstance()->Get(
       web_contents()->GetBrowserContext());
+  if (!api)
+    return;  // Possible in unit tests.
   WebNavigationEventRouter* router = api->web_navigation_event_router_.get();
   if (!router)
     return;
@@ -453,7 +455,7 @@ void WebNavigationTabObserver::HandleError(
   helpers::DispatchOnErrorOccurred(navigation_handle);
 }
 
-// See also NavigationController::IsURLInPageNavigation.
+// See also NavigationController::IsURLSameDocumentNavigation.
 bool WebNavigationTabObserver::IsReferenceFragmentNavigation(
     content::RenderFrameHost* render_frame_host,
     const GURL& url) {
@@ -478,7 +480,7 @@ ExtensionFunction::ResponseAction WebNavigationGetFrameFunction::Run() {
                                     include_incognito(), nullptr, nullptr,
                                     &web_contents, nullptr) ||
       !web_contents) {
-    return RespondNow(OneArgument(base::MakeUnique<base::Value>()));
+    return RespondNow(OneArgument(std::make_unique<base::Value>()));
   }
 
   WebNavigationTabObserver* observer =
@@ -492,11 +494,11 @@ ExtensionFunction::ResponseAction WebNavigationGetFrameFunction::Run() {
       ExtensionApiFrameIdMap::Get()->GetRenderFrameHostById(web_contents,
                                                             frame_id);
   if (!frame_navigation_state.IsValidFrame(render_frame_host))
-    return RespondNow(OneArgument(base::MakeUnique<base::Value>()));
+    return RespondNow(OneArgument(std::make_unique<base::Value>()));
 
   GURL frame_url = frame_navigation_state.GetUrl(render_frame_host);
   if (!frame_navigation_state.IsValidUrl(frame_url))
-    return RespondNow(OneArgument(base::MakeUnique<base::Value>()));
+    return RespondNow(OneArgument(std::make_unique<base::Value>()));
 
   GetFrame::Results::Details frame_details;
   frame_details.url = frame_url.spec();
@@ -518,7 +520,7 @@ ExtensionFunction::ResponseAction WebNavigationGetAllFramesFunction::Run() {
                                     include_incognito(), nullptr, nullptr,
                                     &web_contents, nullptr) ||
       !web_contents) {
-    return RespondNow(OneArgument(base::MakeUnique<base::Value>()));
+    return RespondNow(OneArgument(std::make_unique<base::Value>()));
   }
 
   WebNavigationTabObserver* observer =

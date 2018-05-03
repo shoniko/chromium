@@ -15,8 +15,9 @@ from telemetry.web_perf import timeline_based_measurement
 import page_sets
 
 
-# See tr.v.Numeric.getSummarizedScalarNumericsWithNames()
-# https://github.com/catapult-project/catapult/blob/master/tracing/tracing/value/numeric.html#L323
+# Regex to filter out a few names of statistics supported by
+# Histogram.getStatisticScalar(), see:
+#   https://github.com/catapult-project/catapult/blob/d4179a05/tracing/tracing/value/histogram.html#L645  pylint: disable=line-too-long
 _IGNORED_STATS_RE = re.compile(
     r'(?<!dump)(?<!process)_(std|count|max|min|sum|pct_\d{4}(_\d+)?)$')
 
@@ -104,12 +105,6 @@ class MemoryBenchmarkTrivialSitesDesktop(_MemoryInfra):
   def ValueCanBeAddedPredicate(cls, value, is_first_result):
     return DefaultValueCanBeAddedPredicateForMemoryMeasurement(value)
 
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass
-    return StoryExpectations()
-
 
 @benchmark.Owner(emails=['perezju@chromium.org'])
 class MemoryBenchmarkTop10Mobile(_MemoryInfra):
@@ -129,12 +124,6 @@ class MemoryBenchmarkTop10Mobile(_MemoryInfra):
   @classmethod
   def ValueCanBeAddedPredicate(cls, value, is_first_result):
     return DefaultValueCanBeAddedPredicateForMemoryMeasurement(value)
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass
-    return StoryExpectations()
 
 
 class _MemoryV8Benchmark(_MemoryInfra):
@@ -180,14 +169,6 @@ class MemoryLongRunningIdleGmail(_MemoryV8Benchmark):
   def Name(cls):
     return 'memory.long_running_idle_gmail_tbmv2'
 
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        self.DisableBenchmark(
-            [story.expectations.ANDROID_SVELTE],
-            'Requires a lot of memory: crbug.com/611167')
-    return StoryExpectations()
-
 
 @benchmark.Owner(emails=['ulan@chromium.org'])
 class MemoryLongRunningIdleGmailBackground(_MemoryV8Benchmark):
@@ -202,11 +183,3 @@ class MemoryLongRunningIdleGmailBackground(_MemoryV8Benchmark):
   @classmethod
   def Name(cls):
     return 'memory.long_running_idle_gmail_background_tbmv2'
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        self.DisableBenchmark(
-            [story.expectations.ANDROID_SVELTE],
-            'Requires a lot of memory: crbug.com/616530')
-    return StoryExpectations()

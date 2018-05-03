@@ -18,36 +18,16 @@
 #include "content/browser/streams/stream_context.h"
 #include "content/public/browser/navigation_data.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
-#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/stream_handle.h"
-#include "content/public/common/resource_response.h"
 #include "net/base/net_errors.h"
 #include "net/http/transport_security_state.h"
 #include "net/ssl/ssl_info.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "services/network/public/cpp/resource_response.h"
 #include "url/gurl.h"
 
-namespace {
-
-// TODO(crbug.com/757633): Attach this information to net::SSLInfo instead of
-// calculating it here.
-bool ShouldSSLErrorsBeFatal(net::URLRequest* request) {
-  net::TransportSecurityState* state =
-      request->context()->transport_security_state();
-  return state->ShouldSSLErrorsBeFatal(request->url().host());
-}
-
-}  // namespace
-
 namespace content {
-
-void NavigationResourceHandler::GetSSLStatusForRequest(
-    const net::SSLInfo& ssl_info,
-    SSLStatus* ssl_status) {
-  DCHECK(ssl_info.cert);
-  *ssl_status = SSLStatus(ssl_info);
-}
 
 NavigationResourceHandler::NavigationResourceHandler(
     net::URLRequest* request,
@@ -64,7 +44,7 @@ NavigationResourceHandler::NavigationResourceHandler(
 
 NavigationResourceHandler::~NavigationResourceHandler() {
   if (core_) {
-    core_->NotifyRequestFailed(false, net::ERR_ABORTED, base::nullopt, false);
+    core_->NotifyRequestFailed(false, net::ERR_ABORTED, base::nullopt);
     DetachFromCore();
   }
 }
@@ -102,7 +82,7 @@ void NavigationResourceHandler::ProceedWithResponse() {
 
 void NavigationResourceHandler::OnRequestRedirected(
     const net::RedirectInfo& redirect_info,
-    ResourceResponse* response,
+    network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
   DCHECK(!has_controller());
 
@@ -117,11 +97,11 @@ void NavigationResourceHandler::OnRequestRedirected(
 
   HoldController(std::move(controller));
   response_ = response;
-  redirect_info_ = base::MakeUnique<net::RedirectInfo>(redirect_info);
+  redirect_info_ = std::make_unique<net::RedirectInfo>(redirect_info);
 }
 
 void NavigationResourceHandler::OnResponseStarted(
-    ResourceResponse* response,
+    network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
   DCHECK(!has_controller());
 
@@ -146,13 +126,10 @@ void NavigationResourceHandler::OnResponseStarted(
       cloned_data = navigation_data->Clone();
   }
 
-  SSLStatus ssl_status;
-  if (request()->ssl_info().cert.get())
-    GetSSLStatusForRequest(request()->ssl_info(), &ssl_status);
-
-  core_->NotifyResponseStarted(
-      response, std::move(stream_handle_), ssl_status, std::move(cloned_data),
-      info->GetGlobalRequestID(), info->IsDownload(), info->is_stream());
+  core_->NotifyResponseStarted(response, std::move(stream_handle_),
+                               request()->ssl_info(), std::move(cloned_data),
+                               info->GetGlobalRequestID(), info->IsDownload(),
+                               info->is_stream());
   HoldController(std::move(controller));
   response_ = response;
 }
@@ -170,7 +147,7 @@ void NavigationResourceHandler::OnResponseCompleted(
     }
 
     core_->NotifyRequestFailed(request()->response_info().was_cached, net_error,
-                               ssl_info, ShouldSSLErrorsBeFatal(request()));
+                               ssl_info);
     DetachFromCore();
   }
   next_handler_->OnResponseCompleted(status, std::move(controller));

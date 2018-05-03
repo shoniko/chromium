@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/debug/dump_without_crashing.h"
-#include "base/memory/ptr_util.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/scoped_observer.h"
@@ -95,9 +94,8 @@ class SyncedPrintersManagerTest : public testing::Test {
   SyncedPrintersManagerTest()
       : manager_(SyncedPrintersManager::Create(
             &profile_,
-            base::MakeUnique<PrintersSyncBridge>(
-                base::Bind(&syncer::ModelTypeStore::CreateInMemoryStoreForTest,
-                           syncer::PRINTERS),
+            std::make_unique<PrintersSyncBridge>(
+                base::Bind(&syncer::ModelTypeStore::CreateInMemoryStoreForTest),
                 base::BindRepeating(
                     base::IgnoreResult(&base::debug::DumpWithoutCrashing))))) {
     base::RunLoop().RunUntilIdle();
@@ -191,7 +189,7 @@ TEST_F(SyncedPrintersManagerTest, EnterprisePrinters) {
   std::string first_printer = kColorLaserJson;
   std::string second_printer = kLexJson;
 
-  auto value = base::MakeUnique<base::ListValue>();
+  auto value = std::make_unique<base::ListValue>();
   value->AppendString(first_printer);
   value->AppendString(second_printer);
 
@@ -209,7 +207,7 @@ TEST_F(SyncedPrintersManagerTest, EnterprisePrinters) {
 
 TEST_F(SyncedPrintersManagerTest, GetEnterprisePrinter) {
   std::string printer = kLexJson;
-  auto value = base::MakeUnique<base::ListValue>();
+  auto value = std::make_unique<base::ListValue>();
   value->AppendString(printer);
 
   sync_preferences::TestingPrefServiceSyncable* prefs =
@@ -242,7 +240,7 @@ TEST_F(SyncedPrintersManagerTest, PrinterIsInstalled) {
 // enterprise or configured printer lists.
 TEST_F(SyncedPrintersManagerTest, PrinterInstalledConfiguresPrinter) {
   // Set up an enterprise printer.
-  auto value = base::MakeUnique<base::ListValue>();
+  auto value = std::make_unique<base::ListValue>();
   value->AppendString(kColorLaserJson);
 
   sync_preferences::TestingPrefServiceSyncable* prefs =

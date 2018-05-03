@@ -13,6 +13,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/test/bind_test_util.h"
 #include "base/test/gtest_util.h"
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -31,7 +32,7 @@ class IncompleteType;
 
 class NoRef {
  public:
-  NoRef() {}
+  NoRef() = default;
 
   MOCK_METHOD0(VoidMethod0, void());
   MOCK_CONST_METHOD0(VoidConstMethod0, void());
@@ -49,7 +50,7 @@ class NoRef {
 
 class HasRef : public NoRef {
  public:
-  HasRef() {}
+  HasRef() = default;
 
   MOCK_CONST_METHOD0(AddRef, void());
   MOCK_CONST_METHOD0(Release, bool());
@@ -61,7 +62,7 @@ class HasRef : public NoRef {
 
 class HasRefPrivateDtor : public HasRef {
  private:
-  ~HasRefPrivateDtor() {}
+  ~HasRefPrivateDtor() = default;
 };
 
 static const int kParentValue = 1;
@@ -196,11 +197,8 @@ class CopyCounter {
  public:
   CopyCounter(int* copies, int* assigns)
       : counter_(copies, assigns, nullptr, nullptr) {}
-  CopyCounter(const CopyCounter& other) : counter_(other.counter_) {}
-  CopyCounter& operator=(const CopyCounter& other) {
-    counter_ = other.counter_;
-    return *this;
-  }
+  CopyCounter(const CopyCounter& other) = default;
+  CopyCounter& operator=(const CopyCounter& other) = default;
 
   explicit CopyCounter(const DerivedCopyMoveCounter& other) : counter_(other) {}
 
@@ -321,8 +319,7 @@ class BindTest : public ::testing::Test {
     static_func_mock_ptr = &static_func_mock_;
   }
 
-  virtual ~BindTest() {
-  }
+  virtual ~BindTest() = default;
 
   static void VoidFunc0() {
     static_func_mock_ptr->VoidMethod0();
@@ -1232,17 +1229,17 @@ TEST_F(BindTest, ArgumentCopiesAndMoves) {
 }
 
 TEST_F(BindTest, CapturelessLambda) {
-  EXPECT_FALSE(internal::IsConvertibleToRunType<void>::value);
-  EXPECT_FALSE(internal::IsConvertibleToRunType<int>::value);
-  EXPECT_FALSE(internal::IsConvertibleToRunType<void(*)()>::value);
-  EXPECT_FALSE(internal::IsConvertibleToRunType<void(NoRef::*)()>::value);
+  EXPECT_FALSE(internal::IsCallableObject<void>::value);
+  EXPECT_FALSE(internal::IsCallableObject<int>::value);
+  EXPECT_FALSE(internal::IsCallableObject<void (*)()>::value);
+  EXPECT_FALSE(internal::IsCallableObject<void (NoRef::*)()>::value);
 
   auto f = []() {};
-  EXPECT_TRUE(internal::IsConvertibleToRunType<decltype(f)>::value);
+  EXPECT_TRUE(internal::IsCallableObject<decltype(f)>::value);
 
   int i = 0;
   auto g = [i]() { (void)i; };
-  EXPECT_FALSE(internal::IsConvertibleToRunType<decltype(g)>::value);
+  EXPECT_TRUE(internal::IsCallableObject<decltype(g)>::value);
 
   auto h = [](int, double) { return 'k'; };
   EXPECT_TRUE((std::is_same<
@@ -1259,6 +1256,36 @@ TEST_F(BindTest, CapturelessLambda) {
   EXPECT_EQ(6, x);
   cb.Run(7);
   EXPECT_EQ(42, x);
+}
+
+TEST_F(BindTest, EmptyFunctor) {
+  struct NonEmptyFunctor {
+    int operator()() const { return x; }
+    int x = 42;
+  };
+
+  struct EmptyFunctor {
+    int operator()() { return 42; }
+  };
+
+  struct EmptyFunctorConst {
+    int operator()() const { return 42; }
+  };
+
+  EXPECT_TRUE(internal::IsCallableObject<NonEmptyFunctor>::value);
+  EXPECT_TRUE(internal::IsCallableObject<EmptyFunctor>::value);
+  EXPECT_TRUE(internal::IsCallableObject<EmptyFunctorConst>::value);
+  EXPECT_EQ(42, BindOnce(EmptyFunctor()).Run());
+  EXPECT_EQ(42, BindOnce(EmptyFunctorConst()).Run());
+  EXPECT_EQ(42, BindRepeating(EmptyFunctorConst()).Run());
+}
+
+TEST_F(BindTest, CapturingLambdaForTesting) {
+  int x = 6;
+  EXPECT_EQ(42, BindLambdaForTesting([=](int y) { return x * y; }).Run(7));
+
+  auto f = [x](std::unique_ptr<int> y) { return x * *y; };
+  EXPECT_EQ(42, BindLambdaForTesting(f).Run(std::make_unique<int>(7)));
 }
 
 TEST_F(BindTest, Cancellation) {

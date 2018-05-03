@@ -4,6 +4,8 @@
 
 #include "content/browser/download/download_response_handler.h"
 
+#include <memory>
+
 #include "content/browser/download/download_stats.h"
 #include "content/browser/download/download_utils.h"
 #include "content/public/browser/download_url_parameters.h"
@@ -46,23 +48,28 @@ mojom::NetworkRequestStatus ConvertInterruptReasonToMojoNetworkRequestStatus(
 }  // namespace
 
 DownloadResponseHandler::DownloadResponseHandler(
-    ResourceRequest* resource_request,
+    network::ResourceRequest* resource_request,
     Delegate* delegate,
     std::unique_ptr<DownloadSaveInfo> save_info,
     bool is_parallel_request,
     bool is_transient,
-    bool fetch_error_body)
+    bool fetch_error_body,
+    DownloadSource download_source,
+    std::vector<GURL> url_chain)
     : delegate_(delegate),
       started_(false),
       save_info_(std::move(save_info)),
-      url_chain_(1, resource_request->url),
+      url_chain_(std::move(url_chain)),
       method_(resource_request->method),
       referrer_(resource_request->referrer),
       is_transient_(is_transient),
       fetch_error_body_(fetch_error_body),
-      has_strong_validators_(false) {
+      download_source_(download_source),
+      has_strong_validators_(false),
+      is_partial_request_(save_info_->offset > 0),
+      abort_reason_(DOWNLOAD_INTERRUPT_REASON_NONE) {
   if (!is_parallel_request)
-    RecordDownloadCount(UNTHROTTLED_COUNT);
+    RecordDownloadCountWithSource(UNTHROTTLED_COUNT, download_source);
   if (resource_request->request_initiator.has_value())
     origin_ = resource_request->request_initiator.value().GetURL();
 }
@@ -70,9 +77,9 @@ DownloadResponseHandler::DownloadResponseHandler(
 DownloadResponseHandler::~DownloadResponseHandler() = default;
 
 void DownloadResponseHandler::OnReceiveResponse(
-    const ResourceResponseHead& head,
+    const network::ResourceResponseHead& head,
     const base::Optional<net::SSLInfo>& ssl_info,
-    mojom::DownloadedTempFilePtr downloaded_file) {
+    network::mojom::DownloadedTempFilePtr downloaded_file) {
   create_info_ = CreateDownloadCreateInfo(head);
 
   if (ssl_info)
@@ -104,11 +111,11 @@ void DownloadResponseHandler::OnReceiveResponse(
 
 std::unique_ptr<DownloadCreateInfo>
 DownloadResponseHandler::CreateDownloadCreateInfo(
-    const ResourceResponseHead& head) {
+    const network::ResourceResponseHead& head) {
   // TODO(qinmin): instead of using NetLogWithSource, introduce new logging
   // class for download.
-  auto create_info = base::MakeUnique<DownloadCreateInfo>(
-      base::Time::Now(), net::NetLogWithSource(), std::move(save_info_));
+  auto create_info = std::make_unique<DownloadCreateInfo>(
+      base::Time::Now(), std::move(save_info_));
 
   DownloadInterruptReason result =
       head.headers
@@ -128,6 +135,8 @@ DownloadResponseHandler::CreateDownloadCreateInfo(
   create_info->response_headers = head.headers;
   create_info->offset = create_info->save_info->offset;
   create_info->mime_type = head.mime_type;
+  create_info->fetch_error_body = fetch_error_body_;
+  create_info->download_source = download_source_;
 
   HandleResponseHeaders(head.headers.get(), create_info.get());
   return create_info;
@@ -135,7 +144,15 @@ DownloadResponseHandler::CreateDownloadCreateInfo(
 
 void DownloadResponseHandler::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
-    const content::ResourceResponseHead& head) {
+    const network::ResourceResponseHead& head) {
+  if (is_partial_request_) {
+    // A redirect while attempting a partial resumption indicates a potential
+    // middle box. Trigger another interruption so that the DownloadItem can
+    // retry.
+    abort_reason_ = DOWNLOAD_INTERRUPT_REASON_SERVER_UNREACHABLE;
+    OnComplete(network::URLLoaderCompletionStatus(net::OK));
+    return;
+  }
   url_chain_.push_back(redirect_info.new_url);
   method_ = redirect_info.new_method;
   referrer_ = GURL(redirect_info.new_referrer);
@@ -169,10 +186,10 @@ void DownloadResponseHandler::OnStartLoadingResponseBody(
 }
 
 void DownloadResponseHandler::OnComplete(
-    const content::ResourceRequestCompletionStatus& completion_status) {
+    const network::URLLoaderCompletionStatus& status) {
   DownloadInterruptReason reason = HandleRequestCompletionStatus(
-      static_cast<net::Error>(completion_status.error_code),
-      has_strong_validators_, cert_status_, DOWNLOAD_INTERRUPT_REASON_NONE);
+      static_cast<net::Error>(status.error_code), has_strong_validators_,
+      cert_status_, abort_reason_);
 
   if (client_ptr_) {
     client_ptr_->OnStreamCompleted(
@@ -184,8 +201,9 @@ void DownloadResponseHandler::OnComplete(
 
   // OnComplete() called without OnReceiveResponse(). This should only
   // happen when the request was aborted.
-  create_info_ = CreateDownloadCreateInfo(ResourceResponseHead());
+  create_info_ = CreateDownloadCreateInfo(network::ResourceResponseHead());
   create_info_->result = reason;
+
   OnResponseStarted(mojom::DownloadStreamHandlePtr());
 }
 

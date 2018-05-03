@@ -154,16 +154,14 @@ void OffscreenBrowserCompositorOutputSurface::SwapBuffers(
   // (crbug.com/520567).
   // The original implementation had a flickering issue (crbug.com/515332).
   gpu::gles2::GLES2Interface* gl = context_provider_->ContextGL();
-  const GLuint64 fence_sync = gl->InsertFenceSyncCHROMIUM();
-  gl->ShallowFlushCHROMIUM();
 
   gpu::SyncToken sync_token;
-  gl->GenUnverifiedSyncTokenCHROMIUM(fence_sync, sync_token.GetData());
+  gl->GenUnverifiedSyncTokenCHROMIUM(sync_token.GetData());
   context_provider_->ContextSupport()->SignalSyncToken(
       sync_token,
       base::Bind(
           &OffscreenBrowserCompositorOutputSurface::OnSwapBuffersComplete,
-          weak_ptr_factory_.GetWeakPtr(), frame.latency_info));
+          weak_ptr_factory_.GetWeakPtr(), frame.latency_info, ++swap_id_));
 }
 
 bool OffscreenBrowserCompositorOutputSurface::IsDisplayedAsOverlayPlane()
@@ -198,9 +196,19 @@ void OffscreenBrowserCompositorOutputSurface::OnReflectorChanged() {
 }
 
 void OffscreenBrowserCompositorOutputSurface::OnSwapBuffersComplete(
-    const std::vector<ui::LatencyInfo>& latency_info) {
+    const std::vector<ui::LatencyInfo>& latency_info,
+    uint64_t swap_id) {
   RenderWidgetHostImpl::OnGpuSwapBuffersCompleted(latency_info);
-  client_->DidReceiveSwapBuffersAck();
+  client_->DidReceiveSwapBuffersAck(swap_id);
+  client_->DidReceivePresentationFeedback(swap_id, gfx::PresentationFeedback());
 }
+
+#if BUILDFLAG(ENABLE_VULKAN)
+gpu::VulkanSurface*
+OffscreenBrowserCompositorOutputSurface::GetVulkanSurface() {
+  NOTIMPLEMENTED();
+  return nullptr;
+}
+#endif
 
 }  // namespace content

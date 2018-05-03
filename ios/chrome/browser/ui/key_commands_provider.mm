@@ -19,12 +19,17 @@
 
 @implementation KeyCommandsProvider
 
-- (NSArray*)keyCommandsForConsumer:(id<KeyCommandsPlumbing>)consumer
-                        dispatcher:
-                            (id<ApplicationCommands, BrowserCommands>)dispatcher
-                       editingText:(BOOL)editingText {
+- (NSArray*)
+keyCommandsForConsumer:(id<KeyCommandsPlumbing>)consumer
+    baseViewController:(UIViewController*)baseViewController
+            dispatcher:
+                (id<ApplicationCommands, BrowserCommands, OmniboxFocuser>)
+                    dispatcher
+           editingText:(BOOL)editingText {
   __weak id<KeyCommandsPlumbing> weakConsumer = consumer;
-  __weak id<ApplicationCommands, BrowserCommands> weakDispatcher = dispatcher;
+  __weak UIViewController* weakBaseViewController = baseViewController;
+  __weak id<ApplicationCommands, BrowserCommands, OmniboxFocuser>
+      weakDispatcher = dispatcher;
 
   // Block to have the tab model open the tab at |index|, if there is one.
   void (^focusTab)(NSUInteger) = ^(NSUInteger index) {
@@ -60,11 +65,16 @@
 
   // New tab blocks.
   void (^newTab)() = ^{
-    [weakDispatcher openNewTab:[OpenNewTabCommand command]];
+    OpenNewTabCommand* newTabCommand = [OpenNewTabCommand command];
+    newTabCommand.shouldFocusOmnibox = YES;
+    [weakDispatcher openNewTab:newTabCommand];
   };
 
   void (^newIncognitoTab)() = ^{
-    [weakDispatcher openNewTab:[OpenNewTabCommand incognitoTabCommand]];
+    OpenNewTabCommand* newIncognitoTabCommand =
+        [OpenNewTabCommand incognitoTabCommand];
+    newIncognitoTabCommand.shouldFocusOmnibox = YES;
+    [weakDispatcher openNewTab:newIncognitoTabCommand];
   };
 
   const int browseLeftDescriptionID = useRTLLayout
@@ -110,7 +120,7 @@
                                      title:l10n_util::GetNSStringWithFixup(
                                                IDS_IOS_KEYBOARD_OPEN_LOCATION)
                                     action:^{
-                                      [weakConsumer focusOmnibox];
+                                      [weakDispatcher focusOmnibox];
                                     }],
       [UIKeyCommand cr_keyCommandWithInput:@"w"
                              modifierFlags:UIKeyModifierCommand
@@ -212,7 +222,9 @@
                            modifierFlags:UIKeyModifierCommand
                                    title:nil
                                   action:^{
-                                    [weakDispatcher showSettings];
+                                    [weakDispatcher
+                                        showSettingsFromViewController:
+                                            weakBaseViewController];
                                   }],
   ]];
 
@@ -304,6 +316,20 @@
       [UIKeyCommand
           cr_keyCommandWithInput:UIKeyInputRightArrow
                    modifierFlags:UIKeyModifierCommand | UIKeyModifierAlternate
+                           title:nil
+                          action:^{
+                            [weakConsumer focusNextTab];
+                          }],
+      [UIKeyCommand
+          cr_keyCommandWithInput:@"\t"
+                   modifierFlags:UIKeyModifierControl | UIKeyModifierShift
+                           title:nil
+                          action:^{
+                            [weakConsumer focusPreviousTab];
+                          }],
+      [UIKeyCommand
+          cr_keyCommandWithInput:@"\t"
+                   modifierFlags:UIKeyModifierControl
                            title:nil
                           action:^{
                             [weakConsumer focusNextTab];

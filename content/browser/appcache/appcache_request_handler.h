@@ -27,6 +27,10 @@ class NetworkDelegate;
 class URLRequest;
 }  // namespace net
 
+namespace network {
+struct ResourceResponseHead;
+}
+
 namespace content {
 class AppCacheJob;
 class AppCacheNavigationHandleCore;
@@ -82,15 +86,16 @@ class CONTENT_EXPORT AppCacheRequestHandler
   // MaybeLoadResource and MaybeLoadFallbackForResponse.
   // Eventually one of the Deliver*Response() methods is called and the
   // LoaderCallback is invoked.
-  void MaybeCreateLoader(const ResourceRequest& resource_request,
+  void MaybeCreateLoader(const network::ResourceRequest& resource_request,
                          ResourceContext* resource_context,
                          LoaderCallback callback) override;
   // MaybeCreateLoaderForResponse always returns synchronously.
   bool MaybeCreateLoaderForResponse(
-      const ResourceResponseHead& response,
-      mojom::URLLoaderPtr* loader,
-      mojom::URLLoaderClientRequest* client_request) override;
-  mojom::URLLoaderFactoryPtr MaybeCreateSubresourceFactory() override;
+      const network::ResourceResponseHead& response,
+      network::mojom::URLLoaderPtr* loader,
+      network::mojom::URLLoaderClientRequest* client_request) override;
+  base::Optional<SubresourceLoaderParams> MaybeCreateSubresourceLoaderParams()
+      override;
 
   // These methods are used for subresource loading by the
   // AppCacheSubresourceURLFactory::SubresourceLoader class.
@@ -98,10 +103,12 @@ class CONTENT_EXPORT AppCacheRequestHandler
   // MaybeLoadResource, MaybeLoadFallbackForResponse, and
   // MaybeLoadFallbackForRedirect. Eventually one of the Deliver*Response()
   // methods is called and the LoaderCallback is invoked.
-  void MaybeCreateSubresourceLoader(const ResourceRequest& resource_request,
-                                    LoaderCallback callback);
-  void MaybeFallbackForSubresourceResponse(const ResourceResponseHead& response,
-                                           LoaderCallback callback);
+  void MaybeCreateSubresourceLoader(
+      const network::ResourceRequest& resource_request,
+      LoaderCallback callback);
+  void MaybeFallbackForSubresourceResponse(
+      const network::ResourceResponseHead& response,
+      LoaderCallback callback);
   void MaybeFallbackForSubresourceRedirect(
       const net::RedirectInfo& redirect_info,
       LoaderCallback callback);
@@ -110,7 +117,7 @@ class CONTENT_EXPORT AppCacheRequestHandler
 
   static std::unique_ptr<AppCacheRequestHandler>
   InitializeForNavigationNetworkService(
-      const ResourceRequest& request,
+      const network::ResourceRequest& request,
       AppCacheNavigationHandleCore* appcache_handle_core,
       URLLoaderFactoryGetter* url_loader_factory_getter);
 
@@ -178,6 +185,16 @@ class CONTENT_EXPORT AppCacheRequestHandler
                            int64_t cache_id,
                            int64_t group_id,
                            const GURL& mainfest_url) override;
+
+  // NetworkService loading:
+  // Called when a |callback| that is originally given to
+  // MaybeCreateLoader() runs for the main resource.
+  // This flips should_create_subresource_loader_ if non-null
+  // |start_loader_callback| is given, and then (always) run
+  // |callback| passing in |start_loader_callback|.
+  void RunLoaderCallbackForMainResource(
+      LoaderCallback callback,
+      StartLoaderCallback start_loader_callback);
 
   // Sub-resource loading -------------------------------------
   // Dedicated worker and all manner of sub-resources are handled here.
@@ -253,12 +270,19 @@ class CONTENT_EXPORT AppCacheRequestHandler
 
   LoaderCallback loader_callback_;
 
+  // Flipped to true if AppCache wants to handle subresource requests
+  // (i.e. when |loader_callback_| is fired with a non-null callback for
+  // non-error cases.
+  bool should_create_subresource_loader_ = false;
+
   // Points to the getter for the network URL loader.
   scoped_refptr<URLLoaderFactoryGetter> network_url_loader_factory_getter_;
 
   // The AppCache host instance. We pass this to the
   // AppCacheSubresourceURLFactory instance on creation.
   base::WeakPtr<AppCacheHost> appcache_host_;
+
+  base::WeakPtrFactory<AppCacheRequestHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AppCacheRequestHandler);
 };

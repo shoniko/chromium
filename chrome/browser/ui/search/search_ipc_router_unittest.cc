@@ -31,6 +31,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/search_test_utils.h"
+#include "components/favicon_base/favicon_types.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/navigation_controller.h"
@@ -120,7 +121,7 @@ class SearchIPCRouterTest : public BrowserWithTestWindowTest {
     data.alternate_urls.push_back("http://foo.com/alt#quux={searchTerms}");
 
     TemplateURL* template_url =
-        template_url_service->Add(base::MakeUnique<TemplateURL>(data));
+        template_url_service->Add(std::make_unique<TemplateURL>(data));
     template_url_service->SetUserSelectedDefaultSearchProvider(template_url);
   }
 
@@ -143,7 +144,7 @@ class SearchIPCRouterTest : public BrowserWithTestWindowTest {
         mock_delegate());
     search_tab_helper->ipc_router_for_testing().set_policy_for_testing(
         base::WrapUnique(new MockSearchIPCRouterPolicy));
-    auto factory = base::MakeUnique<MockEmbeddedSearchClientFactory>();
+    auto factory = std::make_unique<MockEmbeddedSearchClientFactory>();
     ON_CALL(*factory, GetEmbeddedSearchClient())
         .WillByDefault(Return(&mock_embedded_search_client_));
     GetSearchIPCRouter().set_embedded_search_client_factory_for_testing(
@@ -271,7 +272,7 @@ TEST_F(SearchIPCRouterTest, ProcessLogMostVisitedImpressionMsg) {
   const ntp_tiles::NTPTileImpression impression(
       3, ntp_tiles::TileSource::SUGGESTIONS_SERVICE,
       ntp_tiles::TileTitleSource::UNKNOWN, ntp_tiles::TileVisualType::THUMBNAIL,
-      base::Time(), GURL());
+      favicon_base::IconType::kInvalid, base::Time(), GURL());
   NavigateAndCommitActiveTab(GURL(chrome::kChromeSearchLocalNtpUrl));
   SetupMockDelegateAndPolicy();
   MockSearchIPCRouterPolicy* policy = GetSearchIPCRouterPolicy();
@@ -288,7 +289,7 @@ TEST_F(SearchIPCRouterTest, ProcessLogMostVisitedNavigationMsg) {
   const ntp_tiles::NTPTileImpression impression(
       3, ntp_tiles::TileSource::SUGGESTIONS_SERVICE,
       ntp_tiles::TileTitleSource::UNKNOWN, ntp_tiles::TileVisualType::THUMBNAIL,
-      base::Time(), GURL());
+      favicon_base::IconType::kInvalid, base::Time(), GURL());
   NavigateAndCommitActiveTab(GURL(chrome::kChromeSearchLocalNtpUrl));
   SetupMockDelegateAndPolicy();
   MockSearchIPCRouterPolicy* policy = GetSearchIPCRouterPolicy();

@@ -6,6 +6,7 @@
 
 #include "base/sys_info.h"
 #include "build/build_config.h"
+#include "platform/CrossThreadFunctional.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/fonts/FontGlobalContext.h"
 #include "platform/graphics/ImageDecodingStore.h"
@@ -70,7 +71,7 @@ void MemoryCoordinator::UnregisterThread(WebThread* thread) {
   MemoryCoordinator::Instance().web_threads_.erase(thread);
 }
 
-MemoryCoordinator::MemoryCoordinator() {}
+MemoryCoordinator::MemoryCoordinator() = default;
 
 void MemoryCoordinator::RegisterClient(MemoryCoordinatorClient* client) {
   DCHECK(IsMainThread());
@@ -113,8 +114,9 @@ void MemoryCoordinator::OnPurgeMemory() {
     if (!thread->GetWebTaskRunner())
       continue;
 
-    thread->GetWebTaskRunner()->PostTask(
-        FROM_HERE, WTF::Bind(MemoryCoordinator::ClearThreadSpecificMemory));
+    PostCrossThreadTask(
+        *thread->GetWebTaskRunner(), FROM_HERE,
+        CrossThreadBind(MemoryCoordinator::ClearThreadSpecificMemory));
   }
 }
 

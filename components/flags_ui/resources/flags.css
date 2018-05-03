@@ -128,7 +128,7 @@ h2 {
   background: url(../../../ui/webui/resources/images/icon_cancel.svg) no-repeat;
   background-size: 20px;
   border: 0;
-  display: inline-block;
+  display: none;
   height: 20px;
   opacity: 0.5;
   position: absolute;
@@ -140,6 +140,10 @@ h2 {
 .clear-search:focus {
   opacity: 1;
   outline: 0;
+}
+
+.searching .clear-search {
+  display: inline-block;
 }
 
 [dir='rtl'] .clear-search {
@@ -220,14 +224,17 @@ h2 {
 }
 
 .experiment-switched .experiment-name::before {
-  background: url(../../../ui/webui/resources/images/check_circle.svg) no-repeat;
-  color: var(--google-blue-700);
-  content: '';
+  -webkit-margin-end: 4px;
+  -webkit-margin-start: -20px;
+  color: var(--google-blue-500);
+  content: '•';
   display: inline-block;
-  height: 20px;
-  margin: 0 4px -6px 0;
-  width: 20px;
+  font-size: 40px;
+  line-height: 0;
+  vertical-align: middle;
+  width: 16px;
 }
+
 
 .match,
 .referenced h3 {
@@ -241,35 +248,7 @@ h2 {
   width: 150px;
 }
 
-.experiment-disable-link,
-.experiment-enable-link {
-  background: white;
-  border: 1px solid var(--google-blue-700);
-  border-radius: 3px;
-  box-sizing: border-box;
-  color: var(--google-blue-700);
-  display: inline-block;
-  font-size: 13px;
-  letter-spacing: .01em;
-  max-width: 150px;
-  padding: 3px 10px;
-  text-align: center;
-  text-decoration: none;
-  vertical-align: middle;
-  width: 100%;
-}
-
-.experiment-disable-link:hover,
-.experiment-enable-link:hover {
-  background: var(--google-gray-100);
-}
-
-.experiment-disable-link:active,
-.experiment-enable-link:active {
-  background: #eee;
-}
-
-.experiment-select {
+.experiment-actions select {
   background: white;
   border: 1px solid var(--google-blue-700);
   color: var(--google-blue-700);
@@ -281,13 +260,7 @@ h2 {
   width: 100%;
 }
 
-.experiment-select option {
-  padding: 1em;
-}
-
-.experiment-switched .experiment-select,
-.experiment-switched .experiment-enable-link,
-.experiment-switched .experiment-disable-link {
+.experiment-switched .experiment-actions select {
   background: var(--google-blue-700);
   color: white;
 }
@@ -349,15 +322,19 @@ h2 {
 
 .tab-content {
   display: none;
-  left: 0;
   line-height: 25px;
+  margin-top: -50px;
   /* Bottom padding should be greater than evaluated height of needs-restart */
   padding-bottom: 200px;
-  padding-top: 24px;
-  position: absolute;
-  top: -25px;
-  width: 100%;
-  z-index: 0;
+  position: relative;
+  /* iOS does not show unsupported experiments. */
+<if expr="not is_ios">
+  width: 200%;
+</if>
+}
+
+.tabs li:nth-child(2) .tab-content {
+  -webkit-margin-start: -100%;
 }
 
 .selected .tab-content {
@@ -435,7 +412,15 @@ h2 {
 @media (max-width: 360px) {
   #experiment-reset-all {
     font-size: 0.8em;
-    padding: 4px 8px;
+    padding: 2px 8px;
+  }
+
+  #flagsTemplate > .flex-container {
+    flex-direction: column;
+  }
+
+  #version {
+    text-align: initial;
   }
 
   .experiment-restart-button {
@@ -521,6 +506,10 @@ h2 {
 }
 
 @media (max-width: 732px) {
+  .experiment-switched .experiment-name::before {
+    -webkit-margin-start: 0;
+  }
+
   #flagsTemplate {
     padding: 8px 16px;
   }

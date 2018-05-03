@@ -5,6 +5,7 @@
 #include "platform/graphics/CompositorFilterOperations.h"
 
 #include "platform/geometry/IntRect.h"
+#include "platform/runtime_enabled_features.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -82,7 +83,7 @@ void CompositorFilterOperations::AppendSaturatingBrightnessFilter(
 }
 
 void CompositorFilterOperations::AppendReferenceFilter(
-    sk_sp<SkImageFilter> image_filter) {
+    sk_sp<PaintFilter> image_filter) {
   filter_operations_.Append(
       cc::FilterOperation::CreateReferenceFilter(std::move(image_filter)));
 }
@@ -108,13 +109,15 @@ bool CompositorFilterOperations::HasFilterThatMovesPixels() const {
 
 bool CompositorFilterOperations::operator==(
     const CompositorFilterOperations& o) const {
-  return filter_operations_ == o.filter_operations_;
+  return reference_box_ == o.reference_box_ &&
+         filter_operations_ == o.filter_operations_;
 }
 
 bool CompositorFilterOperations::EqualsIgnoringReferenceFilters(
     const CompositorFilterOperations& o) const {
+  DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
   size_t size = filter_operations_.size();
-  if (size != o.filter_operations_.size())
+  if (size != o.filter_operations_.size() || reference_box_ != o.reference_box_)
     return false;
   for (size_t i = 0; i < size; ++i) {
     const auto& operation = filter_operations_.at(i);

@@ -16,13 +16,15 @@
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/surface_sequence.h"
 #include "components/viz/service/frame_sinks/compositor_frame_sink_support.h"
+#include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
 #include "components/viz/test/begin_frame_args_test.h"
 #include "components/viz/test/fake_external_begin_frame_source.h"
-#include "content/browser/compositor/test/no_transport_image_transport_factory.h"
+#include "content/browser/compositor/test/test_image_transport_factory.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/renderer_host/frame_connector_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
@@ -32,8 +34,8 @@
 #include "content/public/common/content_features.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/test/dummy_render_widget_host_delegate.h"
 #include "content/test/fake_renderer_compositor_frame_sink.h"
+#include "content/test/mock_render_widget_host_delegate.h"
 #include "content/test/mock_widget_impl.h"
 #include "content/test/test_render_view_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -50,7 +52,8 @@ const viz::LocalSurfaceId kArbitraryLocalSurfaceId(
 
 class MockFrameConnectorDelegate : public FrameConnectorDelegate {
  public:
-  MockFrameConnectorDelegate() : FrameConnectorDelegate() {}
+  MockFrameConnectorDelegate(bool use_zoom_for_device_scale_factor)
+      : FrameConnectorDelegate(use_zoom_for_device_scale_factor) {}
   ~MockFrameConnectorDelegate() override {}
 
   void SetChildFrameSurface(const viz::SurfaceInfo& surface_info,
@@ -82,24 +85,30 @@ class RenderWidgetHostViewChildFrameTest : public testing::Test {
             base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
   void SetUp() override {
+    SetUpEnvironment(false /* use_zoom_for_device_scale_factor */);
+  }
+
+  void SetUpEnvironment(bool use_zoom_for_device_scale_factor) {
     browser_context_.reset(new TestBrowserContext);
 
 // ImageTransportFactory doesn't exist on Android.
 #if !defined(OS_ANDROID)
     ImageTransportFactory::SetFactory(
-        std::make_unique<NoTransportImageTransportFactory>());
+        std::make_unique<TestImageTransportFactory>());
 #endif
 
     MockRenderProcessHost* process_host =
         new MockRenderProcessHost(browser_context_.get());
     int32_t routing_id = process_host->GetNextRoutingID();
     mojom::WidgetPtr widget;
-    widget_impl_ = base::MakeUnique<MockWidgetImpl>(mojo::MakeRequest(&widget));
+    widget_impl_ = std::make_unique<MockWidgetImpl>(mojo::MakeRequest(&widget));
     widget_host_ = new RenderWidgetHostImpl(
         &delegate_, process_host, routing_id, std::move(widget), false);
     view_ = RenderWidgetHostViewChildFrame::Create(widget_host_);
 
-    test_frame_connector_ = new MockFrameConnectorDelegate();
+    test_frame_connector_ =
+        new MockFrameConnectorDelegate(use_zoom_for_device_scale_factor);
+    test_frame_connector_->SetView(view_);
     view_->SetFrameConnectorDelegate(test_frame_connector_);
 
     viz::mojom::CompositorFrameSinkPtr sink;
@@ -108,7 +117,7 @@ class RenderWidgetHostViewChildFrameTest : public testing::Test {
     viz::mojom::CompositorFrameSinkClientRequest client_request =
         mojo::MakeRequest(&renderer_compositor_frame_sink_ptr_);
     renderer_compositor_frame_sink_ =
-        base::MakeUnique<FakeRendererCompositorFrameSink>(
+        std::make_unique<FakeRendererCompositorFrameSink>(
             std::move(sink), std::move(client_request));
     view_->DidCreateNewRendererCompositorFrameSink(
         renderer_compositor_frame_sink_ptr_.get());
@@ -147,7 +156,7 @@ class RenderWidgetHostViewChildFrameTest : public testing::Test {
   base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   std::unique_ptr<BrowserContext> browser_context_;
-  DummyRenderWidgetHostDelegate delegate_;
+  MockRenderWidgetHostDelegate delegate_;
 
   // Tests should set these to NULL if they've already triggered their
   // destruction.
@@ -204,7 +213,7 @@ TEST_F(RenderWidgetHostViewChildFrameTest, SwapCompositorFrame) {
 
   view_->SubmitCompositorFrame(
       local_surface_id,
-      CreateDelegatedFrame(scale_factor, view_size, view_rect));
+      CreateDelegatedFrame(scale_factor, view_size, view_rect), nullptr);
 
   viz::SurfaceId id = GetSurfaceId();
   if (id.is_valid()) {
@@ -236,7 +245,7 @@ TEST_F(RenderWidgetHostViewChildFrameTest, FrameEviction) {
   // Submit a frame.
   view_->SubmitCompositorFrame(
       kArbitraryLocalSurfaceId,
-      CreateDelegatedFrame(scale_factor, view_size, view_rect));
+      CreateDelegatedFrame(scale_factor, view_size, view_rect), nullptr);
 
   EXPECT_EQ(kArbitraryLocalSurfaceId, GetLocalSurfaceId());
   EXPECT_TRUE(view_->has_frame());
@@ -250,7 +259,7 @@ TEST_F(RenderWidgetHostViewChildFrameTest, FrameEviction) {
   // usable.
   view_->SubmitCompositorFrame(
       kArbitraryLocalSurfaceId,
-      CreateDelegatedFrame(scale_factor, view_size, view_rect));
+      CreateDelegatedFrame(scale_factor, view_size, view_rect), nullptr);
   EXPECT_EQ(kArbitraryLocalSurfaceId, GetLocalSurfaceId());
   EXPECT_TRUE(view_->has_frame());
 }
@@ -299,6 +308,19 @@ class RenderWidgetHostViewChildFrameScrollLatchingDisabledTest
       RenderWidgetHostViewChildFrameScrollLatchingDisabledTest);
 };
 
+class RenderWidgetHostViewChildFrameZoomForDSFTest
+    : public RenderWidgetHostViewChildFrameTest {
+ public:
+  RenderWidgetHostViewChildFrameZoomForDSFTest() {}
+
+  void SetUp() override {
+    SetUpEnvironment(true /* use_zoom_for_device_scale_factor */);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewChildFrameZoomForDSFTest);
+};
+
 // Test that when a child scrolls and then stops consuming once it hits the
 // extent, we don't bubble the subsequent unconsumed GestureScrollUpdates
 // in the same gesture.
@@ -317,6 +339,58 @@ TEST_F(RenderWidgetHostViewChildFrameScrollLatchingDisabledTest,
   view_->GestureEventAck(gesture_scroll,
                          INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS);
   EXPECT_FALSE(test_frame_connector_->seen_bubbled_gsu_);
+}
+
+// Tests that moving the child around does not affect the physical backing size.
+TEST_F(RenderWidgetHostViewChildFrameZoomForDSFTest, PhysicalBackingSize) {
+  ScreenInfo screen_info;
+  screen_info.device_scale_factor = 2.0f;
+  test_frame_connector_->SetScreenInfoForTesting(screen_info);
+
+  gfx::Size local_frame_size(1276, 410);
+  test_frame_connector_->SetLocalFrameSize(local_frame_size);
+  EXPECT_EQ(local_frame_size, view_->GetPhysicalBackingSize());
+
+  gfx::Rect screen_space_rect(local_frame_size);
+  screen_space_rect.set_origin(gfx::Point(230, 263));
+  test_frame_connector_->SetScreenSpaceRect(screen_space_rect);
+  EXPECT_EQ(local_frame_size, view_->GetPhysicalBackingSize());
+  EXPECT_EQ(gfx::Point(115, 131), view_->GetViewBounds().origin());
+  EXPECT_EQ(gfx::Point(230, 263),
+            test_frame_connector_->screen_space_rect_in_pixels().origin());
+}
+
+// Tests that WasResized is called only once and all the parameters change
+// atomically.
+TEST_F(RenderWidgetHostViewChildFrameTest, WasResizedOncePerChange) {
+  MockRenderProcessHost* process =
+      static_cast<MockRenderProcessHost*>(widget_host_->GetProcess());
+  process->Init();
+
+  widget_host_->Init();
+
+  constexpr gfx::Size physical_backing_size(100, 100);
+  constexpr gfx::Rect screen_space_rect(physical_backing_size);
+  viz::ParentLocalSurfaceIdAllocator allocator;
+  viz::LocalSurfaceId local_surface_id = allocator.GenerateId();
+  constexpr viz::FrameSinkId frame_sink_id(1, 1);
+  const viz::SurfaceId surface_id(frame_sink_id, local_surface_id);
+
+  process->sink().ClearMessages();
+
+  test_frame_connector_->UpdateResizeParams(
+      screen_space_rect, physical_backing_size, ScreenInfo(), 1u, surface_id);
+
+  ASSERT_EQ(1u, process->sink().message_count());
+
+  const IPC::Message* resize_msg =
+      process->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID);
+  ASSERT_NE(nullptr, resize_msg);
+  ViewMsg_Resize::Param params;
+  ViewMsg_Resize::Read(resize_msg, &params);
+  EXPECT_EQ(physical_backing_size, std::get<0>(params).physical_backing_size);
+  EXPECT_EQ(screen_space_rect.size(), std::get<0>(params).new_size);
+  EXPECT_EQ(local_surface_id, std::get<0>(params).local_surface_id);
 }
 
 }  // namespace content

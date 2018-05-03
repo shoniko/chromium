@@ -7,9 +7,9 @@
 #include <set>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "components/download/internal/driver_entry.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_url_parameters.h"
@@ -63,8 +63,7 @@ FailureType FailureTypeFromInterruptReason(
 
 // Logs interrupt reason when download fails.
 void LogDownloadInterruptReason(content::DownloadInterruptReason reason) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Download.Service.Driver.InterruptReason",
-                              reason);
+  base::UmaHistogramSparse("Download.Service.Driver.InterruptReason", reason);
 }
 
 }  // namespace
@@ -121,7 +120,7 @@ void DownloadDriverImpl::Initialize(DownloadDriver::Client* client) {
   }
 
   notifier_ =
-      base::MakeUnique<AllDownloadItemNotifier>(download_manager_, this);
+      std::make_unique<AllDownloadItemNotifier>(download_manager_, this);
 }
 
 void DownloadDriverImpl::HardRecover() {
@@ -168,6 +167,8 @@ void DownloadDriverImpl::Start(
   download_url_params->set_file_path(file_path);
   if (request_params.fetch_error_body)
     download_url_params->set_fetch_error_body(true);
+  download_url_params->set_download_source(
+      content::DownloadSource::INTERNAL_API);
 
   download_manager_->DownloadUrl(std::move(download_url_params));
 }
@@ -234,6 +235,11 @@ std::set<std::string> DownloadDriverImpl::GetActiveDownloads() {
   return guids;
 }
 
+size_t DownloadDriverImpl::EstimateMemoryUsage() const {
+  return base::trace_event::EstimateMemoryUsage(guid_to_remove_) +
+         notifier_->EstimateMemoryUsage();
+}
+
 void DownloadDriverImpl::OnDownloadUpdated(content::DownloadManager* manager,
                                            content::DownloadItem* item) {
   DCHECK(client_);
@@ -266,6 +272,15 @@ void DownloadDriverImpl::OnDownloadRemoved(content::DownloadManager* manager,
 
 void DownloadDriverImpl::OnDownloadCreated(content::DownloadManager* manager,
                                            content::DownloadItem* item) {
+  if (guid_to_remove_.find(item->GetGuid()) != guid_to_remove_.end()) {
+    // Client has removed the download before content persistence layer created
+    // the record, remove the download immediately.
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&DownloadDriverImpl::DoRemoveDownload,
+                              weak_ptr_factory_.GetWeakPtr(), item->GetGuid()));
+    return;
+  }
+
   // Listens to all downloads.
   DCHECK(client_);
   DriverEntry entry = CreateDriverEntry(item);

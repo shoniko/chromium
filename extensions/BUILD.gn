@@ -52,7 +52,6 @@ grit("extensions_renderer_resources") {
   deps = [
     "//extensions/common:mojo_js",
     "//extensions/common/api:mojom_js",
-    "//mojo/public/js:bindings",
     "//services/device/public/interfaces:interfaces_js",
   ]
 }
@@ -146,7 +145,7 @@ static_library("test_support") {
     "//net:test_support",
     "//testing/gmock",
     "//testing/gtest",
-    "//third_party/cld",
+    "//third_party/cld_3/src/src:cld_3",
   ]
 
   public_deps = [
@@ -167,6 +166,7 @@ repack("shell_and_test_pak") {
     "$root_gen_dir/extensions/extensions_resources.pak",
     "$root_gen_dir/extensions/shell/app_shell_resources.pak",
     "$root_gen_dir/extensions/strings/extensions_strings_en-US.pak",
+    "$root_gen_dir/mojo/public/js/mojo_bindings_resources.pak",
     "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
     "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
     "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
@@ -182,6 +182,7 @@ repack("shell_and_test_pak") {
     "//content/shell:resources",
     "//extensions/shell:resources",
     "//extensions/strings",
+    "//mojo/public/js:resources",
     "//third_party/WebKit/public:resources",
     "//third_party/WebKit/public:scaled_resources_100_percent",
     "//ui/resources",
@@ -215,6 +216,8 @@ test("extensions_unittests") {
     "//extensions/renderer:unit_tests",
     "//extensions/shell:unit_tests",
     "//extensions/utility:unit_tests",
+    "//services/data_decoder:lib",
+    "//services/service_manager/public/cpp/test:test_support",
     "//ui/gl:test_support",
   ]
 
@@ -255,7 +258,6 @@ source_set("chrome_extensions_browsertests") {
     "browser/api/bluetooth/bluetooth_apitest.cc",
     "browser/api/bluetooth/bluetooth_private_apitest.cc",
     "browser/api/cast_channel/cast_channel_apitest.cc",
-    "browser/api/runtime/runtime_apitest.cc",
     "browser/api/serial/serial_apitest.cc",
     "browser/api/usb/usb_manual_apitest.cc",
     "browser/app_window/app_window_browsertest.cc",

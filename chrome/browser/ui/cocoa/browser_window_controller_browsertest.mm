@@ -362,7 +362,7 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
     CGFloat overlapping_tip_height =
         [info_bar_container_controller overlappingTipHeight];
     LocationBarViewMac* location_bar_view = [controller() locationBarBridge];
-    NSPoint icon_bottom = location_bar_view->GetPageInfoBubblePoint();
+    NSPoint icon_bottom = location_bar_view->GetInfoBarAnchorPoint();
 
     NSPoint info_bar_top = NSMakePoint(0,
         NSHeight([info_bar_container_controller view].frame) -
@@ -441,10 +441,10 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
 
   // Inserts a new tab into the tabstrip at the background.
   void AddTabAtBackground(int index, GURL url) {
-    chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
+    NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
     params.tabstrip_index = index;
     params.disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
-    chrome::Navigate(&params);
+    Navigate(&params);
     content::WaitForLoadStopWithoutSuccessCheck(params.target_contents);
   }
 

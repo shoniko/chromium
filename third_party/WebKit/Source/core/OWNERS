@@ -11,7 +11,6 @@ bokan@chromium.org
 cbiesinger@chromium.org
 chrishtr@chromium.org
 dcheng@chromium.org
-dglazkov@chromium.org
 # dtapuska reviews input-related changes
 dtapuska@chromium.org
 dgozman@chromium.org
@@ -26,6 +25,7 @@ fmalita@chromium.org
 # foolip reviews <video>, <track>, WebVTT and Fullscreen.
 foolip@chromium.org
 fs@opera.com
+futhark@chromium.org
 haraken@chromium.org
 hayato@chromium.org
 inferno@chromium.org
@@ -43,6 +43,8 @@ kojii@chromium.org
 kouhei@chromium.org
 meade@chromium.org
 mkwst@chromium.org
+mstensho@chromium.org
+nainar@chromium.org
 ojan@chromium.org
 # pdr reviews many svg and text autosizing patches.
 pdr@chromium.org

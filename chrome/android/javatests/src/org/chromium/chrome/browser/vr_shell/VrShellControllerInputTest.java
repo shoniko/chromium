@@ -10,6 +10,7 @@ import static org.chromium.chrome.browser.vr_shell.VrTestFramework.POLL_TIMEOUT_
 import static org.chromium.chrome.test.util.ChromeRestriction.RESTRICTION_TYPE_DEVICE_DAYDREAM;
 import static org.chromium.chrome.test.util.ChromeRestriction.RESTRICTION_TYPE_VIEWER_DAYDREAM;
 
+import android.os.SystemClock;
 import android.support.test.filters.MediumTest;
 
 import org.junit.Assert;
@@ -24,12 +25,14 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.vr_shell.rules.ChromeTabbedActivityVrTestRule;
 import org.chromium.chrome.browser.vr_shell.util.VrTransitionUtils;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content.browser.test.util.Coordinates;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.WebContents;
 
 import java.util.concurrent.TimeoutException;
 
@@ -37,8 +40,7 @@ import java.util.concurrent.TimeoutException;
  * End-to-end tests for Daydream controller input while in the VR browser.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG, "enable-features=VrShell"})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @Restriction({RESTRICTION_TYPE_DEVICE_DAYDREAM, RESTRICTION_TYPE_VIEWER_DAYDREAM})
 public class VrShellControllerInputTest {
     // We explicitly instantiate a rule here instead of using parameterization since this class
@@ -68,6 +70,8 @@ public class VrShellControllerInputTest {
         EmulatedVrController controller = new EmulatedVrController(mVrTestRule.getActivity());
         final ContentViewCore cvc =
                 mVrTestRule.getActivity().getActivityTab().getActiveContentViewCore();
+        final WebContents wc = mVrTestRule.getActivity().getActivityTab().getWebContents();
+        Coordinates coord = Coordinates.createFor(wc);
         controller.recenterView();
 
         // Wait for the page to be scrollable
@@ -80,7 +84,7 @@ public class VrShellControllerInputTest {
         }, POLL_TIMEOUT_LONG_MS, POLL_CHECK_INTERVAL_LONG_MS);
 
         // Test that scrolling down works
-        int startScrollPoint = cvc.getNativeScrollYForTest();
+        int startScrollPoint = coord.getScrollXPixInt();
         // Arbitrary, but valid values to scroll smoothly
         int scrollSteps = 20;
         int scrollSpeed = 60;
@@ -88,26 +92,51 @@ public class VrShellControllerInputTest {
         // We need this second scroll down, otherwise the horizontal scrolling becomes flaky
         // TODO(bsheedy): Figure out why this is the case
         controller.scroll(EmulatedVrController.ScrollDirection.DOWN, scrollSteps, scrollSpeed);
-        int endScrollPoint = cvc.getNativeScrollYForTest();
+        int endScrollPoint = coord.getScrollYPixInt();
         Assert.assertTrue("Controller was able to scroll down", startScrollPoint < endScrollPoint);
 
         // Test that scrolling up works
         startScrollPoint = endScrollPoint;
         controller.scroll(EmulatedVrController.ScrollDirection.UP, scrollSteps, scrollSpeed);
-        endScrollPoint = cvc.getNativeScrollYForTest();
+        endScrollPoint = coord.getScrollYPixInt();
         Assert.assertTrue("Controller was able to scroll up", startScrollPoint > endScrollPoint);
 
         // Test that scrolling right works
-        startScrollPoint = cvc.getNativeScrollXForTest();
+        startScrollPoint = coord.getScrollXPixInt();
         controller.scroll(EmulatedVrController.ScrollDirection.RIGHT, scrollSteps, scrollSpeed);
-        endScrollPoint = cvc.getNativeScrollXForTest();
+        endScrollPoint = coord.getScrollXPixInt();
         Assert.assertTrue("Controller was able to scroll right", startScrollPoint < endScrollPoint);
 
         // Test that scrolling left works
         startScrollPoint = endScrollPoint;
         controller.scroll(EmulatedVrController.ScrollDirection.LEFT, scrollSteps, scrollSpeed);
-        endScrollPoint = cvc.getNativeScrollXForTest();
+        endScrollPoint = coord.getScrollXPixInt();
         Assert.assertTrue("Controller was able to scroll left", startScrollPoint > endScrollPoint);
+    }
+
+    /**
+     * Verifies that controller clicks in the VR browser are properly registered on the webpage.
+     * This is done by clicking on a link on the page and ensuring that it causes a navigation.
+     */
+    @Test
+    @MediumTest
+    public void testControllerClicksRegisterOnWebpage() throws InterruptedException {
+        // Load page in VR and make sure the controller is pointed at the content quad
+        mVrTestRule.loadUrl(
+                VrTestFramework.getHtmlTestFile("test_controller_clicks_register_on_webpage"),
+                PAGE_LOAD_TIMEOUT_S);
+        VrTransitionUtils.forceEnterVr();
+        VrTransitionUtils.waitForVrEntry(POLL_TIMEOUT_LONG_MS);
+        EmulatedVrController controller = new EmulatedVrController(mVrTestRule.getActivity());
+        controller.recenterView();
+
+        // pressReleaseTouchpadButton() appears to be flaky for clicking on things, as sometimes
+        // it happens too fast for Chrome to register. So, manually press and release with a delay
+        controller.sendClickButtonToggleEvent();
+        SystemClock.sleep(50);
+        controller.sendClickButtonToggleEvent();
+        ChromeTabUtils.waitForTabPageLoaded(mVrTestRule.getActivity().getActivityTab(),
+                VrTestFramework.getHtmlTestFile("test_navigation_2d_page"));
     }
 
     /**

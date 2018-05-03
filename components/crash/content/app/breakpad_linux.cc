@@ -27,7 +27,6 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
@@ -148,8 +147,6 @@ base::LazyInstance<MicrodumpInfo>::DestructorAtExit g_microdump_info =
 
 #endif
 
-CrashKeyStorage* g_crash_keys = nullptr;
-
 // Writes the value |v| as 16 hex characters to the memory pointed at by
 // |output|.
 void write_uint64_hex(char* output, uint64_t v) {
@@ -249,7 +246,7 @@ void SetChannelFromCommandLine(const base::CommandLine& command_line) {
   if (!GetEnableCrashReporterSwitchParts(command_line, &switch_parts))
     return;
 
-  base::debug::SetCrashKeyValue(crash_keys::kChannel, switch_parts[1]);
+  SetChannelCrashKey(switch_parts[1]);
 }
 #endif
 
@@ -692,7 +689,7 @@ bool CrashDone(const MinidumpDescriptor& minidump,
   info.process_start_time = g_process_start_time;
   info.oom_size = base::g_oom_size;
   info.pid = g_pid;
-  info.crash_keys = g_crash_keys;
+  info.crash_keys = crash_reporter::internal::GetCrashKeyStorage();
   HandleCrashDump(info);
 #if defined(OS_ANDROID)
   return !should_finalize ||
@@ -871,7 +868,7 @@ bool CrashDoneInProcessNoUpload(
   info.upload = false;
   info.process_start_time = g_process_start_time;
   info.pid = g_pid;
-  info.crash_keys = g_crash_keys;
+  info.crash_keys = crash_reporter::internal::GetCrashKeyStorage();
   HandleCrashDump(info);
   return FinalizeCrashDoneAndroid(false /* is_browser_process */);
 }
@@ -1033,7 +1030,7 @@ class NonBrowserCrashHandler : public google_breakpad::CrashGenerationClient {
     iov[4].iov_base = &base::g_oom_size;
     iov[4].iov_len = sizeof(base::g_oom_size);
     google_breakpad::SerializedNonAllocatingMap* serialized_map;
-    iov[5].iov_len = g_crash_keys->Serialize(
+    iov[5].iov_len = crash_reporter::internal::GetCrashKeyStorage()->Serialize(
         const_cast<const google_breakpad::SerializedNonAllocatingMap**>(
             &serialized_map));
     iov[5].iov_base = serialized_map;
@@ -1109,26 +1106,13 @@ bool IsInWhiteList(const base::StringPiece& key) {
   return false;
 }
 
-void SetCrashKeyValue(const base::StringPiece& key,
-                      const base::StringPiece& value) {
-  if (!g_use_crash_key_white_list || IsInWhiteList(key)) {
-    g_crash_keys->SetKeyValue(key.data(), value.data());
-  }
-}
-
-void ClearCrashKey(const base::StringPiece& key) {
-  g_crash_keys->RemoveKey(key.data());
-}
-
 // GetCrashReporterClient() cannot call any Set methods until after
 // InitCrashKeys().
 void InitCrashKeys() {
-  g_crash_keys = new CrashKeyStorage;
-  GetCrashReporterClient()->RegisterCrashKeys();
+  crash_reporter::InitializeCrashKeys();
   g_use_crash_key_white_list =
       GetCrashReporterClient()->UseCrashKeysWhiteList();
   g_crash_key_white_list = GetCrashReporterClient()->GetCrashKeyWhiteList();
-  base::debug::SetCrashKeyReportingFunctions(&SetCrashKeyValue, &ClearCrashKey);
 }
 
 // Miscellaneous initialization functions to call after Breakpad has been
@@ -1391,7 +1375,8 @@ size_t WaitForCrashReportUploadProcess(int fd, size_t bytes_to_read,
     if (ret < 0) {
       // Error
       break;
-    } else if (ret > 0) {
+    }
+    if (ret > 0) {
       // There is data to read.
       ssize_t len = HANDLE_EINTR(
           sys_read(fd, buf + bytes_read, bytes_to_read - bytes_read));
@@ -1800,9 +1785,13 @@ void HandleCrashDump(const BreakpadInfo& info) {
   }
 
   if (info.crash_keys) {
+    using CrashKeyStorage =
+        crash_reporter::internal::TransitionalCrashKeyStorage;
     CrashKeyStorage::Iterator crash_key_iterator(*info.crash_keys);
     const CrashKeyStorage::Entry* entry;
     while ((entry = crash_key_iterator.Next())) {
+      if (g_use_crash_key_white_list && !IsInWhiteList(entry->key))
+        continue;
       writer.AddPairString(entry->key, entry->value);
       writer.AddBoundary();
       writer.Flush();
@@ -1939,11 +1928,6 @@ void InitCrashReporter(const std::string& process_type,
 #else
 void InitCrashReporter(const std::string& process_type) {
 #endif  // defined(OS_ANDROID)
-  // The maximum lengths specified by breakpad include the trailing NULL, so the
-  // actual length of the chunk is one less.
-  static_assert(crash_keys::kChunkMaxLength == 63, "kChunkMaxLength mismatch");
-  static_assert(crash_keys::kSmallSize <= crash_keys::kChunkMaxLength,
-                "crash key chunk size too small");
 #if defined(OS_ANDROID)
   // This will guarantee that the BuildInfo has been initialized and subsequent
   // calls will not require memory allocation.
@@ -2011,6 +1995,11 @@ void InitCrashReporter(const std::string& process_type) {
   }
 
   PostEnableBreakpadInitialization();
+}
+
+void SetChannelCrashKey(const std::string& channel) {
+  static crash_reporter::CrashKeyString<16> channel_key("channel");
+  channel_key.Set(channel);
 }
 
 #if defined(OS_ANDROID)

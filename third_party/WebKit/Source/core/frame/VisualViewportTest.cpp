@@ -17,7 +17,7 @@
 #include "core/html/HTMLHtmlElement.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/page/Page.h"
 #include "core/paint/PaintLayer.h"
@@ -123,7 +123,7 @@ class VisualViewportTest
         blink::testing::CoreTestDataPath(WebString::FromUTF8(fileName)));
   }
 
-  WebViewImpl* WebView() const { return helper_.WebView(); }
+  WebViewImpl* WebView() const { return helper_.GetWebView(); }
   LocalFrame* GetFrame() const { return helper_.LocalMainFrame()->GetFrame(); }
 
   static void ConfigureSettings(WebSettings* settings) {
@@ -395,7 +395,7 @@ TEST_P(VisualViewportTest, TestWebViewResizedBeforeAttachment) {
   NavigateTo("about:blank");
   WebView()->UpdateAllLifecyclePhases();
   main_frame_widget->SetRootGraphicsLayer(
-      frame_view.GetLayoutViewItem().Compositor()->RootGraphicsLayer());
+      frame_view.GetLayoutView()->Compositor()->RootGraphicsLayer());
 
   VisualViewport& visual_viewport = GetFrame()->GetPage()->GetVisualViewport();
   EXPECT_FLOAT_SIZE_EQ(FloatSize(320, 240),
@@ -980,56 +980,6 @@ TEST_P(VisualViewportTest,
   visual_viewport.Move(ScrollOffset(60, 25));
   mainFrame->MoveRangeSelection(initialPoint, endPoint);
   EXPECT_EQ("t ", mainFrame->SelectionAsText().Utf8());
-}
-
-// Test that the scrollFocusedEditableElementIntoRect method works with the
-// visual viewport.
-TEST_P(VisualViewportTest, DISABLED_TestScrollFocusedEditableElementIntoRect) {
-  InitializeWithDesktopSettings();
-  WebView()->Resize(IntSize(500, 300));
-
-  RegisterMockedHttpURLLoad("pinch-viewport-input-field.html");
-  NavigateTo(base_url_ + "pinch-viewport-input-field.html");
-
-  VisualViewport& visual_viewport = GetFrame()->GetPage()->GetVisualViewport();
-  WebView()->ResizeVisualViewport(IntSize(200, 100));
-  WebView()->SetInitialFocus(false);
-  visual_viewport.SetLocation(FloatPoint());
-  WebView()->ScrollFocusedEditableElementIntoRect(IntRect(0, 0, 500, 200));
-
-  EXPECT_EQ(ScrollOffset(0, GetFrame()->View()->MaximumScrollOffset().Height()),
-            GetFrame()->View()->GetScrollOffset());
-  EXPECT_FLOAT_POINT_EQ(FloatPoint(150, 200),
-                        visual_viewport.VisibleRect().Location());
-
-  // Try it again but with the page zoomed in
-  GetFrame()->View()->SetScrollOffset(ScrollOffset(0, 0), kProgrammaticScroll);
-  WebView()->ResizeVisualViewport(IntSize(500, 300));
-  visual_viewport.SetLocation(FloatPoint(0, 0));
-
-  WebView()->SetPageScaleFactor(2);
-  WebView()->ScrollFocusedEditableElementIntoRect(IntRect(0, 0, 500, 200));
-  EXPECT_EQ(ScrollOffset(0, GetFrame()->View()->MaximumScrollOffset().Height()),
-            GetFrame()->View()->GetScrollOffset());
-  EXPECT_FLOAT_POINT_EQ(FloatPoint(125, 150),
-                        visual_viewport.VisibleRect().Location());
-
-  // Once more but make sure that we don't move the visual viewport unless
-  // necessary.
-  RegisterMockedHttpURLLoad("pinch-viewport-input-field-long-and-wide.html");
-  NavigateTo(base_url_ + "pinch-viewport-input-field-long-and-wide.html");
-  WebView()->SetInitialFocus(false);
-  visual_viewport.SetLocation(FloatPoint());
-  GetFrame()->View()->SetScrollOffset(ScrollOffset(0, 0), kProgrammaticScroll);
-  WebView()->ResizeVisualViewport(IntSize(500, 300));
-  visual_viewport.SetLocation(FloatPoint(30, 50));
-
-  WebView()->SetPageScaleFactor(2);
-  WebView()->ScrollFocusedEditableElementIntoRect(IntRect(0, 0, 500, 200));
-  EXPECT_EQ(ScrollOffset(200 - 30 - 75, 600 - 50 - 65),
-            GetFrame()->View()->GetScrollOffset());
-  EXPECT_FLOAT_POINT_EQ(FloatPoint(30, 50),
-                        visual_viewport.VisibleRect().Location());
 }
 
 // Test that resizing the WebView causes ViewportConstrained objects to
@@ -1982,7 +1932,7 @@ TEST_P(VisualViewportTest, ResizeWithScrollAnchoring) {
 // Ensure that resize anchoring as happens when browser controls hide/show
 // affects the scrollable area that's currently set as the root scroller.
 TEST_P(VisualViewportTest, ResizeAnchoringWithRootScroller) {
-  ScopedRootScrollerForTest root_scroller(true);
+  ScopedSetRootScrollerForTest root_scroller(true);
 
   InitializeWithAndroidSettings();
   WebView()->Resize(IntSize(800, 600));
@@ -2012,7 +1962,7 @@ TEST_P(VisualViewportTest, ResizeAnchoringWithRootScroller) {
 // Ensure that resize anchoring as happens when the device is rotated affects
 // the scrollable area that's currently set as the root scroller.
 TEST_P(VisualViewportTest, RotationAnchoringWithRootScroller) {
-  ScopedRootScrollerForTest root_scroller(true);
+  ScopedSetRootScrollerForTest root_scroller(true);
 
   InitializeWithAndroidSettings();
   WebView()->Resize(IntSize(800, 600));

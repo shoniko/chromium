@@ -5,6 +5,7 @@
 #ifndef CSPDirectiveList_h
 #define CSPDirectiveList_h
 
+#include "base/macros.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/frame/csp/MediaListDirective.h"
 #include "core/frame/csp/SourceListDirective.h"
@@ -28,16 +29,17 @@ typedef HeapVector<Member<SourceListDirective>> SourceListDirectiveVector;
 
 class CORE_EXPORT CSPDirectiveList
     : public GarbageCollectedFinalized<CSPDirectiveList> {
-  WTF_MAKE_NONCOPYABLE(CSPDirectiveList);
-
  public:
   static CSPDirectiveList* Create(ContentSecurityPolicy*,
                                   const UChar* begin,
                                   const UChar* end,
                                   ContentSecurityPolicyHeaderType,
-                                  ContentSecurityPolicyHeaderSource);
+                                  ContentSecurityPolicyHeaderSource,
+                                  bool should_parse_wasm_eval = false);
 
-  void Parse(const UChar* begin, const UChar* end);
+  void Parse(const UChar* begin,
+             const UChar* end,
+             bool should_parse_wasm_eval = false);
 
   const String& Header() const { return header_; }
   ContentSecurityPolicyHeaderType HeaderType() const { return header_type_; }
@@ -71,6 +73,10 @@ class CORE_EXPORT CSPDirectiveList
                  SecurityViolationReportingPolicy,
                  ContentSecurityPolicy::ExceptionStatus,
                  const String& script_content) const;
+  bool AllowWasmEval(ScriptState*,
+                     SecurityViolationReportingPolicy,
+                     ContentSecurityPolicy::ExceptionStatus,
+                     const String& script_content) const;
   bool AllowPluginType(const String& type,
                        const String& type_attribute,
                        const KURL&,
@@ -90,6 +96,9 @@ class CORE_EXPORT CSPDirectiveList
   bool AllowObjectFromSource(const KURL&,
                              ResourceRequest::RedirectStatus,
                              SecurityViolationReportingPolicy) const;
+  bool AllowPrefetchFromSource(const KURL&,
+                               ResourceRequest::RedirectStatus,
+                               SecurityViolationReportingPolicy) const;
   bool AllowFrameFromSource(const KURL&,
                             ResourceRequest::RedirectStatus,
                             SecurityViolationReportingPolicy) const;
@@ -149,6 +158,10 @@ class CORE_EXPORT CSPDirectiveList
   }
   bool IsReportOnly() const {
     return header_type_ == kContentSecurityPolicyHeaderTypeReport;
+  }
+  bool IsActiveForConnections() const {
+    return OperativeDirective(
+        ContentSecurityPolicy::DirectiveType::kConnectSrc);
   }
   const Vector<String>& ReportEndpoints() const { return report_endpoints_; }
   bool UseReportingApi() const { return use_reporting_api_; }
@@ -214,7 +227,8 @@ class CORE_EXPORT CSPDirectiveList
   template <class CSPDirectiveType>
   void SetCSPDirective(const String& name,
                        const String& value,
-                       Member<CSPDirectiveType>&);
+                       Member<CSPDirectiveType>&,
+                       bool should_parse_wasm_eval = false);
 
   SourceListDirective* OperativeDirective(SourceListDirective*) const;
   SourceListDirective* OperativeDirective(SourceListDirective*,
@@ -246,6 +260,7 @@ class CORE_EXPORT CSPDirectiveList
                            const String& content) const;
 
   bool CheckEval(SourceListDirective*) const;
+  bool CheckWasmEval(SourceListDirective*) const;
   bool CheckDynamic(SourceListDirective*) const;
   bool IsMatchingNoncePresent(SourceListDirective*, const String&) const;
   bool AreAllMatchingHashesPresent(SourceListDirective*,
@@ -270,6 +285,11 @@ class CORE_EXPORT CSPDirectiveList
                                    ScriptState*,
                                    ContentSecurityPolicy::ExceptionStatus,
                                    const String& script_content) const;
+  bool CheckWasmEvalAndReportViolation(SourceListDirective*,
+                                       const String& console_message,
+                                       ScriptState*,
+                                       ContentSecurityPolicy::ExceptionStatus,
+                                       const String& script_content) const;
   bool CheckInlineAndReportViolation(SourceListDirective*,
                                      const String& console_message,
                                      Element*,
@@ -336,6 +356,7 @@ class CORE_EXPORT CSPDirectiveList
   Member<SourceListDirective> media_src_;
   Member<SourceListDirective> manifest_src_;
   Member<SourceListDirective> object_src_;
+  Member<SourceListDirective> prefetch_src_;
   Member<SourceListDirective> script_src_;
   Member<SourceListDirective> style_src_;
   Member<SourceListDirective> worker_src_;
@@ -346,6 +367,8 @@ class CORE_EXPORT CSPDirectiveList
   bool use_reporting_api_;
 
   String eval_disabled_error_message_;
+
+  DISALLOW_COPY_AND_ASSIGN(CSPDirectiveList);
 };
 
 }  // namespace blink

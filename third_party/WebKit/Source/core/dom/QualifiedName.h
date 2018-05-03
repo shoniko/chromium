@@ -59,7 +59,7 @@ class CORE_EXPORT QualifiedName {
         const AtomicString& local_name,
         const AtomicString& namespace_uri,
         bool is_static) {
-      return WTF::AdoptRef(
+      return base::AdoptRef(
           new QualifiedNameImpl(prefix, local_name, namespace_uri, is_static));
     }
 
@@ -109,7 +109,7 @@ class CORE_EXPORT QualifiedName {
                 const AtomicString& namespace_uri);
   ~QualifiedName();
 
-  QualifiedName(const QualifiedName& other) : impl_(other.impl_) {}
+  QualifiedName(const QualifiedName& other) = default;
   const QualifiedName& operator=(const QualifiedName& other) {
     impl_ = other.impl_;
     return *this;

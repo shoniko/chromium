@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <windows.h>
+
 #include "base/win/scoped_handle.h"
 
 #include <stddef.h>
@@ -196,7 +198,8 @@ void ActiveVerifier::StartTracking(HANDLE handle, const void* owner,
   if (!result.second) {
     Info other = result.first->second;
     base::debug::Alias(&other);
-    base::debug::Alias(&creation_stack_);
+    auto creation_stack = creation_stack_;
+    base::debug::Alias(&creation_stack);
     CHECK(false);  // Attempt to start tracking already tracked handle.
   }
 }
@@ -209,14 +212,16 @@ void ActiveVerifier::StopTracking(HANDLE handle, const void* owner,
   AutoNativeLock lock(*lock_);
   HandleMap::iterator i = map_.find(handle);
   if (i == map_.end()) {
-    base::debug::Alias(&creation_stack_);
+    auto creation_stack = creation_stack_;
+    base::debug::Alias(&creation_stack);
     CHECK(false);  // Attempting to close an untracked handle.
   }
 
   Info other = i->second;
   if (other.owner != owner) {
     base::debug::Alias(&other);
-    base::debug::Alias(&creation_stack_);
+    auto creation_stack = creation_stack_;
+    base::debug::Alias(&creation_stack);
     CHECK(false);  // Attempting to close a handle not owned by opener.
   }
 
@@ -241,7 +246,8 @@ void ActiveVerifier::OnHandleBeingClosed(HANDLE handle) {
 
   Info other = i->second;
   base::debug::Alias(&other);
-  base::debug::Alias(&creation_stack_);
+  auto creation_stack = creation_stack_;
+  base::debug::Alias(&creation_stack);
   CHECK(false);  // CloseHandle called on tracked handle.
 }
 

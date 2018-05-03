@@ -27,17 +27,18 @@ class CompositingReasonFinderTest : public RenderingTest {
 };
 
 TEST_F(CompositingReasonFinderTest, PromoteOpaqueFixedPosition) {
-  ScopedCompositeFixedPositionForTest composite_fixed_position(true);
+  ScopedCompositeOpaqueFixedPositionForTest composite_fixed_position(true);
 
-  SetBodyInnerHTML(
-      "<div id='translucent' style='width: 20px; height: 20px; position: "
-      "fixed; top: 100px; left: 100px;'></div>"
-      "<div id='opaque' style='width: 20px; height: 20px; position: fixed; "
-      "top: 100px; left: 200px; background: white;'></div>"
-      "<div id='opaque-with-shadow' style='width: 20px; height: 20px; "
-      "position: fixed; top: 100px; left: 300px; background: white; "
-      "box-shadow: 10px 10px 5px #888888;'></div>"
-      "<div id='spacer' style='height: 2000px'></div>");
+  SetBodyInnerHTML(R"HTML(
+    <div id='translucent' style='width: 20px; height: 20px; position:
+    fixed; top: 100px; left: 100px;'></div>
+    <div id='opaque' style='width: 20px; height: 20px; position: fixed;
+    top: 100px; left: 200px; background: white;'></div>
+    <div id='opaque-with-shadow' style='width: 20px; height: 20px;
+    position: fixed; top: 100px; left: 300px; background: white;
+    box-shadow: 10px 10px 5px #888888;'></div>
+    <div id='spacer' style='height: 2000px'></div>
+  )HTML");
 
   GetDocument().View()->UpdateAllLifecyclePhases();
 
@@ -62,16 +63,17 @@ TEST_F(CompositingReasonFinderTest, PromoteOpaqueFixedPosition) {
 }
 
 TEST_F(CompositingReasonFinderTest, OnlyAnchoredStickyPositionPromoted) {
-  SetBodyInnerHTML(
-      "<style>"
-      ".scroller {contain: paint; width: 400px; height: 400px; overflow: auto; "
-      "will-change: transform;}"
-      ".sticky { position: sticky; width: 10px; height: 10px;}</style>"
-      "<div class='scroller'>"
-      "  <div id='sticky-top' class='sticky' style='top: 0px;'></div>"
-      "  <div id='sticky-no-anchor' class='sticky'></div>"
-      "  <div style='height: 2000px;'></div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    .scroller {contain: paint; width: 400px; height: 400px; overflow: auto;
+    will-change: transform;}
+    .sticky { position: sticky; width: 10px; height: 10px;}</style>
+    <div class='scroller'>
+      <div id='sticky-top' class='sticky' style='top: 0px;'></div>
+      <div id='sticky-no-anchor' class='sticky'></div>
+      <div style='height: 2000px;'></div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_EQ(kPaintsIntoOwnBacking,
@@ -85,18 +87,19 @@ TEST_F(CompositingReasonFinderTest, OnlyAnchoredStickyPositionPromoted) {
 }
 
 TEST_F(CompositingReasonFinderTest, OnlyScrollingStickyPositionPromoted) {
-  SetBodyInnerHTML(
-      "<style>.scroller {width: 400px; height: 400px; overflow: auto; "
-      "will-change: transform;}"
-      ".sticky { position: sticky; top: 0; width: 10px; height: 10px;}"
-      "</style>"
-      "<div class='scroller'>"
-      "  <div id='sticky-scrolling' class='sticky'></div>"
-      "  <div style='height: 2000px;'></div>"
-      "</div>"
-      "<div class='scroller'>"
-      "  <div id='sticky-no-scrolling' class='sticky'></div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>.scroller {width: 400px; height: 400px; overflow: auto;
+    will-change: transform;}
+    .sticky { position: sticky; top: 0; width: 10px; height: 10px;}
+    </style>
+    <div class='scroller'>
+      <div id='sticky-scrolling' class='sticky'></div>
+      <div style='height: 2000px;'></div>
+    </div>
+    <div class='scroller'>
+      <div id='sticky-no-scrolling' class='sticky'></div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_EQ(
@@ -115,18 +118,19 @@ TEST_F(CompositingReasonFinderTest, OnlyScrollingStickyPositionPromoted) {
 // TODO(flackr): Allow integer transforms as long as all of the ancestor
 // transforms are also integer.
 TEST_F(CompositingReasonFinderTest, OnlyNonTransformedFixedLayersPromoted) {
-  ScopedCompositeFixedPositionForTest composite_fixed_position(true);
+  ScopedCompositeOpaqueFixedPositionForTest composite_fixed_position(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#fixed { position: fixed; height: 200px; width: 200px; background: "
-      "white; top: 0; }"
-      "#spacer { height: 3000px; }"
-      "</style>"
-      "<div id=\"parent\">"
-      "  <div id=\"fixed\"></div>"
-      "  <div id=\"spacer\"></div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #fixed { position: fixed; height: 200px; width: 200px; background:
+    white; top: 0; }
+    #spacer { height: 3000px; }
+    </style>
+    <div id="parent">
+      <div id="fixed"></div>
+      <div id="spacer"></div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -164,18 +168,19 @@ TEST_F(CompositingReasonFinderTest, OnlyNonTransformedFixedLayersPromoted) {
 // Test that opacity applied to the fixed or an ancestor will cause the
 // scrolling contents layer to not be promoted.
 TEST_F(CompositingReasonFinderTest, OnlyOpaqueFixedLayersPromoted) {
-  ScopedCompositeFixedPositionForTest composite_fixed_position(true);
+  ScopedCompositeOpaqueFixedPositionForTest composite_fixed_position(true);
 
-  SetBodyInnerHTML(
-      "<style>"
-      "#fixed { position: fixed; height: 200px; width: 200px; background: "
-      "white; top: 0}"
-      "#spacer { height: 3000px; }"
-      "</style>"
-      "<div id=\"parent\">"
-      "  <div id=\"fixed\"></div>"
-      "  <div id=\"spacer\"></div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #fixed { position: fixed; height: 200px; width: 200px; background:
+    white; top: 0}
+    #spacer { height: 3000px; }
+    </style>
+    <div id="parent">
+      <div id="fixed"></div>
+      <div id="spacer"></div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
@@ -261,82 +266,59 @@ TEST_F(CompositingReasonFinderTest, RequiresCompositingForTransformAnimation) {
       *style));
 }
 
-TEST_F(CompositingReasonFinderTest, RequiresCompositingForEffectAnimation) {
+TEST_F(CompositingReasonFinderTest, CompositingReasonsForAnimation) {
   scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
 
   style->SetSubtreeWillChangeContents(false);
-
-  // In the interest of brevity, for each side of subtreeWillChangeContents()
-  // code path we only check that any one of the effect related animation flags
-  // being set produces true, rather than every permutation.
-
+  style->SetHasCurrentTransformAnimation(false);
   style->SetHasCurrentOpacityAnimation(false);
   style->SetHasCurrentFilterAnimation(false);
   style->SetHasCurrentBackdropFilterAnimation(false);
-  EXPECT_FALSE(
-      CompositingReasonFinder::RequiresCompositingForEffectAnimation(*style));
+  EXPECT_EQ(CompositingReason::kNone,
+            CompositingReasonFinder::CompositingReasonsForAnimation(*style));
+
+  style->SetHasCurrentTransformAnimation(true);
+  EXPECT_EQ(CompositingReason::kActiveTransformAnimation,
+            CompositingReasonFinder::CompositingReasonsForAnimation(*style));
 
   style->SetHasCurrentOpacityAnimation(true);
-  style->SetHasCurrentFilterAnimation(false);
-  style->SetHasCurrentBackdropFilterAnimation(false);
-  EXPECT_TRUE(
-      CompositingReasonFinder::RequiresCompositingForEffectAnimation(*style));
+  EXPECT_EQ(CompositingReason::kActiveTransformAnimation |
+                CompositingReason::kActiveOpacityAnimation,
+            CompositingReasonFinder::CompositingReasonsForAnimation(*style));
 
-  style->SetHasCurrentOpacityAnimation(false);
   style->SetHasCurrentFilterAnimation(true);
-  style->SetHasCurrentBackdropFilterAnimation(false);
-  EXPECT_TRUE(
-      CompositingReasonFinder::RequiresCompositingForEffectAnimation(*style));
+  EXPECT_EQ(CompositingReason::kActiveTransformAnimation |
+                CompositingReason::kActiveOpacityAnimation |
+                CompositingReason::kActiveFilterAnimation,
+            CompositingReasonFinder::CompositingReasonsForAnimation(*style));
 
-  style->SetHasCurrentOpacityAnimation(false);
-  style->SetHasCurrentFilterAnimation(false);
   style->SetHasCurrentBackdropFilterAnimation(true);
-  EXPECT_TRUE(
-      CompositingReasonFinder::RequiresCompositingForEffectAnimation(*style));
-
-  // Check the other side of subtreeWillChangeContents.
-  style->SetSubtreeWillChangeContents(true);
-  style->SetHasCurrentOpacityAnimation(false);
-  style->SetHasCurrentFilterAnimation(false);
-  style->SetHasCurrentBackdropFilterAnimation(false);
-  EXPECT_FALSE(
-      CompositingReasonFinder::RequiresCompositingForEffectAnimation(*style));
-
-  style->SetIsRunningOpacityAnimationOnCompositor(true);
-  style->SetIsRunningFilterAnimationOnCompositor(false);
-  style->SetIsRunningBackdropFilterAnimationOnCompositor(false);
-  EXPECT_TRUE(
-      CompositingReasonFinder::RequiresCompositingForEffectAnimation(*style));
-
-  style->SetIsRunningOpacityAnimationOnCompositor(false);
-  style->SetIsRunningFilterAnimationOnCompositor(true);
-  style->SetIsRunningBackdropFilterAnimationOnCompositor(false);
-  EXPECT_TRUE(
-      CompositingReasonFinder::RequiresCompositingForEffectAnimation(*style));
-
-  style->SetIsRunningOpacityAnimationOnCompositor(false);
-  style->SetIsRunningFilterAnimationOnCompositor(false);
-  style->SetIsRunningBackdropFilterAnimationOnCompositor(true);
-  EXPECT_TRUE(
-      CompositingReasonFinder::RequiresCompositingForEffectAnimation(*style));
+  EXPECT_EQ(CompositingReason::kActiveTransformAnimation |
+                CompositingReason::kActiveOpacityAnimation |
+                CompositingReason::kActiveFilterAnimation |
+                CompositingReason::kActiveBackdropFilterAnimation,
+            CompositingReasonFinder::CompositingReasonsForAnimation(*style));
+  EXPECT_EQ(CompositingReason::kComboActiveAnimation,
+            CompositingReasonFinder::CompositingReasonsForAnimation(*style));
 }
 
 TEST_F(CompositingReasonFinderTest, CompositeNestedSticky) {
-  ScopedCompositeFixedPositionForTest composite_fixed_position(true);
+  ScopedCompositeOpaqueFixedPositionForTest composite_fixed_position(true);
 
-  SetBodyInnerHTML(
-      "<style>.scroller { overflow: scroll; height: 200px; width: 100px; }"
-      ".container { height: 500px; }"
-      ".opaque { background-color: white; contain: paint; }"
-      "#outerSticky { height: 50px; position: sticky; top: 0px; }"
-      "#innerSticky { height: 20px; position: sticky; top: 25px; }</style>"
-      "<div class='scroller'>"
-      "  <div class='container'>"
-      "    <div id='outerSticky' class='opaque'>"
-      "      <div id='innerSticky' class='opaque'></div>"
-      "    </div>"
-      "  </div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>.scroller { overflow: scroll; height: 200px; width: 100px; }
+    .container { height: 500px; }
+    .opaque { background-color: white; contain: paint; }
+    #outerSticky { height: 50px; position: sticky; top: 0px; }
+    #innerSticky { height: 20px; position: sticky; top: 25px; }</style>
+    <div class='scroller'>
+      <div class='container'>
+        <div id='outerSticky' class='opaque'>
+          <div id='innerSticky' class='opaque'></div>
+        </div>
+      </div>
+    </div>
+  )HTML");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   Element* outer_sticky = GetDocument().getElementById("outerSticky");

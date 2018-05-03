@@ -16,11 +16,14 @@ namespace net {
 struct RedirectInfo;
 }  // namespace net
 
+namespace network {
+struct ResourceResponseInfo;
+}
+
 namespace content {
 
 class ReceivedData;
 class ResourceDispatcher;
-struct ResourceResponseInfo;
 
 // Listens for request response data and stores it so that it can be compared
 // to the reference data.
@@ -32,18 +35,14 @@ class TestRequestPeer : public RequestPeer {
 
   void OnUploadProgress(uint64_t position, uint64_t size) override;
   bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
-                          const ResourceResponseInfo& info) override;
-  void OnReceivedResponse(const ResourceResponseInfo& info) override;
+                          const network::ResourceResponseInfo& info) override;
+  void OnReceivedResponse(const network::ResourceResponseInfo& info) override;
   void OnDownloadedData(int len, int encoded_data_length) override;
   void OnReceivedData(std::unique_ptr<ReceivedData> data) override;
   void OnTransferSizeUpdated(int transfer_size_diff) override;
   void OnReceivedCachedMetadata(const char* data, int len) override;
-  void OnCompletedRequest(int error_code,
-                          bool stale_copy_in_cache,
-                          const base::TimeTicks& completion_time,
-                          int64_t total_transfer_size,
-                          int64_t encoded_body_size,
-                          int64_t decoded_body_size) override;
+  void OnCompletedRequest(
+      const network::URLLoaderCompletionStatus& status) override;
 
   struct Context final {
     Context();

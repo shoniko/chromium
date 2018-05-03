@@ -980,14 +980,10 @@ void VertexAttribDivisorANGLE(GLuint index, GLuint divisor) override;
 
 void GenMailboxCHROMIUM(GLbyte* mailbox) override;
 
-void ProduceTextureCHROMIUM(GLenum target, const GLbyte* mailbox) override;
-
 void ProduceTextureDirectCHROMIUM(GLuint texture,
-                                  GLenum target,
                                   const GLbyte* mailbox) override;
 
-GLuint CreateAndConsumeTextureCHROMIUM(GLenum target,
-                                       const GLbyte* mailbox) override;
+GLuint CreateAndConsumeTextureCHROMIUM(const GLbyte* mailbox) override;
 
 void BindUniformLocationCHROMIUM(GLuint program,
                                  GLint location,
@@ -1012,12 +1008,9 @@ void DiscardFramebufferEXT(GLenum target,
 
 void LoseContextCHROMIUM(GLenum current, GLenum other) override;
 
-GLuint64 InsertFenceSyncCHROMIUM() override;
+void GenSyncTokenCHROMIUM(GLbyte* sync_token) override;
 
-void GenSyncTokenCHROMIUM(GLuint64 fence_sync, GLbyte* sync_token) override;
-
-void GenUnverifiedSyncTokenCHROMIUM(GLuint64 fence_sync,
-                                    GLbyte* sync_token) override;
+void GenUnverifiedSyncTokenCHROMIUM(GLbyte* sync_token) override;
 
 void VerifySyncTokensCHROMIUM(GLbyte** sync_tokens, GLsizei count) override;
 
@@ -1051,9 +1044,6 @@ void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
                              GLuint edge_aa_mask,
                              const GLfloat* bounds_rect,
                              GLuint filter) override;
-
-void SetColorSpaceForScanoutCHROMIUM(GLuint texture_id,
-                                     GLColorSpace color_space) override;
 
 void ScheduleCALayerInUseQueryCHROMIUM(GLsizei count,
                                        const GLuint* textures) override;
@@ -1249,11 +1239,9 @@ void BeginRasterCHROMIUM(GLuint texture_id,
                          GLboolean use_distance_field_text,
                          GLint pixel_config) override;
 
-void RasterCHROMIUM(const cc::DisplayItemList* list,
-                    GLint x,
-                    GLint y,
-                    GLint w,
-                    GLint h) override;
+void* MapRasterCHROMIUM(GLsizeiptr size) override;
+
+void UnmapRasterCHROMIUM(GLsizeiptr written_size) override;
 
 void EndRasterCHROMIUM() override;
 
@@ -1262,5 +1250,18 @@ void TexStorage2DImageCHROMIUM(GLenum target,
                                GLenum bufferUsage,
                                GLsizei width,
                                GLsizei height) override;
+
+void SetColorSpaceMetadataCHROMIUM(GLuint texture_id,
+                                   GLColorSpace color_space) override;
+
+void WindowRectanglesEXT(GLenum mode, GLsizei count, const GLint* box) override;
+
+GLuint CreateGpuFenceCHROMIUM() override;
+
+GLuint CreateClientGpuFenceCHROMIUM(ClientGpuFence source) override;
+
+void WaitGpuFenceCHROMIUM(GLuint gpu_fence_id) override;
+
+void DestroyGpuFenceCHROMIUM(GLuint gpu_fence_id) override;
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_AUTOGEN_H_

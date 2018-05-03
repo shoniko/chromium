@@ -31,8 +31,8 @@
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source_type.h"
+#include "net/reporting/reporting_service.h"
 #include "net/ssl/ssl_cert_request_info.h"
-#include "net/url_request/network_error_logging_delegate.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/redirect_util.h"
 #include "net/url_request/url_request_context.h"
@@ -44,15 +44,16 @@
 #include "url/gurl.h"
 #include "url/origin.h"
 
+#if BUILDFLAG(ENABLE_REPORTING)
+#include "net/url_request/network_error_logging_delegate.h"
+#endif  // BUILDFLAG(ENABLE_REPORTING)
+
 using base::Time;
 using std::string;
 
 namespace net {
 
 namespace {
-
-// Max number of http redirects to follow.  Same number as gecko.
-const int kMaxRedirects = 20;
 
 // TODO(battre): Delete this, see http://crbug.com/89321:
 // This counter keeps track of the identifiers used for URL requests so far.
@@ -164,10 +165,6 @@ void URLRequest::Delegate::OnSSLCertificateError(URLRequest* request,
 
 void URLRequest::Delegate::OnResponseStarted(URLRequest* request,
                                              int net_error) {
-  OnResponseStarted(request);
-}
-
-void URLRequest::Delegate::OnResponseStarted(URLRequest* request) {
   NOTREACHED();
 }
 
@@ -195,7 +192,8 @@ URLRequest::~URLRequest() {
   // on UserData associated with |this| and poke at it during teardown.
   job_.reset();
 
-  context_->RemoveURLRequest(this);
+  DCHECK_EQ(1u, context_->url_requests()->count(this));
+  context_->url_requests()->erase(this);
 
   int net_error = OK;
   // Log error only on failure, not cancellation, as even successful requests
@@ -578,11 +576,12 @@ URLRequest::URLRequest(const GURL& url,
       received_response_content_length_(0),
       creation_time_(base::TimeTicks::Now()),
       raw_header_size_(0),
+      is_pac_request_(false),
       traffic_annotation_(traffic_annotation) {
   // Sanity check out environment.
   DCHECK(base::ThreadTaskRunnerHandle::IsSet());
 
-  context->InsertURLRequest(this);
+  context->url_requests()->insert(this);
   net_log_.BeginEvent(
       NetLogEventType::REQUEST_ALIVE,
       base::Bind(&NetLogURLRequestConstructorCallback, &url, priority_));
@@ -1062,11 +1061,11 @@ bool URLRequest::CanGetCookies(const CookieList& cookie_list) const {
   return g_default_can_use_cookies;
 }
 
-bool URLRequest::CanSetCookie(const std::string& cookie_line,
+bool URLRequest::CanSetCookie(const net::CanonicalCookie& cookie,
                               CookieOptions* options) const {
   DCHECK(!(load_flags_ & LOAD_DO_NOT_SAVE_COOKIES));
   if (network_delegate_) {
-    return network_delegate_->CanSetCookie(*this, cookie_line, options);
+    return network_delegate_->CanSetCookie(*this, cookie, options);
   }
   return g_default_can_use_cookies;
 }
@@ -1142,7 +1141,9 @@ void URLRequest::NotifyRequestCompleted() {
     network_delegate_->NotifyCompleted(this, job_.get() != NULL,
                                        status_.error());
 
+#if BUILDFLAG(ENABLE_REPORTING)
   MaybeGenerateNetworkErrorLoggingReport();
+#endif  // BUILDFLAG(ENABLE_REPORTING)
 }
 
 void URLRequest::OnCallToDelegate() {
@@ -1161,6 +1162,7 @@ void URLRequest::OnCallToDelegateComplete() {
   net_log_.EndEvent(NetLogEventType::URL_REQUEST_DELEGATE);
 }
 
+#if BUILDFLAG(ENABLE_REPORTING)
 void URLRequest::MaybeGenerateNetworkErrorLoggingReport() {
   NetworkErrorLoggingDelegate* delegate =
       context()->network_error_logging_delegate();
@@ -1184,15 +1186,24 @@ void URLRequest::MaybeGenerateNetworkErrorLoggingReport() {
     details.server_ip = endpoint.address();
   // TODO(juliatuttle): Plumb this.
   details.protocol = kProtoUnknown;
-  details.status_code = GetResponseCode();
-  if (details.status_code == -1)
+  if (response_headers()) {
+    // HttpResponseHeaders::response_code() returns 0 if response code couldn't
+    // be parsed, which is also how NEL represents the same.
+    details.status_code = response_headers()->response_code();
+  } else {
     details.status_code = 0;
+  }
   details.elapsed_time =
       base::TimeTicks::Now() - load_timing_info_.request_start;
   details.type = status().ToNetError();
 
+  details.is_reporting_upload =
+      context()->reporting_service() &&
+      context()->reporting_service()->RequestIsUpload(*this);
+
   delegate->OnNetworkError(details);
 }
+#endif  // BUILDFLAG(ENABLE_REPORTING)
 
 void URLRequest::GetConnectionAttempts(ConnectionAttempts* out) const {
   if (job_)

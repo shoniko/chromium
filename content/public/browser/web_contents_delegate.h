@@ -21,6 +21,7 @@
 #include "content/public/common/media_stream_request.h"
 #include "content/public/common/previews_state.h"
 #include "content/public/common/window_container_type.mojom.h"
+#include "third_party/WebKit/common/color_chooser/color_chooser.mojom.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "third_party/WebKit/public/platform/WebSecurityStyle.h"
@@ -42,14 +43,12 @@ class FilePath;
 namespace content {
 class ColorChooser;
 class JavaScriptDialogManager;
-class PageState;
 class RenderFrameHost;
 class RenderWidgetHost;
 class SessionStorageNamespace;
 class SiteInstance;
 class WebContents;
 class WebContentsImpl;
-struct ColorSuggestion;
 struct ContextMenuParams;
 struct DropData;
 struct FileChooserParams;
@@ -74,7 +73,6 @@ class WebGestureEvent;
 namespace content {
 
 struct OpenURLParams;
-struct WebContentsUnresponsiveState;
 
 enum class KeyboardEventProcessingResult;
 
@@ -239,15 +237,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Returns true if the context menu operation was handled by the delegate.
   virtual bool HandleContextMenu(const content::ContextMenuParams& params);
 
-  // Opens source view for given WebContents that is navigated to the given
-  // page url.
-  virtual void ViewSourceForTab(WebContents* source, const GURL& page_url);
-
-  // Opens source view for the given subframe.
-  virtual void ViewSourceForFrame(WebContents* source,
-                                  const GURL& url,
-                                  const PageState& page_state);
-
   // Allows delegates to handle keyboard events before sending to the renderer.
   // See enum for description of return values.
   virtual KeyboardEventProcessingResult PreHandleKeyboardEvent(
@@ -328,9 +317,7 @@ class CONTENT_EXPORT WebContentsDelegate {
                                   WebContents* new_contents) {}
 
   // Notification that the tab is hung.
-  virtual void RendererUnresponsive(
-      WebContents* source,
-      const WebContentsUnresponsiveState& unresponsive_state) {}
+  virtual void RendererUnresponsive(WebContents* source) {}
 
   // Notification that the tab is no longer hung.
   virtual void RendererResponsive(WebContents* source) {}
@@ -350,7 +337,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual ColorChooser* OpenColorChooser(
       WebContents* web_contents,
       SkColor color,
-      const std::vector<ColorSuggestion>& suggestions);
+      const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions);
 
   // Called when a file selection is to be done.
   virtual void RunFileChooser(RenderFrameHost* render_frame_host,
@@ -503,22 +490,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // used.
   virtual gfx::Size GetSizeForNewRenderView(WebContents* web_contents) const;
 
-  // Notification that validation of a form displayed by the |web_contents|
-  // has failed. There can only be one message per |web_contents| at a time.
-  virtual void ShowValidationMessage(WebContents* web_contents,
-                                     const gfx::Rect& anchor_in_root_view,
-                                     const base::string16& main_text,
-                                     const base::string16& sub_text) {}
-
-  // Notification that the delegate should hide any showing form validation
-  // message.
-  virtual void HideValidationMessage(WebContents* web_contents) {}
-
-  // Notification that the form element that triggered the validation failure
-  // has moved.
-  virtual void MoveValidationMessage(WebContents* web_contents,
-                                     const gfx::Rect& anchor_in_root_view) {}
-
   // Returns true if the WebContents is never visible.
   virtual bool IsNeverVisible(WebContents* web_contents);
 
@@ -556,6 +527,15 @@ class CONTENT_EXPORT WebContentsDelegate {
                                                  bool allowed_per_prefs,
                                                  const url::Origin& origin,
                                                  const GURL& resource_url);
+
+  // Requests to get browser controls info such as the height of the top/bottom
+  // controls, and whether they will shrink the Blink's view size.
+  // Note that they are not complete in the sense that there is no API to tell
+  // content to poll these values again, except part of resize. But this is not
+  // needed by embedder because it's always accompanied by view size change.
+  virtual int GetTopControlsHeight() const;
+  virtual int GetBottomControlsHeight() const;
+  virtual bool DoBrowserControlsShrinkBlinkSize() const;
 
   // Give WebContentsDelegates the opportunity to adjust the previews state.
   virtual void AdjustPreviewsStateForNavigation(PreviewsState* previews_state) {

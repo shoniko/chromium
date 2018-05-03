@@ -59,14 +59,15 @@ void VRDisplayImpl::OnDeactivate(mojom::VRDisplayEventReason reason) {
 void VRDisplayImpl::RequestPresent(
     mojom::VRSubmitFrameClientPtr submit_client,
     mojom::VRPresentationProviderRequest request,
+    mojom::VRRequestPresentOptionsPtr present_options,
     mojom::VRDisplayHost::RequestPresentCallback callback) {
   if (!device_->IsAccessAllowed(this) || !InFocusedFrame()) {
-    std::move(callback).Run(false);
+    std::move(callback).Run(false, nullptr);
     return;
   }
 
   device_->RequestPresent(this, std::move(submit_client), std::move(request),
-                          std::move(callback));
+                          std::move(present_options), std::move(callback));
 }
 
 void VRDisplayImpl::ExitPresent() {
@@ -74,12 +75,13 @@ void VRDisplayImpl::ExitPresent() {
     device_->ExitPresent();
 }
 
+// Gets a pose for magic window sessions.
 void VRDisplayImpl::GetPose(GetPoseCallback callback) {
   if (!device_->IsAccessAllowed(this)) {
     std::move(callback).Run(nullptr);
     return;
   }
-  device_->GetPose(std::move(callback));
+  device_->GetMagicWindowPose(std::move(callback));
 }
 
 void VRDisplayImpl::SetListeningForActivate(bool listening) {

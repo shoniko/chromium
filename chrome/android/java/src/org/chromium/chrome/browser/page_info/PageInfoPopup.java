@@ -439,9 +439,16 @@ public class PageInfoPopup implements OnClickListener {
             mOpenOnlineButton.setVisibility(View.GONE);
         }
 
-        mInstantAppIntent = (mIsInternalPage || isShowingOfflinePage()) ? null
-                : InstantAppsHandler.getInstance().getInstantAppIntentForUrl(mFullUrl);
-        if (mInstantAppIntent == null) mInstantAppButton.setVisibility(View.GONE);
+        InstantAppsHandler instantAppsHandler = InstantAppsHandler.getInstance();
+        if (!mIsInternalPage && !isShowingOfflinePage()
+                && instantAppsHandler.isInstantAppAvailable(mFullUrl, false /* checkHoldback */,
+                           false /* includeUserPrefersBrowser */)) {
+            mInstantAppIntent = instantAppsHandler.getInstantAppIntentForUrl(mFullUrl);
+            RecordUserAction.record("Android.InstantApps.OpenInstantAppButtonShown");
+        } else {
+            mInstantAppIntent = null;
+            mInstantAppButton.setVisibility(View.GONE);
+        }
 
         // Create the dialog.
         mDialog = new Dialog(mContext) {
@@ -669,8 +676,7 @@ public class PageInfoPopup implements OnClickListener {
                 assert false : "Invalid setting " + permission.setting + " for permission "
                         + permission.type;
         }
-        if (permission.type == ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION
-                && WebsitePreferenceBridge.shouldUseDSEGeolocationSetting(mFullUrl, false)) {
+        if (WebsitePreferenceBridge.isPermissionControlledByDSE(permission.type, mFullUrl, false)) {
             status_text = statusTextForDSEPermission(permission);
         }
         builder.append(status_text);
@@ -804,8 +810,6 @@ public class PageInfoPopup implements OnClickListener {
                     recordAction(PageInfoAction.PAGE_INFO_SITE_SETTINGS_OPENED);
                     Bundle fragmentArguments =
                             SingleWebsitePreferences.createFragmentArgsForSite(mFullUrl);
-                    fragmentArguments.putParcelable(SingleWebsitePreferences.EXTRA_WEB_CONTENTS,
-                            mTab.getWebContents());
                     Intent preferencesIntent = PreferencesLauncher.createIntentForSettingsPage(
                             mContext, SingleWebsitePreferences.class.getName());
                     preferencesIntent.putExtra(

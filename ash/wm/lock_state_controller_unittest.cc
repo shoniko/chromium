@@ -7,6 +7,9 @@
 #include <memory>
 #include <utility>
 
+#include "ash/accessibility/accessibility_controller.h"
+#include "ash/accessibility/test_accessibility_controller_client.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/config.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
@@ -14,10 +17,12 @@
 #include "ash/shutdown_reason.h"
 #include "ash/system/power/power_button_controller.h"
 #include "ash/system/power/power_button_test_base.h"
+#include "ash/touch/touch_devices_controller.h"
 #include "ash/wm/lock_state_controller_test_api.h"
 #include "ash/wm/session_state_animator.h"
 #include "ash/wm/test_session_state_animator.h"
 #include "base/command_line.h"
+#include "base/run_loop.h"
 #include "base/time/time.h"
 #include "chromeos/dbus/fake_power_manager_client.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
@@ -71,6 +76,9 @@ class LockStateControllerTest : public PowerButtonTestBase {
     test_animator_ = new TestSessionStateAnimator;
     lock_state_controller_->set_animator_for_test(test_animator_);
     lock_state_test_api_->set_shutdown_controller(&test_shutdown_controller_);
+
+    a11y_controller_ = Shell::Get()->accessibility_controller();
+    a11y_controller_->SetClient(a11y_client_.CreateInterfacePtrAndBind());
   }
 
  protected:
@@ -261,8 +269,13 @@ class LockStateControllerTest : public PowerButtonTestBase {
     lock_state_controller_->OnLockScreenHide(closure);
   }
 
+  // Simulate that shutdown sound duration callback is done.
+  void ShutdownSoundPlayed() { a11y_controller_->FlushMojoForTest(); }
+
   TestShutdownController test_shutdown_controller_;
   TestSessionStateAnimator* test_animator_ = nullptr;  // not owned
+  AccessibilityController* a11y_controller_;
+  TestAccessibilityControllerClient a11y_client_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(LockStateControllerTest);
@@ -317,6 +330,7 @@ TEST_F(LockStateControllerTest, LegacyLockAndShutDown) {
   if (Shell::GetAshConfig() != Config::MASH)
     EXPECT_FALSE(cursor_visible());
 
+  ShutdownSoundPlayed();
   EXPECT_TRUE(lock_state_test_api_->real_shutdown_timer_is_running());
   lock_state_test_api_->trigger_real_shutdown_timeout();
   EXPECT_EQ(1, NumShutdownRequests());
@@ -330,6 +344,7 @@ TEST_F(LockStateControllerTest, LegacyNotLoggedIn) {
   PressPowerButton();
   ExpectShutdownAnimationStarted();
 
+  ShutdownSoundPlayed();
   EXPECT_TRUE(lock_state_test_api_->real_shutdown_timer_is_running());
 }
 
@@ -341,6 +356,7 @@ TEST_F(LockStateControllerTest, LegacyGuest) {
   PressPowerButton();
   ExpectShutdownAnimationStarted();
 
+  ShutdownSoundPlayed();
   EXPECT_TRUE(lock_state_test_api_->real_shutdown_timer_is_running());
 }
 
@@ -375,6 +391,7 @@ TEST_F(LockStateControllerTest, ShutdownWhenNotLoggedIn) {
   ExpectShutdownAnimationFinished();
   lock_state_test_api_->trigger_shutdown_timeout();
 
+  ShutdownSoundPlayed();
   EXPECT_TRUE(lock_state_test_api_->real_shutdown_timer_is_running());
   EXPECT_EQ(0, NumShutdownRequests());
 
@@ -536,6 +553,7 @@ TEST_F(LockStateControllerTest, LockToShutdown) {
   ExpectShutdownAnimationFinished();
   lock_state_test_api_->trigger_shutdown_timeout();
 
+  ShutdownSoundPlayed();
   EXPECT_TRUE(lock_state_test_api_->real_shutdown_timer_is_running());
   EXPECT_EQ(0, NumShutdownRequests());
   lock_state_test_api_->trigger_real_shutdown_timeout();
@@ -751,6 +769,7 @@ TEST_F(LockStateControllerTest, RequestShutdownFromLoginScreen) {
     EXPECT_FALSE(cursor_visible());
 
   EXPECT_EQ(0, NumShutdownRequests());
+  ShutdownSoundPlayed();
   EXPECT_TRUE(lock_state_test_api_->real_shutdown_timer_is_running());
   lock_state_test_api_->trigger_real_shutdown_timeout();
   EXPECT_EQ(1, NumShutdownRequests());
@@ -776,6 +795,7 @@ TEST_F(LockStateControllerTest, RequestShutdownFromLockScreen) {
     EXPECT_FALSE(cursor_visible());
 
   EXPECT_EQ(0, NumShutdownRequests());
+  ShutdownSoundPlayed();
   EXPECT_TRUE(lock_state_test_api_->real_shutdown_timer_is_running());
   lock_state_test_api_->trigger_real_shutdown_timeout();
   EXPECT_EQ(1, NumShutdownRequests());
@@ -1016,6 +1036,43 @@ TEST_F(LockStateControllerTest, CancelClamshellDisplayOffAfterLock) {
   EXPECT_FALSE(power_button_controller_->TriggerDisplayOffTimerForTesting());
   EXPECT_FALSE(power_manager_client_->backlights_forced_off());
   UnlockScreen();
+}
+
+// Tests the default behavior of disabling the touchscreen when the screen is
+// turned off due to user inactivity.
+TEST_F(LockStateControllerTest, DisableTouchscreenForScreenOff) {
+  Initialize(ButtonType::NORMAL, LoginStatus::USER);
+  // Run the event loop so PowerButtonDisplayController will get the initial
+  // backlights-forced-off state from chromeos::PowerManagerClient.
+  base::RunLoop().RunUntilIdle();
+
+  // Manually turn the screen off and check that the touchscreen is enabled.
+  power_manager_client_->SendBrightnessChanged(0, true /* user_initiated */);
+  EXPECT_TRUE(Shell::Get()->touch_devices_controller()->GetTouchscreenEnabled(
+      TouchscreenEnabledSource::GLOBAL));
+
+  // It should be disabled if the screen is turned off due to user inactivity.
+  power_manager_client_->SendBrightnessChanged(100, true /* user_initiated */);
+  power_manager_client_->SendBrightnessChanged(0, false /* user_initiated */);
+  EXPECT_FALSE(Shell::Get()->touch_devices_controller()->GetTouchscreenEnabled(
+      TouchscreenEnabledSource::GLOBAL));
+}
+
+// Tests that the kTouchscreenUsableWhileScreenOff switch keeps the touchscreen
+// enabled when the screen is turned off due to user inactivity.
+TEST_F(LockStateControllerTest, TouchscreenUnableWhileScreenOff) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kTouchscreenUsableWhileScreenOff);
+  ResetPowerButtonController();
+  Initialize(ButtonType::NORMAL, LoginStatus::USER);
+  // Run the event loop so PowerButtonDisplayController will get the initial
+  // backlights-forced-off state from chromeos::PowerManagerClient.
+  base::RunLoop().RunUntilIdle();
+
+  // The touchscreen should remain enabled.
+  power_manager_client_->SendBrightnessChanged(0, false /* user_initiated */);
+  EXPECT_TRUE(Shell::Get()->touch_devices_controller()->GetTouchscreenEnabled(
+      TouchscreenEnabledSource::GLOBAL));
 }
 
 }  // namespace ash

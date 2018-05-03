@@ -21,22 +21,22 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
+#include "services/network/public/cpp/data_element.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "storage/browser/blob/blob_data_snapshot.h"
 #include "storage/browser/fileapi/file_stream_reader.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
-#include "storage/common/data_element.h"
 #include "storage/common/storage_histograms.h"
 
 namespace storage {
 namespace {
 const char kCacheStorageRecordBytesLabel[] = "DiskCache.CacheStorage";
 
-bool IsFileType(DataElement::Type type) {
+bool IsFileType(network::DataElement::Type type) {
   switch (type) {
-    case DataElement::TYPE_FILE:
-    case DataElement::TYPE_FILE_FILESYSTEM:
+    case network::DataElement::TYPE_FILE:
+    case network::DataElement::TYPE_FILE_FILESYSTEM:
       return true;
     default:
       return false;
@@ -57,6 +57,8 @@ int ConvertBlobErrorToNetError(BlobStatus reason) {
       return net::ERR_UNEXPECTED;
     case BlobStatus::ERR_REFERENCED_BLOB_BROKEN:
       return net::ERR_INVALID_HANDLE;
+    case BlobStatus::ERR_REFERENCED_FILE_UNAVAILABLE:
+      return net::ERR_INVALID_HANDLE;
     case BlobStatus::DONE:
     case BlobStatus::PENDING_QUOTA:
     case BlobStatus::PENDING_TRANSPORT:
@@ -69,13 +71,10 @@ int ConvertBlobErrorToNetError(BlobStatus reason) {
 }
 }  // namespace
 
-BlobReader::FileStreamReaderProvider::~FileStreamReaderProvider() {}
+BlobReader::FileStreamReaderProvider::~FileStreamReaderProvider() = default;
 
-BlobReader::BlobReader(
-    const BlobDataHandle* blob_handle,
-    std::unique_ptr<FileStreamReaderProvider> file_stream_provider)
-    : file_stream_provider_(std::move(file_stream_provider)),
-      file_task_runner_(base::CreateTaskRunnerWithTraits(
+BlobReader::BlobReader(const BlobDataHandle* blob_handle)
+    : file_task_runner_(base::CreateTaskRunnerWithTraits(
           {base::MayBlock(), base::TaskPriority::USER_VISIBLE})),
       net_error_(net::OK),
       weak_factory_(this) {
@@ -88,8 +87,7 @@ BlobReader::BlobReader(
   }
 }
 
-BlobReader::~BlobReader() {
-}
+BlobReader::~BlobReader() = default;
 
 BlobReader::Status BlobReader::CalculateSize(
     const net::CompletionCallback& done) {
@@ -114,7 +112,7 @@ bool BlobReader::has_side_data() const {
   if (items.size() != 1)
     return false;
   const BlobDataItem& item = *items.at(0);
-  if (item.type() != DataElement::TYPE_DISK_CACHE_ENTRY)
+  if (item.type() != network::DataElement::TYPE_DISK_CACHE_ENTRY)
     return false;
   const int disk_cache_side_stream_index = item.disk_cache_side_stream_index();
   if (disk_cache_side_stream_index < 0)
@@ -247,7 +245,7 @@ bool BlobReader::IsInMemory() const {
     return true;
   }
   for (const auto& item : blob_data_->items()) {
-    if (item->type() != DataElement::TYPE_BYTES) {
+    if (item->type() != network::DataElement::TYPE_BYTES) {
       return false;
     }
   }
@@ -457,11 +455,11 @@ BlobReader::Status BlobReader::ReadItem() {
 
   // Do the reading.
   const BlobDataItem& item = *items.at(current_item_index_);
-  if (item.type() == DataElement::TYPE_BYTES) {
+  if (item.type() == network::DataElement::TYPE_BYTES) {
     ReadBytesItem(item, bytes_to_read);
     return Status::DONE;
   }
-  if (item.type() == DataElement::TYPE_DISK_CACHE_ENTRY)
+  if (item.type() == network::DataElement::TYPE_DISK_CACHE_ENTRY)
     return ReadDiskCacheEntryItem(item, bytes_to_read);
   if (!IsFileType(item.type())) {
     NOTREACHED();
@@ -651,23 +649,40 @@ std::unique_ptr<FileStreamReader> BlobReader::CreateFileStreamReader(
   DCHECK(IsFileType(item.type()));
 
   switch (item.type()) {
-    case DataElement::TYPE_FILE:
-      return file_stream_provider_->CreateForLocalFile(
+    case network::DataElement::TYPE_FILE:
+      if (file_stream_provider_for_testing_) {
+        return file_stream_provider_for_testing_->CreateForLocalFile(
+            file_task_runner_.get(), item.path(),
+            item.offset() + additional_offset,
+            item.expected_modification_time());
+      }
+      return base::WrapUnique(FileStreamReader::CreateForLocalFile(
           file_task_runner_.get(), item.path(),
-          item.offset() + additional_offset, item.expected_modification_time());
-    case DataElement::TYPE_FILE_FILESYSTEM:
-      return file_stream_provider_->CreateFileStreamReader(
-          item.filesystem_url(), item.offset() + additional_offset,
+          item.offset() + additional_offset,
+          item.expected_modification_time()));
+    case network::DataElement::TYPE_FILE_FILESYSTEM: {
+      int64_t max_bytes_to_read =
           item.length() == std::numeric_limits<uint64_t>::max()
               ? storage::kMaximumLength
-              : item.length() - additional_offset,
+              : item.length() - additional_offset;
+      if (file_stream_provider_for_testing_) {
+        return file_stream_provider_for_testing_->CreateFileStreamReader(
+            item.filesystem_url(), item.offset() + additional_offset,
+            max_bytes_to_read, item.expected_modification_time());
+      }
+      return item.file_system_context()->CreateFileStreamReader(
+          storage::FileSystemURL(
+              item.file_system_context()->CrackURL(item.filesystem_url())),
+          item.offset() + additional_offset, max_bytes_to_read,
           item.expected_modification_time());
-    case DataElement::TYPE_BLOB:
-    case DataElement::TYPE_BYTES:
-    case DataElement::TYPE_BYTES_DESCRIPTION:
-    case DataElement::TYPE_DISK_CACHE_ENTRY:
-    case DataElement::TYPE_DATA_PIPE:
-    case DataElement::TYPE_UNKNOWN:
+    }
+    case network::DataElement::TYPE_RAW_FILE:
+    case network::DataElement::TYPE_BLOB:
+    case network::DataElement::TYPE_BYTES:
+    case network::DataElement::TYPE_BYTES_DESCRIPTION:
+    case network::DataElement::TYPE_DISK_CACHE_ENTRY:
+    case network::DataElement::TYPE_DATA_PIPE:
+    case network::DataElement::TYPE_UNKNOWN:
       break;
   }
 

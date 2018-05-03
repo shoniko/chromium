@@ -4,7 +4,8 @@
 
 #include "media/gpu/android/android_video_surface_chooser_impl.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/time/default_tick_clock.h"
 
 namespace media {
@@ -22,7 +23,7 @@ AndroidVideoSurfaceChooserImpl::AndroidVideoSurfaceChooserImpl(
       weak_factory_(this) {
   // Use a DefaultTickClock if one wasn't provided.
   if (!tick_clock_) {
-    optional_tick_clock_ = base::MakeUnique<base::DefaultTickClock>();
+    optional_tick_clock_ = std::make_unique<base::DefaultTickClock>();
     tick_clock_ = optional_tick_clock_.get();
   }
 }
@@ -53,6 +54,8 @@ void AndroidVideoSurfaceChooserImpl::UpdateState(
     if (!initial_state_received_) {
       initial_state_received_ = true;
       // Choose here so that Choose() doesn't have to handle non-dynamic.
+      // Note that we ignore |is_expecting_relayout| here, since it's transient.
+      // We don't want to pick SurfaceTexture permanently for that.
       if (overlay_factory_ &&
           (current_state_.is_fullscreen || current_state_.is_secure ||
            current_state_.is_required)) {
@@ -130,10 +133,6 @@ void AndroidVideoSurfaceChooserImpl::Choose() {
     if (time_since_last_failure < MinimumDelayAfterFailedOverlay)
       new_overlay_state = kUsingSurfaceTexture;
   }
-
-  // If our frame is hidden, then don't use overlays.
-  if (current_state_.is_frame_hidden)
-    new_overlay_state = kUsingSurfaceTexture;
 
   // If an overlay is required, then choose one.  The only way we won't is if we
   // don't have a factory or our request fails.

@@ -136,6 +136,9 @@ This file contains the strings for ash.
       <message name="IDS_ASH_SHELF_APP_LIST_LAUNCHER_SYNCING_TITLE" desc="The title used for the Ash Launcher in the Shelf to indicate loading/syncinc apps.">
         Launcher (syncing apps...)
       </message>
+      <message name="IDS_ASH_SHELF_BACK_BUTTON_TITLE" desc="The title used for the back button on the Shelf, which is avaliable in tablet mode.">
+        Back
+      </message>
       <message name="IDS_ASH_SHELF_OVERFLOW_NAME" desc="The title used for the Ash overflow button in the shelf">
         Overflow button
       </message>
@@ -158,6 +161,7 @@ This file contains the strings for ash.
         Shelf
       </message>
 
+      <!-- Shelf buttons -->
       <message name="IDS_ASH_SHELF_SHUTDOWN_BUTTON" desc="Text shown on shutdown button on login/lock screen.">
         Shut down
       </message>
@@ -172,6 +176,12 @@ This file contains the strings for ash.
       </message>
       <message name="IDS_ASH_SHELF_CANCEL_BUTTON" desc="Text shown on cancel button on add user screen.">
         Cancel
+      </message>
+      <message name="IDS_ASH_BROWSE_AS_GUEST_BUTTON" desc="Text shown on Chrome OS sign-in screen button that launches guest session. Should be short.">
+        Browse as Guest
+      </message>
+      <message name="IDS_ASH_ADD_USER_BUTTON" desc="Text shown on an add user button on login/locker screen">
+        Add Person
       </message>
 
       <message name="IDS_ASH_KEYBOARD_OVERLAY_TITLE" desc="The title of the keyboard overlay.">
@@ -422,11 +432,11 @@ This file contains the strings for ash.
       <message name="IDS_ASH_USER_IS_SUPERVISED_BY_NOTICE" desc="Text for notifications showing that this user is supervised">
         Usage and history of this user can be reviewed by the manager (<ph name="MANAGER_EMAIL">$1<ex>user@example.com</ex></ph>) on chrome.com.
       </message>
-      <message name="IDS_ASH_CHILD_USER_IS_MANAGED_BY_ONE_PARENT_NOTICE" desc="Text for notifications showing that this child user is managed by parent's account.">
-        This is an account for kids managed by <ph name="MANAGER_EMAIL">$1<ex>user@example.com</ex></ph>
+      <message name="IDS_ASH_CHILD_USER_IS_MANAGED_BY_ONE_PARENT_NOTICE" desc="Text for notifications showing that this user is managed by parent's account.">
+        Account managed by <ph name="MANAGER_EMAIL">$1<ex>user@example.com</ex></ph>
       </message>
-      <message name="IDS_ASH_CHILD_USER_IS_MANAGED_BY_TWO_PARENTS_NOTICE" desc="Text for notifications showing that this child user is managed by two parents' accounts.">
-        This is an account for kids managed by <ph name="FIRST_PARENT_EMAIL">$1<ex>first@example.com</ex></ph> and <ph name="SECOND_PARENT_EMAIL">$2<ex>second@example.com</ex></ph>
+      <message name="IDS_ASH_CHILD_USER_IS_MANAGED_BY_TWO_PARENTS_NOTICE" desc="Text for notifications showing that this user is managed by two parents' accounts.">
+        Account managed by <ph name="FIRST_PARENT_EMAIL">$1<ex>first@example.com</ex></ph> and <ph name="SECOND_PARENT_EMAIL">$2<ex>second@example.com</ex></ph>
       </message>
 
       <message name="IDS_ASH_STATUS_TRAY_PREVIOUS_MENU" desc="The accessible text for header entries for detailed versions of status tray items.">
@@ -467,7 +477,7 @@ This file contains the strings for ash.
         These are your stylus tools
       </message>
       <message name="IDS_ASH_STYLUS_WARM_WELCOME_BUBBLE_DESCRIPTION" desc="The description of the bubble that pops up the first time a user uses a stylus. Describes what tools exist in the palette tray.">
-        Tap the stylus button on the shelf to take a note, screenshot, use the assistant, laser pointer, or magnifying glass.
+        Tap the stylus button on the shelf to take a note, screenshot, use the Google Assistant, laser pointer, or magnifying glass.
       </message>
       <message name="IDS_ASH_PALETTE_SETTINGS" desc="The label on the setting button used to open palette setting page.">
         Stylus settings
@@ -476,7 +486,10 @@ This file contains the strings for ash.
         The Google Assistant doesn’t speak this language.
       </message>
       <message name="IDS_ASH_VOICE_INTERACTION_SECONDARY_USER_TOAST_MESSAGE" desc="Message content on the toast that appears when the voice interaction shortcut is pressed but the active user profile is not the primary user profile.">
-        Assistant is only available for primary profile.
+        The Google Assistant is only available for primary profile.
+      </message>
+      <message name="IDS_ASH_VOICE_INTERACTION_DISABLED_BY_POLICY_MESSAGE" desc="Message content on the toast that appears when the voice interaction shortcut is pressed but the feature is disabled by enterprise policy.">
+        The Google Assistant is disabled by your administrator.
       </message>
 
       <message name="IDS_ASH_TOAST_DISMISS_BUTTON" desc="The text button shown in toasts to close the toast immediately without waiting timeout.">
@@ -879,6 +892,12 @@ This file contains the strings for ash.
       <message name="IDS_ASH_STATUS_TRAY_INITIALIZING_CELLULAR" desc="Message for the status area when initializing the cellular device.">
         Initializing...
       </message>
+      <message name="IDS_ASH_STATUS_TRAY_SIM_CARD_MISSING" desc="Message for the status area when a SIM card is missing.">
+        Missing SIM card
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_SIM_CARD_LOCKED" desc="Message for the status area when a SIM card is locked.">
+        SIM card is locked
+      </message>
       <message name="IDS_ASH_STATUS_TRAY_NETWORK_ACTIVATING" desc="Message for the network tray tooltip and network list when activating a network.">
         Activating <ph name="NAME">$1<ex>YBH Cellular</ex></ph>
       </message>
@@ -1084,7 +1103,7 @@ This file contains the strings for ash.
       <message name="IDS_ASH_SPLIT_VIEW_GUIDANCE" desc="Message that shows up on overview mode telling users where to drag the window to use split view.">
         Drag here to use split screen
       </message>
-      <message name="IDS_ASH_SPLIT_VIEW_CANNOT_SNAP" desc="Message that shows up on overview mode telling users the window they are trying to drag cannot be snapped and thus cannot be used in split view mode.">
+      <message name="IDS_ASH_SPLIT_VIEW_CANNOT_SNAP" desc="Message that shows up on overview mode telling users the window they are trying to drag cannot be snapped and thus cannot be used in split view mode. Also shows up on a toast when a user tries to enter split view mode with an application that cannot be used in split view mode.">
         App does not support split-screen.
       </message>
 
@@ -1125,6 +1144,10 @@ This file contains the strings for ash.
       <message name="IDS_ASH_LOGIN_POD_OWNER_USER" desc="Login/lock screen user pod menu title for a user who owns the device.">
         <ph name="USER_NAME">$1<ex>Ivan Arbuzov</ex></ph> (owner)
       </message>
+      <message name="IDS_ASH_LOGIN_POD_MENU_BUTTON_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the menu button of the user pod on the login screen.">
+        Options menu for <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
+      </message>
+
 
       <!-- Multi-profiles intro dialog -->
       <message name="IDS_ASH_MULTIPROFILES_INTRO_HEADLINE" desc="Describes which feature multi-profiles intro dialog presents.">
@@ -1175,6 +1198,9 @@ Subsequent notifications, windows and dialogs may be split between desktops.
       </message>
       <message name="IDS_ASH_MESSAGE_CENTER_SETTINGS_BUTTON_TOOLTIP" desc="The tooltip text for visiting the appropriate settings page in the footer of the message center.">
         Settings
+      </message>
+      <message name="IDS_ASH_MESSAGE_CENTER_COLLAPSE_BUTTON_TOOLTIP" desc="The tooltip text for closing notifier settings.">
+        Close settings
       </message>
       <message name="IDS_ASH_MESSAGE_CENTER_SETTINGS_TITLE" desc="The title for the message center's list of checkboxes that allows a user to enable/disable notifications from various sources.">
         Settings

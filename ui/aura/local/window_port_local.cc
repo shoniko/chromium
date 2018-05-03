@@ -71,7 +71,7 @@ void WindowPortLocal::OnDeviceScaleFactorChanged(
   if (last_device_scale_factor_ != new_device_scale_factor &&
       local_surface_id_.is_valid()) {
     last_device_scale_factor_ = new_device_scale_factor;
-    local_surface_id_ = local_surface_id_allocator_.GenerateId();
+    local_surface_id_ = parent_local_surface_id_allocator_.GenerateId();
     if (frame_sink_)
       frame_sink_->SetLocalSurfaceId(local_surface_id_);
   }
@@ -96,7 +96,7 @@ void WindowPortLocal::OnDidChangeBounds(const gfx::Rect& old_bounds,
                                         const gfx::Rect& new_bounds) {
   if (last_size_ != new_bounds.size() && local_surface_id_.is_valid()) {
     last_size_ = new_bounds.size();
-    local_surface_id_ = local_surface_id_allocator_.GenerateId();
+    local_surface_id_ = parent_local_surface_id_allocator_.GenerateId();
     if (frame_sink_)
       frame_sink_->SetLocalSurfaceId(local_surface_id_);
   }
@@ -128,8 +128,7 @@ WindowPortLocal::CreateLayerTreeFrameSink() {
   frame_sink->SetSurfaceChangedCallback(base::Bind(
       &WindowPortLocal::OnSurfaceChanged, weak_factory_.GetWeakPtr()));
   frame_sink_ = frame_sink->GetWeakPtr();
-  local_surface_id_ = local_surface_id_allocator_.GenerateId();
-  frame_sink->SetLocalSurfaceId(local_surface_id_);
+  AllocateLocalSurfaceId();
   if (window_->GetRootWindow())
     window_->layer()->GetCompositor()->AddFrameSink(frame_sink_id_);
   return std::move(frame_sink);
@@ -140,17 +139,16 @@ viz::SurfaceId WindowPortLocal::GetSurfaceId() const {
 }
 
 void WindowPortLocal::AllocateLocalSurfaceId() {
-  local_surface_id_ = local_surface_id_allocator_.GenerateId();
+  last_device_scale_factor_ = ui::GetScaleFactorForNativeView(window_);
+  last_size_ = window_->bounds().size();
+  local_surface_id_ = parent_local_surface_id_allocator_.GenerateId();
   if (frame_sink_)
     frame_sink_->SetLocalSurfaceId(local_surface_id_);
 }
 
 const viz::LocalSurfaceId& WindowPortLocal::GetLocalSurfaceId() {
-  if (!local_surface_id_.is_valid()) {
-    last_device_scale_factor_ = ui::GetScaleFactorForNativeView(window_);
-    last_size_ = window_->bounds().size();
-    local_surface_id_ = local_surface_id_allocator_.GenerateId();
-  }
+  if (!local_surface_id_.is_valid())
+    AllocateLocalSurfaceId();
   return local_surface_id_;
 }
 
@@ -179,7 +177,9 @@ void WindowPortLocal::OnSurfaceChanged(const viz::SurfaceInfo& surface_info) {
           ->GetFrameSinkManager()
           ->surface_manager()
           ->reference_factory();
-  window_->layer()->SetShowPrimarySurface(surface_info, reference_factory);
+  window_->layer()->SetShowPrimarySurface(surface_info.id(),
+                                          window_->bounds().size(),
+                                          SK_ColorWHITE, reference_factory);
   window_->layer()->SetFallbackSurfaceId(surface_info.id());
 }
 

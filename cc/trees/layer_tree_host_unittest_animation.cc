@@ -26,7 +26,6 @@
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/test/fake_picture_layer.h"
 #include "cc/test/layer_tree_test.h"
-#include "cc/test/mock_layer_client.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/transform_node.h"
 
@@ -428,41 +427,6 @@ class LayerTreeHostAnimationTestAnimationFinishedEvents
 SINGLE_AND_MULTI_THREAD_TEST_F(
     LayerTreeHostAnimationTestAnimationFinishedEvents);
 
-// Ensures that LayerClient::DidChangeLayerOpacity() is notified when an
-// animation changes the opacity of a Layer.
-class LayerTreeHostAnimationTestOpacityAnimationNotifiesClient
-    : public LayerTreeHostAnimationTest {
- public:
-  void BeginTest() override {
-    AttachPlayersToTimeline();
-    Layer* layer = layer_tree_host()->root_layer();
-    layer->SetLayerClient(&layer_client_);
-    player_->AttachElement(layer->element_id());
-    MainThreadTaskRunner()->PostTask(
-        FROM_HERE,
-        base::BindOnce(base::IgnoreResult(&AddOpacityTransitionToPlayer),
-                       base::Unretained(player_.get()), 0.0, 1.0f, 0.5f, true));
-    EXPECT_CALL(layer_client_, DidChangeLayerOpacity(1.0f, 0.5f));
-  }
-
-  void NotifyAnimationFinished(base::TimeTicks monotonic_time,
-                               int target_property,
-                               int group) override {
-    Animation* animation = player_->GetAnimation(TargetProperty::OPACITY);
-    if (animation)
-      player_->RemoveAnimation(animation->id());
-    EndTest();
-  }
-
-  void AfterTest() override {}
-
- private:
-  MockLayerClient layer_client_;
-};
-
-SINGLE_AND_MULTI_THREAD_TEST_F(
-    LayerTreeHostAnimationTestOpacityAnimationNotifiesClient);
-
 // Ensures that when opacity is being animated, this value does not cause the
 // subtree to be skipped.
 class LayerTreeHostAnimationTestDoNotSkipLayersWithAnimatedOpacity
@@ -504,7 +468,7 @@ class LayerTreeHostAnimationTestDoNotSkipLayersWithAnimatedOpacity
     EXPECT_EQ(1, update_check_layer_->update_count());
 
     // clear update_check_layer_ so LayerTreeHost dies.
-    update_check_layer_ = NULL;
+    update_check_layer_ = nullptr;
   }
 
  private:
@@ -610,7 +574,8 @@ class LayerTreeHostAnimationTestForceRedraw
       layer_tree_host()->SetNeedsAnimate();
   }
 
-  void UpdateLayerTreeHost() override {
+  void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) override {
     layer_tree_host()->SetNeedsCommitWithForcedRedraw();
   }
 
@@ -815,7 +780,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(
 class LayerTreeHostAnimationTestScrollOffsetAnimationTakeover
     : public LayerTreeHostAnimationTest {
  public:
-  LayerTreeHostAnimationTestScrollOffsetAnimationTakeover() {}
+  LayerTreeHostAnimationTestScrollOffsetAnimationTakeover() = default;
 
   void SetupTree() override {
     LayerTreeHostAnimationTest::SetupTree();
@@ -875,7 +840,7 @@ MULTI_THREAD_TEST_F(LayerTreeHostAnimationTestScrollOffsetAnimationTakeover);
 class LayerTreeHostAnimationTestScrollOffsetAnimationAdjusted
     : public LayerTreeHostAnimationTest {
  public:
-  LayerTreeHostAnimationTestScrollOffsetAnimationAdjusted() {}
+  LayerTreeHostAnimationTestScrollOffsetAnimationAdjusted() = default;
 
   void SetupTree() override {
     LayerTreeHostAnimationTest::SetupTree();
@@ -1915,7 +1880,8 @@ class LayerTreeHostAnimationTestSetPotentiallyAnimatingOnLacDestruction
 
   void DidCommit() override { PostSetNeedsCommitToMainThread(); }
 
-  void UpdateLayerTreeHost() override {
+  void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) override {
     if (layer_tree_host()->SourceFrameNumber() == 2) {
       // Destroy player.
       timeline_->DetachPlayer(player_.get());
@@ -1991,7 +1957,8 @@ class LayerTreeHostAnimationTestRebuildPropertyTreesOnAnimationSetNeedsCommit
       PostSetNeedsCommitToMainThread();
   }
 
-  void UpdateLayerTreeHost() override {
+  void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) override {
     if (layer_tree_host()->SourceFrameNumber() == 1) {
       EXPECT_FALSE(layer_tree_host()->property_trees()->needs_rebuild);
       AddAnimatedTransformToPlayer(player_child_.get(), 1.0, 5, 5);

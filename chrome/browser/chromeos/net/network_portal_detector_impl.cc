@@ -17,6 +17,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/net/network_portal_notification_controller.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/login/login_state.h"
@@ -24,7 +25,6 @@
 #include "chromeos/network/network_state_handler.h"
 #include "components/device_event_log/device_event_log.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/common/content_switches.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -219,6 +219,14 @@ NetworkPortalDetectorImpl::NetworkPortalDetectorImpl(
       weak_factory_(this) {
   NET_LOG(EVENT) << "NetworkPortalDetectorImpl::NetworkPortalDetectorImpl()";
   captive_portal_detector_.reset(new CaptivePortalDetector(request_context));
+
+  // Captive portal randomization can cause problems in some environemnts.
+  // Disable randomization by default by setting portal_test_url_.
+  // http://crbug.com/776409.
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableCaptivePortalRandomUrl)) {
+    portal_test_url_ = GURL(CaptivePortalDetector::kDefaultURL);
+  }
 
   if (create_notification_controller) {
     notification_controller_.reset(
@@ -465,6 +473,7 @@ void NetworkPortalDetectorImpl::StartAttempt() {
   const GURL test_url =
       !portal_test_url_.is_empty() ? portal_test_url_ : GetRandomizedTestURL();
   DCHECK(test_url.is_valid());
+  NET_LOG(EVENT) << "Starting captive portal detection with URL: " << test_url;
   captive_portal_detector_->DetectCaptivePortal(
       test_url,
       base::Bind(&NetworkPortalDetectorImpl::OnAttemptCompleted,
@@ -519,18 +528,7 @@ void NetworkPortalDetectorImpl::OnAttemptCompleted(
     attempt_completed_report_.Report();
   }
 
-  // If Chrome portal detection successfully returns portal state, mark the
-  // state so that Chrome won't schedule detection actively by self.
-  // The exception is when portal side session expires, shill doesn't report
-  // network connection state changed from online to portal. Thus we enable
-  // Chrome's detection by still marking |state_| to STATE_IDLE.
-  if (result == captive_portal::RESULT_BEHIND_CAPTIVE_PORTAL &&
-      response_code == 200 &&
-      (!network || network->connection_state() != shill::kStateOnline)) {
-    state_ = STATE_BEHIND_PORTAL_IDLE;
-  } else {
-    state_ = STATE_IDLE;
-  }
+  state_ = STATE_IDLE;
   attempt_timeout_.Cancel();
 
   CaptivePortalState state;

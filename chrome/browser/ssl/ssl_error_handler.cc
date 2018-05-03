@@ -5,6 +5,7 @@
 #include "chrome/browser/ssl/ssl_error_handler.h"
 
 #include <stdint.h>
+#include <memory>
 #include <unordered_set>
 #include <utility>
 
@@ -30,7 +31,6 @@
 #include "chrome/browser/ssl/ssl_error_assistant.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/browser_resources.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/prefs/pref_service.h"
 #include "components/security_interstitials/core/ssl_error_ui.h"
@@ -57,8 +57,6 @@
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #endif  // #if defined(OS_WIN)
 
-namespace {
-
 const base::Feature kMITMSoftwareInterstitial{"MITMSoftwareInterstitial",
                                               base::FEATURE_ENABLED_BY_DEFAULT};
 
@@ -68,9 +66,6 @@ const base::Feature kCaptivePortalInterstitial{
 const base::Feature kCaptivePortalCertificateList{
     "CaptivePortalCertificateList", base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kSSLCommonNameMismatchHandling{
-    "SSLCommonNameMismatchHandling", base::FEATURE_ENABLED_BY_DEFAULT};
-
 #if defined(OS_WIN)
 const base::Feature kSuperfishInterstitial{"SuperfishInterstitial",
                                            base::FEATURE_ENABLED_BY_DEFAULT};
@@ -78,6 +73,11 @@ const base::Feature kSuperfishInterstitial{"SuperfishInterstitial",
 const base::Feature kSuperfishInterstitial{"SuperfishInterstitial",
                                            base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
+
+namespace {
+
+const base::Feature kSSLCommonNameMismatchHandling{
+    "SSLCommonNameMismatchHandling", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Default delay in milliseconds before displaying the SSL interstitial.
 // This can be changed in tests.
@@ -102,10 +102,9 @@ bool IsSuperfish(const scoped_refptr<net::X509Certificate>& cert) {
       {0xB6, 0xFE, 0x91, 0x51, 0x40, 0x2B, 0xAD, 0x1C, 0x06, 0xD7, 0xE6,
        0x6D, 0xB6, 0x7A, 0x26, 0xAA, 0x73, 0x56, 0xF2, 0xE6, 0xC6, 0x44,
        0xDB, 0xCF, 0x9F, 0x98, 0x96, 0x8F, 0xF6, 0x32, 0xE1, 0xB7}};
-  for (const net::X509Certificate::OSCertHandle& intermediate :
-       cert->GetIntermediateCertificates()) {
+  for (const auto& intermediate : cert->intermediate_buffers()) {
     net::SHA256HashValue hash =
-        net::X509Certificate::CalculateFingerprint256(intermediate);
+        net::X509Certificate::CalculateFingerprint256(intermediate.get());
     if (hash == kSuperfishFingerprint) {
       return true;
     }
@@ -206,6 +205,11 @@ class ConfigSingleton {
   const std::string MatchKnownMITMSoftware(
       const scoped_refptr<net::X509Certificate> cert);
 
+  // Returns a DynamicInterstitialInfo that matches with |ssl_info|. If is no
+  // match, return null.
+  base::Optional<DynamicInterstitialInfo> MatchDynamicInterstitial(
+      const net::SSLInfo& ssl_info);
+
   // Testing methods:
   void ResetForTesting();
   void SetInterstitialDelayForTesting(const base::TimeDelta& delay);
@@ -262,7 +266,7 @@ ConfigSingleton::ConfigSingleton()
           base::TimeDelta::FromMilliseconds(kInterstitialDelayInMilliseconds)),
       is_enterprise_managed_for_testing_(ENTERPRISE_MANAGED_STATUS_NOT_SET),
       os_captive_portal_status_for_testing_(OS_CAPTIVE_PORTAL_STATUS_NOT_SET),
-      ssl_error_assistant_(base::MakeUnique<SSLErrorAssistant>()) {}
+      ssl_error_assistant_(std::make_unique<SSLErrorAssistant>()) {}
 
 base::TimeDelta ConfigSingleton::interstitial_delay() const {
   return interstitial_delay_;
@@ -381,6 +385,11 @@ const std::string ConfigSingleton::MatchKnownMITMSoftware(
   return ssl_error_assistant_->MatchKnownMITMSoftware(cert);
 }
 
+base::Optional<DynamicInterstitialInfo>
+ConfigSingleton::MatchDynamicInterstitial(const net::SSLInfo& ssl_info) {
+  return ssl_error_assistant_->MatchDynamicInterstitial(ssl_info);
+}
+
 class SSLErrorHandlerDelegateImpl : public SSLErrorHandler::Delegate {
  public:
   SSLErrorHandlerDelegateImpl(
@@ -393,7 +402,8 @@ class SSLErrorHandlerDelegateImpl : public SSLErrorHandler::Delegate {
       const GURL& request_url,
       std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
       const base::Callback<void(content::CertificateRequestResultType)>&
-          callback)
+          decision_callback,
+      SSLErrorHandler::BlockingPageReadyCallback blocking_page_ready_callback)
       : web_contents_(web_contents),
         ssl_info_(ssl_info),
         profile_(profile),
@@ -402,7 +412,9 @@ class SSLErrorHandlerDelegateImpl : public SSLErrorHandler::Delegate {
         is_superfish_(is_superfish),
         request_url_(request_url),
         ssl_cert_reporter_(std::move(ssl_cert_reporter)),
-        callback_(callback) {}
+        decision_callback_(decision_callback),
+        blocking_page_ready_callback_(std::move(blocking_page_ready_callback)) {
+  }
   ~SSLErrorHandlerDelegateImpl() override;
 
   // SSLErrorHandler::Delegate methods:
@@ -418,13 +430,18 @@ class SSLErrorHandlerDelegateImpl : public SSLErrorHandler::Delegate {
   void ShowCaptivePortalInterstitial(const GURL& landing_url) override;
   void ShowMITMSoftwareInterstitial(const std::string& mitm_software_name,
                                     bool is_enterprise_managed) override;
-  void ShowSSLInterstitial() override;
+  void ShowSSLInterstitial(const GURL& support_url) override;
   void ShowBadClockInterstitial(const base::Time& now,
                                 ssl_errors::ClockState clock_state) override;
 
  private:
+  // Calls the |blocking_page_ready_callback_| if it's not null, else calls
+  // Show() on the given interstitial.
+  void OnBlockingPageReady(
+      security_interstitials::SecurityInterstitialPage* interstitial_page);
+
   content::WebContents* web_contents_;
-  const net::SSLInfo& ssl_info_;
+  const net::SSLInfo ssl_info_;
   Profile* const profile_;
   const int cert_error_;
   const int options_mask_;
@@ -432,7 +449,9 @@ class SSLErrorHandlerDelegateImpl : public SSLErrorHandler::Delegate {
   const GURL request_url_;
   std::unique_ptr<CommonNameMismatchHandler> common_name_mismatch_handler_;
   std::unique_ptr<SSLCertReporter> ssl_cert_reporter_;
-  const base::Callback<void(content::CertificateRequestResultType)> callback_;
+  const base::Callback<void(content::CertificateRequestResultType)>
+      decision_callback_;
+  SSLErrorHandler::BlockingPageReadyCallback blocking_page_ready_callback_;
 };
 
 SSLErrorHandlerDelegateImpl::~SSLErrorHandlerDelegateImpl() {
@@ -492,39 +511,47 @@ bool SSLErrorHandlerDelegateImpl::IsErrorOverridable() const {
 void SSLErrorHandlerDelegateImpl::ShowCaptivePortalInterstitial(
     const GURL& landing_url) {
   // Show captive portal blocking page. The interstitial owns the blocking page.
-  (new CaptivePortalBlockingPage(web_contents_, request_url_, landing_url,
-                                 std::move(ssl_cert_reporter_), ssl_info_,
-                                 callback_))
-      ->Show();
+  OnBlockingPageReady(new CaptivePortalBlockingPage(
+      web_contents_, request_url_, landing_url, std::move(ssl_cert_reporter_),
+      ssl_info_, decision_callback_));
 }
 
 void SSLErrorHandlerDelegateImpl::ShowMITMSoftwareInterstitial(
     const std::string& mitm_software_name,
     bool is_enterprise_managed) {
   // Show MITM software blocking page. The interstitial owns the blocking page.
-  (new MITMSoftwareBlockingPage(
-       web_contents_, cert_error_, request_url_, std::move(ssl_cert_reporter_),
-       ssl_info_, mitm_software_name, is_enterprise_managed, callback_))
-      ->Show();
+  OnBlockingPageReady(new MITMSoftwareBlockingPage(
+      web_contents_, cert_error_, request_url_, std::move(ssl_cert_reporter_),
+      ssl_info_, mitm_software_name, is_enterprise_managed,
+      decision_callback_));
 }
 
-void SSLErrorHandlerDelegateImpl::ShowSSLInterstitial() {
+void SSLErrorHandlerDelegateImpl::ShowSSLInterstitial(const GURL& support_url) {
   // Show SSL blocking page. The interstitial owns the blocking page.
-  (SSLBlockingPage::Create(web_contents_, cert_error_, ssl_info_, request_url_,
-                           options_mask_, base::Time::NowFromSystemTime(),
-                           std::move(ssl_cert_reporter_), is_superfish_,
-                           callback_))
-      ->Show();
+  OnBlockingPageReady(SSLBlockingPage::Create(
+      web_contents_, cert_error_, ssl_info_, request_url_, options_mask_,
+      base::Time::NowFromSystemTime(), support_url,
+      std::move(ssl_cert_reporter_), is_superfish_, decision_callback_));
 }
 
 void SSLErrorHandlerDelegateImpl::ShowBadClockInterstitial(
     const base::Time& now,
     ssl_errors::ClockState clock_state) {
   // Show bad clock page. The interstitial owns the blocking page.
-  (new BadClockBlockingPage(web_contents_, cert_error_, ssl_info_, request_url_,
-                            now, clock_state, std::move(ssl_cert_reporter_),
-                            callback_))
-      ->Show();
+  OnBlockingPageReady(new BadClockBlockingPage(
+      web_contents_, cert_error_, ssl_info_, request_url_, now, clock_state,
+      std::move(ssl_cert_reporter_), decision_callback_));
+}
+
+void SSLErrorHandlerDelegateImpl::OnBlockingPageReady(
+    security_interstitials::SecurityInterstitialPage* interstitial_page) {
+  if (blocking_page_ready_callback_.is_null()) {
+    interstitial_page->Show();
+  } else {
+    std::move(blocking_page_ready_callback_)
+        .Run(std::unique_ptr<security_interstitials::SecurityInterstitialPage>(
+            interstitial_page));
+  }
 }
 
 int IsCertErrorFatal(int cert_error) {
@@ -563,11 +590,13 @@ void SSLErrorHandler::HandleSSLError(
     int cert_error,
     const net::SSLInfo& ssl_info,
     const GURL& request_url,
-    bool should_ssl_errors_be_fatal,
     bool expired_previous_decision,
     std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
     const base::Callback<void(content::CertificateRequestResultType)>&
-        callback) {
+        decision_callback,
+    base::OnceCallback<
+        void(std::unique_ptr<security_interstitials::SecurityInterstitialPage>)>
+        blocking_page_ready_callback) {
   DCHECK(!FromWebContents(web_contents));
 
   Profile* profile =
@@ -580,7 +609,7 @@ void SSLErrorHandler::HandleSSLError(
   bool is_superfish =
       base::FeatureList::IsEnabled(kSuperfishInterstitial) && is_superfish_cert;
   int options_mask = CalculateOptionsMask(
-      cert_error, hard_override_disabled, should_ssl_errors_be_fatal,
+      cert_error, hard_override_disabled, ssl_info.is_fatal_cert_error,
       is_superfish, expired_previous_decision);
 
   SSLErrorHandler* error_handler = new SSLErrorHandler(
@@ -588,8 +617,9 @@ void SSLErrorHandler::HandleSSLError(
           new SSLErrorHandlerDelegateImpl(
               web_contents, ssl_info, profile, cert_error, options_mask,
               is_superfish, request_url, std::move(ssl_cert_reporter),
-              callback)),
-      web_contents, profile, cert_error, ssl_info, request_url, callback);
+              decision_callback, std::move(blocking_page_ready_callback))),
+      web_contents, profile, cert_error, ssl_info, request_url,
+      decision_callback);
   web_contents->SetUserData(UserDataKey(), base::WrapUnique(error_handler));
   error_handler->StartHandlingError();
 }
@@ -665,7 +695,8 @@ SSLErrorHandler::SSLErrorHandler(
     int cert_error,
     const net::SSLInfo& ssl_info,
     const GURL& request_url,
-    const base::Callback<void(content::CertificateRequestResultType)>& callback)
+    const base::Callback<void(content::CertificateRequestResultType)>&
+        decision_callback)
     : content::WebContentsObserver(web_contents),
       delegate_(std::move(delegate)),
       web_contents_(web_contents),
@@ -673,7 +704,7 @@ SSLErrorHandler::SSLErrorHandler(
       cert_error_(cert_error),
       ssl_info_(ssl_info),
       request_url_(request_url),
-      callback_(callback),
+      decision_callback_(decision_callback),
       weak_ptr_factory_(this) {}
 
 SSLErrorHandler::~SSLErrorHandler() {
@@ -685,6 +716,13 @@ void SSLErrorHandler::StartHandlingError() {
   if (ssl_errors::ErrorInfo::NetErrorToErrorType(cert_error_) ==
       ssl_errors::ErrorInfo::CERT_DATE_INVALID) {
     HandleCertDateInvalidError();
+    return;
+  }
+
+  base::Optional<DynamicInterstitialInfo> dynamic_interstitial =
+      g_config.Pointer()->MatchDynamicInterstitial(ssl_info_);
+  if (dynamic_interstitial) {
+    ShowDynamicInterstitial(dynamic_interstitial.value());
     return;
   }
 
@@ -821,7 +859,7 @@ void SSLErrorHandler::ShowSSLInterstitial() {
   RecordUMA(delegate_->IsErrorOverridable()
                 ? SHOW_SSL_INTERSTITIAL_OVERRIDABLE
                 : SHOW_SSL_INTERSTITIAL_NONOVERRIDABLE);
-  delegate_->ShowSSLInterstitial();
+  delegate_->ShowSSLInterstitial(GURL());
   // Once an interstitial is displayed, no need to keep the handler around.
   // This is the equivalent of "delete this".
   web_contents_->RemoveUserData(UserDataKey());
@@ -835,6 +873,26 @@ void SSLErrorHandler::ShowBadClockInterstitial(
   // Once an interstitial is displayed, no need to keep the handler around.
   // This is the equivalent of "delete this".
   web_contents_->RemoveUserData(UserDataKey());
+}
+
+void SSLErrorHandler::ShowDynamicInterstitial(
+    const DynamicInterstitialInfo dynamic_interstitial) {
+  switch (dynamic_interstitial.interstitial_type) {
+    case chrome_browser_ssl::DynamicInterstitial::INTERSTITIAL_PAGE_NONE:
+      NOTREACHED();
+    case chrome_browser_ssl::DynamicInterstitial::INTERSTITIAL_PAGE_SSL:
+      delegate_->ShowSSLInterstitial(dynamic_interstitial.support_url);
+      return;
+    case chrome_browser_ssl::DynamicInterstitial::
+        INTERSTITIAL_PAGE_CAPTIVE_PORTAL:
+      delegate_->ShowCaptivePortalInterstitial(GURL());
+      return;
+    case chrome_browser_ssl::DynamicInterstitial::
+        INTERSTITIAL_PAGE_MITM_SOFTWARE:
+      // TODO(spqchan): Implement support for MitM dynamic interstitials.
+      NOTREACHED();
+      return;
+  }
 }
 
 void SSLErrorHandler::CommonNameMismatchHandlerCallback(
@@ -893,8 +951,8 @@ void SSLErrorHandler::NavigationStopped() {
 void SSLErrorHandler::DeleteSSLErrorHandler() {
   // Need to explicity deny the certificate via the callback, otherwise memory
   // is leaked.
-  if (!callback_.is_null()) {
-    base::ResetAndReturn(&callback_)
+  if (!decision_callback_.is_null()) {
+    base::ResetAndReturn(&decision_callback_)
         .Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_DENY);
   }
   delegate_.reset();

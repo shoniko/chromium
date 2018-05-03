@@ -4,21 +4,24 @@
 
 #import "ios/chrome/browser/ui/settings/save_passwords_collection_view_controller.h"
 
+#import <UIKit/UIKit.h>
+
 #include "base/ios/ios_util.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/keyed_service/core/service_access_type.h"
+#include "components/password_manager/core/browser/password_list_sorter.h"
 #include "components/password_manager/core/browser/password_manager_constants.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "components/password_manager/core/browser/password_ui_utils.h"
+#include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
@@ -54,6 +57,7 @@ typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierSavePasswordsSwitch,
   SectionIdentifierSavedPasswords,
   SectionIdentifierBlacklist,
+  SectionIdentifierExportPasswordsButton,
 };
 
 typedef NS_ENUM(NSInteger, ItemType) {
@@ -62,6 +66,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeSavePasswordsSwitch,
   ItemTypeSavedPassword,  // This is a repeated item type.
   ItemTypeBlacklisted,    // This is a repeated item type.
+  ItemTypeExportPasswordsButton,
 };
 
 }  // namespace
@@ -114,6 +119,8 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   PrefBackedBoolean* passwordManagerEnabled_;
   // The item related to the switch for the password manager setting.
   CollectionViewSwitchItem* savePasswordsItem_;
+  // The item related to the button for exporting passwords.
+  CollectionViewTextItem* exportPasswordsItem_;
   // The interface for getting and manipulating a user's saved passwords.
   scoped_refptr<password_manager::PasswordStore> passwordStore_;
   // A helper object for passing data about saved passwords from a finished
@@ -128,10 +135,10 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   std::vector<std::unique_ptr<autofill::PasswordForm>> savedForms_;
   // The list of the user's blacklisted sites.
   std::vector<std::unique_ptr<autofill::PasswordForm>> blacklistedForms_;
-  // Deletion of password being asynchronous, and the method taking a reference
-  // to the PasswordForm, the PasswordForm must outlive the calls to
-  // RemoveLogin. This vector will ensure this.
-  std::vector<std::unique_ptr<autofill::PasswordForm>> deletedForms_;
+  // Map containing duplicates of saved passwords.
+  password_manager::DuplicatesMap savedPasswordDuplicates_;
+  // Map containing duplicates of blacklisted passwords.
+  password_manager::DuplicatesMap blacklistedPasswordDuplicates_;
   // The current Chrome browser state.
   ios::ChromeBrowserState* browserState_;
   // Object storing the time of the previous successful re-authentication.
@@ -142,9 +149,14 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   // Module containing the reauthentication mechanism for viewing and copying
   // passwords.
   ReauthenticationModule* reauthenticationModule_;
+  // Boolean containing whether the export button and functionality are enabled
+  // or not.
+  BOOL exportEnabled_;
 }
+
 // Kick off async request to get logins from password store.
 - (void)getLoginsFromPasswordStore;
+
 @end
 
 @implementation SavePasswordsCollectionViewController
@@ -219,6 +231,7 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
           toSectionWithIdentifier:SectionIdentifierSavedPasswords];
     }
   }
+
   if (!blacklistedForms_.empty()) {
     [model addSectionWithIdentifier:SectionIdentifierBlacklist];
     CollectionViewTextItem* headerItem =
@@ -233,6 +246,25 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
           toSectionWithIdentifier:SectionIdentifierBlacklist];
     }
   }
+
+  if (base::FeatureList::IsEnabled(
+          password_manager::features::kPasswordExport)) {
+    // Export passwords button.
+    [model addSectionWithIdentifier:SectionIdentifierExportPasswordsButton];
+    exportPasswordsItem_ = [self exportPasswordsItem];
+    [model addItem:exportPasswordsItem_
+        toSectionWithIdentifier:SectionIdentifierExportPasswordsButton];
+    [self updateExportPasswordsItem];
+  }
+}
+
+- (BOOL)shouldShowEditButton {
+  return YES;
+}
+
+- (BOOL)editButtonEnabled {
+  DCHECK([self shouldShowEditButton]);
+  return !savedForms_.empty() || !blacklistedForms_.empty();
 }
 
 #pragma mark - Items
@@ -257,6 +289,15 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   savePasswordsItem.on = [passwordManagerEnabled_ value];
   savePasswordsItem.accessibilityIdentifier = @"savePasswordsItem_switch";
   return savePasswordsItem;
+}
+
+- (CollectionViewTextItem*)exportPasswordsItem {
+  CollectionViewTextItem* exportPasswordsItem = [[CollectionViewTextItem alloc]
+      initWithType:ItemTypeExportPasswordsButton];
+  exportPasswordsItem.text = l10n_util::GetNSString(IDS_IOS_EXPORT_PASSWORDS);
+  exportPasswordsItem.accessibilityIdentifier = @"exportPasswordsItem_button";
+  exportPasswordsItem.accessibilityTraits = UIAccessibilityTraitButton;
+  return exportPasswordsItem;
 }
 
 - (SavedFormContentItem*)savedFormItemWithForm:(autofill::PasswordForm*)form {
@@ -377,10 +418,6 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 
   // Update the cell.
   [self reconfigureCellsForItems:@[ savePasswordsItem_ ]];
-
-  // Update the edit button.
-  [self.editor setEditing:NO];
-  [self updateEditButton];
 }
 
 #pragma mark - Actions
@@ -391,10 +428,6 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 
   // Update the item.
   savePasswordsItem_.on = [passwordManagerEnabled_ value];
-
-  // Update the edit button.
-  [self.editor setEditing:NO];
-  [self updateEditButton];
 }
 
 #pragma mark - Private methods
@@ -412,24 +445,57 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
     (const std::vector<std::unique_ptr<autofill::PasswordForm>>&)result {
   for (auto it = result.begin(); it != result.end(); ++it) {
     // PasswordForm is needed when user wants to delete the site/password.
-    auto form = base::MakeUnique<autofill::PasswordForm>(**it);
+    auto form = std::make_unique<autofill::PasswordForm>(**it);
     if (form->blacklisted_by_user)
       blacklistedForms_.push_back(std::move(form));
     else
       savedForms_.push_back(std::move(form));
   }
 
+  password_manager::SortEntriesAndHideDuplicates(
+      &savedForms_, &savedPasswordDuplicates_,
+      password_manager::PasswordEntryType::SAVED);
+  password_manager::SortEntriesAndHideDuplicates(
+      &blacklistedForms_, &blacklistedPasswordDuplicates_,
+      password_manager::PasswordEntryType::BLACKLISTED);
+
   [self updateEditButton];
   [self reloadData];
 }
 
-- (BOOL)shouldShowEditButton {
-  return [passwordManagerEnabled_ value];
+- (void)updateExportPasswordsItem {
+  if (savedForms_.empty()) {
+    exportPasswordsItem_.textColor = [[MDCPalette greyPalette] tint500];
+    exportPasswordsItem_.accessibilityTraits = UIAccessibilityTraitNotEnabled;
+    [self reconfigureCellsForItems:@[ exportPasswordsItem_ ]];
+    exportEnabled_ = NO;
+  } else {
+    exportEnabled_ = YES;
+  }
 }
 
-- (BOOL)editButtonEnabled {
-  DCHECK([self shouldShowEditButton]);
-  return !savedForms_.empty() || !blacklistedForms_.empty();
+- (void)startPasswordsExportFlow {
+  UIAlertController* exportConfirmation = [UIAlertController
+      alertControllerWithTitle:nil
+                       message:l10n_util::GetNSString(
+                                   IDS_IOS_EXPORT_PASSWORDS_ALERT_MESSAGE)
+                preferredStyle:UIAlertControllerStyleActionSheet];
+  UIAlertAction* cancelAction =
+      [UIAlertAction actionWithTitle:l10n_util::GetNSString(
+                                         IDS_IOS_EXPORT_PASSWORDS_CANCEL_BUTTON)
+                               style:UIAlertActionStyleCancel
+                             handler:nil];
+  [exportConfirmation addAction:cancelAction];
+
+  // TODO(crbug.com/789122): Ask for password serialization
+  // and wire re-authentication.
+  UIAlertAction* exportAction = [UIAlertAction
+      actionWithTitle:l10n_util::GetNSString(IDS_IOS_EXPORT_PASSWORDS)
+                style:UIAlertActionStyleDefault
+              handler:nil];
+  [exportConfirmation addAction:exportAction];
+
+  [self presentViewController:exportConfirmation animated:YES completion:nil];
 }
 
 #pragma mark UICollectionViewDelegate
@@ -476,6 +542,15 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
                 blacklistedForms_.size());
       [self openDetailedViewForForm:*blacklistedForms_[indexPath.item]];
       break;
+    case ItemTypeExportPasswordsButton:
+      DCHECK_EQ(SectionIdentifierExportPasswordsButton,
+                [model sectionIdentifierForSection:indexPath.section]);
+      DCHECK(base::FeatureList::IsEnabled(
+          password_manager::features::kPasswordExport));
+      if (exportEnabled_) {
+        [self startPasswordsExportFlow];
+      }
+      break;
     default:
       NOTREACHED();
   }
@@ -511,12 +586,26 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
     // Adjust index to account for deleted items.
     formIndex -= blacklisted ? blacklistedDeleted : passwordsDeleted;
     auto& forms = blacklisted ? blacklistedForms_ : savedForms_;
+    auto& duplicates =
+        blacklisted ? blacklistedPasswordDuplicates_ : savedPasswordDuplicates_;
+    password_manager::PasswordEntryType entryType =
+        blacklisted ? password_manager::PasswordEntryType::BLACKLISTED
+                    : password_manager::PasswordEntryType::SAVED;
+
     DCHECK_LT(formIndex, forms.size());
     auto formIterator = forms.begin() + formIndex;
+
     std::unique_ptr<autofill::PasswordForm> form = std::move(*formIterator);
+    std::string key = password_manager::CreateSortKey(*form, entryType);
+    auto duplicatesRange = duplicates.equal_range(key);
+    for (auto iterator = duplicatesRange.first;
+         iterator != duplicatesRange.second; ++iterator) {
+      passwordStore_->RemoveLogin(*(iterator->second));
+    }
+    duplicates.erase(key);
+
     forms.erase(formIterator);
     passwordStore_->RemoveLogin(*form);
-    deletedForms_.push_back(std::move(form));
     if (blacklisted) {
       ++blacklistedDeleted;
     } else {
@@ -562,9 +651,13 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
         if (!strongSelf)
           return;
         if (![strongSelf editButtonEnabled]) {
-          [strongSelf setEditing:NO];
+          [strongSelf.editor setEditing:NO];
         }
         [strongSelf updateEditButton];
+        if (base::FeatureList::IsEnabled(
+                password_manager::features::kPasswordExport)) {
+          [strongSelf updateExportPasswordsItem];
+        }
       }];
 }
 
@@ -572,12 +665,33 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 
 - (void)deletePassword:(const autofill::PasswordForm&)form {
   passwordStore_->RemoveLogin(form);
-  for (auto it = savedForms_.begin(); it != savedForms_.end(); ++it) {
-    if (**it == form) {
-      savedForms_.erase(it);
-      break;
-    }
+
+  std::vector<std::unique_ptr<autofill::PasswordForm>>& forms =
+      form.blacklisted_by_user ? blacklistedForms_ : savedForms_;
+  auto iterator = std::find_if(
+      forms.begin(), forms.end(),
+      [&form](const std::unique_ptr<autofill::PasswordForm>& value) {
+        return *value == form;
+      });
+  DCHECK(iterator != forms.end());
+  forms.erase(iterator);
+
+  password_manager::DuplicatesMap& duplicates =
+      form.blacklisted_by_user ? blacklistedPasswordDuplicates_
+                               : savedPasswordDuplicates_;
+  password_manager::PasswordEntryType entryType =
+      form.blacklisted_by_user
+          ? password_manager::PasswordEntryType::BLACKLISTED
+          : password_manager::PasswordEntryType::SAVED;
+  std::string key = password_manager::CreateSortKey(form, entryType);
+  auto duplicatesRange = duplicates.equal_range(key);
+  for (auto iterator = duplicatesRange.first;
+       iterator != duplicatesRange.second; ++iterator) {
+    passwordStore_->RemoveLogin(*(iterator->second));
   }
+  duplicates.erase(key);
+
+  [self updateEditButton];
   [self reloadData];
   [self.navigationController popViewControllerAnimated:YES];
 }

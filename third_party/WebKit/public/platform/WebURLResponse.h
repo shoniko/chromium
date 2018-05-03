@@ -61,7 +61,7 @@ class WebURLResponse {
   };
 
   struct SignedCertificateTimestamp {
-    SignedCertificateTimestamp() {}
+    SignedCertificateTimestamp() = default;
     SignedCertificateTimestamp(WebString status,
                                WebString origin,
                                WebString log_description,
@@ -139,7 +139,7 @@ class WebURLResponse {
 
   class ExtraData {
    public:
-    virtual ~ExtraData() {}
+    virtual ~ExtraData() = default;
   };
 
   BLINK_PLATFORM_EXPORT ~WebURLResponse();
@@ -202,6 +202,7 @@ class WebURLResponse {
   BLINK_PLATFORM_EXPORT void SetSecurityStyle(WebSecurityStyle);
 
   BLINK_PLATFORM_EXPORT void SetSecurityDetails(const WebSecurityDetails&);
+  BLINK_PLATFORM_EXPORT WebSecurityDetails SecurityDetailsForTesting();
 
 #if INSIDE_BLINK
   BLINK_PLATFORM_EXPORT const ResourceResponse& ToResourceResponse() const;
@@ -218,9 +219,6 @@ class WebURLResponse {
   // ServiceWorkerResponseInfo::was_fetched_via_service_worker() for details.
   BLINK_PLATFORM_EXPORT bool WasFetchedViaServiceWorker() const;
   BLINK_PLATFORM_EXPORT void SetWasFetchedViaServiceWorker(bool);
-
-  // Flag whether this request was loaded using a foreign fetch service worker.
-  BLINK_PLATFORM_EXPORT void SetWasFetchedViaForeignFetch(bool);
 
   // Flag whether the fallback request with skip service worker flag was
   // required. See ServiceWorkerResponseInfo::was_fallback_required() for

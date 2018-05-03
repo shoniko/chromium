@@ -31,8 +31,6 @@
 #include "core/layout/LayoutScrollbarPart.h"
 #include "core/layout/LayoutScrollbarTheme.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/api/LayoutAPIShim.h"
-#include "core/layout/api/LayoutEmbeddedContentItem.h"
 #include "core/paint/ObjectPaintInvalidator.h"
 #include "platform/graphics/GraphicsContext.h"
 
@@ -65,10 +63,10 @@ LayoutScrollbar::LayoutScrollbar(ScrollableArea* scrollable_area,
   if (LayoutScrollbarPart* part = parts_.at(kScrollbarBGPart)) {
     part->UpdateLayout();
     rect.SetSize(FlooredIntSize(part->Size()));
-  } else if (this->Orientation() == kHorizontalScrollbar) {
-    rect.SetWidth(this->Width());
+  } else if (Orientation() == kHorizontalScrollbar) {
+    rect.SetWidth(Width());
   } else {
-    rect.SetHeight(this->Height());
+    rect.SetHeight(Height());
   }
 
   SetFrameRect(rect);
@@ -391,7 +389,7 @@ void LayoutScrollbar::InvalidateDisplayItemClientsOfScrollbarParts() {
 void LayoutScrollbar::SetVisualRect(const LayoutRect& rect) {
   Scrollbar::SetVisualRect(rect);
   for (auto& part : parts_)
-    part.value->SetVisualRect(rect);
+    part.value->GetMutableForPainting().FirstFragment().SetVisualRect(rect);
 }
 
 }  // namespace blink

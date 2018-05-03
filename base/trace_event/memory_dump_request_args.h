@@ -62,9 +62,8 @@ enum class MemoryDumpLevelOfDetail : uint32_t {
   LAST = DETAILED
 };
 
-// Initial request arguments for a global memory dump. (see
-// MemoryDumpManager::RequestGlobalMemoryDump()). Keep this consistent with
-// memory_instrumentation.mojo and memory_instrumentation_struct_traits.{h,cc}
+// Keep this consistent with memory_instrumentation.mojo and
+// memory_instrumentation_struct_traits.{h,cc}
 struct BASE_EXPORT MemoryDumpRequestArgs {
   // Globally unique identifier. In multi-process dumps, all processes issue a
   // local dump with the same guid. This allows the trace importers to

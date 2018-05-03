@@ -17,6 +17,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/default_clock.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/indexed_db/indexed_db_factory_impl.h"
 #include "content/browser/indexed_db/indexed_db_leveldb_coding.h"
@@ -37,8 +38,8 @@ using base::ASCIIToUTF16;
 using url::Origin;
 
 namespace content {
+namespace indexed_db_backing_store_unittest {
 
-namespace {
 static const size_t kDefaultMaxOpenIteratorsPerDatabase = 50;
 
 // Write |content| to |file|. Returns true on success.
@@ -89,7 +90,7 @@ class TestableIndexedDBBackingStore : public IndexedDBBackingStore {
     DCHECK(!path_base.empty());
 
     std::unique_ptr<LevelDBComparator> comparator =
-        base::MakeUnique<Comparator>();
+        std::make_unique<Comparator>();
 
     if (!base::CreateDirectory(path_base)) {
       *status = leveldb::Status::IOError("Unable to create base dir");
@@ -193,7 +194,7 @@ class TestableIndexedDBBackingStore : public IndexedDBBackingStore {
 class TestIDBFactory : public IndexedDBFactoryImpl {
  public:
   explicit TestIDBFactory(IndexedDBContextImpl* idb_context)
-      : IndexedDBFactoryImpl(idb_context) {}
+      : IndexedDBFactoryImpl(idb_context, base::DefaultClock::GetInstance()) {}
 
   scoped_refptr<TestableIndexedDBBackingStore> OpenBackingStoreForTest(
       const Origin& origin,
@@ -508,7 +509,7 @@ TEST_F(IndexedDBBackingStoreTestWithBlobs, PutGetConsistencyWithBlobs) {
           [](IndexedDBBackingStoreTestWithBlobs* test, TestState* state) {
             // Initiate transaction1 - writing blobs.
             state->transaction1 =
-                base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                std::make_unique<IndexedDBBackingStore::Transaction>(
                     test->backing_store());
             state->transaction1->Begin();
             std::vector<std::unique_ptr<storage::BlobDataHandle>> handles;
@@ -559,7 +560,7 @@ TEST_F(IndexedDBBackingStoreTestWithBlobs, PutGetConsistencyWithBlobs) {
 
             // Initiate transaction3, deleting blobs.
             state->transaction3 =
-                base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                std::make_unique<IndexedDBBackingStore::Transaction>(
                     test->backing_store());
             state->transaction3->Begin();
             EXPECT_TRUE(test->backing_store()
@@ -637,7 +638,7 @@ TEST_F(IndexedDBBackingStoreTest, DeleteRange) {
 
               // Initiate transaction1 - write records.
               state->transaction1 =
-                  base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                  std::make_unique<IndexedDBBackingStore::Transaction>(
                       backing_store);
               state->transaction1->Begin();
               std::vector<std::unique_ptr<storage::BlobDataHandle>> handles;
@@ -673,7 +674,7 @@ TEST_F(IndexedDBBackingStoreTest, DeleteRange) {
 
               // Initiate transaction 2 - delete range.
               state->transaction2 =
-                  base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                  std::make_unique<IndexedDBBackingStore::Transaction>(
                       backing_store);
               state->transaction2->Begin();
               IndexedDBValue result_value;
@@ -762,7 +763,7 @@ TEST_F(IndexedDBBackingStoreTest, DeleteRangeEmptyRange) {
 
               // Initiate transaction1 - write records.
               state->transaction1 =
-                  base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                  std::make_unique<IndexedDBBackingStore::Transaction>(
                       backing_store);
               state->transaction1->Begin();
 
@@ -798,7 +799,7 @@ TEST_F(IndexedDBBackingStoreTest, DeleteRangeEmptyRange) {
 
               // Initiate transaction 2 - delete range.
               state->transaction2 =
-                  base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                  std::make_unique<IndexedDBBackingStore::Transaction>(
                       backing_store);
               state->transaction2->Begin();
               IndexedDBValue result_value;
@@ -847,7 +848,7 @@ TEST_F(IndexedDBBackingStoreTestWithBlobs, BlobJournalInterleavedTransactions) {
           [](IndexedDBBackingStoreTestWithBlobs* test, TestState* state) {
             // Initiate transaction1.
             state->transaction1 =
-                base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                std::make_unique<IndexedDBBackingStore::Transaction>(
                     test->backing_store());
             state->transaction1->Begin();
             std::vector<std::unique_ptr<storage::BlobDataHandle>> handles1;
@@ -876,7 +877,7 @@ TEST_F(IndexedDBBackingStoreTestWithBlobs, BlobJournalInterleavedTransactions) {
 
             // Initiate transaction2.
             state->transaction2 =
-                base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                std::make_unique<IndexedDBBackingStore::Transaction>(
                     test->backing_store());
             state->transaction2->Begin();
             std::vector<std::unique_ptr<storage::BlobDataHandle>> handles2;
@@ -928,7 +929,7 @@ TEST_F(IndexedDBBackingStoreTestWithBlobs, LiveBlobJournal) {
       base::BindOnce(
           [](IndexedDBBackingStoreTestWithBlobs* test, TestState* state) {
             state->transaction1 =
-                base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                std::make_unique<IndexedDBBackingStore::Transaction>(
                     test->backing_store());
             state->transaction1->Begin();
             std::vector<std::unique_ptr<storage::BlobDataHandle>> handles;
@@ -978,7 +979,7 @@ TEST_F(IndexedDBBackingStoreTestWithBlobs, LiveBlobJournal) {
             }
 
             state->transaction3 =
-                base::MakeUnique<IndexedDBBackingStore::Transaction>(
+                std::make_unique<IndexedDBBackingStore::Transaction>(
                     test->backing_store());
             state->transaction3->Begin();
             EXPECT_TRUE(test->backing_store()
@@ -1323,9 +1324,6 @@ TEST_F(IndexedDBBackingStoreTest, GetDatabaseNames) {
   RunAllTasksUntilIdle();
 }
 
-}  // namespace
-
-// Not in the anonymous namespace to friend IndexedDBBackingStore.
 TEST_F(IndexedDBBackingStoreTest, ReadCorruptionInfo) {
   // No |path_base|.
   std::string message;
@@ -1416,4 +1414,5 @@ TEST_F(IndexedDBBackingStoreTest, ReadCorruptionInfo) {
   EXPECT_EQ("foo", message);
 }
 
+}  // namespace indexed_db_backing_store_unittest
 }  // namespace content

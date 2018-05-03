@@ -13,9 +13,12 @@ namespace blink {
 class MODULES_EXPORT ModulesInitializer : public CoreInitializer {
  public:
   void Initialize() override;
+  void RegisterInterfaces(service_manager::BinderRegistry&) override;
 
  protected:
   void InitLocalFrame(LocalFrame&) const override;
+  void OnClearWindowObjectInMainWorld(Document&,
+                                      const Settings&) const override;
 
  private:
   void InstallSupplements(LocalFrame&) const override;
@@ -28,10 +31,6 @@ class MODULES_EXPORT ModulesInitializer : public CoreInitializer {
                                  InspectorDOMAgent*,
                                  InspectedFrames*,
                                  Page*) const override;
-  LinkResource* CreateServiceWorkerLinkResource(
-      HTMLLinkElement*) const override;
-  void OnClearWindowObjectInMainWorld(Document&,
-                                      const Settings&) const override;
   std::unique_ptr<WebMediaPlayer> CreateWebMediaPlayer(
       WebFrameClient*,
       HTMLMediaElement&,
@@ -41,8 +40,6 @@ class MODULES_EXPORT ModulesInitializer : public CoreInitializer {
   WebRemotePlaybackClient* CreateWebRemotePlaybackClient(
       HTMLMediaElement&) const override;
 
-  void ProvideCredentialManagerClient(Page&, WebCredentialManagerClient*)
-      const override;
   void ProvideModulesToPage(Page&, WebViewClient*) const override;
   void ForceNextWebGLContextCreationToFail() const override;
 

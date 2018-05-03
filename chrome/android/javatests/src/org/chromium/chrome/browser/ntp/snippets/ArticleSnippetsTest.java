@@ -29,7 +29,6 @@ import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.Callback;
-import org.chromium.base.CommandLine;
 import org.chromium.base.DiscardableReferencePool;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.params.ParameterAnnotations.ClassParameter;
@@ -41,13 +40,14 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.favicon.IconType;
 import org.chromium.chrome.browser.favicon.LargeIconBridge;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
 import org.chromium.chrome.browser.ntp.cards.SignInPromo;
 import org.chromium.chrome.browser.ntp.cards.SuggestionsCategoryInfo;
-import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.signin.DisplayableProfileData;
 import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninPromoController;
@@ -70,6 +70,7 @@ import org.chromium.chrome.browser.widget.displaystyle.VerticalDisplayStyle;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.chrome.test.util.RenderTestRule;
+import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.chrome.test.util.browser.compositor.layouts.DisableChromeAnimations;
 import org.chromium.chrome.test.util.browser.suggestions.DummySuggestionsEventReporter;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
@@ -87,8 +88,7 @@ import java.util.Locale;
  */
 @RunWith(ParameterizedRunner.class)
 @UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ArticleSnippetsTest {
     @Rule
     public SuggestionsDependenciesRule mSuggestionsDeps = new SuggestionsDependenciesRule();
@@ -141,13 +141,12 @@ public class ArticleSnippetsTest {
     @Before
     public void setUp() throws Exception {
         if (mChromeHomeEnabled) {
-            CommandLine.getInstance().appendSwitch("enable-features=ChromeHome");
+            Features.getInstance().enable(ChromeFeatureList.CHROME_HOME);
         } else {
-            CommandLine.getInstance().appendSwitch("disable-features=ChromeHome");
+            Features.getInstance().disable(ChromeFeatureList.CHROME_HOME);
         }
 
         mActivityTestRule.startMainActivityOnBlankPage();
-        ChromePreferenceManager.getInstance().setNewTabPageGenericSigninPromoDismissed(true);
         mThumbnailProvider = new MockThumbnailProvider();
         mSnippetsSource = new FakeSuggestionsSource();
         mSuggestionsDeps.getFactory().thumbnailProvider = mThumbnailProvider;
@@ -185,8 +184,6 @@ public class ArticleSnippetsTest {
 
             mSuggestion = new SnippetArticleViewHolder(mRecyclerView, mContextMenuManager,
                     mUiDelegate, mUiConfig, /* offlinePageBridge = */ null);
-            mSigninPromo = new SignInPromo.GenericPromoViewHolder(
-                    mRecyclerView, mContextMenuManager, mUiConfig);
         });
     }
 
@@ -367,21 +364,6 @@ public class ArticleSnippetsTest {
     @Test
     @MediumTest
     @Feature({"ArticleSnippets", "RenderTest"})
-    public void testGenericSigninPromo() throws IOException {
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            mRecyclerView.init(mUiConfig, null);
-            mRecyclerView.setAdapter(null);
-            mSigninPromo = new SignInPromo.GenericPromoViewHolder(mRecyclerView, null, mUiConfig);
-            ((SignInPromo.GenericPromoViewHolder) mSigninPromo)
-                    .onBindViewHolder(new SignInPromo.GenericSigninPromoData());
-            mContentView.addView(mSigninPromo.itemView);
-        });
-        mRenderTestRule.render(mSigninPromo.itemView, "signin_promo");
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"ArticleSnippets", "RenderTest"})
     public void testPersonalizedSigninPromosNoAccounts() throws IOException {
         ThreadUtils.runOnUiThreadBlocking(() -> {
             createPersonalizedSigninPromo(null);
@@ -471,6 +453,9 @@ public class ArticleSnippetsTest {
         }
 
         @Override
+        public void removeThumbnailsFromDisk(String contentId) {}
+
+        @Override
         public void cancelRetrieval(ThumbnailRequest request) {
             boolean removed = mRequests.remove(request);
             Assert.assertTrue(
@@ -557,7 +542,7 @@ public class ArticleSnippetsTest {
             ThreadUtils.postOnUiThread(() -> {
                 // Return an arbitrary drawable.
                 callback.onLargeIconAvailable(
-                        getBitmap(R.drawable.star_green), largeIconSizePx, true);
+                        getBitmap(R.drawable.star_green), largeIconSizePx, true, IconType.INVALID);
             });
         }
     }

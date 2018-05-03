@@ -39,6 +39,7 @@
 namespace {
 
 using base::trace_event::MemoryDumpType;
+using memory_instrumentation::GlobalMemoryDump;
 using memory_instrumentation::mojom::ProcessType;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -75,9 +76,8 @@ class ProcessMemoryMetricsEmitterFake : public ProcessMemoryMetricsEmitter {
  private:
   ~ProcessMemoryMetricsEmitterFake() override {}
 
-  void ReceivedMemoryDump(
-      bool success,
-      memory_instrumentation::mojom::GlobalMemoryDumpPtr ptr) override {
+  void ReceivedMemoryDump(bool success,
+                          std::unique_ptr<GlobalMemoryDump> ptr) override {
     EXPECT_TRUE(success);
     ProcessMemoryMetricsEmitter::ReceivedMemoryDump(success, std::move(ptr));
     finished_memory_dump_ = true;
@@ -140,8 +140,10 @@ void CheckAllMemoryMetrics(const base::HistogramTester& histogram_tester,
                            int count,
                            int number_of_renderer_processes = 1u,
                            int number_of_extenstion_processes = 0u) {
+#if !defined(OS_WIN)
   CheckMemoryMetric("Memory.Experimental.Browser2.Malloc", histogram_tester,
                     count, true);
+#endif
 #if !defined(OS_MACOSX)
   CheckMemoryMetric("Memory.Experimental.Browser2.Resident", histogram_tester,
                     count, true);
@@ -149,8 +151,10 @@ void CheckAllMemoryMetrics(const base::HistogramTester& histogram_tester,
   CheckMemoryMetric("Memory.Experimental.Browser2.PrivateMemoryFootprint",
                     histogram_tester, count, true);
   if (number_of_renderer_processes) {
+#if !defined(OS_WIN)
     CheckMemoryMetric("Memory.Experimental.Renderer2.Malloc", histogram_tester,
                       count, true, number_of_renderer_processes);
+#endif
 #if !defined(OS_MACOSX)
     CheckMemoryMetric("Memory.Experimental.Renderer2.Resident",
                       histogram_tester, count, true,
@@ -168,8 +172,10 @@ void CheckAllMemoryMetrics(const base::HistogramTester& histogram_tester,
                       number_of_renderer_processes);
   }
   if (number_of_extenstion_processes) {
+#if !defined(OS_WIN)
     CheckMemoryMetric("Memory.Experimental.Extension2.Malloc", histogram_tester,
                       count, true, number_of_extenstion_processes);
+#endif
 #if !defined(OS_MACOSX)
     CheckMemoryMetric("Memory.Experimental.Extension2.Resident",
                       histogram_tester, count, true,
@@ -296,8 +302,10 @@ class ProcessMemoryMetricsEmitterTest : public ExtensionBrowserTest {
   }
 
   void CheckUkmRendererSource(ukm::SourceId source_id, size_t metric_count) {
+#if !defined(OS_WIN)
     CheckMemoryMetricWithName(source_id, UkmEntry::kMallocName, false,
                               metric_count);
+#endif
 #if !defined(OS_MACOSX)
     CheckMemoryMetricWithName(source_id, UkmEntry::kResidentName, false,
                               metric_count);
@@ -316,8 +324,10 @@ class ProcessMemoryMetricsEmitterTest : public ExtensionBrowserTest {
 
   void CheckUkmBrowserSource(ukm::SourceId source_id,
                              size_t metric_count = 1u) {
+#if !defined(OS_WIN)
     CheckMemoryMetricWithName(source_id, UkmEntry::kMallocName, false,
                               metric_count);
+#endif
 #if !defined(OS_MACOSX)
     CheckMemoryMetricWithName(source_id, UkmEntry::kResidentName, false,
                               metric_count);
@@ -410,7 +420,9 @@ class ProcessMemoryMetricsEmitterTest : public ExtensionBrowserTest {
 #if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
 #define MAYBE_FetchAndEmitMetrics DISABLED_FetchAndEmitMetrics
 #else
-#define MAYBE_FetchAndEmitMetrics FetchAndEmitMetrics
+// TODO(michaelpg): Remove this unconditional disabling once new UKM testing
+// style CLs land: crbug.com/761524.
+#define MAYBE_FetchAndEmitMetrics DISABLED_FetchAndEmitMetrics
 #endif
 IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
                        MAYBE_FetchAndEmitMetrics) {
@@ -444,8 +456,10 @@ IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
 #define MAYBE_FetchAndEmitMetricsWithExtensions \
   DISABLED_FetchAndEmitMetricsWithExtensions
 #else
+// TODO(michaelpg): Remove this unconditional disabling once new UKM testing
+// style CLs land: crbug.com/761524.
 #define MAYBE_FetchAndEmitMetricsWithExtensions \
-  FetchAndEmitMetricsWithExtensions
+  DISABLED_FetchAndEmitMetricsWithExtensions
 #endif
 IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
                        MAYBE_FetchAndEmitMetricsWithExtensions) {
@@ -489,8 +503,10 @@ IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
 #define MAYBE_FetchAndEmitMetricsWithHostedApps \
   DISABLED_FetchAndEmitMetricsWithHostedApps
 #else
+// TODO(michaelpg): Remove this unconditional disabling once new UKM testing
+// style CLs land: crbug.com/761524.
 #define MAYBE_FetchAndEmitMetricsWithHostedApps \
-  FetchAndEmitMetricsWithHostedApps
+  DISABLED_FetchAndEmitMetricsWithHostedApps
 #endif
 IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
                        MAYBE_FetchAndEmitMetricsWithHostedApps) {
@@ -528,13 +544,10 @@ IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
   CheckPageInfoUkmMetrics(url, true);
 }
 
-#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
+// Breaks when attempting to add tests for new UKMs: crbug.com/761524
+// Re-enable with crrev.com/c/774120.
 #define MAYBE_FetchAndEmitMetricsWithExtensionsAndHostReuse \
   DISABLED_FetchAndEmitMetricsWithExtensionsAndHostReuse
-#else
-#define MAYBE_FetchAndEmitMetricsWithExtensionsAndHostReuse \
-  FetchAndEmitMetricsWithExtensionsAndHostReuse
-#endif
 IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
                        MAYBE_FetchAndEmitMetricsWithExtensionsAndHostReuse) {
   // This test does not work with --site-per-process flag since this test
@@ -585,7 +598,9 @@ IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
 #if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
 #define MAYBE_FetchDuringTrace DISABLED_FetchDuringTrace
 #else
-#define MAYBE_FetchDuringTrace FetchDuringTrace
+// TODO(michaelpg): Remove this unconditional disabling once new UKM testing
+// style CLs land: crbug.com/761524.
+#define MAYBE_FetchDuringTrace DISABLED_FetchDuringTrace
 #endif
 IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
                        MAYBE_FetchDuringTrace) {
@@ -643,7 +658,9 @@ IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
 #if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
 #define MAYBE_FetchThreeTimes DISABLED_FetchThreeTimes
 #else
-#define MAYBE_FetchThreeTimes FetchThreeTimes
+// TODO(michaelpg): Remove this unconditional disabling once new UKM testing
+// style CLs land: crbug.com/761524.
+#define MAYBE_FetchThreeTimes DISABLED_FetchThreeTimes
 #endif
 IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest, MAYBE_FetchThreeTimes) {
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -673,7 +690,9 @@ IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest, MAYBE_FetchThreeTimes) {
 #if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
 #define MAYBE_ForegroundAndBackgroundPages DISABLED_ForegroundAndBackgroundPages
 #else
-#define MAYBE_ForegroundAndBackgroundPages ForegroundAndBackgroundPages
+// TODO(michaelpg): Remove this unconditional disabling once new UKM testing
+// style CLs land: crbug.com/761524.
+#define MAYBE_ForegroundAndBackgroundPages DISABLED_ForegroundAndBackgroundPages
 #endif
 IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
                        MAYBE_ForegroundAndBackgroundPages) {

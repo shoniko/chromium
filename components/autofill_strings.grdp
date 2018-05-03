@@ -128,24 +128,27 @@
     Postal code
   </message>
 
+  <message name="IDS_AUTOFILL_SETTINGS_POPUP" desc="The text displayed in the Autofill popup to direct the user to the Autofill settings UI.">
+   Autofill settings
+  </message>
   <if expr="_google_chrome">
-    <message name="IDS_AUTOFILL_OPTIONS_POPUP" desc="The text displayed in the Autofill popup to direct the user to the Autofill settings UI.">
+    <message name="IDS_AUTOFILL_OPTIONS_POPUP" desc="The text displayed in the Autofill popup to direct the user to the Autofill settings UI. (This string is going to be deprecated in favor of IDS_AUTOFILL_SETTINGS_POPUP.)">
      Chrome Autofill settings...
    </message>
   </if>
   <if expr="not _google_chrome">
-    <message name="IDS_AUTOFILL_OPTIONS_POPUP" desc="The label of the text displayed in the Autofill popup to direct the user to the Autofill settings UI.">
+    <message name="IDS_AUTOFILL_OPTIONS_POPUP" desc="The label of the text displayed in the Autofill popup to direct the user to the Autofill settings UI. (This string is going to be deprecated in favor of IDS_AUTOFILL_SETTINGS_POPUP.)">
       Chromium Autofill settings...
     </message>
   </if>
 
   <if expr="_google_chrome">
-    <message name="IDS_AUTOFILL_CREDIT_CARD_OPTIONS_POPUP" desc="The label of the text displayed in the Autofill Credit Card popup to direct the user to the Autofill settings UI.">
+    <message name="IDS_AUTOFILL_CREDIT_CARD_OPTIONS_POPUP" desc="The label of the text displayed in the Autofill Credit Card popup to direct the user to the Autofill settings UI. (This string is going to be deprecated in favor of IDS_AUTOFILL_SETTINGS_POPUP.)">
      Chrome Autofill settings...
     </message>
   </if>
   <if expr="not _google_chrome">
-    <message name="IDS_AUTOFILL_CREDIT_CARD_OPTIONS_POPUP" desc="The label of the text displayed in the Autofill Credit Card popup to direct the user to the Autofill settings UI.">
+    <message name="IDS_AUTOFILL_CREDIT_CARD_OPTIONS_POPUP" desc="The label of the text displayed in the Autofill Credit Card popup to direct the user to the Autofill settings UI. (This string is going to be deprecated in favor of IDS_AUTOFILL_SETTINGS_POPUP.)">
       Chromium Autofill settings...
     </message>
   </if>
@@ -172,7 +175,7 @@
   </if>
   <if expr="use_titlecase">
     <message name="IDS_AUTOFILL_SHOW_ALL_SAVED_FALLBACK" desc="Mac/In Title Case::The text shown as an option in the suggestion drop down when a password field is clicked">
-    Show all Saved Passwords
+    Show All Saved Passwords
   </message>
   </if>
   <message name="IDS_AUTOFILL_GENERATE_PASSWORD_FALLBACK" desc="The text shown as an option in the suggestion drop down when a password field is clicked">
@@ -230,6 +233,9 @@
   </if>
   <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_TITLE_TO_CLOUD_V2" desc="Title text for the Autofill save card prompt when the card is to be saved by uploading it to Google Payments, according to June 2017 UI guidelines. The prompt can be either a bubble or an infobar.">
     Save card to Google?
+  </message>
+  <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_TITLE_TO_CLOUD_V3" desc="Title text for the Autofill save card prompt when the card is to be saved by uploading it to Google Payments, according to January 2018 UI guidelines. The prompt can be either a bubble or an infobar.">
+    Save card?
   </message>
   <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_UPLOAD_EXPLANATION" desc="Explanation of the effect of the Autofill save card prompt when the card is to be saved by uploading it to Google Payments and also saved locally. The prompt can be either a bubble or an infobar.">
     Pay quickly on sites and apps across devices using cards you have saved with Google.
@@ -323,7 +329,13 @@
       Enter the expiration date and CVC for <ph name="CREDIT_CARD">$1<ex>Visa - 5679</ex></ph>
     </message>
     <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS" desc="Text explaining what the user should do in the card unmasking dialog.">
+      After you confirm, card details from your Google Payments account will be shared with this site.
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS_LOCAL_CARD" desc="Text explaining what the user should do in the card unmasking dialog.  Appears specifically for local cards already stored on the device.">
       Once you confirm, your card details will be shared with this site.
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_CVC_IMAGE_DESCRIPTION" desc="Accessible description for the CVC image. It should describe where to find the CVC on a credit card.">
+      The CVC is located behind your card.
     </message>
   </if>
   <if expr="is_ios">
@@ -331,9 +343,15 @@
       Confirm Card
     </message>
     <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS" desc="Text explaining what the user should do in the card unmasking dialog.">
+      Enter the CVC for <ph name="CREDIT_CARD">$1<ex>Visa - 5679</ex></ph>. After you confirm, card details from your Google Payments account will be shared with this site.
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS_LOCAL_CARD" desc="Text explaining what the user should do in the card unmasking dialog.  Appears specifically for local cards already stored on the device.">
       Enter the CVC for <ph name="CREDIT_CARD">$1<ex>Visa - 5679</ex></ph>. Once you confirm, your card details will be shared with this site.
     </message>
     <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS_EXPIRED" desc="Text explaining what the user should do in the card unmasking dialog to update an expired card.">
+      Enter the expiration date and CVC for <ph name="CREDIT_CARD">$1<ex>Visa - 5679</ex></ph> to update your card details. After you confirm, card details from your Google Payments account will be shared with this site.
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS_EXPIRED_LOCAL_CARD" desc="Text explaining what the user should do in the card unmasking dialog to update an expired card.  Appears specifically for local cards already stored on the device.">
       Enter the expiration date and CVC for <ph name="CREDIT_CARD">$1<ex>Visa - 5679</ex></ph> to update your card details. Once you confirm, your card details will be shared with this site.
     </message>
   </if>
@@ -402,7 +420,7 @@
   <message name="IDS_AUTOFILL_WALLET_MANAGEMENT_LINK_TEXT" desc="Text for link that allows users to see and edit their Wallet information." formatter_data="android_java">
     Edit
   </message>
-  <message name="IDS_AUTOFILL_FROM_GOOGLE_ACCOUNT_LONG" desc="Text that indicates an address or credit card came from Google servers." formatter_data="android_java">
-    From Google Payments
+  <message name="IDS_AUTOFILL_FROM_GOOGLE_ACCOUNT_LONG" desc="Text that indicates an address or credit card came from Google Pay. 'Google Pay' should not be translated as it is the product name." formatter_data="android_java">
+    From Google Pay
   </message>
 </grit-part>

@@ -71,7 +71,6 @@ class FlexibleArrayBufferView;
 class Frame;
 class LocalDOMWindow;
 class LocalFrame;
-class NodeFilter;
 class XPathNSResolver;
 
 template <typename CallbackInfo>
@@ -388,41 +387,16 @@ inline double ToCoreDate(v8::Isolate* isolate,
   return object.As<v8::Date>()->ValueOf();
 }
 
-// FIXME: Remove the special casing for NodeFilter and XPathNSResolver.
-NodeFilter* ToNodeFilter(v8::Local<v8::Value>,
-                         v8::Local<v8::Object>,
-                         ScriptState*);
+// FIXME: Remove the special casing for XPathNSResolver.
 XPathNSResolver* ToXPathNSResolver(ScriptState*, v8::Local<v8::Value>);
 
-template <typename VectorType>
-VectorType ToImplArray(const Vector<ScriptValue>& value,
-                       v8::Isolate* isolate,
-                       ExceptionState& exception_state) {
-  using ValueType = typename VectorType::ValueType;
-  using TraitsType = NativeValueTraits<ValueType>;
-
-  if (value.size() > VectorType::MaxCapacity()) {
-    exception_state.ThrowRangeError("Array length exceeds supported limit.");
-    return VectorType();
-  }
-
-  VectorType result;
-  result.ReserveInitialCapacity(value.size());
-  for (unsigned i = 0; i < value.size(); ++i) {
-    result.UncheckedAppend(
-        TraitsType::NativeValue(isolate, value[i].V8Value(), exception_state));
-    if (exception_state.HadException())
-      return VectorType();
-  }
-  return result;
-}
-
-template <typename VectorType>
-VectorType ToImplArguments(const v8::FunctionCallbackInfo<v8::Value>& info,
-                           int start_index,
-                           ExceptionState& exception_state) {
-  using ValueType = typename VectorType::ValueType;
-  using TraitsType = NativeValueTraits<ValueType>;
+template <typename IDLType>
+VectorOf<typename NativeValueTraits<IDLType>::ImplType> ToImplArguments(
+    const v8::FunctionCallbackInfo<v8::Value>& info,
+    int start_index,
+    ExceptionState& exception_state) {
+  using TraitsType = NativeValueTraits<IDLType>;
+  using VectorType = VectorOf<typename TraitsType::ImplType>;
 
   int length = info.Length();
   VectorType result;
@@ -453,33 +427,6 @@ CORE_EXPORT v8::Local<v8::Object> GetEsIterator(v8::Isolate*,
 CORE_EXPORT bool HasCallableIteratorSymbol(v8::Isolate*,
                                            v8::Local<v8::Value>,
                                            ExceptionState&);
-
-// TODO(rakuco): remove the specializations below (and consequently the
-// non-IDLBase version of NativeValueTraitsBase) once we manage to convert all
-// uses of NativeValueTraits to types that derive from IDLBase or for generated
-// IDL interfaces/dictionaries/unions.
-template <>
-struct NativeValueTraits<String> {
-  static inline String NativeValue(v8::Isolate* isolate,
-                                   v8::Local<v8::Value> value,
-                                   ExceptionState& exception_state) {
-    V8StringResource<> string_value(value);
-    if (!string_value.Prepare(exception_state))
-      return String();
-    return string_value;
-  }
-};
-
-template <>
-struct NativeValueTraits<v8::Local<v8::Value>>
-    : public NativeValueTraitsBase<v8::Local<v8::Value>> {
-  static inline v8::Local<v8::Value> NativeValue(
-      v8::Isolate* isolate,
-      v8::Local<v8::Value> value,
-      ExceptionState& exception_state) {
-    return value;
-  }
-};
 
 CORE_EXPORT v8::Isolate* ToIsolate(ExecutionContext*);
 CORE_EXPORT v8::Isolate* ToIsolate(LocalFrame*);
@@ -525,76 +472,6 @@ CORE_EXPORT void ToFlexibleArrayBufferView(v8::Isolate*,
                                            FlexibleArrayBufferView&,
                                            void* storage = nullptr);
 
-// Converts a V8 value to an array (an IDL sequence) as per the WebIDL
-// specification: http://heycam.github.io/webidl/#es-sequence
-template <typename VectorType>
-VectorType ToImplSequence(v8::Isolate* isolate,
-                          v8::Local<v8::Value> value,
-                          ExceptionState& exception_state) {
-  using ValueType = typename VectorType::ValueType;
-
-  if (!value->IsObject() || value->IsRegExp()) {
-    exception_state.ThrowTypeError(
-        "The provided value cannot be converted to a sequence.");
-    return VectorType();
-  }
-
-  v8::TryCatch block(isolate);
-  v8::Local<v8::Object> iterator =
-      GetEsIterator(isolate, value.As<v8::Object>(), exception_state);
-  if (exception_state.HadException())
-    return VectorType();
-
-  v8::Local<v8::String> next_key = V8String(isolate, "next");
-  v8::Local<v8::String> value_key = V8String(isolate, "value");
-  v8::Local<v8::String> done_key = V8String(isolate, "done");
-  v8::Local<v8::Context> context = isolate->GetCurrentContext();
-  VectorType result;
-  while (true) {
-    v8::Local<v8::Value> next;
-    if (!iterator->Get(context, next_key).ToLocal(&next)) {
-      exception_state.RethrowV8Exception(block.Exception());
-      return VectorType();
-    }
-    // TODO(bashi): Support callable objects.
-    if (!next->IsObject() || !next.As<v8::Object>()->IsFunction()) {
-      exception_state.ThrowTypeError("Iterator.next should be callable.");
-      return VectorType();
-    }
-    v8::Local<v8::Value> next_result;
-    if (!V8ScriptRunner::CallFunction(next.As<v8::Function>(),
-                                      ToExecutionContext(context), iterator, 0,
-                                      nullptr, isolate)
-             .ToLocal(&next_result)) {
-      exception_state.RethrowV8Exception(block.Exception());
-      return VectorType();
-    }
-    if (!next_result->IsObject()) {
-      exception_state.ThrowTypeError(
-          "Iterator.next() did not return an object.");
-      return VectorType();
-    }
-    v8::Local<v8::Object> result_object = next_result.As<v8::Object>();
-    v8::Local<v8::Value> element;
-    v8::Local<v8::Value> done;
-    if (!result_object->Get(context, value_key).ToLocal(&element) ||
-        !result_object->Get(context, done_key).ToLocal(&done)) {
-      exception_state.RethrowV8Exception(block.Exception());
-      return VectorType();
-    }
-    v8::Local<v8::Boolean> done_boolean;
-    if (!done->ToBoolean(context).ToLocal(&done_boolean)) {
-      exception_state.RethrowV8Exception(block.Exception());
-      return VectorType();
-    }
-    if (done_boolean->Value())
-      break;
-    result.push_back(NativeValueTraits<ValueType>::NativeValue(
-        isolate, element, exception_state));
-  }
-  return result;
-}
-
 CORE_EXPORT bool IsValidEnum(const String& value,
                              const char** valid_values,
                              size_t length,
@@ -611,6 +488,7 @@ CORE_EXPORT bool IsValidEnum(const Vector<String>& values,
 enum DeleteResult { kDeleteSuccess, kDeleteReject, kDeleteUnknownProperty };
 
 CORE_EXPORT v8::Local<v8::Value> FromJSONString(v8::Isolate*,
+                                                v8::Local<v8::Context>,
                                                 const String& stringified_json,
                                                 ExceptionState&);
 

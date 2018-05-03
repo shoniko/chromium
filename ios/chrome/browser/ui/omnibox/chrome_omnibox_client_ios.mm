@@ -4,7 +4,6 @@
 
 #include "ios/chrome/browser/ui/omnibox/chrome_omnibox_client_ios.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/favicon/ios/web_favicon_driver.h"
@@ -41,7 +40,7 @@ ChromeOmniboxClientIOS::~ChromeOmniboxClientIOS() {}
 
 std::unique_ptr<AutocompleteProviderClient>
 ChromeOmniboxClientIOS::CreateAutocompleteProviderClient() {
-  return base::MakeUnique<AutocompleteProviderClientImpl>(browser_state_);
+  return std::make_unique<AutocompleteProviderClientImpl>(browser_state_);
 }
 
 std::unique_ptr<OmniboxNavigationObserver>
@@ -216,7 +215,7 @@ gfx::Image ChromeOmniboxClientIOS::GetFavicon() const {
 void ChromeOmniboxClientIOS::OnTextChanged(
     const AutocompleteMatch& current_match,
     bool user_input_in_progress,
-    base::string16& user_text,
+    const base::string16& user_text,
     const AutocompleteResult& result,
     bool is_popup_open,
     bool has_focus) {}

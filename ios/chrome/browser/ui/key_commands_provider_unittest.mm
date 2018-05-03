@@ -24,10 +24,11 @@ TEST_F(KeyCommandsProviderTest, NoTabs_EditingText_ReturnsObjects) {
   KeyCommandsProvider* provider = [[KeyCommandsProvider alloc] init];
   id mockConsumer =
       [OCMockObject mockForProtocol:@protocol(KeyCommandsPlumbing)];
-  id<ApplicationCommands, BrowserCommands> dispatcher = nil;
+  id<ApplicationCommands, BrowserCommands, OmniboxFocuser> dispatcher = nil;
   [[[mockConsumer expect] andReturnUnsignedInteger:0] tabsCount];
 
   EXPECT_NE(nil, [provider keyCommandsForConsumer:mockConsumer
+                               baseViewController:nil
                                        dispatcher:dispatcher
                                       editingText:YES]);
 }
@@ -36,11 +37,12 @@ TEST_F(KeyCommandsProviderTest, ReturnsKeyCommandsObjects) {
   KeyCommandsProvider* provider = [[KeyCommandsProvider alloc] init];
   id mockConsumer =
       [OCMockObject mockForProtocol:@protocol(KeyCommandsPlumbing)];
-  id<ApplicationCommands, BrowserCommands> dispatcher = nil;
+  id<ApplicationCommands, BrowserCommands, OmniboxFocuser> dispatcher = nil;
 
   [[[mockConsumer expect] andReturnUnsignedInteger:0] tabsCount];
 
   for (id element in [provider keyCommandsForConsumer:mockConsumer
+                                   baseViewController:nil
                                            dispatcher:dispatcher
                                           editingText:YES]) {
     EXPECT_TRUE([element isKindOfClass:[UIKeyCommand class]]);
@@ -51,12 +53,13 @@ TEST_F(KeyCommandsProviderTest, MoreKeyboardCommandsWhenTabs) {
   KeyCommandsProvider* provider = [[KeyCommandsProvider alloc] init];
   id mockConsumer =
       [OCMockObject mockForProtocol:@protocol(KeyCommandsPlumbing)];
-  id<ApplicationCommands, BrowserCommands> dispatcher = nil;
+  id<ApplicationCommands, BrowserCommands, OmniboxFocuser> dispatcher = nil;
 
   // No tabs.
   [[[mockConsumer expect] andReturnUnsignedInteger:0] tabsCount];
   NSUInteger numberOfKeyCommandsWithoutTabs =
       [[provider keyCommandsForConsumer:mockConsumer
+                     baseViewController:nil
                              dispatcher:dispatcher
                             editingText:NO] count];
 
@@ -64,6 +67,7 @@ TEST_F(KeyCommandsProviderTest, MoreKeyboardCommandsWhenTabs) {
   [[[mockConsumer expect] andReturnUnsignedInteger:1] tabsCount];
   NSUInteger numberOfKeyCommandsWithTabs =
       [[provider keyCommandsForConsumer:mockConsumer
+                     baseViewController:nil
                              dispatcher:dispatcher
                             editingText:NO] count];
 
@@ -74,12 +78,13 @@ TEST_F(KeyCommandsProviderTest, LessKeyCommandsWhenTabsAndEditingText) {
   KeyCommandsProvider* provider = [[KeyCommandsProvider alloc] init];
   id mockConsumer =
       [OCMockObject mockForProtocol:@protocol(KeyCommandsPlumbing)];
-  id<ApplicationCommands, BrowserCommands> dispatcher = nil;
+  id<ApplicationCommands, BrowserCommands, OmniboxFocuser> dispatcher = nil;
 
   // Not editing text.
   [[[mockConsumer expect] andReturnUnsignedInteger:1] tabsCount];
   NSUInteger numberOfKeyCommandsWhenNotEditingText =
       [[provider keyCommandsForConsumer:mockConsumer
+                     baseViewController:nil
                              dispatcher:dispatcher
                             editingText:NO] count];
 
@@ -87,6 +92,7 @@ TEST_F(KeyCommandsProviderTest, LessKeyCommandsWhenTabsAndEditingText) {
   [[[mockConsumer expect] andReturnUnsignedInteger:1] tabsCount];
   NSUInteger numberOfKeyCommandsWhenEditingText =
       [[provider keyCommandsForConsumer:mockConsumer
+                     baseViewController:nil
                              dispatcher:dispatcher
                             editingText:YES] count];
 

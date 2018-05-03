@@ -148,8 +148,8 @@ cr.define('settings', function() {
      * @param {string} languageCode
      */
     enableLanguage(languageCode) {
-      var languageCodes = this.settingsPrefs_.prefs.intl.accept_languages.value;
-      var languages = languageCodes.split(',');
+      let languageCodes = this.settingsPrefs_.prefs.intl.accept_languages.value;
+      const languages = languageCodes.split(',');
       if (languages.indexOf(languageCode) != -1)
         return;
       languages.push(languageCode);
@@ -167,9 +167,9 @@ cr.define('settings', function() {
      * @param {string} languageCode
      */
     disableLanguage(languageCode) {
-      var languageCodes = this.settingsPrefs_.prefs.intl.accept_languages.value;
-      var languages = languageCodes.split(',');
-      var index = languages.indexOf(languageCode);
+      let languageCodes = this.settingsPrefs_.prefs.intl.accept_languages.value;
+      const languages = languageCodes.split(',');
+      const index = languages.indexOf(languageCode);
       if (index == -1)
         return;
       languages.splice(index, 1);
@@ -190,7 +190,7 @@ cr.define('settings', function() {
      * @param {boolean} enable
      */
     setEnableTranslationForLanguage(languageCode, enable) {
-      var index =
+      const index =
           this.settingsPrefs_.prefs.translate_blocked_languages.value.indexOf(
               languageCode);
       if (enable) {
@@ -203,6 +203,48 @@ cr.define('settings', function() {
           return;
         this.settingsPrefs_.push(
             'prefs.translate_blocked_languages.value', languageCode);
+      }
+    }
+
+    /**
+     * Moves a language inside the language list.
+     * Movement is determined by the |moveType| parameter.
+     * @param {string} languageCode
+     * @param {chrome.languageSettingsPrivate.MoveType} moveType
+     */
+    moveLanguage(languageCode, moveType) {
+      let languageCodes = this.settingsPrefs_.prefs.intl.accept_languages.value;
+      let languages = languageCodes.split(',');
+      const index = languages.indexOf(languageCode);
+
+      if (moveType == chrome.languageSettingsPrivate.MoveType.TOP) {
+        if (index < 1)
+          return;
+
+        languages.splice(index, 1);
+        languages.unshift(languageCode);
+      } else if (moveType == chrome.languageSettingsPrivate.MoveType.UP) {
+        if (index < 1)
+          return;
+
+        let temp = languages[index - 1];
+        languages[index - 1] = languageCode;
+        languages[index] = temp;
+      } else if (moveType == chrome.languageSettingsPrivate.MoveType.DOWN) {
+        if (index == -1 || index == languages.length - 1)
+          return;
+
+        let temp = languages[index + 1];
+        languages[index + 1] = languageCode;
+        languages[index] = temp;
+      }
+
+      languageCodes = languages.join(',');
+      this.settingsPrefs_.set(
+          'prefs.intl.accept_languages.value', languageCodes);
+      if (cr.isChromeOS) {
+        this.settingsPrefs_.set(
+            'prefs.settings.language.preferred_languages.value', languageCodes);
       }
     }
 
@@ -273,15 +315,15 @@ cr.define('settings', function() {
      */
     addInputMethod(inputMethodId) {
       assert(cr.isChromeOS);
-      var inputMethod = this.componentExtensionImes.find(function(ime) {
+      const inputMethod = this.componentExtensionImes.find(function(ime) {
         return ime.id == inputMethodId;
       });
       assertTrue(!!inputMethod);
       inputMethod.enabled = true;
-      var prefPath = 'prefs.settings.language.preload_engines.value';
-      var enabledInputMethods = this.settingsPrefs_.get(prefPath).split(',');
+      const prefPath = 'prefs.settings.language.preload_engines.value';
+      const enabledInputMethods = this.settingsPrefs_.get(prefPath).split(',');
       enabledInputMethods.push(inputMethodId);
-      this.settingsPrefs_.set(prefPath, enabledInputMethods.join(','))
+      this.settingsPrefs_.set(prefPath, enabledInputMethods.join(','));
     }
 
     /**
@@ -291,7 +333,7 @@ cr.define('settings', function() {
      */
     removeInputMethod(inputMethodId) {
       assert(cr.isChromeOS);
-      var inputMethod = this.componentExtensionImes.find(function(ime) {
+      const inputMethod = this.componentExtensionImes.find(function(ime) {
         return ime.id == inputMethodId;
       });
       assertTrue(!!inputMethod);
@@ -305,27 +347,43 @@ cr.define('settings', function() {
 
   // List of language-related preferences suitable for testing.
   function getFakeLanguagePrefs() {
-    var fakePrefs = [{
-      key: 'intl.app_locale',
-      type: chrome.settingsPrivate.PrefType.STRING,
-      value: 'en-US',
-    }, {
-      key: 'intl.accept_languages',
-      type: chrome.settingsPrivate.PrefType.STRING,
-      value: 'en-US,sw',
-    }, {
-      key: 'spellcheck.dictionaries',
-      type: chrome.settingsPrivate.PrefType.LIST,
-      value: ['en-US'],
-    }, {
-      key: 'translate.enabled',
-      type: chrome.settingsPrivate.PrefType.BOOLEAN,
-      value: true,
-    }, {
-      key: 'translate_blocked_languages',
-      type: chrome.settingsPrivate.PrefType.LIST,
-      value: ['en-US'],
-    }];
+    const fakePrefs = [
+      {
+        key: 'browser.enable_spellchecking',
+        type: chrome.settingsPrivate.PrefType.BOOLEAN,
+        value: true,
+      },
+      {
+        key: 'intl.app_locale',
+        type: chrome.settingsPrivate.PrefType.STRING,
+        value: 'en-US',
+      },
+      {
+        key: 'intl.accept_languages',
+        type: chrome.settingsPrivate.PrefType.STRING,
+        value: 'en-US,sw',
+      },
+      {
+        key: 'spellcheck.dictionaries',
+        type: chrome.settingsPrivate.PrefType.LIST,
+        value: ['en-US'],
+      },
+      {
+        key: 'spellcheck.forced_dictionaries',
+        type: chrome.settingsPrivate.PrefType.LIST,
+        value: [],
+      },
+      {
+        key: 'translate.enabled',
+        type: chrome.settingsPrivate.PrefType.BOOLEAN,
+        value: true,
+      },
+      {
+        key: 'translate_blocked_languages',
+        type: chrome.settingsPrivate.PrefType.LIST,
+        value: ['en-US'],
+      }
+    ];
     if (cr.isChromeOS) {
       fakePrefs.push({
         key: 'settings.language.preferred_languages',

@@ -51,6 +51,7 @@
 #include "components/guest_view/browser/guest_view_manager_delegate.h"
 #include "components/guest_view/browser/guest_view_manager_factory.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
+#include "components/viz/common/features.h"
 #include "content/public/browser/ax_event_notification_details.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/interstitial_page.h"
@@ -68,9 +69,11 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/fake_speech_recognition_manager.h"
+#include "content/public/test/test_file_error_injector.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_utils.h"
+#include "device/geolocation/public/cpp/scoped_geolocation_overrider.h"
 #include "extensions/browser/api/declarative/rules_registry.h"
 #include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/api/declarative/test_rules_registry.h"
@@ -513,7 +516,8 @@ class WebViewTestBase : public extensions::PlatformAppBrowserTest {
     // Mock out geolocation for geolocation specific tests.
     if (!strncmp(test_info->name(), "GeolocationAPI",
             strlen("GeolocationAPI"))) {
-      ui_test_utils::OverrideGeolocation(10, 20);
+      geolocation_overrider_ =
+          std::make_unique<device::ScopedGeolocationOverrider>(10, 20);
     }
   }
 
@@ -838,6 +842,7 @@ class WebViewTestBase : public extensions::PlatformAppBrowserTest {
     return !strncmp(test_info->name(), name, strlen(name));
   }
 
+  std::unique_ptr<device::ScopedGeolocationOverrider> geolocation_overrider_;
   std::unique_ptr<content::FakeSpeechRecognitionManager>
       fake_speech_recognition_manager_;
 
@@ -902,6 +907,27 @@ class WebViewDPITest : public WebViewTest {
   static float scale() { return 2.0f; }
 };
 INSTANTIATE_TEST_CASE_P(WebViewTests, WebViewDPITest, testing::Bool());
+
+class WebViewSurfaceSynchronizationTest : public WebViewTest {
+ public:
+  WebViewSurfaceSynchronizationTest() = default;
+  ~WebViewSurfaceSynchronizationTest() override = default;
+
+  void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kEnableSurfaceSynchronization);
+    WebViewTestBase::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebViewSurfaceSynchronizationTest);
+};
+
+INSTANTIATE_TEST_CASE_P(WebViewTests,
+                        WebViewSurfaceSynchronizationTest,
+                        testing::Bool());
 
 class WebViewWithZoomForDSFTest : public WebViewTest {
  protected:
@@ -1057,8 +1083,23 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, AudioMutesOnAttach) {
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewTest, AudioStateJavascriptAPI) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAutoplayPolicy,
+      switches::autoplay::kNoUserGestureRequiredPolicy);
+
   ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/audio_state_api"))
+      << message_;
+}
+
+// Test that WebView does not override autoplay policy.
+IN_PROC_BROWSER_TEST_P(WebViewTest, AutoplayPolicy) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAutoplayPolicy,
+      switches::autoplay::kDocumentUserActivationRequiredPolicy);
+
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/autoplay"))
       << message_;
 }
 
@@ -1152,6 +1193,25 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, AddRemoveWebView_AddRemoveWebView) {
 IN_PROC_BROWSER_TEST_P(WebViewSizeTest, AutoSize) {
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/autosize"))
       << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(WebViewSurfaceSynchronizationTest, AutoSize) {
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/autosize"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(WebViewSurfaceSynchronizationTest, AutoSizeHeight) {
+  TestHelper("testAutosizeHeight", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_P(WebViewSurfaceSynchronizationTest,
+                       AutosizeBeforeNavigation) {
+  TestHelper("testAutosizeBeforeNavigation", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_P(WebViewSurfaceSynchronizationTest,
+                       AutosizeRemoveAttributes) {
+  TestHelper("testAutosizeRemoveAttributes", "web_view/shim", NO_TEST_SERVER);
 }
 
 // Test for http://crbug.com/419611.
@@ -1528,6 +1588,66 @@ IN_PROC_BROWSER_TEST_P(WebViewNewWindowTest, Shim_TestNewWindowNoReferrerLink) {
   TestHelper("testNewWindowNoReferrerLink", "web_view/shim", NEEDS_TEST_SERVER);
 }
 
+IN_PROC_BROWSER_TEST_P(WebViewNewWindowTest,
+                       Shim_TestWebViewAndEmbedderInNewWindow) {
+  ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
+
+  // Launch the app and wait until it's ready to load a test.
+  LoadAndLaunchPlatformApp("web_view/shim", "Launched");
+
+  content::WebContents* embedder_web_contents = GetFirstAppWindowWebContents();
+  ASSERT_TRUE(embedder_web_contents);
+
+  GURL::Replacements replace_host;
+  replace_host.SetHostStr("localhost");
+
+  std::string empty_guest_path(
+      "/extensions/platform_apps/web_view/shim/empty_guest.html");
+  GURL empty_guest_url = embedded_test_server()->GetURL(empty_guest_path);
+  empty_guest_url = empty_guest_url.ReplaceComponents(replace_host);
+
+  ui_test_utils::UrlLoadObserver empty_guest_observer(
+      empty_guest_url, content::NotificationService::AllSources());
+
+  // Run the test and wait until the guest WebContents is available and has
+  // finished loading.
+  ExtensionTestMessageListener done_listener("TEST_PASSED", false);
+  done_listener.set_failure_message("TEST_FAILED");
+  EXPECT_TRUE(content::ExecuteScript(
+      embedder_web_contents, "runTest('testWebViewAndEmbedderInNewWindow')"));
+
+  empty_guest_observer.Wait();
+
+  content::Source<content::NavigationController> source =
+      empty_guest_observer.source();
+  EXPECT_TRUE(source->GetWebContents()
+                  ->GetMainFrame()
+                  ->GetProcess()
+                  ->IsForGuestsOnly());
+  ASSERT_TRUE(done_listener.WaitUntilSatisfied());
+
+  // Make sure opener and owner for the empty_guest source are different.
+  // In general, we should have two guests and two embedders. Once we know the
+  // guests are different and the embedders are different, then we have four
+  // distinct WebContents, as we expect.
+  std::vector<content::WebContents*> guest_contents_list;
+  GetGuestViewManager()->GetGuestWebContentsList(&guest_contents_list);
+  ASSERT_EQ(2u, guest_contents_list.size());
+  content::WebContents* new_window_guest_contents = guest_contents_list[0];
+
+  content::WebContents* empty_guest_web_contents = source->GetWebContents();
+  ASSERT_EQ(empty_guest_web_contents, guest_contents_list[1]);
+  ASSERT_NE(empty_guest_web_contents, new_window_guest_contents);
+  content::WebContents* empty_guest_embedder =
+      GetEmbedderForGuest(empty_guest_web_contents);
+  ASSERT_NE(empty_guest_embedder, embedder_web_contents);
+  ASSERT_TRUE(empty_guest_embedder);
+  content::RenderFrameHost* empty_guest_opener =
+      empty_guest_web_contents->GetOriginalOpener();
+  ASSERT_TRUE(empty_guest_opener);
+  ASSERT_NE(empty_guest_opener, empty_guest_embedder->GetMainFrame());
+}
+
 IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestContentLoadEvent) {
   TestHelper("testContentLoadEvent", "web_view/shim", NO_TEST_SERVER);
 }
@@ -1718,7 +1838,14 @@ IN_PROC_BROWSER_TEST_P(WebViewSizeTest, Shim_TestResizeWebviewResizesContent) {
 }
 
 // Test makes sure that interstitial pages renders in <webview>.
-IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPage) {
+// Flaky on Win dbg: crbug.com/779973
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_InterstitialPage DISABLED_InterstitialPage
+#else
+#define MAYBE_InterstitialPage InterstitialPage
+#endif
+
+IN_PROC_BROWSER_TEST_P(WebViewTest, MAYBE_InterstitialPage) {
   // This test tests that a inner WebContents' InterstitialPage is properly
   // connected to an outer WebContents through a CrossProcessFrameConnector, it
   // doesn't make sense for BrowserPlugin based guests.
@@ -1741,7 +1868,14 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPage) {
 
 // Test makes sure that interstitial pages are registered in the
 // RenderWidgetHostInputEventRouter when inside a <webview>.
-IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPageRouteEvents) {
+// Flaky on Win dbg: crbug.com/779973
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_InterstitialPageRouteEvents DISABLED_InterstitialPageRouteEvents
+#else
+#define MAYBE_InterstitialPageRouteEvents InterstitialPageRouteEvents
+#endif
+
+IN_PROC_BROWSER_TEST_P(WebViewTest, MAYBE_InterstitialPageRouteEvents) {
   // This test tests that a inner WebContents' InterstitialPage is properly
   // connected to an outer WebContents through a CrossProcessFrameConnector, it
   // doesn't make sense for BrowserPlugin based guests.
@@ -1764,7 +1898,15 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPageRouteEvents) {
 
 // Test makes sure that interstitial pages will receive input events and can be
 // focused.
-IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPageFocusedWidget) {
+// Flaky on Win dbg: crbug.com/779973
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_InterstitialPageFocusedWidget \
+  DISABLED_InterstitialPageFocusedWidget
+#else
+#define MAYBE_InterstitialPageFocusedWidget InterstitialPageFocusedWidget
+#endif
+
+IN_PROC_BROWSER_TEST_P(WebViewTest, MAYBE_InterstitialPageFocusedWidget) {
   // This test tests that a inner WebContents' InterstitialPage is properly
   // connected to an outer WebContents through a CrossProcessFrameConnector, it
   // doesn't make sense for BrowserPlugin based guests.
@@ -1817,7 +1959,14 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPageFocusedWidget) {
 
 // Test makes sure that the browser does not crash when a <webview> navigates
 // out of an interstitial.
-IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPageDetach) {
+// Flaky on Win dbg: crbug.com/779973
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_InterstitialPageDetach DISABLED_InterstitialPageDetach
+#else
+#define MAYBE_InterstitialPageDetach InterstitialPageDetach
+#endif
+
+IN_PROC_BROWSER_TEST_P(WebViewTest, MAYBE_InterstitialPageDetach) {
   InterstitialTestHelper();
 
   content::WebContents* guest_web_contents =
@@ -1834,7 +1983,14 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPageDetach) {
 
 // This test makes sure the browser process does not crash if app is closed
 // while an interstitial page is being shown in guest.
-IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialTeardown) {
+// Flaky on Win dbg: crbug.com/779973
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_InterstitialTeardown DISABLED_InterstitialTeardown
+#else
+#define MAYBE_InterstitialTeardown InterstitialTeardown
+#endif
+
+IN_PROC_BROWSER_TEST_P(WebViewTest, MAYBE_InterstitialTeardown) {
   InterstitialTestHelper();
 
   // Now close the app while interstitial page being shown in guest.
@@ -2016,6 +2172,26 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, DOMStorageIsolation) {
       browser()->tab_strip_model()->GetWebContentsAt(0),
       get_session_storage.c_str(), &output));
   EXPECT_STREQ("badval", output.c_str());
+}
+
+// This tests how guestviews should or should not be able to find each other
+// depending on whether they are in the same storage partition or not.
+// This is a regression test for https://crbug.com/794079 (where two guestviews
+// in the same storage partition stopped being able to find each other).
+// This is also a regression test for https://crbug.com/802278 (setting of
+// a guestview as an opener should not leak any memory).
+IN_PROC_BROWSER_TEST_P(WebViewTest, FindabilityIsolation) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  GURL navigate_to_url = embedded_test_server()->GetURL(
+      "/extensions/platform_apps/web_view/findability_isolation/page.html");
+  GURL::Replacements replace_host;
+  replace_host.SetHostStr("localhost");
+  navigate_to_url = navigate_to_url.ReplaceComponents(replace_host);
+
+  ui_test_utils::NavigateToURL(browser(), navigate_to_url);
+  ASSERT_TRUE(
+      RunPlatformAppTest("platform_apps/web_view/findability_isolation"));
 }
 
 // This tests IndexedDB isolation for packaged apps with webview tags. It loads
@@ -2640,12 +2816,11 @@ namespace {
 const char kDownloadPathPrefix[] = "/download_cookie_isolation_test";
 
 // EmbeddedTestServer request handler for use with DownloadCookieIsolation test.
-// Responds with the next status code in |status_codes| if the 'Cookie' header
-// sent with the request matches the query() part of the URL. Otherwise, fails
-// the request with an HTTP 403. The body of the response is the value of the
-// Cookie header.
+// Responds with the next status code 200 if the 'Cookie' header sent with the
+// request matches the query() part of the URL. Otherwise, fails the request
+// with an HTTP 403. The body of the response is the value of the Cookie
+// header.
 std::unique_ptr<net::test_server::HttpResponse> HandleDownloadRequestWithCookie(
-    base::queue<net::HttpStatusCode>* status_codes,
     const net::test_server::HttpRequest& request) {
   if (!base::StartsWith(request.relative_url, kDownloadPathPrefix,
                         base::CompareCase::SENSITIVE)) {
@@ -2666,14 +2841,11 @@ std::unique_ptr<net::test_server::HttpResponse> HandleDownloadRequestWithCookie(
     return std::move(response);
   }
 
-  DCHECK(!status_codes->empty());
-
   // We have a cookie. Send some content along with the next status code.
   response.reset(new net::test_server::BasicHttpResponse);
-  response->set_code(status_codes->front());
+  response->set_code(net::HTTP_OK);
   response->set_content_type("application/octet-stream");
   response->set_content(cookie_to_expect);
-  status_codes->pop();
   return std::move(response);
 }
 
@@ -2736,17 +2908,8 @@ class DownloadHistoryWaiter : public DownloadHistory::Observer {
 // respective cookie stores. In addition, if those downloads are resumed, they
 // should continue to use their respective cookie stores.
 IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadCookieIsolation) {
-  // These are the status codes to be returned by
-  // HandleDownloadRequestWithCookie. The first two requests are going to result
-  // in interrupted downloads. The next two requests are going to succeed.
-  base::queue<net::HttpStatusCode> status_codes;
-  status_codes.push(net::HTTP_INTERNAL_SERVER_ERROR);
-  status_codes.push(net::HTTP_INTERNAL_SERVER_ERROR);
-  status_codes.push(net::HTTP_OK);
-  status_codes.push(net::HTTP_OK);
-
   embedded_test_server()->RegisterRequestHandler(
-      base::Bind(&HandleDownloadRequestWithCookie, &status_codes));
+      base::BindRepeating(&HandleDownloadRequestWithCookie));
   ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
   LoadAndLaunchPlatformApp("web_view/download_cookie_isolation",
                            "created-webviews");
@@ -2763,6 +2926,15 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadCookieIsolation) {
   content::DownloadManager* download_manager =
       content::BrowserContext::GetDownloadManager(
           web_contents->GetBrowserContext());
+
+  scoped_refptr<content::TestFileErrorInjector> error_injector(
+      content::TestFileErrorInjector::Create(download_manager));
+
+  content::TestFileErrorInjector::FileErrorInfo error_info(
+      content::TestFileErrorInjector::FILE_OPERATION_STREAM_COMPLETE, 0,
+      content::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED);
+  error_info.stream_offset = 0;
+  error_injector->InjectError(error_info);
 
   std::unique_ptr<content::DownloadTestObserver> interrupted_observer(
       new content::DownloadTestObserverInterrupted(
@@ -2781,10 +2953,11 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadCookieIsolation) {
           "startDownload('second', '%s?cookie=second')",
           embedded_test_server()->GetURL(kDownloadPathPrefix).spec().c_str())));
 
-  // Both downloads should fail due to the HTTP_INTERNAL_SERVER_ERROR that was
-  // injected above to the request handler. This maps to
-  // DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED.
+  // Both downloads should fail due to the error that was injected above to the
+  // download manager. This maps to DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED.
   interrupted_observer->WaitForFinished();
+
+  error_injector->ClearError();
 
   content::DownloadManager::DownloadVector downloads;
   download_manager->GetAllDownloads(&downloads);
@@ -2824,15 +2997,8 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadCookieIsolation) {
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewTest, PRE_DownloadCookieIsolation_CrossSession) {
-  // These are the status codes to be returned by
-  // HandleDownloadRequestWithCookie. The first two requests are going to result
-  // in interrupted downloads. The next two requests are going to succeed.
-  base::queue<net::HttpStatusCode> status_codes;
-  status_codes.push(net::HTTP_INTERNAL_SERVER_ERROR);
-  status_codes.push(net::HTTP_INTERNAL_SERVER_ERROR);
-
   embedded_test_server()->RegisterRequestHandler(
-      base::Bind(&HandleDownloadRequestWithCookie, &status_codes));
+      base::BindRepeating(&HandleDownloadRequestWithCookie));
   ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
   LoadAndLaunchPlatformApp("web_view/download_cookie_isolation",
                            "created-webviews");
@@ -2857,6 +3023,15 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, PRE_DownloadCookieIsolation_CrossSession) {
           download_manager, 2,
           content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
 
+  scoped_refptr<content::TestFileErrorInjector> error_injector(
+      content::TestFileErrorInjector::Create(download_manager));
+
+  content::TestFileErrorInjector::FileErrorInfo error_info(
+      content::TestFileErrorInjector::FILE_OPERATION_STREAM_COMPLETE, 0,
+      content::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED);
+  error_info.stream_offset = 0;
+  error_injector->InjectError(error_info);
+
   EXPECT_TRUE(content::ExecuteScript(
       web_contents,
       base::StringPrintf(
@@ -2870,9 +3045,8 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, PRE_DownloadCookieIsolation_CrossSession) {
           "startDownload('second', '%s?cookie=second')",
           embedded_test_server()->GetURL(kDownloadPathPrefix).spec().c_str())));
 
-  // Both downloads should fail due to the HTTP_INTERNAL_SERVER_ERROR that was
-  // injected above to the request handler. This maps to
-  // DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED.
+  // Both downloads should fail due to the error that was injected above to the
+  // download manager. This maps to DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED.
   interrupted_observer->WaitForFinished();
 
   // Wait for both downloads to be stored.
@@ -2884,12 +3058,8 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, PRE_DownloadCookieIsolation_CrossSession) {
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadCookieIsolation_CrossSession) {
-  base::queue<net::HttpStatusCode> status_codes;
-  status_codes.push(net::HTTP_OK);
-  status_codes.push(net::HTTP_OK);
-
   embedded_test_server()->RegisterRequestHandler(
-      base::Bind(&HandleDownloadRequestWithCookie, &status_codes));
+      base::BindRepeating(&HandleDownloadRequestWithCookie));
   ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
 
   content::BrowserContext* browser_context = profile();
@@ -3359,6 +3529,12 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestFocusWhileFocused) {
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewTest, NestedGuestContainerBounds) {
+  // TODO(crbug.com/776539): Disabled due to being flaky.
+  if (GetParam() == true) {
+    DLOG(ERROR) << "Disabled due to flakiness.";
+    return;
+  }
+
   TestHelper("testPDFInWebview", "web_view/shim", NO_TEST_SERVER);
 
   std::vector<content::WebContents*> guest_web_contents_list;
@@ -3509,7 +3685,13 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, LoadWebviewInaccessibleResource) {
 
 // Tests that a webview inside an iframe can load and that it is destroyed when
 // the iframe is detached.
-IN_PROC_BROWSER_TEST_P(WebViewTest, LoadWebviewInsideIframe) {
+// Flakily times out under MSan. crbug.com/793422
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_LoadWebviewInsideIframe DISABLED_LoadWebviewInsideIframe
+#else
+#define MAYBE_LoadWebviewInsideIframe LoadWebviewInsideIframe
+#endif
+IN_PROC_BROWSER_TEST_P(WebViewTest, MAYBE_LoadWebviewInsideIframe) {
   TestHelper("testLoadWebviewInsideIframe",
              "web_view/load_webview_inside_iframe", NEEDS_TEST_SERVER);
 
@@ -3816,6 +3998,111 @@ IN_PROC_BROWSER_TEST_P(WebViewGuestScrollTest,
 
     waiter.WaitForScrollChange(gfx::Vector2dF());
   }
+}
+
+// Tests scroll latching behaviour with WebViews.
+// Only applicable with OOPIF-based guests when scroll latching is enabled.
+// We can move these tests to a more general fixture once the features
+// have landed (crbug.com/533069 and crbug.com/526463).
+class WebViewGuestScrollLatchingTest : public WebViewTestBase {
+ protected:
+  WebViewGuestScrollLatchingTest() {}
+  ~WebViewGuestScrollLatchingTest() override {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    WebViewTestBase::SetUpCommandLine(command_line);
+    feature_list_.InitWithFeatures(
+        {features::kTouchpadAndWheelScrollLatching, features::kAsyncWheelEvents,
+         features::kGuestViewCrossProcessFrames},
+        {});
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebViewGuestScrollLatchingTest);
+};
+
+// Test that when we bubble scroll from a guest, the guest does not also
+// consume the scroll.
+IN_PROC_BROWSER_TEST_F(WebViewGuestScrollLatchingTest,
+                       ScrollLatchingPreservedInGuests) {
+  LoadAppWithGuest("web_view/scrollable_embedder_and_guest");
+
+  content::WebContents* embedder_contents = GetEmbedderWebContents();
+
+  std::vector<content::WebContents*> guest_web_contents_list;
+  GetGuestViewManager()->WaitForNumGuestsCreated(1u);
+  GetGuestViewManager()->GetGuestWebContentsList(&guest_web_contents_list);
+  ASSERT_EQ(1u, guest_web_contents_list.size());
+
+  content::WebContents* guest_contents = guest_web_contents_list[0];
+  content::RenderWidgetHostView* guest_host_view =
+      guest_contents->GetRenderWidgetHostView();
+
+  content::RenderWidgetHostView* embedder_host_view =
+      embedder_contents->GetRenderWidgetHostView();
+  ASSERT_EQ(gfx::Vector2dF(), guest_host_view->GetLastScrollOffset());
+  ASSERT_EQ(gfx::Vector2dF(), embedder_host_view->GetLastScrollOffset());
+
+  gfx::Point guest_scroll_location(1, 1);
+  gfx::Point guest_scroll_location_in_root =
+      guest_host_view->TransformPointToRootCoordSpace(guest_scroll_location);
+
+  // When the guest is already scrolled to the top, scroll up so that we bubble
+  // scroll.
+  blink::WebGestureEvent scroll_begin(
+      blink::WebGestureEvent::kGestureScrollBegin,
+      blink::WebInputEvent::kNoModifiers,
+      blink::WebInputEvent::kTimeStampForTesting);
+  scroll_begin.source_device = blink::kWebGestureDeviceTouchpad;
+  scroll_begin.x = guest_scroll_location.x();
+  scroll_begin.y = guest_scroll_location.y();
+  scroll_begin.global_x = guest_scroll_location_in_root.x();
+  scroll_begin.global_y = guest_scroll_location_in_root.y();
+  scroll_begin.data.scroll_begin.delta_x_hint = 0;
+  scroll_begin.data.scroll_begin.delta_y_hint = 5;
+  content::SimulateGestureEvent(guest_contents, scroll_begin,
+                                ui::LatencyInfo(ui::SourceEventType::WHEEL));
+
+  content::InputEventAckWaiter update_waiter(
+      guest_contents->GetRenderViewHost()->GetWidget(),
+      base::BindRepeating([](content::InputEventAckSource,
+                             content::InputEventAckState state,
+                             const blink::WebInputEvent& event) {
+        return event.GetType() ==
+                   blink::WebGestureEvent::kGestureScrollUpdate &&
+               state != content::INPUT_EVENT_ACK_STATE_CONSUMED;
+      }));
+
+  blink::WebGestureEvent scroll_update(
+      blink::WebGestureEvent::kGestureScrollUpdate,
+      blink::WebInputEvent::kNoModifiers,
+      blink::WebInputEvent::kTimeStampForTesting);
+  scroll_update.source_device = scroll_begin.source_device;
+  scroll_update.x = scroll_begin.x;
+  scroll_update.y = scroll_begin.y;
+  scroll_update.global_x = scroll_begin.global_x;
+  scroll_update.global_y = scroll_begin.global_y;
+  scroll_update.data.scroll_update.delta_x =
+      scroll_begin.data.scroll_begin.delta_x_hint;
+  scroll_update.data.scroll_update.delta_y =
+      scroll_begin.data.scroll_begin.delta_y_hint;
+  content::SimulateGestureEvent(guest_contents, scroll_update,
+                                ui::LatencyInfo(ui::SourceEventType::WHEEL));
+  update_waiter.Wait();
+  update_waiter.Reset();
+
+  ASSERT_EQ(gfx::Vector2dF(), guest_host_view->GetLastScrollOffset());
+
+  // Now we switch directions and scroll down. The guest can scroll in this
+  // direction, but since we're bubbling, the guest should not consume this.
+  scroll_update.data.scroll_update.delta_y = -5;
+  content::SimulateGestureEvent(guest_contents, scroll_update,
+                                ui::LatencyInfo(ui::SourceEventType::WHEEL));
+  update_waiter.Wait();
+
+  EXPECT_EQ(gfx::Vector2dF(), guest_host_view->GetLastScrollOffset());
 }
 
 INSTANTIATE_TEST_CASE_P(WebViewScrollBubbling,
@@ -4214,8 +4501,12 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusTest, TouchFocusesEmbedder) {
   guest_rect.Offset(-embedder_origin.x(), -embedder_origin.y());
 
   // Generate and send synthetic touch event.
+  content::InputEventAckWaiter waiter(
+      GetGuestWebContents()->GetRenderWidgetHostView()->GetRenderWidgetHost(),
+      blink::WebInputEvent::kTouchStart);
   content::SimulateTouchPressAt(GetEmbedderWebContents(),
                                 guest_rect.CenterPoint());
+  waiter.Wait();
   EXPECT_TRUE(aura_webview->HasFocus());
 }
 #endif

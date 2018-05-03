@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/files/file_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -24,7 +25,7 @@ and coverage, produces reports, and updates related files.
 Usage: traffic_annotation_auditor [OPTION]... [path_filters]
 
 Extracts network traffic annotations from source files. If path filter(s) are
-specified, only those directories of the source  will be analyzed.
+specified, only those directories of the source will be analyzed.
 
 Options:
   -h, --help          Shows help.
@@ -37,12 +38,17 @@ Options:
                       auditor's executable.
   --extractor-output  Optional path to the temporary file that extracted
                       annotations will be stored into.
-  --extracted-input   Optional path to the file that temporary extracted
+  --extractor-input   Optional path to the file that temporary extracted
                       annotations are already stored in. If this is provided,
                       clang tool is not run and this is used as input.
-  --full-run          Optional flag asking the tool to run on the whole
+  --no-filtering      Optional flag asking the tool to run on the whole
                       repository without text filtering files. Using this flag
                       may increase processing time x40.
+  --all-files         Optional flag asking to use compile_commands.json instead
+                      of git to get the list of files that will be checked.
+                      This flag is useful when using build flags that change
+                      files, like jumbo. This flag slows down the execution as
+                      it checks every compiled file.
   --test-only         Optional flag to request just running tests and not
                       updating any file. If not specified,
                       'tools/traffic_annotation/summary/annotations.xml' might
@@ -51,10 +57,17 @@ Options:
                       be called to update downstream files.
   --summary-file      Optional path to the output file with all annotations.
   --annotations-file  Optional path to a TSV output file with all annotations.
-  path_filters        Optional paths to filter what files the tool is run on.
+  --limit             Limit for the maximum number of returned errors.
+                      Use 0 for unlimited.
+  --error-resilient   Optional flag, stating not to return error in exit code if
+                      auditor fails to perform the tests. This flag can be used
+                      for trybots to avoid spamming when tests cannot run.
+  path_filters        Optional paths to filter which files the tool is run on.
+                      It can also include deleted files names when auditor is
+                      run on a partial repository.
 
 Example:
-  traffic_annotation_auditor --build-dir=out/Debug summary-file=report.txt
+  traffic_annotation_auditor --build-path=out/Release
 )";
 
 const base::FilePath kDownstreamUpdater =
@@ -62,6 +75,8 @@ const base::FilePath kDownstreamUpdater =
         .Append(FILE_PATH_LITERAL("traffic_annotation"))
         .Append(FILE_PATH_LITERAL("scripts"))
         .Append(FILE_PATH_LITERAL("annotations_xml_downstream_caller.py"));
+
+const std::string kCodeSearchLink("https://cs.chromium.org/chromium/src/");
 
 }  // namespace
 
@@ -177,24 +192,26 @@ std::string PolicyToText(std::string debug_string) {
 
 // Writes a TSV file of all annotations and their content.
 bool WriteAnnotationsFile(const base::FilePath& filepath,
-                          const std::vector<AnnotationInstance>& annotations) {
+                          const std::vector<AnnotationInstance>& annotations,
+                          const std::vector<std::string>& missing_ids) {
   std::vector<std::string> lines;
   std::string title =
-      "Unique ID\tReview by pconunsel\tEmpty Policy Justification\t"
-      "Sender\tDescription\tTrigger\tData\tDestination\tCookies Allowed\t"
-      "Cookies Store\tSetting\tChrome Policy\tComments\tSource File\tHash Code";
+      "Unique ID\tLast Update\tSender\tDescription\tTrigger\tData\t"
+      "Destination\tEmpty Policy Justification\tCookies Allowed\t"
+      "Cookies Store\tSetting\tChrome Policy\tComments\tSource File\t"
+      "ID Hash Code\tContent Hash Code";
 
   for (auto& instance : annotations) {
+    if (instance.type != AnnotationInstance::Type::ANNOTATION_COMPLETE)
+      continue;
     // Unique ID
     std::string line = instance.proto.unique_id();
 
-    // Place holder for Review by pcounsel.
+    // Place holder for Last Update Date, will be updated in the scripts.
     line += "\t";
 
     // Semantics.
     const auto semantics = instance.proto.semantics();
-    line += base::StringPrintf("\t%s",
-                               semantics.empty_policy_justification().c_str());
     line += base::StringPrintf("\t%s", semantics.sender().c_str());
     line += base::StringPrintf(
         "\t%s", UpdateTextForTSV(semantics.description()).c_str());
@@ -217,11 +234,13 @@ bool WriteAnnotationsFile(const base::FilePath& filepath,
         break;
       case traffic_annotation::
           NetworkTrafficAnnotation_TrafficSemantics_Destination_OTHER:
-        if (!semantics.destination_other().empty())
+        if (!semantics.destination_other().empty()) {
+          line += "\t";
           line += UpdateTextForTSV(base::StringPrintf(
-              "\tOther: %s", semantics.destination_other().c_str()));
-        else
+              "Other: %s", semantics.destination_other().c_str()));
+        } else {
           line += "\tOther";
+        }
         break;
 
       default:
@@ -231,6 +250,8 @@ bool WriteAnnotationsFile(const base::FilePath& filepath,
 
     // Policy.
     const auto policy = instance.proto.policy();
+    line +=
+        base::StringPrintf("\t%s", policy.empty_policy_justification().c_str());
     line +=
         policy.cookies_allowed() ==
                 traffic_annotation::
@@ -256,23 +277,36 @@ bool WriteAnnotationsFile(const base::FilePath& filepath,
     line += base::StringPrintf("\t%s", UpdateTextForTSV(policies_text).c_str());
 
     // Comments.
-    line += "\t" + instance.proto.comments();
+    line += "\t" + UpdateTextForTSV(instance.proto.comments());
 
     // Source.
     const auto source = instance.proto.source();
-    line += base::StringPrintf("\t%s:%i", source.file().c_str(), source.line());
+    line += base::StringPrintf("\t%s%s?l=%i", kCodeSearchLink.c_str(),
+                               source.file().c_str(), source.line());
 
-    // Hash code.
+    // ID Hash code.
     line += base::StringPrintf("\t%i", instance.unique_id_hash_code);
 
+    // Content Hash code.
+    line += base::StringPrintf("\t%i", instance.GetContentHashCode());
+
     lines.push_back(line);
+  }
+
+  // Add missing annotations.
+  int columns = std::count(title.begin(), title.end(), '\t');
+  std::string tabs(columns, '\t');
+
+  for (const std::string& id : missing_ids) {
+    lines.push_back(id + tabs);
   }
 
   std::sort(lines.begin(), lines.end());
   lines.insert(lines.begin(), title);
   std::string report;
-  for (const std::string& line : lines)
+  for (const std::string& line : lines) {
     report += line + "\n";
+  }
 
   return base::WriteFile(filepath, report.c_str(), report.length()) != -1;
 }
@@ -282,6 +316,8 @@ int wmain(int argc, wchar_t* argv[]) {
 #else
 int main(int argc, char* argv[]) {
 #endif
+  printf("Starting traffic annotation auditor. This may take a few minutes.\n");
+
   // Parse switches.
   base::CommandLine command_line = base::CommandLine(argc, argv);
   if (command_line.HasSwitch("help") || command_line.HasSwitch("h") ||
@@ -297,16 +333,36 @@ int main(int argc, char* argv[]) {
       command_line.GetSwitchValuePath("extractor-output");
   base::FilePath extractor_input =
       command_line.GetSwitchValuePath("extractor-input");
-  bool full_run = command_line.HasSwitch("full-run");
+  bool filter_files = !command_line.HasSwitch("no-filtering");
+  bool all_files = command_line.HasSwitch("all-files");
   bool test_only = command_line.HasSwitch("test-only");
   base::FilePath summary_file = command_line.GetSwitchValuePath("summary-file");
   base::FilePath annotations_file =
       command_line.GetSwitchValuePath("annotations-file");
   std::vector<std::string> path_filters;
+  int outputs_limit = 0;
+  if (command_line.HasSwitch("limit")) {
+    if (!base::StringToInt(command_line.GetSwitchValueNative("limit"),
+                           &outputs_limit) ||
+        outputs_limit < 0) {
+      LOG(ERROR)
+          << "The value for 'limit' switch should be a positive integer.";
+
+      // This error is always enforced, as it is a commandline switch.
+      return 1;
+    }
+  }
+
+  // If 'error-resilient' switch is provided, 0 will be returned in case of
+  // operational errors, otherwise 1.
+  int error_value = command_line.HasSwitch("error-resilient") ? 0 : 1;
 
 #if defined(OS_WIN)
-  for (const auto& path : command_line.GetArgs())
-    path_filters.push_back(base::UTF16ToASCII(path));
+  for (const auto& path : command_line.GetArgs()) {
+    std::string repaired_path(base::UTF16ToASCII(path));
+    base::ReplaceChars(repaired_path, "\\", "/", &repaired_path);
+    path_filters.push_back(repaired_path);
+  }
 #else
   path_filters = command_line.GetArgs();
 #endif
@@ -330,6 +386,8 @@ int main(int argc, char* argv[]) {
   if (build_path.empty()) {
     LOG(ERROR)
         << "You must specify a compiled build directory to run the auditor.\n";
+
+    // This error is always enforced, as it is a commandline switch.
     return 1;
   }
 
@@ -337,9 +395,9 @@ int main(int argc, char* argv[]) {
 
   // Extract annotations.
   if (extractor_input.empty()) {
-    if (!auditor.RunClangTool(path_filters, full_run)) {
+    if (!auditor.RunClangTool(path_filters, filter_files, all_files)) {
       LOG(ERROR) << "Failed to run clang tool.";
-      return 1;
+      return error_value;
     }
 
     // Write extractor output if requested.
@@ -353,7 +411,7 @@ int main(int argc, char* argv[]) {
     if (!base::ReadFileToString(extractor_input, &raw_output)) {
       LOG(ERROR) << "Could not read input file: "
                  << extractor_input.value().c_str();
-      return 1;
+      return error_value;
     } else {
       auditor.set_clang_tool_raw_output(raw_output);
     }
@@ -361,12 +419,12 @@ int main(int argc, char* argv[]) {
 
   // Process extractor output.
   if (!auditor.ParseClangToolRawOutput())
-    return 1;
+    return error_value;
 
   // Perform checks.
-  if (!auditor.RunAllChecks()) {
+  if (!auditor.RunAllChecks(path_filters, test_only)) {
     LOG(ERROR) << "Running checks failed.";
-    return 1;
+    return error_value;
   }
 
   // Write the summary file.
@@ -374,42 +432,41 @@ int main(int argc, char* argv[]) {
       !WriteSummaryFile(summary_file, auditor.extracted_annotations(),
                         auditor.extracted_calls(), auditor.errors())) {
     LOG(ERROR) << "Could not write summary file.";
-    return 1;
+    return error_value;
   }
 
   // Write annotations TSV file.
-  if (!annotations_file.empty() &&
-      !WriteAnnotationsFile(annotations_file,
-                            auditor.extracted_annotations())) {
-    LOG(ERROR) << "Could not write TSV file.";
-    return 1;
-  }
-
-  // Test/Update annotations.xml.
-  TrafficAnnotationExporter exporter(source_path);
-  if (!exporter.UpdateAnnotations(
-          auditor.extracted_annotations(),
-          TrafficAnnotationAuditor::GetReservedUniqueIDs())) {
-    return 1;
-  }
-  if (exporter.modified()) {
-    if (test_only) {
-      printf("Error: annotation.xml needs update.\n");
-    } else if (!exporter.SaveAnnotationsXML() ||
-               !RunAnnotationDownstreamUpdater(source_path)) {
-      LOG(ERROR) << "Could not update annotations XML or downstream files.";
-      return 1;
+  if (!annotations_file.empty()) {
+    std::vector<std::string> missing_ids;
+    if (!auditor.exporter().GetOtherPlatformsAnnotationIDs(&missing_ids) ||
+        !WriteAnnotationsFile(annotations_file, auditor.extracted_annotations(),
+                              missing_ids)) {
+      LOG(ERROR) << "Could not write TSV file.";
+      return error_value;
     }
   }
 
-  // Dump Errors and Warnings to stdout.
   const std::vector<AuditorResult>& errors = auditor.errors();
-  for (const auto& error : errors) {
-    printf(
-        "%s: %s\n",
-        error.type() == AuditorResult::Type::ERROR_SYNTAX ? "Error" : "Warning",
-        error.ToText().c_str());
+
+  // Update annotations.xml if everything else is OK and the auditor is not
+  // run in test-only mode.
+  if (errors.empty() && !test_only && auditor.exporter().modified()) {
+    if (!auditor.exporter().SaveAnnotationsXML() ||
+        !RunAnnotationDownstreamUpdater(source_path)) {
+      LOG(ERROR) << "Could not update annotations XML or downstream files.";
+      return error_value;
+    }
   }
 
-  return 0;
+  // Dump Errors to stdout.
+  if (errors.size()) {
+    printf("[Errors]\n");
+    for (int i = 0; i < static_cast<int>(errors.size()); i++) {
+      printf("  (%i)\t%s\n", i + 1, errors[i].ToText().c_str());
+      if (i + 1 == outputs_limit)
+        break;
+    }
+  }
+
+  return static_cast<int>(errors.size());
 }

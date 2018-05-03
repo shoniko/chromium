@@ -56,7 +56,7 @@ class CORE_EXPORT FilterOperations {
   bool IsEmpty() const { return !operations_.size(); }
   size_t size() const { return operations_.size(); }
   const FilterOperation* at(size_t index) const {
-    return index < operations_.size() ? operations_.at(index).Get() : 0;
+    return index < operations_.size() ? operations_.at(index).Get() : nullptr;
   }
 
   bool CanInterpolateWith(const FilterOperations&) const;
@@ -71,7 +71,7 @@ class CORE_EXPORT FilterOperations {
 
   bool HasReferenceFilter() const;
 
-  void AddClient(SVGResourceClient*) const;
+  void AddClient(SVGResourceClient*, WebTaskRunner*) const;
   void RemoveClient(SVGResourceClient*) const;
 
   void Trace(blink::Visitor*);
@@ -97,7 +97,7 @@ class FilterOperationsWrapper
   void Trace(blink::Visitor* visitor) { visitor->Trace(operations_); }
 
  private:
-  FilterOperationsWrapper() {}
+  FilterOperationsWrapper() = default;
 
   explicit FilterOperationsWrapper(const FilterOperations& operations)
       : operations_(operations) {}

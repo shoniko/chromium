@@ -22,8 +22,8 @@
 #include "chrome/common/url_constants.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/common/disable_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/feature_switch.h"
@@ -187,8 +187,7 @@ void ExtensionMessageBubbleBrowserTest::
   CheckBubble(browser(), ANCHOR_BROWSER_ACTION, false);
 
   extension_service()->UninstallExtension(
-      extension->id(), extensions::UNINSTALL_REASON_FOR_TESTING,
-      base::Bind(&base::DoNothing), nullptr);
+      extension->id(), extensions::UNINSTALL_REASON_FOR_TESTING, nullptr);
   base::RunLoop().RunUntilIdle();
 
   // If the only relevant extension was uninstalled, the bubble should
@@ -214,8 +213,7 @@ void ExtensionMessageBubbleBrowserTest::TestUninstallDangerousExtension() {
   // Uninstall the extension before the bubble is shown. This should not crash,
   // and the bubble shouldn't be shown.
   extension_service()->UninstallExtension(
-      extension->id(), extensions::UNINSTALL_REASON_FOR_TESTING,
-      base::Bind(&base::DoNothing), nullptr);
+      extension->id(), extensions::UNINSTALL_REASON_FOR_TESTING, nullptr);
   base::RunLoop().RunUntilIdle();
   CheckBubbleIsNotPresent(second_browser, false, false);
 }

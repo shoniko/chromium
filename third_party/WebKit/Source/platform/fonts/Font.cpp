@@ -37,6 +37,7 @@
 #include "platform/geometry/FloatRect.h"
 #include "platform/graphics/paint/PaintCanvas.h"
 #include "platform/graphics/paint/PaintFlags.h"
+#include "platform/graphics/paint/PaintTextBlob.h"
 #include "platform/text/BidiResolver.h"
 #include "platform/text/Character.h"
 #include "platform/text/TextRun.h"
@@ -113,8 +114,7 @@ void DrawBlobs(PaintCanvas* canvas,
   for (const auto& blob_info : blobs) {
     DCHECK(blob_info.blob);
     PaintCanvasAutoRestore auto_restore(canvas, false);
-    if (blob_info.rotation ==
-        ShapeResultBloberizer::BlobRotation::kCCWRotation) {
+    if (blob_info.rotation == CanvasRotationInVertical::kRotateCanvasUpright) {
       canvas->save();
 
       SkMatrix m;
@@ -128,7 +128,7 @@ void DrawBlobs(PaintCanvas* canvas,
 
 }  // anonymous ns
 
-bool Font::DrawText(PaintCanvas* canvas,
+void Font::DrawText(PaintCanvas* canvas,
                     const TextRunPaintInfo& run_info,
                     const FloatPoint& point,
                     float device_scale_factor,
@@ -136,7 +136,7 @@ bool Font::DrawText(PaintCanvas* canvas,
   // Don't draw anything while we are using custom fonts that are in the process
   // of loading.
   if (ShouldSkipDrawing())
-    return false;
+    return;
 
   ShapeResultBloberizer bloberizer(*this, device_scale_factor);
   CachingWordShaper word_shaper(*this);
@@ -144,10 +144,9 @@ bool Font::DrawText(PaintCanvas* canvas,
   word_shaper.FillResultBuffer(run_info, &buffer);
   bloberizer.FillGlyphs(run_info, buffer);
   DrawBlobs(canvas, flags, bloberizer.Blobs(), point);
-  return true;
 }
 
-bool Font::DrawText(PaintCanvas* canvas,
+void Font::DrawText(PaintCanvas* canvas,
                     const NGTextFragmentPaintInfo& text_info,
                     const FloatPoint& point,
                     float device_scale_factor,
@@ -155,13 +154,12 @@ bool Font::DrawText(PaintCanvas* canvas,
   // Don't draw anything while we are using custom fonts that are in the process
   // of loading.
   if (ShouldSkipDrawing())
-    return false;
+    return;
 
   ShapeResultBloberizer bloberizer(*this, device_scale_factor);
   bloberizer.FillGlyphs(text_info.text, text_info.from, text_info.to,
                         text_info.shape_result);
   DrawBlobs(canvas, flags, bloberizer.Blobs(), point);
-  return true;
 }
 
 bool Font::DrawBidiText(PaintCanvas* canvas,
@@ -290,14 +288,15 @@ unsigned InterceptsFromBlobs(const ShapeResultBloberizer::BlobBuffer& blobs,
     // for a change in font. A TextBlob can contain runs with differing fonts
     // and the getTextBlobIntercepts method handles multiple fonts for us. For
     // upright in vertical blobs we currently have to bail, see crbug.com/655154
-    if (blob_info.rotation == ShapeResultBloberizer::BlobRotation::kCCWRotation)
+    if (blob_info.rotation == CanvasRotationInVertical::kRotateCanvasUpright)
       continue;
 
     SkScalar* offset_intercepts_buffer = nullptr;
     if (intercepts_buffer)
       offset_intercepts_buffer = &intercepts_buffer[num_intervals];
-    num_intervals += paint.getTextBlobIntercepts(
-        blob_info.blob.get(), bounds_array, offset_intercepts_buffer);
+    num_intervals +=
+        paint.getTextBlobIntercepts(blob_info.blob->ToSkTextBlob().get(),
+                                    bounds_array, offset_intercepts_buffer);
   }
   return num_intervals;
 }
@@ -378,6 +377,13 @@ FloatRect Font::SelectionRectForText(const TextRun& run,
 
   return PixelSnappedSelectionRect(
       FloatRect(point.X() + range.start, point.Y(), range.Width(), height));
+}
+
+FloatRect Font::BoundingBox(const TextRun& run) const {
+  FontCachePurgePreventer purge_preventer;
+  CachingWordShaper shaper(*this);
+  CharacterRange range = shaper.GetCharacterRange(run, 0, run.length());
+  return FloatRect(range.start, -range.ascent, range.Width(), range.Height());
 }
 
 int Font::OffsetForPosition(const TextRun& run,

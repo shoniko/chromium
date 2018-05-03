@@ -26,7 +26,6 @@
 #include "components/viz/service/display/output_surface_client.h"
 #include "components/viz/service/display/software_output_device.h"
 #include "components/viz/service/display/software_renderer.h"
-#include "components/viz/service/display/texture_mailbox_deleter.h"
 #include "components/viz/test/paths.h"
 #include "components/viz/test/test_gpu_memory_buffer_manager.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -37,7 +36,11 @@ namespace cc {
 PixelTest::PixelTest()
     : device_viewport_size_(gfx::Size(200, 200)),
       disable_picture_quad_image_filtering_(false),
-      output_surface_client_(new FakeOutputSurfaceClient) {}
+      output_surface_client_(new FakeOutputSurfaceClient) {
+  // Keep texture sizes exactly matching the bounds of the RenderPass to avoid
+  // floating point badness in texcoords.
+  renderer_settings_.dont_round_texture_sizes_for_pixel_tests = true;
+}
 
 PixelTest::~PixelTest() = default;
 
@@ -156,35 +159,35 @@ bool PixelTest::PixelsMatchReference(const base::FilePath& ref_file,
       *result_bitmap_, test_data_dir.Append(ref_file), comparator);
 }
 
-void PixelTest::SetUpGLRenderer(bool flipped_output_surface) {
-  enable_pixel_output_.reset(new gl::DisableNullDrawGLBindings);
+void PixelTest::SetUpGLWithoutRenderer(bool flipped_output_surface) {
+  enable_pixel_output_ = std::make_unique<gl::DisableNullDrawGLBindings>();
 
-  scoped_refptr<TestInProcessContextProvider> context_provider(
-      new TestInProcessContextProvider(nullptr));
-  output_surface_.reset(new PixelTestOutputSurface(std::move(context_provider),
-                                                   flipped_output_surface));
+  auto context_provider =
+      base::MakeRefCounted<TestInProcessContextProvider>(nullptr);
+  output_surface_ = std::make_unique<PixelTestOutputSurface>(
+      std::move(context_provider), flipped_output_surface);
   output_surface_->BindToClient(output_surface_client_.get());
 
-  shared_bitmap_manager_.reset(new TestSharedBitmapManager);
+  shared_bitmap_manager_ = std::make_unique<TestSharedBitmapManager>();
   gpu_memory_buffer_manager_ =
       std::make_unique<viz::TestGpuMemoryBufferManager>();
   resource_provider_ = std::make_unique<DisplayResourceProvider>(
-      output_surface_->context_provider(), shared_bitmap_manager_.get(),
-      gpu_memory_buffer_manager_.get(), settings_.resource_settings);
+      output_surface_->context_provider(), shared_bitmap_manager_.get());
 
-  child_context_provider_ = new TestInProcessContextProvider(nullptr);
+  child_context_provider_ =
+      base::MakeRefCounted<TestInProcessContextProvider>(nullptr);
   child_context_provider_->BindToCurrentThread();
   child_resource_provider_ = std::make_unique<LayerTreeResourceProvider>(
       child_context_provider_.get(), shared_bitmap_manager_.get(),
       gpu_memory_buffer_manager_.get(), true,
       settings_.resource_settings);
+}
 
-  texture_mailbox_deleter_ = std::make_unique<viz::TextureMailboxDeleter>(
-      base::ThreadTaskRunnerHandle::Get());
-
+void PixelTest::SetUpGLRenderer(bool flipped_output_surface) {
+  SetUpGLWithoutRenderer(flipped_output_surface);
   renderer_ = std::make_unique<viz::GLRenderer>(
       &renderer_settings_, output_surface_.get(), resource_provider_.get(),
-      texture_mailbox_deleter_.get());
+      base::ThreadTaskRunnerHandle::Get());
   renderer_->Initialize();
   renderer_->SetVisible(true);
 }
@@ -200,8 +203,11 @@ void PixelTest::SetUpSoftwareRenderer() {
   output_surface_->BindToClient(output_surface_client_.get());
   shared_bitmap_manager_.reset(new TestSharedBitmapManager());
   resource_provider_ = std::make_unique<DisplayResourceProvider>(
-      nullptr, shared_bitmap_manager_.get(), gpu_memory_buffer_manager_.get(),
+      nullptr, shared_bitmap_manager_.get());
+  child_resource_provider_ = std::make_unique<LayerTreeResourceProvider>(
+      nullptr, shared_bitmap_manager_.get(), nullptr, true,
       settings_.resource_settings);
+
   auto renderer = std::make_unique<viz::SoftwareRenderer>(
       &renderer_settings_, output_surface_.get(), resource_provider_.get());
   software_renderer_ = renderer.get();

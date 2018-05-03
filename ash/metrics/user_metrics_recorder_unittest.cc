@@ -8,7 +8,6 @@
 
 #include "ash/login_status.h"
 #include "ash/metrics/user_metrics_recorder_test_api.h"
-#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/session/session_controller.h"
 #include "ash/session/test_session_controller_client.h"
@@ -131,16 +130,13 @@ TEST_F(UserMetricsRecorderTest, VerifyStatsRecordedByRecordPeriodicMetrics) {
 // Verify the shelf item counts recorded by the
 // UserMetricsRecorder::RecordPeriodicMetrics() method.
 TEST_F(UserMetricsRecorderTest, ValuesRecordedByRecordShelfItemCounts) {
-  // TODO: investigate failure in mash, http://crbug.com/695629.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   CreateUserSessions(1);
 
-  // Make sure the shelf contains the app list launcher button.
+  // Make sure the shelf contains the app list launcher and back button.
   ShelfModel* shelf_model = Shell::Get()->shelf_model();
-  ASSERT_EQ(1u, shelf_model->items().size());
-  ASSERT_EQ(TYPE_APP_LIST, shelf_model->items()[0].type);
+  ASSERT_EQ(2u, shelf_model->items().size());
+  ASSERT_EQ(TYPE_BACK_BUTTON, shelf_model->items()[0].type);
+  ASSERT_EQ(TYPE_APP_LIST, shelf_model->items()[1].type);
 
   ShelfItem shelf_item;
   shelf_item.type = ash::TYPE_PINNED_APP;

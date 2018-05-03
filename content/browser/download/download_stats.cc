@@ -9,7 +9,6 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_util.h"
 #include "content/browser/download/download_resource_handler.h"
 #include "content/public/browser/download_interrupt_reasons.h"
@@ -208,7 +207,33 @@ constexpr const base::FilePath::CharType* kDangerousFileTypes[] = {
     FILE_PATH_LITERAL(".imgpart"),     FILE_PATH_LITERAL(".ndif"),
     FILE_PATH_LITERAL(".smi"),         FILE_PATH_LITERAL(".sparsebundle"),
     FILE_PATH_LITERAL(".sparseimage"), FILE_PATH_LITERAL(".toast"),
-    FILE_PATH_LITERAL(".udif"),
+    FILE_PATH_LITERAL(".udif"),        FILE_PATH_LITERAL(".run"),        // 262
+    FILE_PATH_LITERAL(".mpkg"),        FILE_PATH_LITERAL(".as"),         // 264
+    FILE_PATH_LITERAL(".cpgz"),        FILE_PATH_LITERAL(".pax"),        // 266
+    FILE_PATH_LITERAL(".xip"),         FILE_PATH_LITERAL(".docx"),       // 268
+    FILE_PATH_LITERAL(".docm"),        FILE_PATH_LITERAL(".dott"),       // 270
+    FILE_PATH_LITERAL(".dotm"),        FILE_PATH_LITERAL(".docb"),       // 272
+    FILE_PATH_LITERAL(".xlsx"),        FILE_PATH_LITERAL(".xlsm"),       // 274
+    FILE_PATH_LITERAL(".xltx"),        FILE_PATH_LITERAL(".xltm"),       // 276
+    FILE_PATH_LITERAL(".pptx"),        FILE_PATH_LITERAL(".pptm"),       // 278
+    FILE_PATH_LITERAL(".potx"),        FILE_PATH_LITERAL(".ppam"),       // 280
+    FILE_PATH_LITERAL(".ppsx"),        FILE_PATH_LITERAL(".sldx"),       // 282
+    FILE_PATH_LITERAL(".sldm"),        FILE_PATH_LITERAL(".htm"),        // 284
+    FILE_PATH_LITERAL(".html"),        FILE_PATH_LITERAL(".xht"),        // 286
+    FILE_PATH_LITERAL(".xhtm"),        FILE_PATH_LITERAL(".xhtml"),      // 288
+    FILE_PATH_LITERAL(".vdx"),         FILE_PATH_LITERAL(".vsx"),        // 290
+    FILE_PATH_LITERAL(".vtx"),         FILE_PATH_LITERAL(".vsdx"),       // 292
+    FILE_PATH_LITERAL(".vssx"),        FILE_PATH_LITERAL(".vstx"),       // 294
+    FILE_PATH_LITERAL(".vsdm"),        FILE_PATH_LITERAL(".vssm"),       // 296
+    FILE_PATH_LITERAL(".vstm"),        FILE_PATH_LITERAL(".btapp"),      // 298
+    FILE_PATH_LITERAL(".btbtskin"),    FILE_PATH_LITERAL(".btinstall"),  // 300
+    FILE_PATH_LITERAL(".btkey"),       FILE_PATH_LITERAL(".btsearch"),   // 302
+    FILE_PATH_LITERAL(".dhtml"),       FILE_PATH_LITERAL(".dhtm"),       // 304
+    FILE_PATH_LITERAL(".dht"),         FILE_PATH_LITERAL(".shtml"),      // 306
+    FILE_PATH_LITERAL(".shtm"),        FILE_PATH_LITERAL(".sht"),        // 308
+    // NOTE! When you add a type here, please add the UMA value as a comment.
+    // These must all match DownloadItem.DangerousFileType in enums.xml.
+    // From 263 onward, they should also match SBClientDownloadExtensions.
 };
 
 // The maximum size in KB for the file size metric, file size larger than this
@@ -240,6 +265,46 @@ void RecordBandwidthMetric(const std::string& metric, int bandwidth) {
   base::UmaHistogramCustomCounts(metric, bandwidth, 1, 50 * 1000 * 1000, 50);
 }
 
+// Records a histogram with download source suffix.
+std::string CreateHistogramNameWithSuffix(const std::string& name,
+                                          DownloadSource download_source) {
+  std::string suffix;
+  switch (download_source) {
+    case DownloadSource::UNKNOWN:
+      suffix = "UnknownSource";
+      break;
+    case DownloadSource::NAVIGATION:
+      suffix = "Navigation";
+      break;
+    case DownloadSource::DRAG_AND_DROP:
+      suffix = "DragAndDrop";
+      break;
+    case DownloadSource::FROM_RENDERER:
+      suffix = "FromRenderer";
+      break;
+    case DownloadSource::EXTENSION_API:
+      suffix = "ExtensionAPI";
+      break;
+    case DownloadSource::EXTENSION_INSTALLER:
+      suffix = "ExtensionInstaller";
+      break;
+    case DownloadSource::INTERNAL_API:
+      suffix = "InternalAPI";
+      break;
+    case DownloadSource::WEB_CONTENTS_API:
+      suffix = "WebContentsAPI";
+      break;
+    case DownloadSource::OFFLINE_PAGE:
+      suffix = "OfflinePage";
+      break;
+    case DownloadSource::CONTEXT_MENU:
+      suffix = "ContextMenu";
+      break;
+  }
+
+  return name + "." + suffix;
+}
+
 }  // namespace
 
 void RecordDownloadCount(DownloadCountTypes type) {
@@ -247,15 +312,20 @@ void RecordDownloadCount(DownloadCountTypes type) {
       "Download.Counts", type, DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
 }
 
-void RecordDownloadSource(DownloadSource source) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "Download.Sources", source, DOWNLOAD_SOURCE_LAST_ENTRY);
+void RecordDownloadCountWithSource(DownloadCountTypes type,
+                                   DownloadSource download_source) {
+  RecordDownloadCount(type);
+
+  std::string name =
+      CreateHistogramNameWithSuffix("Download.Counts", download_source);
+  base::UmaHistogramEnumeration(name, type, DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
 }
 
 void RecordDownloadCompleted(const base::TimeTicks& start,
                              int64_t download_len,
-                             bool is_parallelizable) {
-  RecordDownloadCount(COMPLETED_COUNT);
+                             bool is_parallelizable,
+                             DownloadSource download_source) {
+  RecordDownloadCountWithSource(COMPLETED_COUNT, download_source);
   UMA_HISTOGRAM_LONG_TIMES("Download.Time", (base::TimeTicks::Now() - start));
   int64_t max = 1024 * 1024 * 1024;  // One Terabyte.
   download_len /= 1024;  // In Kilobytes
@@ -274,8 +344,9 @@ void RecordDownloadInterrupted(DownloadInterruptReason reason,
                                int64_t received,
                                int64_t total,
                                bool is_parallelizable,
-                               bool is_parallel_download_enabled) {
-  RecordDownloadCount(INTERRUPTED_COUNT);
+                               bool is_parallel_download_enabled,
+                               DownloadSource download_source) {
+  RecordDownloadCountWithSource(INTERRUPTED_COUNT, download_source);
   if (is_parallelizable) {
     RecordParallelizableDownloadCount(INTERRUPTED_COUNT,
                                       is_parallel_download_enabled);
@@ -286,6 +357,13 @@ void RecordDownloadInterrupted(DownloadInterruptReason reason,
           kAllInterruptReasonCodes, arraysize(kAllInterruptReasonCodes));
   UMA_HISTOGRAM_CUSTOM_ENUMERATION("Download.InterruptedReason", reason,
                                    samples);
+
+  std::string name = CreateHistogramNameWithSuffix("Download.InterruptedReason",
+                                                   download_source);
+  base::HistogramBase* counter = base::CustomHistogram::FactoryGet(
+      name, samples, base::HistogramBase::kUmaTargetedHistogramFlag);
+  counter->Add(reason);
+
   if (is_parallel_download_enabled) {
     UMA_HISTOGRAM_CUSTOM_ENUMERATION(
         "Download.InterruptedReason.ParallelDownload", reason, samples);
@@ -322,7 +400,7 @@ void RecordDownloadInterrupted(DownloadInterruptReason reason,
           kMaxKb, kBuckets);
     }
     if (delta_bytes == 0) {
-      RecordDownloadCount(INTERRUPTED_AT_END_COUNT);
+      RecordDownloadCountWithSource(INTERRUPTED_AT_END_COUNT, download_source);
       UMA_HISTOGRAM_CUSTOM_ENUMERATION("Download.InterruptedAtEndReason",
                                        reason, samples);
 
@@ -373,7 +451,7 @@ void RecordDangerousDownloadAccept(DownloadDangerType danger_type,
                             danger_type,
                             DOWNLOAD_DANGER_TYPE_MAX);
   if (danger_type == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY(
+    base::UmaHistogramSparse(
         "Download.DangerousFile.DangerousDownloadValidated",
         GetDangerousFileType(file_path));
   }
@@ -387,16 +465,16 @@ void RecordDangerousDownloadDiscard(DownloadDiscardReason reason,
       UMA_HISTOGRAM_ENUMERATION(
           "Download.UserDiscard", danger_type, DOWNLOAD_DANGER_TYPE_MAX);
       if (danger_type == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE) {
-        UMA_HISTOGRAM_SPARSE_SLOWLY("Download.DangerousFile.UserDiscard",
-                                    GetDangerousFileType(file_path));
+        base::UmaHistogramSparse("Download.DangerousFile.UserDiscard",
+                                 GetDangerousFileType(file_path));
       }
       break;
     case DOWNLOAD_DISCARD_DUE_TO_SHUTDOWN:
       UMA_HISTOGRAM_ENUMERATION(
           "Download.Discard", danger_type, DOWNLOAD_DANGER_TYPE_MAX);
       if (danger_type == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE) {
-        UMA_HISTOGRAM_SPARSE_SLOWLY("Download.DangerousFile.Discard",
-                                    GetDangerousFileType(file_path));
+        base::UmaHistogramSparse("Download.DangerousFile.Discard",
+                                 GetDangerousFileType(file_path));
       }
       break;
     default:

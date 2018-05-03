@@ -27,12 +27,12 @@
 #include "platform/loader/fetch/ResourceRequest.h"
 
 #include <memory>
+
 #include "platform/network/NetworkUtils.h"
 #include "platform/network/http_names.h"
 #include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/PtrUtil.h"
-#include "public/platform/WebAddressSpace.h"
 #include "public/platform/WebURLRequest.h"
 
 namespace blink {
@@ -59,25 +59,24 @@ ResourceRequest::ResourceRequest(const KURL& url)
       should_reset_app_cache_(false),
       cache_mode_(mojom::FetchCacheMode::kDefault),
       service_worker_mode_(WebURLRequest::ServiceWorkerMode::kAll),
-      priority_(kResourceLoadPriorityLowest),
+      priority_(ResourceLoadPriority::kLowest),
       intra_priority_value_(0),
       requestor_id_(0),
-      requestor_process_id_(0),
+      plugin_child_id_(-1),
       app_cache_host_id_(0),
       previews_state_(WebURLRequest::kPreviewsUnspecified),
       request_context_(WebURLRequest::kRequestContextUnspecified),
-      frame_type_(WebURLRequest::kFrameTypeNone),
-      fetch_request_mode_(WebURLRequest::kFetchRequestModeNoCORS),
-      fetch_credentials_mode_(WebURLRequest::kFetchCredentialsModeInclude),
-      fetch_redirect_mode_(WebURLRequest::kFetchRedirectModeFollow),
+      frame_type_(network::mojom::RequestContextFrameType::kNone),
+      fetch_request_mode_(network::mojom::FetchRequestMode::kNoCORS),
+      fetch_credentials_mode_(network::mojom::FetchCredentialsMode::kInclude),
+      fetch_redirect_mode_(network::mojom::FetchRedirectMode::kFollow),
       referrer_policy_(kReferrerPolicyDefault),
       did_set_http_referrer_(false),
       check_for_browser_side_navigation_(true),
       ui_start_time_(0),
       is_external_request_(false),
-      loading_ipc_type_(RuntimeEnabledFeatures::LoadingWithMojoEnabled()
-                            ? WebURLRequest::LoadingIPCType::kMojo
-                            : WebURLRequest::LoadingIPCType::kChromeIPC),
+      cors_preflight_policy_(
+          network::mojom::CORSPreflightPolicy::kConsiderPreflight),
       is_same_document_navigation_(false),
       input_perf_metric_report_policy_(
           InputToLoadPerfMetricReportPolicy::kNoReport),
@@ -94,7 +93,6 @@ ResourceRequest::ResourceRequest(CrossThreadResourceRequestData* data)
   http_header_fields_.Adopt(std::move(data->http_headers_));
 
   SetHTTPBody(data->http_body_);
-  SetAttachedCredential(data->attached_credential_);
   SetAllowStoredCredentials(data->allow_stored_credentials_);
   SetReportUploadProgress(data->report_upload_progress_);
   SetHasUserGesture(data->has_user_gesture_);
@@ -105,7 +103,7 @@ ResourceRequest::ResourceRequest(CrossThreadResourceRequestData* data)
   SetServiceWorkerMode(data->service_worker_mode_);
   SetShouldResetAppCache(data->should_reset_app_cache_);
   SetRequestorID(data->requestor_id_);
-  SetRequestorProcessID(data->requestor_process_id_);
+  SetPluginChildID(data->plugin_child_id_);
   SetAppCacheHostID(data->app_cache_host_id_);
   SetPreviewsState(data->previews_state_);
   SetRequestContext(data->request_context_);
@@ -119,19 +117,57 @@ ResourceRequest::ResourceRequest(CrossThreadResourceRequestData* data)
   check_for_browser_side_navigation_ = data->check_for_browser_side_navigation_;
   ui_start_time_ = data->ui_start_time_;
   is_external_request_ = data->is_external_request_;
-  loading_ipc_type_ = data->loading_ipc_type_;
+  cors_preflight_policy_ = data->cors_preflight_policy_;
   input_perf_metric_report_policy_ = data->input_perf_metric_report_policy_;
   redirect_status_ = data->redirect_status_;
+  suggested_filename_ = data->suggested_filename_;
 }
 
 ResourceRequest::ResourceRequest(const ResourceRequest&) = default;
 
 ResourceRequest& ResourceRequest::operator=(const ResourceRequest&) = default;
 
+std::unique_ptr<ResourceRequest> ResourceRequest::CreateRedirectRequest(
+    const KURL& new_url,
+    const AtomicString& new_method,
+    const KURL& new_site_for_cookies,
+    const String& new_referrer,
+    ReferrerPolicy new_referrer_policy,
+    WebURLRequest::ServiceWorkerMode service_worker_mode) const {
+  std::unique_ptr<ResourceRequest> request =
+      std::make_unique<ResourceRequest>(new_url);
+  request->SetHTTPMethod(new_method);
+  request->SetSiteForCookies(new_site_for_cookies);
+  String referrer =
+      new_referrer.IsEmpty() ? Referrer::NoReferrer() : String(new_referrer);
+  request->SetHTTPReferrer(
+      Referrer(referrer, static_cast<ReferrerPolicy>(new_referrer_policy)));
+  request->SetServiceWorkerMode(service_worker_mode);
+  request->SetRedirectStatus(RedirectStatus::kFollowedRedirect);
+
+  // Copy from parameters for |this|.
+  request->SetDownloadToFile(DownloadToFile());
+  request->SetUseStreamOnResponse(UseStreamOnResponse());
+  request->SetRequestContext(GetRequestContext());
+  request->SetFrameType(GetFrameType());
+  request->SetShouldResetAppCache(ShouldResetAppCache());
+  request->SetFetchRequestMode(GetFetchRequestMode());
+  request->SetFetchCredentialsMode(GetFetchCredentialsMode());
+  request->SetKeepalive(GetKeepalive());
+  request->SetPriority(Priority());
+
+  if (request->HttpMethod() == HttpMethod())
+    request->SetHTTPBody(HttpBody());
+  request->SetCheckForBrowserSideNavigation(CheckForBrowserSideNavigation());
+  request->SetCORSPreflightPolicy(CORSPreflightPolicy());
+
+  return request;
+}
+
 std::unique_ptr<CrossThreadResourceRequestData> ResourceRequest::CopyData()
     const {
   std::unique_ptr<CrossThreadResourceRequestData> data =
-      WTF::MakeUnique<CrossThreadResourceRequestData>();
+      std::make_unique<CrossThreadResourceRequestData>();
   data->url_ = Url().Copy();
   data->timeout_interval_ = TimeoutInterval();
   data->site_for_cookies_ = SiteForCookies().Copy();
@@ -144,8 +180,6 @@ std::unique_ptr<CrossThreadResourceRequestData> ResourceRequest::CopyData()
 
   if (http_body_)
     data->http_body_ = http_body_->DeepCopy();
-  if (attached_credential_)
-    data->attached_credential_ = attached_credential_->DeepCopy();
   data->allow_stored_credentials_ = allow_stored_credentials_;
   data->report_upload_progress_ = report_upload_progress_;
   data->has_user_gesture_ = has_user_gesture_;
@@ -156,7 +190,7 @@ std::unique_ptr<CrossThreadResourceRequestData> ResourceRequest::CopyData()
   data->service_worker_mode_ = service_worker_mode_;
   data->should_reset_app_cache_ = should_reset_app_cache_;
   data->requestor_id_ = requestor_id_;
-  data->requestor_process_id_ = requestor_process_id_;
+  data->plugin_child_id_ = plugin_child_id_;
   data->app_cache_host_id_ = app_cache_host_id_;
   data->previews_state_ = previews_state_;
   data->request_context_ = request_context_;
@@ -170,9 +204,10 @@ std::unique_ptr<CrossThreadResourceRequestData> ResourceRequest::CopyData()
   data->check_for_browser_side_navigation_ = check_for_browser_side_navigation_;
   data->ui_start_time_ = ui_start_time_;
   data->is_external_request_ = is_external_request_;
-  data->loading_ipc_type_ = loading_ipc_type_;
+  data->cors_preflight_policy_ = cors_preflight_policy_;
   data->input_perf_metric_report_policy_ = input_perf_metric_report_policy_;
   data->redirect_status_ = redirect_status_;
+  data->suggested_filename_ = suggested_filename_;
   return data;
 }
 
@@ -220,12 +255,12 @@ void ResourceRequest::SetSiteForCookies(const KURL& site_for_cookies) {
   site_for_cookies_ = site_for_cookies;
 }
 
-RefPtr<SecurityOrigin> ResourceRequest::RequestorOrigin() const {
+scoped_refptr<const SecurityOrigin> ResourceRequest::RequestorOrigin() const {
   return requestor_origin_;
 }
 
 void ResourceRequest::SetRequestorOrigin(
-    RefPtr<SecurityOrigin> requestor_origin) {
+    scoped_refptr<const SecurityOrigin> requestor_origin) {
   requestor_origin_ = std::move(requestor_origin);
 }
 
@@ -297,17 +332,8 @@ EncodedFormData* ResourceRequest::HttpBody() const {
   return http_body_.get();
 }
 
-void ResourceRequest::SetHTTPBody(RefPtr<EncodedFormData> http_body) {
+void ResourceRequest::SetHTTPBody(scoped_refptr<EncodedFormData> http_body) {
   http_body_ = std::move(http_body);
-}
-
-EncodedFormData* ResourceRequest::AttachedCredential() const {
-  return attached_credential_.get();
-}
-
-void ResourceRequest::SetAttachedCredential(
-    RefPtr<EncodedFormData> attached_credential) {
-  attached_credential_ = std::move(attached_credential);
 }
 
 bool ResourceRequest::AllowStoredCredentials() const {
@@ -320,6 +346,10 @@ void ResourceRequest::SetAllowStoredCredentials(bool allow_credentials) {
 
 ResourceLoadPriority ResourceRequest::Priority() const {
   return priority_;
+}
+
+int ResourceRequest::IntraPriorityValue() const {
+  return intra_priority_value_;
 }
 
 void ResourceRequest::SetPriority(ResourceLoadPriority priority,
@@ -347,13 +377,14 @@ void ResourceRequest::ClearHTTPHeaderField(const AtomicString& name) {
 }
 
 void ResourceRequest::SetExternalRequestStateFromRequestorAddressSpace(
-    WebAddressSpace requestor_space) {
-  static_assert(kWebAddressSpaceLocal < kWebAddressSpacePrivate,
+    mojom::IPAddressSpace requestor_space) {
+  static_assert(mojom::IPAddressSpace::kLocal < mojom::IPAddressSpace::kPrivate,
                 "Local is inside Private");
-  static_assert(kWebAddressSpaceLocal < kWebAddressSpacePublic,
+  static_assert(mojom::IPAddressSpace::kLocal < mojom::IPAddressSpace::kPublic,
                 "Local is inside Public");
-  static_assert(kWebAddressSpacePrivate < kWebAddressSpacePublic,
-                "Private is inside Public");
+  static_assert(
+      mojom::IPAddressSpace::kPrivate < mojom::IPAddressSpace::kPublic,
+      "Private is inside Public");
 
   // TODO(mkwst): This only checks explicit IP addresses. We'll have to move all
   // this up to //net and //content in order to have any real impact on gateway
@@ -363,11 +394,11 @@ void ResourceRequest::SetExternalRequestStateFromRequestorAddressSpace(
     return;
   }
 
-  WebAddressSpace target_space = kWebAddressSpacePublic;
+  mojom::IPAddressSpace target_space = mojom::IPAddressSpace::kPublic;
   if (NetworkUtils::IsReservedIPAddress(url_.Host()))
-    target_space = kWebAddressSpacePrivate;
+    target_space = mojom::IPAddressSpace::kPrivate;
   if (SecurityOrigin::Create(url_)->IsLocalhost())
-    target_space = kWebAddressSpaceLocal;
+    target_space = mojom::IPAddressSpace::kLocal;
 
   is_external_request_ = requestor_space > target_space;
 }

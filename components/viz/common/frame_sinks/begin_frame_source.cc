@@ -22,7 +22,26 @@ namespace viz {
 namespace {
 // kDoubleTickDivisor prevents the SyntheticBFS from sending BeginFrames too
 // often to an observer.
-static const double kDoubleTickDivisor = 2.0;
+constexpr double kDoubleTickDivisor = 2.0;
+
+base::AtomicSequenceNumber g_next_source_id;
+
+// Generates a source_id with upper 32 bits from |restart_id| and lower 32 bits
+// from an atomic sequence.
+uint64_t GenerateSourceId(uint32_t restart_id) {
+  return static_cast<uint64_t>(restart_id) << 32 | g_next_source_id.GetNext();
+}
+
+// Notifies the observer of the BeginFrame. If the BeginFrame is a
+// animate_only BeginFrame, the observer may not be notified of the
+// BeginFrame.
+void FilterAndIssueBeginFrame(BeginFrameObserver* observer,
+                              const BeginFrameArgs& args) {
+  if (args.animate_only && !observer->WantsAnimateOnlyBeginFrames())
+    return;
+  observer->OnBeginFrame(args);
+}
+
 }  // namespace
 
 // BeginFrameObserverBase -------------------------------------------------
@@ -34,9 +53,13 @@ const BeginFrameArgs& BeginFrameObserverBase::LastUsedBeginFrameArgs() const {
   return last_begin_frame_args_;
 }
 
+bool BeginFrameObserverBase::WantsAnimateOnlyBeginFrames() const {
+  return wants_animate_only_begin_frames_;
+}
+
 void BeginFrameObserverBase::OnBeginFrame(const BeginFrameArgs& args) {
   DCHECK(args.IsValid());
-  DCHECK(args.frame_time >= last_begin_frame_args_.frame_time);
+  DCHECK_GE(args.frame_time, last_begin_frame_args_.frame_time);
   DCHECK(args.sequence_number > last_begin_frame_args_.sequence_number ||
          args.source_id != last_begin_frame_args_.source_id)
       << "current " << args.AsValue()->ToString() << ", last "
@@ -59,31 +82,40 @@ void BeginFrameObserverBase::AsValueInto(
 }
 
 // BeginFrameSource -------------------------------------------------------
-namespace {
-static base::AtomicSequenceNumber g_next_source_id;
-}  // namespace
 
-BeginFrameSource::BeginFrameSource() : source_id_(g_next_source_id.GetNext()) {}
+// static
+constexpr uint32_t BeginFrameSource::kNotRestartableId;
+
+BeginFrameSource::BeginFrameSource(uint32_t restart_id)
+    : source_id_(GenerateSourceId(restart_id)) {}
 
 BeginFrameSource::~BeginFrameSource() = default;
 
 void BeginFrameSource::AsValueInto(
     base::trace_event::TracedValue* state) const {
-  state->SetInteger("source_id", source_id_);
+  // The lower 32 bits of source_id are the interesting piece of |source_id_|.
+  state->SetInteger("source_id", static_cast<uint32_t>(source_id_));
 }
 
 // StubBeginFrameSource ---------------------------------------------------
+StubBeginFrameSource::StubBeginFrameSource()
+    : BeginFrameSource(kNotRestartableId) {}
+
 bool StubBeginFrameSource::IsThrottled() const {
   return true;
 }
 
 // SyntheticBeginFrameSource ----------------------------------------------
+SyntheticBeginFrameSource::SyntheticBeginFrameSource(uint32_t restart_id)
+    : BeginFrameSource(restart_id) {}
+
 SyntheticBeginFrameSource::~SyntheticBeginFrameSource() = default;
 
 // BackToBackBeginFrameSource ---------------------------------------------
 BackToBackBeginFrameSource::BackToBackBeginFrameSource(
     std::unique_ptr<DelayBasedTimeSource> time_source)
-    : time_source_(std::move(time_source)),
+    : SyntheticBeginFrameSource(kNotRestartableId),
+      time_source_(std::move(time_source)),
       next_sequence_number_(BeginFrameArgs::kStartingFrameNumber),
       weak_factory_(this) {
   time_source_->SetClient(this);
@@ -138,13 +170,15 @@ void BackToBackBeginFrameSource::OnTimerTick() {
   pending_observers.swap(pending_begin_frame_observers_);
   DCHECK(!pending_observers.empty());
   for (BeginFrameObserver* obs : pending_observers)
-    obs->OnBeginFrame(args);
+    FilterAndIssueBeginFrame(obs, args);
 }
 
 // DelayBasedBeginFrameSource ---------------------------------------------
 DelayBasedBeginFrameSource::DelayBasedBeginFrameSource(
-    std::unique_ptr<DelayBasedTimeSource> time_source)
-    : time_source_(std::move(time_source)),
+    std::unique_ptr<DelayBasedTimeSource> time_source,
+    uint32_t restart_id)
+    : SyntheticBeginFrameSource(restart_id),
+      time_source_(std::move(time_source)),
       next_sequence_number_(BeginFrameArgs::kStartingFrameNumber) {
   time_source_->SetClient(this);
 }
@@ -213,7 +247,7 @@ void DelayBasedBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
            missed_args.source_id != last_args.source_id)
         << "missed " << missed_args.AsValue()->ToString() << ", last "
         << last_args.AsValue()->ToString();
-    obs->OnBeginFrame(missed_args);
+    FilterAndIssueBeginFrame(obs, missed_args);
   }
 }
 
@@ -239,7 +273,7 @@ void DelayBasedBeginFrameSource::OnTimerTick() {
         (last_begin_frame_args_.frame_time >
          last_args.frame_time +
              last_begin_frame_args_.interval / kDoubleTickDivisor)) {
-      obs->OnBeginFrame(last_begin_frame_args_);
+      FilterAndIssueBeginFrame(obs, last_begin_frame_args_);
     }
   }
 }
@@ -247,7 +281,7 @@ void DelayBasedBeginFrameSource::OnTimerTick() {
 // ExternalBeginFrameSource -----------------------------------------------
 ExternalBeginFrameSource::ExternalBeginFrameSource(
     ExternalBeginFrameSourceClient* client)
-    : client_(client) {
+    : BeginFrameSource(kNotRestartableId), client_(client) {
   DCHECK(client_);
 }
 
@@ -279,7 +313,7 @@ void ExternalBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
   BeginFrameArgs missed_args = GetMissedBeginFrameArgs(obs);
   if (missed_args.IsValid()) {
     DCHECK_EQ(BeginFrameArgs::MISSED, missed_args.type);
-    obs->OnBeginFrame(missed_args);
+    FilterAndIssueBeginFrame(obs, missed_args);
   }
 }
 
@@ -326,7 +360,7 @@ void ExternalBeginFrameSource::OnBeginFrame(const BeginFrameArgs& args) {
              (args.sequence_number > last_args.sequence_number))
           << "current " << args.AsValue()->ToString() << ", last "
           << last_args.AsValue()->ToString();
-      obs->OnBeginFrame(args);
+      FilterAndIssueBeginFrame(obs, args);
     }
   }
 }

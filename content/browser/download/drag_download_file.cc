@@ -52,7 +52,7 @@ class DragDownloadFile::DragDownloadFileUI : public DownloadItem::Observer {
         referrer_(referrer),
         referrer_encoding_(referrer_encoding),
         web_contents_(web_contents),
-        download_item_(NULL),
+        download_item_(nullptr),
         weak_ptr_factory_(this) {
     DCHECK(on_completed_task_runner_);
     DCHECK(!on_completed_.is_null());
@@ -65,7 +65,6 @@ class DragDownloadFile::DragDownloadFileUI : public DownloadItem::Observer {
                         const base::FilePath& file_path) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-    RecordDownloadSource(INITIATED_BY_DRAG_N_DROP);
     // TODO(https://crbug.com/614134) This should use the frame actually
     // containing the link being dragged rather than the main frame of the tab.
     net::NetworkTrafficAnnotationTag traffic_annotation =
@@ -100,6 +99,7 @@ class DragDownloadFile::DragDownloadFileUI : public DownloadItem::Observer {
                                     weak_ptr_factory_.GetWeakPtr()));
     params->set_file_path(file_path);
     params->set_file(std::move(file));  // Nulls file.
+    params->set_download_source(DownloadSource::DRAG_AND_DROP);
     BrowserContext::GetDownloadManager(web_contents_->GetBrowserContext())
         ->DownloadUrl(std::move(params));
   }
@@ -151,7 +151,7 @@ class DragDownloadFile::DragDownloadFileUI : public DownloadItem::Observer {
         on_completed_.Reset();
       }
       download_item_->RemoveObserver(this);
-      download_item_ = NULL;
+      download_item_ = nullptr;
     }
     // Ignore other states.
   }
@@ -167,7 +167,7 @@ class DragDownloadFile::DragDownloadFileUI : public DownloadItem::Observer {
       on_completed_.Reset();
     }
     download_item_->RemoveObserver(this);
-    download_item_ = NULL;
+    download_item_ = nullptr;
   }
 
   scoped_refptr<base::SingleThreadTaskRunner> const on_completed_task_runner_;
@@ -194,7 +194,7 @@ DragDownloadFile::DragDownloadFile(const base::FilePath& file_path,
       file_(std::move(file)),
       drag_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       state_(INITIALIZED),
-      drag_ui_(NULL),
+      drag_ui_(nullptr),
       weak_ptr_factory_(this) {
   drag_ui_ = new DragDownloadFileUI(
       url, referrer, referrer_encoding, web_contents, drag_task_runner_,
@@ -213,7 +213,7 @@ DragDownloadFile::~DragDownloadFile() {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::BindOnce(&DragDownloadFileUI::Delete, base::Unretained(drag_ui_)));
-  drag_ui_ = NULL;
+  drag_ui_ = nullptr;
 }
 
 void DragDownloadFile::Start(ui::DownloadFileObserver* observer) {
@@ -260,7 +260,7 @@ void DragDownloadFile::DownloadCompleted(bool is_successful) {
     observer_->OnDownloadAborted();
 
   // Release the observer since we do not need it any more.
-  observer_ = NULL;
+  observer_ = nullptr;
 
   if (nested_loop_.running())
     nested_loop_.Quit();

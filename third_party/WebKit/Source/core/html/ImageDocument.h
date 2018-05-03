@@ -25,10 +25,10 @@
 #ifndef ImageDocument_h
 #define ImageDocument_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/html/HTMLDivElement.h"
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLImageElement.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -89,9 +89,6 @@ class CORE_EXPORT ImageDocument final : public HTMLDocument {
 
   // Whether the image has finished loading or not
   bool image_is_loaded_;
-
-  // Size of the checkerboard background tiles
-  int style_checker_size_;
 
   // Desktop: State of the mouse cursor in the image style
   enum MouseCursorMode { kDefault, kZoomIn, kZoomOut };

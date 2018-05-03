@@ -15,9 +15,10 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/bubble/bubble_frame_view.h"
+#include "ui/views/layout/layout_manager.h"
 #include "ui/views/layout/layout_provider.h"
-#include "ui/views/style/platform_style.h"
 #include "ui/views/view_tracker.h"
+#include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -60,8 +61,8 @@ const char BubbleDialogDelegateView::kViewClassName[] =
 BubbleDialogDelegateView::~BubbleDialogDelegateView() {
   if (GetWidget())
     GetWidget()->RemoveObserver(this);
-  SetLayoutManager(NULL);
-  SetAnchorView(NULL);
+  SetLayoutManager(nullptr);
+  SetAnchorView(nullptr);
 }
 
 // static
@@ -106,9 +107,8 @@ NonClientFrameView* BubbleDialogDelegateView::CreateNonClientFrameView(
     Widget* widget) {
   BubbleFrameView* frame = new BubbleFrameView(title_margins_, gfx::Insets());
 
-  // By default, assume the footnote only contains text.
   frame->set_footnote_margins(
-      LayoutProvider::Get()->GetDialogInsetsForContentType(TEXT, TEXT));
+      LayoutProvider::Get()->GetInsetsMetric(INSETS_DIALOG_SUBSECTION));
   frame->SetFootnoteView(CreateFootnoteView());
 
   BubbleBorder::Arrow adjusted_arrow = arrow();
@@ -147,8 +147,17 @@ void BubbleDialogDelegateView::OnWidgetVisibilityChanged(Widget* widget,
 
 void BubbleDialogDelegateView::OnWidgetActivationChanged(Widget* widget,
                                                          bool active) {
-  if (close_on_deactivate() && widget == GetWidget() && !active)
-    GetWidget()->Close();
+#if defined(OS_MACOSX)
+  // Install |mac_bubble_closer_| the first time the widget becomes active.
+  if (active && !mac_bubble_closer_ && GetWidget()) {
+    mac_bubble_closer_ = std::make_unique<ui::BubbleCloser>(
+        GetWidget()->GetNativeWindow(),
+        base::BindRepeating(&BubbleDialogDelegateView::OnDeactivate,
+                            base::Unretained(this)));
+  }
+#endif
+  if (widget == GetWidget() && !active)
+    OnDeactivate();
 }
 
 void BubbleDialogDelegateView::OnWidgetBoundsChanged(
@@ -210,8 +219,9 @@ BubbleDialogDelegateView::BubbleDialogDelegateView(View* anchor_view,
       anchor_view_tracker_(std::make_unique<ViewTracker>()),
       anchor_widget_(nullptr),
       arrow_(arrow),
-      mirror_arrow_in_rtl_(PlatformStyle::kMirrorBubbleArrowInRTLByDefault),
-      shadow_(BubbleBorder::SMALL_SHADOW),
+      mirror_arrow_in_rtl_(
+          ViewsDelegate::GetInstance()->ShouldMirrorArrowsInRTL()),
+      shadow_(BubbleBorder::DIALOG_SHADOW),
       color_explicitly_set_(false),
       accept_events_(true),
       adjust_if_offscreen_(true),
@@ -231,9 +241,13 @@ gfx::Rect BubbleDialogDelegateView::GetBubbleBounds() {
   // The argument rect has its origin at the bubble's arrow anchor point;
   // its size is the preferred size of the bubble's client view (this view).
   bool anchor_minimized = anchor_widget() && anchor_widget()->IsMinimized();
+  // If GetAnchorView() returns nullptr or GetAnchorRect() returns an empty rect
+  // at (0, 0), don't try and adjust arrow if off-screen.
+  gfx::Rect anchor_rect = GetAnchorRect();
+  bool has_anchor = GetAnchorView() || anchor_rect != gfx::Rect();
   return GetBubbleFrameView()->GetUpdatedWindowBounds(
-      GetAnchorRect(), GetWidget()->client_view()->GetPreferredSize(),
-      adjust_if_offscreen_ && !anchor_minimized);
+      anchor_rect, GetWidget()->client_view()->GetPreferredSize(),
+      adjust_if_offscreen_ && !anchor_minimized && has_anchor);
 }
 
 void BubbleDialogDelegateView::OnNativeThemeChanged(
@@ -314,6 +328,11 @@ void BubbleDialogDelegateView::HandleVisibilityChanged(Widget* widget,
     if (GetAccessibleWindowRole() == ui::AX_ROLE_ALERT_DIALOG)
       widget->GetRootView()->NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, true);
   }
+}
+
+void BubbleDialogDelegateView::OnDeactivate() {
+  if (close_on_deactivate() && GetWidget())
+    GetWidget()->Close();
 }
 
 }  // namespace views

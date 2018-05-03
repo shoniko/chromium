@@ -7,17 +7,17 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
-#include "base/memory/ptr_util.h"
 #include "cc/layers/solid_color_layer.h"
 #include "chrome/browser/android/compositor/layer/contextual_search_layer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "content/public/browser/android/compositor.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/ContextualSearchSceneLayer_jni.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/interfaces/url_loader_factory.mojom.h"
 #include "ui/android/resources/resource_manager_impl.h"
 #include "ui/android/view_android.h"
 #include "ui/gfx/android/java_bitmap.h"
@@ -73,8 +73,8 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jint progress_bar_background_resource_id,
     jint progress_bar_resource_id,
     jint search_promo_resource_id,
-    jint peek_promo_ripple_resource_id,
-    jint peek_promo_text_resource_id,
+    jint bar_banner_ripple_resource_id,
+    jint bar_banner_text_resource_id,
     jfloat dp_to_px,
     jfloat base_page_brightness,
     jfloat base_page_offset,
@@ -82,12 +82,12 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jboolean search_promo_visible,
     jfloat search_promo_height,
     jfloat search_promo_opacity,
-    jboolean search_peek_promo_visible,
-    jfloat search_peek_promo_height,
-    jfloat search_peek_promo_padding,
-    jfloat search_peek_promo_ripple_width,
-    jfloat search_peek_promo_ripple_opacity,
-    jfloat search_peek_promo_text_opacity,
+    jboolean search_bar_banner_visible,
+    jfloat search_bar_banner_height,
+    jfloat search_bar_banner_padding,
+    jfloat search_bar_banner_ripple_width,
+    jfloat search_bar_banner_ripple_opacity,
+    jfloat search_bar_banner_text_opacity,
     jfloat search_panel_x,
     jfloat search_panel_y,
     jfloat search_panel_width,
@@ -163,11 +163,11 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
       quick_action_icon_resource_id, arrow_up_resource_id,
       close_icon_resource_id, progress_bar_background_resource_id,
       progress_bar_resource_id, search_promo_resource_id,
-      peek_promo_ripple_resource_id, peek_promo_text_resource_id, dp_to_px,
+      bar_banner_ripple_resource_id, bar_banner_text_resource_id, dp_to_px,
       content_layer, search_promo_visible, search_promo_height,
-      search_promo_opacity, search_peek_promo_visible, search_peek_promo_height,
-      search_peek_promo_padding, search_peek_promo_ripple_width,
-      search_peek_promo_ripple_opacity, search_peek_promo_text_opacity,
+      search_promo_opacity, search_bar_banner_visible, search_bar_banner_height,
+      search_bar_banner_padding, search_bar_banner_ripple_width,
+      search_bar_banner_ripple_opacity, search_bar_banner_text_opacity,
       search_panel_x, search_panel_y, search_panel_width, search_panel_height,
       search_bar_margin_side, search_bar_height, search_context_opacity,
       search_text_layer_min_height, search_term_opacity,
@@ -193,14 +193,16 @@ void ContextualSearchSceneLayer::FetchThumbnail(
 
   GURL gurl(thumbnail_url_);
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
-  fetcher_ = base::MakeUnique<chrome::BitmapFetcher>(gurl, this,
-                                                     NO_TRAFFIC_ANNOTATION_YET);
+  network::mojom::URLLoaderFactory* loader_factory =
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetURLLoaderFactoryForBrowserProcess();
+  fetcher_ =
+      std::make_unique<BitmapFetcher>(gurl, this, NO_TRAFFIC_ANNOTATION_YET);
   fetcher_->Init(
-      profile->GetRequestContext(),
       std::string(),
-      net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+      net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
       net::LOAD_NORMAL);
-  fetcher_->Start();
+  fetcher_->Start(loader_factory);
 }
 
 void ContextualSearchSceneLayer::OnFetchComplete(const GURL& url,
@@ -240,7 +242,9 @@ void ContextualSearchSceneLayer::HideTree(JNIEnv* env,
   content_container_->SetPosition(gfx::PointF(0.0f, 0.0f));
 }
 
-static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
+static jlong JNI_ContextualSearchSceneLayer_Init(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jobj) {
   // This will automatically bind to the Java object and pass ownership there.
   ContextualSearchSceneLayer* tree_provider =
       new ContextualSearchSceneLayer(env, jobj);

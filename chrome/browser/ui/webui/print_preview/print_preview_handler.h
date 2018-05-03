@@ -101,10 +101,6 @@ class PrintPreviewHandler
     return regenerate_preview_request_count_;
   }
 
-  // Shuts down the initiator renderer. Called when a bad IPC message is
-  // received.
-  void BadMessageReceived();
-
   // Notifies PDF Printer Handler that |path| was selected. Used for tests.
   void FileSelectedForTesting(const base::FilePath& path,
                               int index,
@@ -123,6 +119,13 @@ class PrintPreviewHandler
   // Protected so unit tests can override.
   virtual PrinterHandler* GetPrinterHandler(printing::PrinterType printer_type);
 
+  // Shuts down the initiator renderer. Called when a bad IPC message is
+  // received.
+  virtual void BadMessageReceived();
+
+  // Gets the initiator for the print preview dialog.
+  virtual content::WebContents* GetInitiator() const;
+
   // Register/unregister from notifications of changes done to the GAIA
   // cookie. Protected so unit tests can override.
   virtual void RegisterForGaiaCookieChanges();
@@ -137,6 +140,8 @@ class PrintPreviewHandler
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, GetPrinters);
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, GetPrinterCapabilities);
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, Print);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, GetPreview);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, SendPreviewUpdates);
   class AccessTokenService;
 
   content::WebContents* preview_web_contents() const;
@@ -195,17 +200,13 @@ class PrintPreviewHandler
   // Generates new token and sends back to UI.
   void HandleGetAccessToken(const base::ListValue* args);
 
-  // Brings up a web page to allow the user to configure cloud print.
-  // |args| is unused.
-  void HandleManageCloudPrint(const base::ListValue* args);
+  // Brings up Chrome printing setting page to allow the user to configure local
+  // printers or Google Cloud printers. |args| is unused.
+  void HandleManagePrinters(const base::ListValue* args);
 
   // Gathers UMA stats when the print preview dialog is about to close.
   // |args| is unused.
   void HandleClosePreviewDialog(const base::ListValue* args);
-
-  // Asks the browser to show the native printer management dialog.
-  // |args| is unused.
-  void HandleManagePrinters(const base::ListValue* args);
 
   // Asks the browser for several settings that are needed before the first
   // preview is displayed.
@@ -247,23 +248,14 @@ class PrintPreviewHandler
   void SendCloudPrintJob(const std::string& callback_id,
                          const base::RefCountedBytes* data);
 
-  // Gets the initiator for the print preview dialog.
-  content::WebContents* GetInitiator() const;
-
   // Closes the preview dialog.
   void ClosePreviewDialog();
-
-  // Adds all the recorded stats taken so far to histogram counts.
-  void ReportStats();
 
   // Clears initiator details for the print preview dialog.
   void ClearInitiatorDetails();
 
   // Populates |settings| according to the current locale.
   void GetNumberFormatAndMeasurementSystem(base::DictionaryValue* settings);
-
-  bool GetPreviewDataAndTitle(scoped_refptr<base::RefCountedBytes>* data,
-                              base::string16* title) const;
 
   PdfPrinterHandler* GetPdfPrinterHandler();
 
@@ -298,7 +290,6 @@ class PrintPreviewHandler
 
   // A count of how many requests received to show manage printers dialog.
   int manage_printers_dialog_request_count_;
-  int manage_cloud_printers_dialog_request_count_;
 
   // Whether we have already logged a failed print preview.
   bool reported_failed_preview_;
@@ -330,12 +321,6 @@ class PrintPreviewHandler
   std::unique_ptr<PrinterHandler> local_printer_handler_;
 
   base::queue<std::string> preview_callbacks_;
-
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
-  // Print settings to use in the local print request to send when
-  // HandleHidePreview() is called.
-  std::unique_ptr<base::DictionaryValue> settings_;
-#endif
 
   base::WeakPtrFactory<PrintPreviewHandler> weak_factory_;
 

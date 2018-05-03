@@ -10,14 +10,14 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/UserGestureIndicator.h"
+#include "core/frame/Frame.h"
+#include "core/frame/LocalFrame.h"
 #include "modules/permissions/PermissionUtils.h"
 #include "modules/quota/StorageEstimate.h"
-#include "platform/StorageQuotaCallbacks.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/Functional.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebStorageQuotaError.h"
+#include "third_party/WebKit/common/quota/quota_types.mojom-blink.h"
 
 namespace blink {
 
@@ -30,36 +30,23 @@ namespace {
 const char kUniqueOriginErrorMessage[] =
     "The operation is not supported in this context.";
 
-class EstimateCallbacks final : public StorageQuotaCallbacks {
-  WTF_MAKE_NONCOPYABLE(EstimateCallbacks);
-
- public:
-  explicit EstimateCallbacks(ScriptPromiseResolver* resolver)
-      : resolver_(resolver) {}
-
-  ~EstimateCallbacks() override {}
-
-  void DidQueryStorageUsageAndQuota(
-      unsigned long long usage_in_bytes,
-      unsigned long long quota_in_bytes) override {
-    StorageEstimate estimate;
-    estimate.setUsage(usage_in_bytes);
-    estimate.setQuota(quota_in_bytes);
-    resolver_->Resolve(estimate);
+void QueryStorageUsageAndQuotaCallback(ScriptPromiseResolver* resolver,
+                                       mojom::QuotaStatusCode status_code,
+                                       int64_t usage_in_bytes,
+                                       int64_t quota_in_bytes) {
+  if (status_code != mojom::QuotaStatusCode::kOk) {
+    // TODO(sashab): Replace this with a switch statement, and remove the enum
+    // values from QuotaStatusCode.
+    resolver->Reject(
+        DOMException::Create(static_cast<ExceptionCode>(status_code)));
+    return;
   }
 
-  void DidFail(WebStorageQuotaError error) override {
-    resolver_->Reject(DOMException::Create(static_cast<ExceptionCode>(error)));
-  }
-
-  virtual void Trace(blink::Visitor* visitor) {
-    visitor->Trace(resolver_);
-    StorageQuotaCallbacks::Trace(visitor);
-  }
-
- private:
-  Member<ScriptPromiseResolver> resolver_;
-};
+  StorageEstimate estimate;
+  estimate.setUsage(usage_in_bytes);
+  estimate.setQuota(quota_in_bytes);
+  resolver->Resolve(estimate);
+}
 
 }  // namespace
 
@@ -68,7 +55,8 @@ ScriptPromise StorageManager::persist(ScriptState* script_state) {
   ScriptPromise promise = resolver->Promise();
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context->IsSecureContext());  // [SecureContext] in IDL
-  SecurityOrigin* security_origin = execution_context->GetSecurityOrigin();
+  const SecurityOrigin* security_origin =
+      execution_context->GetSecurityOrigin();
   if (security_origin->IsUnique()) {
     resolver->Reject(V8ThrowException::CreateTypeError(
         script_state->GetIsolate(), kUniqueOriginErrorMessage));
@@ -76,21 +64,13 @@ ScriptPromise StorageManager::persist(ScriptState* script_state) {
   }
 
   DCHECK(execution_context->IsDocument());
-  PermissionService* permission_service =
-      GetPermissionService(ExecutionContext::From(script_state));
-  if (!permission_service) {
-    resolver->Reject(DOMException::Create(
-        kInvalidStateError,
-        "In its current state, the global scope can't request permissions."));
-    return promise;
-  }
-  permission_service->RequestPermission(
-      CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
-      ExecutionContext::From(script_state)->GetSecurityOrigin(),
-      UserGestureIndicator::ProcessingUserGesture(),
-      ConvertToBaseCallback(
+  Document* doc = ToDocumentOrNull(execution_context);
+  GetPermissionService(ExecutionContext::From(script_state))
+      .RequestPermission(
+          CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
+          Frame::HasTransientUserActivation(doc ? doc->GetFrame() : nullptr),
           WTF::Bind(&StorageManager::PermissionRequestComplete,
-                    WrapPersistent(this), WrapPersistent(resolver))));
+                    WrapPersistent(this), WrapPersistent(resolver)));
 
   return promise;
 }
@@ -100,27 +80,19 @@ ScriptPromise StorageManager::persisted(ScriptState* script_state) {
   ScriptPromise promise = resolver->Promise();
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context->IsSecureContext());  // [SecureContext] in IDL
-  SecurityOrigin* security_origin = execution_context->GetSecurityOrigin();
+  const SecurityOrigin* security_origin =
+      execution_context->GetSecurityOrigin();
   if (security_origin->IsUnique()) {
     resolver->Reject(V8ThrowException::CreateTypeError(
         script_state->GetIsolate(), kUniqueOriginErrorMessage));
     return promise;
   }
 
-  PermissionService* permission_service =
-      GetPermissionService(ExecutionContext::From(script_state));
-  if (!permission_service) {
-    resolver->Reject(DOMException::Create(
-        kInvalidStateError,
-        "In its current state, the global scope can't query permissions."));
-    return promise;
-  }
-  permission_service->HasPermission(
-      CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
-      ExecutionContext::From(script_state)->GetSecurityOrigin(),
-      ConvertToBaseCallback(
+  GetPermissionService(ExecutionContext::From(script_state))
+      .HasPermission(
+          CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
           WTF::Bind(&StorageManager::PermissionRequestComplete,
-                    WrapPersistent(this), WrapPersistent(resolver))));
+                    WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
@@ -129,29 +101,30 @@ ScriptPromise StorageManager::estimate(ScriptState* script_state) {
   ScriptPromise promise = resolver->Promise();
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context->IsSecureContext());  // [SecureContext] in IDL
-  SecurityOrigin* security_origin = execution_context->GetSecurityOrigin();
+  const SecurityOrigin* security_origin =
+      execution_context->GetSecurityOrigin();
   if (security_origin->IsUnique()) {
     resolver->Reject(V8ThrowException::CreateTypeError(
         script_state->GetIsolate(), kUniqueOriginErrorMessage));
     return promise;
   }
 
-  KURL storage_partition = KURL(NullURL(), security_origin->ToString());
   Platform::Current()->QueryStorageUsageAndQuota(
-      storage_partition, kWebStorageQuotaTypeTemporary,
-      new EstimateCallbacks(resolver));
+      WrapRefCounted(security_origin), mojom::StorageType::kTemporary,
+      WTF::Bind(&QueryStorageUsageAndQuotaCallback, WrapPersistent(resolver)));
   return promise;
 }
 
-PermissionService* StorageManager::GetPermissionService(
+PermissionService& StorageManager::GetPermissionService(
     ExecutionContext* execution_context) {
-  if (!permission_service_ &&
-      ConnectToPermissionService(execution_context,
-                                 mojo::MakeRequest(&permission_service_)))
-    permission_service_.set_connection_error_handler(ConvertToBaseCallback(
+  if (!permission_service_) {
+    ConnectToPermissionService(execution_context,
+                               mojo::MakeRequest(&permission_service_));
+    permission_service_.set_connection_error_handler(
         WTF::Bind(&StorageManager::PermissionServiceConnectionError,
-                  WrapWeakPersistent(this))));
-  return permission_service_.get();
+                  WrapWeakPersistent(this)));
+  }
+  return *permission_service_;
 }
 
 void StorageManager::PermissionServiceConnectionError() {
@@ -166,10 +139,12 @@ void StorageManager::PermissionRequestComplete(ScriptPromiseResolver* resolver,
   resolver->Resolve(status == PermissionStatus::GRANTED);
 }
 
-STATIC_ASSERT_ENUM(kWebStorageQuotaErrorNotSupported, kNotSupportedError);
-STATIC_ASSERT_ENUM(kWebStorageQuotaErrorInvalidModification,
+STATIC_ASSERT_ENUM(mojom::QuotaStatusCode::kErrorNotSupported,
+                   kNotSupportedError);
+STATIC_ASSERT_ENUM(mojom::QuotaStatusCode::kErrorInvalidModification,
                    kInvalidModificationError);
-STATIC_ASSERT_ENUM(kWebStorageQuotaErrorInvalidAccess, kInvalidAccessError);
-STATIC_ASSERT_ENUM(kWebStorageQuotaErrorAbort, kAbortError);
+STATIC_ASSERT_ENUM(mojom::QuotaStatusCode::kErrorInvalidAccess,
+                   kInvalidAccessError);
+STATIC_ASSERT_ENUM(mojom::QuotaStatusCode::kErrorAbort, kAbortError);
 
 }  // namespace blink

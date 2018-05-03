@@ -105,7 +105,7 @@ void SVGPathElement::SvgAttributeChanged(const QualifiedName& attr_name) {
 void SVGPathElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   SVGAnimatedPropertyBase* property = PropertyFromAttribute(name);
   if (property == path_) {
     SVGAnimatedPath* path = this->GetPath();
@@ -114,7 +114,7 @@ void SVGPathElement::CollectStyleForPresentationAttribute(
     if (const SVGElement* element = CorrespondingElement())
       path = ToSVGPathElement(element)->GetPath();
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                            path->CssValue());
+                                            &path->CssValue());
     return;
   }
   SVGGeometryElement::CollectStyleForPresentationAttribute(name, value, style);

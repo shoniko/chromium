@@ -5,7 +5,6 @@
 #include "chrome/browser/vr/databinding/binding.h"
 
 #include "base/memory/ptr_util.h"
-#include "base/memory/weak_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace vr {
@@ -30,7 +29,8 @@ TEST(Binding, BoundBool) {
   TestView b;
   b.value = false;
 
-  b.binding = VR_BIND_FIELD(bool, TestModel, &a, value, TestView, &b, value);
+  b.binding =
+      VR_BIND_FIELD(bool, TestModel, &a, model->value, TestView, &b, value);
 
   EXPECT_NE(a.value, b.value);
   b.binding->Update();
@@ -52,21 +52,6 @@ TEST(Binding, BoundBool) {
   b.binding->Update();
   EXPECT_EQ(false, a.value);
   EXPECT_EQ(true, b.value);
-}
-
-TEST(Binding, Lifetime) {
-  base::WeakPtr<BindingBase> binding;
-  {
-    TestModel a;
-    TestView b;
-    b.binding = VR_BIND_FIELD(bool, TestModel, &a, value, TestView, &b, value);
-    binding = b.binding->GetWeakPtr();
-  }
-  // This test is not particularly useful, since we're just testing the behavior
-  // of base::WeakPtr, but it confirms that when an object owning a binding
-  // falls out of scope, weak pointers to its bindings are correctly
-  // invalidated.
-  EXPECT_FALSE(!!binding);
 }
 
 }  // namespace vr

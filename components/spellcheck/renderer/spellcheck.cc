@@ -58,9 +58,10 @@ class UpdateSpellcheckEnabled : public content::RenderFrameVisitor {
 };
 
 bool UpdateSpellcheckEnabled::Visit(content::RenderFrame* render_frame) {
-  SpellCheckProvider* provider = SpellCheckProvider::Get(render_frame);
-  DCHECK(provider);
-  provider->EnableSpellcheck(enabled_);
+  if (!enabled_) {
+    if (render_frame && render_frame->GetWebFrame())
+      render_frame->GetWebFrame()->RemoveSpellingMarkers();
+  }
   return true;
 }
 
@@ -169,7 +170,9 @@ class SpellCheck::SpellcheckRequest {
 // and as such the SpellCheckProviders will never be notified of different
 // values.
 // TODO(groby): Simplify this.
-SpellCheck::SpellCheck() : spellcheck_enabled_(true) {
+SpellCheck::SpellCheck(
+    service_manager::LocalInterfaceProvider* embedder_provider)
+    : embedder_provider_(embedder_provider), spellcheck_enabled_(true) {
   if (!content::ChildThread::Get())
     return;  // Can be NULL in tests.
 
@@ -178,9 +181,9 @@ SpellCheck::SpellCheck() : spellcheck_enabled_(true) {
   DCHECK(service_manager_connection);
 
   auto registry = base::MakeUnique<service_manager::BinderRegistry>();
-  registry->AddInterface(
-      base::Bind(&SpellCheck::SpellCheckerRequest, base::Unretained(this)),
-      base::ThreadTaskRunnerHandle::Get());
+  registry->AddInterface(base::BindRepeating(&SpellCheck::SpellCheckerRequest,
+                                             base::Unretained(this)),
+                         base::ThreadTaskRunnerHandle::Get());
 
   service_manager_connection->AddConnectionFilter(
       base::MakeUnique<content::SimpleConnectionFilter>(std::move(registry)));
@@ -261,7 +264,8 @@ void SpellCheck::CustomDictionaryChanged(
 // AddSpellcheckLanguage() is called.
 void SpellCheck::AddSpellcheckLanguage(base::File file,
                                        const std::string& language) {
-  languages_.push_back(base::MakeUnique<SpellcheckLanguage>());
+  languages_.push_back(
+      base::MakeUnique<SpellcheckLanguage>(embedder_provider_));
   languages_.back()->Init(std::move(file), language);
 }
 
@@ -443,8 +447,8 @@ void SpellCheck::PostDelayedSpellCheckTask(SpellcheckRequest* request) {
     return;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&SpellCheck::PerformSpellCheck, AsWeakPtr(),
-                            base::Owned(request)));
+      FROM_HERE, base::BindOnce(&SpellCheck::PerformSpellCheck, AsWeakPtr(),
+                                base::Owned(request)));
 }
 #endif
 

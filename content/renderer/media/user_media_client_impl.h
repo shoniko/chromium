@@ -15,25 +15,20 @@
 #include "base/sequence_checker.h"
 #include "content/common/content_export.h"
 #include "content/common/media/media_devices.h"
-#include "content/common/media/media_devices.mojom.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/renderer/media/media_devices_event_dispatcher.h"
 #include "content/renderer/media/user_media_processor.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/platform/modules/mediastream/media_devices.mojom.h"
 #include "third_party/WebKit/public/web/WebApplyConstraintsRequest.h"
 #include "third_party/WebKit/public/web/WebMediaDeviceChangeObserver.h"
-#include "third_party/WebKit/public/web/WebMediaDevicesRequest.h"
 #include "third_party/WebKit/public/web/WebUserMediaClient.h"
 #include "third_party/WebKit/public/web/WebUserMediaRequest.h"
-
-namespace base {
-class TaskRunner;
-}
 
 namespace content {
 
 class ApplyConstraintsProcessor;
-class MediaStreamDispatcher;
+class MediaStreamDeviceObserver;
 class PeerConnectionDependencyFactory;
 
 // UserMediaClientImpl handles requests coming from the Blink MediaDevices
@@ -49,46 +44,37 @@ class CONTENT_EXPORT UserMediaClientImpl : public RenderFrameObserver,
   UserMediaClientImpl(
       RenderFrame* render_frame,
       PeerConnectionDependencyFactory* dependency_factory,
-      std::unique_ptr<MediaStreamDispatcher> media_stream_dispatcher,
-      const scoped_refptr<base::TaskRunner>& worker_task_runner);
+      std::unique_ptr<MediaStreamDeviceObserver> media_stream_device_observer);
   UserMediaClientImpl(RenderFrame* render_frame,
                       std::unique_ptr<UserMediaProcessor> user_media_processor);
   ~UserMediaClientImpl() override;
 
-  MediaStreamDispatcher* media_stream_dispatcher() const {
-    return user_media_processor_->media_stream_dispatcher();
+  MediaStreamDeviceObserver* media_stream_device_observer() const {
+    return user_media_processor_->media_stream_device_observer();
   }
 
   // blink::WebUserMediaClient implementation
   void RequestUserMedia(const blink::WebUserMediaRequest& web_request) override;
   void CancelUserMediaRequest(
       const blink::WebUserMediaRequest& web_request) override;
-  void RequestMediaDevices(
-      const blink::WebMediaDevicesRequest& media_devices_request) override;
   void SetMediaDeviceChangeObserver(
       const blink::WebMediaDeviceChangeObserver& observer) override;
   void ApplyConstraints(
       const blink::WebApplyConstraintsRequest& web_request) override;
+  void StopTrack(const blink::WebMediaStreamTrack& web_track) override;
 
   // RenderFrameObserver override
   void WillCommitProvisionalLoad() override;
 
   void SetMediaDevicesDispatcherForTesting(
-      ::mojom::MediaDevicesDispatcherHostPtr media_devices_dispatcher);
-
- protected:
-  // This method is virtual for test purposes. A test can override it to
-  // test requesting local media streams. The function notifies Blink that the
-  // |request| has completed.
-  virtual void EnumerateDevicesSucceded(
-      blink::WebMediaDevicesRequest* request,
-      blink::WebVector<blink::WebMediaDeviceInfo>& devices);
+      blink::mojom::MediaDevicesDispatcherHostPtr media_devices_dispatcher);
 
  private:
   class Request {
    public:
     explicit Request(std::unique_ptr<UserMediaRequest> request);
     explicit Request(const blink::WebApplyConstraintsRequest& request);
+    explicit Request(const blink::WebMediaStreamTrack& request);
     Request(Request&& other);
     Request& operator=(Request&& other);
     ~Request();
@@ -98,20 +84,23 @@ class CONTENT_EXPORT UserMediaClientImpl : public RenderFrameObserver,
     UserMediaRequest* user_media_request() const {
       return user_media_request_.get();
     }
-
     const blink::WebApplyConstraintsRequest& apply_constraints_request() const {
       return apply_constraints_request_;
     }
-
-    bool IsApplyConstraints() const {
-      return !apply_constraints_request_.IsNull();
+    const blink::WebMediaStreamTrack& web_track_to_stop() const {
+      return web_track_to_stop_;
     }
 
     bool IsUserMedia() const { return !!user_media_request_; }
+    bool IsApplyConstraints() const {
+      return !apply_constraints_request_.IsNull();
+    }
+    bool IsStopTrack() const { return !web_track_to_stop_.IsNull(); }
 
    private:
     std::unique_ptr<UserMediaRequest> user_media_request_;
     blink::WebApplyConstraintsRequest apply_constraints_request_;
+    blink::WebMediaStreamTrack web_track_to_stop_;
   };
 
   void MaybeProcessNextRequestInfo();
@@ -122,16 +111,13 @@ class CONTENT_EXPORT UserMediaClientImpl : public RenderFrameObserver,
   // RenderFrameObserver implementation.
   void OnDestruct() override;
 
-  using EnumerationResult = std::vector<MediaDeviceInfoArray>;
-  void FinalizeEnumerateDevices(blink::WebMediaDevicesRequest request,
-                                const EnumerationResult& result);
-
   // Callback invoked by MediaDevicesEventDispatcher when a device-change
   // notification arrives.
   void DevicesChanged(MediaDeviceType device_type,
                       const MediaDeviceInfoArray& device_infos);
 
-  const ::mojom::MediaDevicesDispatcherHostPtr& GetMediaDevicesDispatcher();
+  const blink::mojom::MediaDevicesDispatcherHostPtr&
+  GetMediaDevicesDispatcher();
 
   // |user_media_processor_| is a unique_ptr for testing purposes.
   std::unique_ptr<UserMediaProcessor> user_media_processor_;
@@ -139,7 +125,7 @@ class CONTENT_EXPORT UserMediaClientImpl : public RenderFrameObserver,
   // problems in builds that do not include WebRTC.
   std::unique_ptr<ApplyConstraintsProcessor> apply_constraints_processor_;
 
-  ::mojom::MediaDevicesDispatcherHostPtr media_devices_dispatcher_;
+  blink::mojom::MediaDevicesDispatcherHostPtr media_devices_dispatcher_;
 
   // UserMedia requests are processed sequentially. |is_processing_request_|
   // is a flag that indicates if a request is being processed at a given time,

@@ -18,7 +18,7 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "url/gurl.h"
 
-class CommandUpdater;
+class CommandUpdaterImpl;
 class Profile;
 class ReloadButton;
 class ToolbarModel;
@@ -94,14 +94,14 @@ class SimpleWebViewDialog : public views::ButtonListener,
 
   Profile* profile_;
   std::unique_ptr<ToolbarModel> toolbar_model_;
-  std::unique_ptr<CommandUpdater> command_updater_;
+  std::unique_ptr<CommandUpdaterImpl> command_updater_;
 
   // Controls
-  views::ImageButton* back_;
-  views::ImageButton* forward_;
-  ReloadButton* reload_;
-  LocationBarView* location_bar_;
-  views::WebView* web_view_;
+  views::ImageButton* back_ = nullptr;
+  views::ImageButton* forward_ = nullptr;
+  ReloadButton* reload_ = nullptr;
+  LocationBarView* location_bar_ = nullptr;
+  views::WebView* web_view_ = nullptr;
 
   // Contains |web_view_| while it isn't owned by the view.
   std::unique_ptr<views::WebView> web_view_container_;

@@ -88,12 +88,12 @@ class TestVideoConfig {
 
   static VideoDecoderConfig Normal(VideoCodec codec = kCodecVP8);
   static VideoDecoderConfig NormalH264();
-  static VideoDecoderConfig NormalEncrypted();
+  static VideoDecoderConfig NormalEncrypted(VideoCodec codec = kCodecVP8);
   static VideoDecoderConfig NormalRotated(VideoRotation rotation);
 
   // Returns a configuration that is larger in dimensions than Normal().
   static VideoDecoderConfig Large(VideoCodec codec = kCodecVP8);
-  static VideoDecoderConfig LargeEncrypted();
+  static VideoDecoderConfig LargeEncrypted(VideoCodec codec = kCodecVP8);
 
   // Returns coded size for Normal and Large config.
   static gfx::Size NormalCodedSize();
@@ -241,6 +241,11 @@ MATCHER(ParsedDTSGreaterThanPTS, "") {
          CONTAINS_STRING(arg, ", which is after the frame's PTS");
 }
 
+MATCHER_P2(CodecUnsupportedInContainer, codec, container, "") {
+  return CONTAINS_STRING(arg, std::string(codec) + "' is not supported for '" +
+                                  std::string(container));
+}
+
 MATCHER_P(FoundStream, stream_type_string, "") {
   return CONTAINS_STRING(
       arg, "found_" + std::string(stream_type_string) + "_stream\":true");
@@ -310,6 +315,18 @@ MATCHER_P(SkippingSpliceAlreadySpliced, time_microseconds, "") {
       arg, "Skipping splice frame generation: overlapped buffers at " +
                base::IntToString(time_microseconds) +
                "us are in a previously buffered splice.");
+}
+
+MATCHER_P2(SkippingSpliceTooLittleOverlap,
+           pts_microseconds,
+           overlap_microseconds,
+           "") {
+  return CONTAINS_STRING(
+      arg, "Skipping audio splice trimming at PTS=" +
+               base::IntToString(pts_microseconds) + "us. Found only " +
+               base::IntToString(overlap_microseconds) +
+               "us of overlap, need at least 1000us. Multiple occurrences may "
+               "result in loss of A/V sync.");
 }
 
 MATCHER_P(WebMSimpleBlockDurationEstimated, estimated_duration_ms, "") {

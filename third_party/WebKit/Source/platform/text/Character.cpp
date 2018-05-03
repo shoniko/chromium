@@ -110,11 +110,7 @@ bool Character::IsUprightInMixedVertical(UChar32 character) {
   RETURN_HAS_PROPERTY(character, kIsUprightInMixedVertical)
 }
 
-bool Character::IsCJKIdeographOrSymbol(UChar32 c) {
-  // Likely common case
-  if (c < 0x2C7)
-    return false;
-
+bool Character::IsCJKIdeographOrSymbolSlow(UChar32 c) {
   RETURN_HAS_PROPERTY(c, kIsCJKIdeographOrSymbol)
 }
 
@@ -211,6 +207,30 @@ unsigned Character::ExpansionOpportunityCount(const UChar* characters,
   return count;
 }
 
+bool Character::CanTextDecorationSkipInk(UChar32 codepoint) {
+  if (codepoint == kSolidusCharacter || codepoint == kReverseSolidusCharacter ||
+      codepoint == kLowLineCharacter)
+    return false;
+
+  if (Character::IsCJKIdeographOrSymbol(codepoint))
+    return false;
+
+  UBlockCode block = ublock_getCode(codepoint);
+  switch (block) {
+    // These blocks contain CJK characters we don't want to skip ink, but are
+    // not ideograph that IsCJKIdeographOrSymbol() does not cover.
+    case UBLOCK_HANGUL_JAMO:
+    case UBLOCK_HANGUL_COMPATIBILITY_JAMO:
+    case UBLOCK_HANGUL_SYLLABLES:
+    case UBLOCK_HANGUL_JAMO_EXTENDED_A:
+    case UBLOCK_HANGUL_JAMO_EXTENDED_B:
+    case UBLOCK_LINEAR_B_IDEOGRAMS:
+      return false;
+    default:
+      return true;
+  }
+}
+
 bool Character::CanReceiveTextEmphasis(UChar32 c) {
   WTF::Unicode::CharCategory category = WTF::Unicode::Category(c);
   if (category &
@@ -230,6 +250,14 @@ bool Character::CanReceiveTextEmphasis(UChar32 c) {
     return false;
 
   return true;
+}
+
+bool Character::IsEmojiFlagSequenceTag(UChar32 c) {
+  // Only allow valid sequences from
+  // http://www.unicode.org/reports/tr51/proposed.html#valid-emoji-tag-sequences
+  return (c >= kTagDigitZero && c <= kTagDigitNine) ||
+         (c >= kTagLatinSmallLetterA && c <= kTagLatinSmallLetterZ) ||
+         c == kCancelTag;
 }
 
 template <typename CharacterType>
@@ -257,6 +285,11 @@ bool Character::IsCommonOrInheritedScript(UChar32 character) {
   UScriptCode script = uscript_getScript(character, &status);
   return U_SUCCESS(status) &&
          (script == USCRIPT_COMMON || script == USCRIPT_INHERITED);
+}
+
+bool Character::IsUnassignedOrPrivateUse(UChar32 character) {
+  return WTF::Unicode::Category(character) &
+         (WTF::Unicode::kOther_NotAssigned | WTF::Unicode::kOther_PrivateUse);
 }
 
 }  // namespace blink

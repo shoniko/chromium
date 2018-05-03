@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,7 @@ chrome.automation.EventType = {
   FOCUS: 'focus',
   IMAGE_FRAME_UPDATED: 'imageFrameUpdated',
   HIDE: 'hide',
+  HIT_TEST_RESULT: 'hitTestResult',
   HOVER: 'hover',
   INVALID_STATUS_CHANGED: 'invalidStatusChanged',
   LAYOUT_COMPLETE: 'layoutComplete',
@@ -96,7 +97,8 @@ chrome.automation.RoleType = {
   COLOR_WELL: 'colorWell',
   COLUMN_HEADER: 'columnHeader',
   COLUMN: 'column',
-  COMBO_BOX: 'comboBox',
+  COMBO_BOX_GROUPING: 'comboBoxGrouping',
+  COMBO_BOX_MENU_BUTTON: 'comboBoxMenuButton',
   COMPLEMENTARY: 'complementary',
   CONTENT_INFO: 'contentInfo',
   DATE: 'date',
@@ -186,6 +188,7 @@ chrome.automation.RoleType = {
   TABLE: 'table',
   TERM: 'term',
   TEXT_FIELD: 'textField',
+  TEXT_FIELD_WITH_COMBO_BOX: 'textFieldWithComboBox',
   TIME: 'time',
   TIMER: 'timer',
   TITLE_BAR: 'titleBar',
@@ -427,6 +430,13 @@ chrome.automation.AutomationNode.prototype.location;
  * @see https://developer.chrome.com/extensions/automation#method-boundsForRange
  */
 chrome.automation.AutomationNode.prototype.boundsForRange = function(startIndex, endIndex) {};
+
+/**
+ * The location (as a bounding box) of this node in global screen coordinates without applying any clipping from ancestors.
+ * @type {(!chrome.automation.Rect|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-unclippedLocation
+ */
+chrome.automation.AutomationNode.prototype.unclippedLocation;
 
 /**
  * The purpose of the node, other than the role, if any.
@@ -885,6 +895,20 @@ chrome.automation.AutomationNode.prototype.containerLiveAtomic;
 chrome.automation.AutomationNode.prototype.containerLiveBusy;
 
 /**
+ * Aria auto complete.
+ * @type {(string|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-autoComplete
+ */
+chrome.automation.AutomationNode.prototype.autoComplete;
+
+/**
+ * The name of the programmatic backing object.
+ * @type {(string|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-className
+ */
+chrome.automation.AutomationNode.prototype.className;
+
+/**
  * A map containing all HTML attributes and their values
  * @type {Object<string>}
  * @see https://developer.chrome.com/extensions/automation#type-htmlAttributes
@@ -1035,15 +1059,27 @@ chrome.automation.AutomationNode.prototype.nextSibling;
 
 /**
  * @type {(!chrome.automation.AutomationNode|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-previousOnLine
+ */
+chrome.automation.AutomationNode.prototype.previousOnLine;
+
+/**
+ * @type {(!chrome.automation.AutomationNode|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-nextOnLine
  */
 chrome.automation.AutomationNode.prototype.nextOnLine;
 
 /**
  * @type {(!chrome.automation.AutomationNode|undefined)}
- * @see https://developer.chrome.com/extensions/automation#type-previousOnLine
+ * @see https://developer.chrome.com/extensions/automation#type-previousFocus
  */
-chrome.automation.AutomationNode.prototype.previousOnLine;
+chrome.automation.AutomationNode.prototype.previousFocus;
+
+/**
+ * @type {(!chrome.automation.AutomationNode|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-nextFocus
+ */
+chrome.automation.AutomationNode.prototype.nextFocus;
 
 /**
  * The index of this node in its parent node's list of children. If this is the root node, this will be undefined.
@@ -1084,6 +1120,16 @@ chrome.automation.AutomationNode.prototype.getImageData = function(maxWidth, max
  * @see https://developer.chrome.com/extensions/automation#method-hitTest
  */
 chrome.automation.AutomationNode.prototype.hitTest = function(x, y, eventToFire) {};
+
+/**
+ * Does a $(ref:automation.AutomationNode.hitTest), and receives a callback with
+ * the resulting hit node.
+ * @param {number} x
+ * @param {number} y
+ * @param {function(!chrome.automation.AutomationNode):void} callback
+ * @see https://developer.chrome.com/extensions/automation#method-hitTestWithReply
+ */
+chrome.automation.AutomationNode.prototype.hitTestWithReply = function(x, y, callback) {};
 
 /**
  * Scrolls this node to make it visible.

@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/IDLTypes.h"
 #include "bindings/core/v8/NativeValueTraitsImpl.h"
@@ -15,23 +17,25 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "bindings/modules/v8/V8Request.h"
-#include "bindings/modules/v8/V8Response.h"
+#include "bindings/core/v8/V8Request.h"
+#include "bindings/core/v8/V8Response.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/fetch/BodyStreamBuffer.h"
+#include "core/fetch/FormDataBytesConsumer.h"
+#include "core/fetch/GlobalFetch.h"
+#include "core/fetch/Request.h"
+#include "core/fetch/Response.h"
+#include "core/fetch/ResponseInit.h"
 #include "core/frame/Frame.h"
-#include "core/testing/DummyPageHolder.h"
-#include "modules/fetch/BodyStreamBuffer.h"
-#include "modules/fetch/FormDataBytesConsumer.h"
-#include "modules/fetch/GlobalFetch.h"
-#include "modules/fetch/Request.h"
-#include "modules/fetch/Response.h"
-#include "modules/fetch/ResponseInit.h"
-#include "platform/wtf/PtrUtil.h"
+#include "core/testing/PageTestBase.h"
 #include "public/platform/WebURLResponse.h"
+#include "public/platform/modules/cache_storage/cache_storage.mojom-blink.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCache.h"
 #include "services/network/public/interfaces/fetch_api.mojom-blink.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using blink::mojom::CacheStorageError;
 
 namespace blink {
 
@@ -103,7 +107,7 @@ class ScopedFetcherForTests final
 // specific caches.
 class ErrorWebCacheForTests : public WebServiceWorkerCache {
  public:
-  ErrorWebCacheForTests(const WebServiceWorkerCacheError error)
+  ErrorWebCacheForTests(const CacheStorageError error)
       : error_(error),
         expected_url_(nullptr),
         expected_query_params_(nullptr),
@@ -220,7 +224,7 @@ class ErrorWebCacheForTests : public WebServiceWorkerCache {
     EXPECT_EQ(expected_query_params.cache_name, query_params.cache_name);
   }
 
-  const WebServiceWorkerCacheError error_;
+  const CacheStorageError error_;
 
   const String* expected_url_;
   const QueryParams* expected_query_params_;
@@ -232,20 +236,20 @@ class ErrorWebCacheForTests : public WebServiceWorkerCache {
 class NotImplementedErrorCache : public ErrorWebCacheForTests {
  public:
   NotImplementedErrorCache()
-      : ErrorWebCacheForTests(kWebServiceWorkerCacheErrorNotImplemented) {}
+      : ErrorWebCacheForTests(CacheStorageError::kErrorNotImplemented) {}
 };
 
-class CacheStorageTest : public ::testing::Test {
+class CacheStorageTest : public PageTestBase {
  public:
-  CacheStorageTest() : page_(DummyPageHolder::Create(IntSize(1, 1))) {}
+  void SetUp() override { PageTestBase::SetUp(IntSize(1, 1)); }
 
   Cache* CreateCache(ScopedFetcherForTests* fetcher,
                      WebServiceWorkerCache* web_cache) {
-    return Cache::Create(fetcher, WTF::WrapUnique(web_cache));
+    return Cache::Create(fetcher, base::WrapUnique(web_cache));
   }
 
   ScriptState* GetScriptState() {
-    return ToScriptStateForMainWorld(page_->GetDocument().GetFrame());
+    return ToScriptStateForMainWorld(GetDocument().GetFrame());
   }
   ExecutionContext* GetExecutionContext() {
     return ExecutionContext::From(GetScriptState());
@@ -334,9 +338,6 @@ class CacheStorageTest : public ::testing::Test {
 
     ScriptValue* value_;
   };
-
-  // Lifetime is that of the text fixture.
-  std::unique_ptr<DummyPageHolder> page_;
 };
 
 RequestInfo StringToRequestInfo(const String& value) {
@@ -368,14 +369,14 @@ TEST_F(CacheStorageTest, Basics) {
   EXPECT_EQ(kNotImplementedString, GetRejectString(match_promise));
 
   cache = CreateCache(fetcher, test_cache = new ErrorWebCacheForTests(
-                                   kWebServiceWorkerCacheErrorNotFound));
+                                   CacheStorageError::kErrorNotFound));
   match_promise = cache->match(GetScriptState(), StringToRequestInfo(url),
                                options, exception_state);
   ScriptValue script_value = GetResolveValue(match_promise);
   EXPECT_TRUE(script_value.IsUndefined());
 
   cache = CreateCache(fetcher, test_cache = new ErrorWebCacheForTests(
-                                   kWebServiceWorkerCacheErrorExists));
+                                   CacheStorageError::kErrorExists));
   match_promise = cache->match(GetScriptState(), StringToRequestInfo(url),
                                options, exception_state);
   EXPECT_EQ("InvalidAccessError: Entry already exists.",
@@ -497,13 +498,13 @@ TEST_F(CacheStorageTest, BatchOperationArguments) {
   test_cache->SetExpectedBatchOperations(&expected_delete_operations);
 
   ScriptPromise delete_result =
-      cache->deleteFunction(GetScriptState(), RequestToRequestInfo(request),
-                            options, exception_state);
+      cache->Delete(GetScriptState(), RequestToRequestInfo(request), options,
+                    exception_state);
   EXPECT_EQ("dispatchBatch",
             test_cache->GetAndClearLastErrorWebCacheMethodCalled());
   EXPECT_EQ(kNotImplementedString, GetRejectString(delete_result));
 
-  ScriptPromise string_delete_result = cache->deleteFunction(
+  ScriptPromise string_delete_result = cache->Delete(
       GetScriptState(), StringToRequestInfo(url), options, exception_state);
   EXPECT_EQ("dispatchBatch",
             test_cache->GetAndClearLastErrorWebCacheMethodCalled());
@@ -686,9 +687,9 @@ TEST_F(CacheStorageTest, MatchAllAndBatchResponseTest) {
       EXPECT_EQ(expected_urls[i], response->url());
   }
 
-  result = cache->deleteFunction(GetScriptState(),
-                                 StringToRequestInfo("http://some.url/"),
-                                 options, exception_state);
+  result =
+      cache->Delete(GetScriptState(), StringToRequestInfo("http://some.url/"),
+                    options, exception_state);
   script_value = GetResolveValue(result);
   EXPECT_TRUE(script_value.V8Value()->IsBoolean());
   EXPECT_EQ(true, script_value.V8Value().As<v8::Boolean>()->Value());

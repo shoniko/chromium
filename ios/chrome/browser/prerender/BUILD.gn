@@ -19,11 +19,14 @@ source_set("prerender") {
     "//components/keyed_service/core",
     "//components/keyed_service/ios",
     "//components/prefs",
+    "//components/signin/ios/browser",
     "//ios/chrome/browser",
     "//ios/chrome/browser/browser_state",
+    "//ios/chrome/browser/geolocation:geolocation_internal",
     "//ios/chrome/browser/history:tab_helper",
     "//ios/chrome/browser/net",
     "//ios/chrome/browser/prefs",
+    "//ios/chrome/browser/signin",
     "//ios/chrome/browser/tabs",
     "//ios/chrome/browser/ui",
     "//ios/web",
@@ -51,4 +54,24 @@ source_set("unit_tests") {
     "//net:test_support",
     "//testing/gtest",
   ]
+}
+source_set("eg_tests") {
+  testonly = true
+  sources = [
+    "prerender_egtest.mm",
+  ]
+  deps = [
+    "//base",
+    "//ios/chrome/browser/ui:ui_util",
+    "//ios/chrome/browser/ui/content_suggestions:content_suggestions_constant",
+    "//ios/chrome/browser/ui/omnibox:omnibox_internal",
+    "//ios/chrome/test/app:test_support",
+    "//ios/chrome/test/earl_grey:test_support",
+    "//ios/web/public/test/http_server",
+  ]
+  libs = [
+    "UIKit.framework",
+    "XCTest.framework",
+  ]
+  configs += [ "//build/config/compiler:enable_arc" ]
 }

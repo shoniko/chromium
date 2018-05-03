@@ -17,6 +17,7 @@
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/animation/ink_drop_mask.h"
+#include "ui/views/background.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/painter.h"
 
@@ -35,7 +36,7 @@ ButtonFromView::ButtonFromView(views::View* content,
   set_notify_enter_exit_on_child(true);
   ink_drop_container_ = new views::InkDropContainerView();
   AddChildView(ink_drop_container_);
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
   SetInkDropMode(InkDropHostView::InkDropMode::ON);
   AddChildView(content_);
   // Only make it focusable when we are active/interested in clicks.
@@ -43,9 +44,12 @@ ButtonFromView::ButtonFromView(views::View* content,
     SetFocusForPlatform();
 
   SetFocusPainter(TrayPopupUtils::CreateFocusPainter());
+
+  SetBackground(views::CreateThemedSolidBackground(
+      this, ui::NativeTheme::kColorId_BubbleBackground));
 }
 
-ButtonFromView::~ButtonFromView() {}
+ButtonFromView::~ButtonFromView() = default;
 
 void ButtonFromView::OnMouseEntered(const ui::MouseEvent& event) {
   button_hovered_ = true;

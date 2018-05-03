@@ -7,10 +7,10 @@
 #include <memory>
 #include "platform/WaitableEvent.h"
 #include "platform/WebTaskRunner.h"
+#include "platform/loader/fetch/ResourceError.h"
 #include "platform/runtime_enabled_features.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebContentSettingsClient.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
@@ -67,8 +67,9 @@ class MockServiceWorkerContextClient : public WebServiceWorkerContextClient {
                   std::unique_ptr<WebServiceWorkerClientCallbacks>) override {
     NOTREACHED();
   }
-  void OpenNewPopup(const WebURL&,
-                    std::unique_ptr<WebServiceWorkerClientCallbacks>) override {
+  void OpenPaymentHandlerWindow(
+      const WebURL&,
+      std::unique_ptr<WebServiceWorkerClientCallbacks>) override {
     NOTREACHED();
   }
   void PostMessageToClient(const WebString& uuid,
@@ -92,13 +93,6 @@ class MockServiceWorkerContextClient : public WebServiceWorkerContextClient {
                 std::unique_ptr<WebServiceWorkerClientCallbacks>) override {
     NOTREACHED();
   }
-  void RegisterForeignFetchScopes(
-      int install_event_id,
-      const WebVector<WebURL>& sub_scopes,
-      const WebVector<WebSecurityOrigin>& origins) override {
-    NOTREACHED();
-  }
-
   void WorkerContextDestroyed() override { termination_event_.Signal(); }
 
   void WaitUntilScriptEvaluated() { script_evaluated_event_.Wait(); }
@@ -120,9 +114,9 @@ class MockServiceWorkerInstalledScriptsManager
 class WebEmbeddedWorkerImplTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    auto client = WTF::MakeUnique<MockServiceWorkerContextClient>();
+    auto client = std::make_unique<MockServiceWorkerContextClient>();
     auto installed_scripts_manager =
-        WTF::MakeUnique<MockServiceWorkerInstalledScriptsManager>();
+        std::make_unique<MockServiceWorkerInstalledScriptsManager>();
     mock_client_ = client.get();
     if (RuntimeEnabledFeatures::ServiceWorkerScriptStreamingEnabled()) {
       mock_installed_scripts_manager_ = installed_scripts_manager.get();
@@ -254,9 +248,7 @@ TEST_F(WebEmbeddedWorkerImplTest, ScriptNotFound) {
   WebURLResponse response;
   response.SetMIMEType("text/javascript");
   response.SetHTTPStatusCode(404);
-  WebURLError error;
-  error.reason = 1010;
-  error.domain = WebURLError::Domain::kTest;
+  ResourceError error = ResourceError::Failure(script_url);
   Platform::Current()->GetURLLoaderMockFactory()->RegisterErrorURL(
       script_url, response, error);
   start_data_.script_url = script_url;
@@ -289,14 +281,7 @@ TEST_F(WebEmbeddedWorkerImplTest, ScriptNotFound) {
   ::testing::Mock::VerifyAndClearExpectations(mock_client_);
 }
 
-// The running worker is detected as a memory leak. crbug.com/586897
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_DontPauseAfterDownload DISABLED_DontPauseAfterDownload
-#else
-#define MAYBE_DontPauseAfterDownload DontPauseAfterDownload
-#endif
-
-TEST_F(WebEmbeddedWorkerImplTest, MAYBE_DontPauseAfterDownload) {
+TEST_F(WebEmbeddedWorkerImplTest, DontPauseAfterDownload) {
   EXPECT_CALL(*mock_client_, WorkerReadyForInspection()).Times(1);
   worker_->StartWorkerContext(start_data_);
   ::testing::Mock::VerifyAndClearExpectations(mock_client_);
@@ -342,14 +327,7 @@ TEST_F(WebEmbeddedWorkerImplTest, MAYBE_DontPauseAfterDownload) {
   mock_client_->WaitUntilThreadTermination();
 }
 
-// The running worker is detected as a memory leak. crbug.com/586897
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_PauseAfterDownload DISABLED_PauseAfterDownload
-#else
-#define MAYBE_PauseAfterDownload PauseAfterDownload
-#endif
-
-TEST_F(WebEmbeddedWorkerImplTest, MAYBE_PauseAfterDownload) {
+TEST_F(WebEmbeddedWorkerImplTest, PauseAfterDownload) {
   EXPECT_CALL(*mock_client_, WorkerReadyForInspection()).Times(1);
   start_data_.pause_after_download_mode =
       WebEmbeddedWorkerStartData::kPauseAfterDownload;

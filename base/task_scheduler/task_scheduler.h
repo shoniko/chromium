@@ -23,7 +23,7 @@
 #include "build/build_config.h"
 
 namespace gin {
-class V8Platform;
+class V8BackgroundTaskRunner;
 }
 
 namespace content {
@@ -51,19 +51,31 @@ class Location;
 class BASE_EXPORT TaskScheduler {
  public:
   struct BASE_EXPORT InitParams {
+    enum class SharedWorkerPoolEnvironment {
+      // Use the default environment (no environment).
+      DEFAULT,
+#if defined(OS_WIN)
+      // Place the worker in a COM MTA.
+      COM_MTA,
+#endif  // defined(OS_WIN)
+    };
+
     InitParams(
         const SchedulerWorkerPoolParams& background_worker_pool_params_in,
         const SchedulerWorkerPoolParams&
             background_blocking_worker_pool_params_in,
         const SchedulerWorkerPoolParams& foreground_worker_pool_params_in,
         const SchedulerWorkerPoolParams&
-            foreground_blocking_worker_pool_params_in);
+            foreground_blocking_worker_pool_params_in,
+        SharedWorkerPoolEnvironment shared_worker_pool_environment_in =
+            SharedWorkerPoolEnvironment::DEFAULT);
     ~InitParams();
 
     SchedulerWorkerPoolParams background_worker_pool_params;
     SchedulerWorkerPoolParams background_blocking_worker_pool_params;
     SchedulerWorkerPoolParams foreground_worker_pool_params;
     SchedulerWorkerPoolParams foreground_blocking_worker_pool_params;
+    SharedWorkerPoolEnvironment shared_worker_pool_environment;
   };
 
   // Destroying a TaskScheduler is not allowed in production; it is always
@@ -160,9 +172,9 @@ class BASE_EXPORT TaskScheduler {
 
 #if !defined(OS_NACL)
   // Creates and starts a task scheduler using default params. |name| is used to
-  // label threads and histograms. It should identify the component that calls
-  // this. Start() is called by this method; it is invalid to call it again
-  // afterwards. CHECKs on failure. For tests, prefer
+  // label histograms, it must not be empty. It should identify the component
+  // that calls this. Start() is called by this method; it is invalid to call it
+  // again afterwards. CHECKs on failure. For tests, prefer
   // base::test::ScopedTaskEnvironment (ensures isolation).
   static void CreateAndStartWithDefaultParams(StringPiece name);
 
@@ -171,12 +183,12 @@ class BASE_EXPORT TaskScheduler {
   void StartWithDefaultParams();
 #endif  // !defined(OS_NACL)
 
-  // Creates a ready to start task scheduler. |name| is used to label threads
-  // and histograms. It should identify the component that creates the
-  // TaskScheduler. The task scheduler doesn't create threads until Start() is
-  // called. Tasks can be posted at any time but will not run until after
-  // Start() is called. For tests, prefer base::test::ScopedTaskEnvironment
-  // (ensures isolation).
+  // Creates a ready to start task scheduler. |name| is used to label
+  // histograms, it must not be empty. It should identify the component that
+  // creates the TaskScheduler. The task scheduler doesn't create threads until
+  // Start() is called. Tasks can be posted at any time but will not run until
+  // after Start() is called. For tests, prefer
+  // base::test::ScopedTaskEnvironment (ensures isolation).
   static void Create(StringPiece name);
 
   // Registers |task_scheduler| to handle tasks posted through the post_task.h
@@ -198,7 +210,7 @@ class BASE_EXPORT TaskScheduler {
   static TaskScheduler* GetInstance();
 
  private:
-  friend class gin::V8Platform;
+  friend class gin::V8BackgroundTaskRunner;
   friend class content::BrowserMainLoopTest_CreateThreadsInSingleProcess_Test;
 
   // Returns the maximum number of non-single-threaded non-blocked tasks posted

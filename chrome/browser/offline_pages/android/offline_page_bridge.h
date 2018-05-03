@@ -11,6 +11,7 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/supports_user_data.h"
 #include "components/offline_pages/core/offline_page_item.h"
 #include "components/offline_pages/core/offline_page_model.h"
@@ -48,12 +49,6 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
                         const OfflinePageItem& added_page) override;
   void OfflinePageDeleted(
       const OfflinePageModel::DeletedPageInfo& page_info) override;
-
-  void CheckPagesExistOffline(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jobjectArray>& j_urls_array,
-      const base::android::JavaParamRef<jobject>& j_callback_obj);
 
   void GetAllPages(JNIEnv* env,
                    const base::android::JavaParamRef<jobject>& obj,
@@ -118,6 +113,7 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
 
   void SavePageLater(JNIEnv* env,
                      const base::android::JavaParamRef<jobject>& obj,
+                     const base::android::JavaParamRef<jobject>& j_callback_obj,
                      const base::android::JavaParamRef<jstring>& url,
                      const base::android::JavaParamRef<jstring>& j_namespace,
                      const base::android::JavaParamRef<jstring>& j_client_id,
@@ -186,7 +182,17 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
       const jlong j_timestamp_millis,
       const base::android::JavaParamRef<jobject>& j_callback_obj);
 
+  void GetLaunchUrlByOfflineId(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jlong j_offline_id,
+      const base::android::JavaParamRef<jobject>& j_callback_obj);
+
  private:
+  void GetPageByOfflineIdDone(
+      const base::android::ScopedJavaGlobalRef<jobject>& j_callback_obj,
+      const OfflinePageItem* offline_page);
+
   void NotifyIfDoneLoading() const;
 
   base::android::ScopedJavaLocalRef<jobject> CreateClientId(
@@ -198,6 +204,8 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
   content::BrowserContext* browser_context_;
   // Not owned.
   OfflinePageModel* offline_page_model_;
+
+  base::WeakPtrFactory<OfflinePageBridge> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OfflinePageBridge);
 };

@@ -32,6 +32,18 @@ class MainThreadTaskQueue;
 class TaskQueue;
 class WebViewSchedulerImpl;
 
+namespace renderer_scheduler_impl_unittest {
+class RendererSchedulerImplTest;
+}
+
+namespace web_frame_scheduler_impl_unittest {
+class WebFrameSchedulerImplTest;
+}
+
+namespace web_view_scheduler_impl_unittest {
+class WebViewSchedulerImplTest;
+}
+
 class PLATFORM_EXPORT WebFrameSchedulerImpl : public WebFrameScheduler {
  public:
   WebFrameSchedulerImpl(RendererSchedulerImpl* renderer_scheduler,
@@ -55,37 +67,28 @@ class PLATFORM_EXPORT WebFrameSchedulerImpl : public WebFrameScheduler {
   bool IsCrossOrigin() const override;
   WebFrameScheduler::FrameType GetFrameType() const override;
   scoped_refptr<WebTaskRunner> GetTaskRunner(TaskType) override;
-  WebViewScheduler* GetWebViewScheduler() override;
-  void WillNavigateBackForwardSoon() override;
+  WebViewScheduler* GetWebViewScheduler() const override;
   void DidStartProvisionalLoad(bool is_main_frame) override;
-  void DidFailProvisionalLoad() override;
   void DidCommitProvisionalLoad(bool is_web_history_inert_commit,
                                 bool is_reload,
                                 bool is_main_frame) override;
-  void DidStartLoading(unsigned long identifier) override;
-  void DidStopLoading(unsigned long identifier) override;
-  void SetDocumentParsingInBackground(bool background_parser_active) override;
+  WebScopedVirtualTimePauser CreateWebScopedVirtualTimePauser() override;
   void OnFirstMeaningfulPaint() override;
   std::unique_ptr<ActiveConnectionHandle> OnActiveConnectionCreated() override;
   void AsValueInto(base::trace_event::TracedValue* state) const;
-  bool IsExemptFromThrottling() const override;
+  bool IsExemptFromBudgetBasedThrottling() const override;
 
   bool has_active_connection() const { return active_connection_count_; }
 
-  void OnTraceLogEnabled();
-
-  // TODO(hajimehoshi): Some tests like RendererSchedulerImplTest depends on
-  // these functions. These are public or a lot of FORWARD_DECLARE_TEST and
-  // FRIEND_TEST_ALL_PREFIXES would be required. Fix the tests not to use these.
-  scoped_refptr<WebTaskRunner> LoadingTaskRunner();
-  scoped_refptr<WebTaskRunner> LoadingControlTaskRunner();
-  scoped_refptr<WebTaskRunner> ThrottleableTaskRunner();
-  scoped_refptr<WebTaskRunner> DeferrableTaskRunner();
-  scoped_refptr<WebTaskRunner> PausableTaskRunner();
-  scoped_refptr<WebTaskRunner> UnpausableTaskRunner();
+  void OnTraceLogEnabled() {
+    tracing_controller_.OnTraceLogEnabled();
+  }
 
  private:
   friend class WebViewSchedulerImpl;
+  friend class renderer_scheduler_impl_unittest::RendererSchedulerImplTest;
+  friend class web_frame_scheduler_impl_unittest::WebFrameSchedulerImplTest;
+  friend class web_view_scheduler_impl_unittest::WebViewSchedulerImplTest;
 
   class ActiveConnectionHandleImpl : public ActiveConnectionHandle {
    public:
@@ -109,8 +112,16 @@ class PLATFORM_EXPORT WebFrameSchedulerImpl : public WebFrameScheduler {
   void DidOpenActiveConnection();
   void DidCloseActiveConnection();
 
+  scoped_refptr<TaskQueue> LoadingTaskQueue();
+  scoped_refptr<TaskQueue> LoadingControlTaskQueue();
+  scoped_refptr<TaskQueue> ThrottleableTaskQueue();
+  scoped_refptr<TaskQueue> DeferrableTaskQueue();
+  scoped_refptr<TaskQueue> PausableTaskQueue();
+  scoped_refptr<TaskQueue> UnpausableTaskQueue();
+
   base::WeakPtr<WebFrameSchedulerImpl> AsWeakPtr();
 
+  TraceableVariableController tracing_controller_;
   scoped_refptr<MainThreadTaskQueue> loading_task_queue_;
   scoped_refptr<MainThreadTaskQueue> loading_control_task_queue_;
   scoped_refptr<MainThreadTaskQueue> throttleable_task_queue_;
@@ -129,8 +140,6 @@ class PLATFORM_EXPORT WebFrameSchedulerImpl : public WebFrameScheduler {
   base::trace_event::BlameContext* blame_context_;   // NOT OWNED
   std::set<Observer*> loader_observers_;             // NOT OWNED
   WebFrameScheduler::ThrottlingState throttling_state_;
-  // TODO(kraynov): Find a way to distinguish different frames
-  // (probably by grouping on TraceViewer side).
   TraceableState<bool, kTracingCategoryNameInfo> frame_visible_;
   TraceableState<bool, kTracingCategoryNameInfo> page_visible_;
   TraceableState<bool, kTracingCategoryNameInfo> page_stopped_;

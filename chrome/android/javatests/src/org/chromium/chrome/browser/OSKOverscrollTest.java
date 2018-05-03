@@ -6,7 +6,6 @@ package org.chromium.chrome.browser;
 
 import android.graphics.Rect;
 import android.support.test.filters.MediumTest;
-import android.test.MoreAsserts;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -20,6 +19,7 @@ import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content.browser.test.util.Coordinates;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
@@ -38,8 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class OSKOverscrollTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -95,7 +94,7 @@ public class OSKOverscrollTest {
         try {
             String jsonText = JavaScriptUtils.executeJavaScriptAndWaitForResult(
                     webContents, "window.visualViewport.height");
-            MoreAsserts.assertNotEqual(jsonText.trim().toLowerCase(Locale.US), "null");
+            Assert.assertNotEquals(jsonText.trim().toLowerCase(Locale.US), "null");
             return Integer.parseInt(jsonText);
         } catch (Exception ex) {
             Assert.fail(ex.toString());
@@ -134,8 +133,9 @@ public class OSKOverscrollTest {
         // Get the position of the footer and the viewport height before bringing up the OSK.
         Rect footerPositionBefore = DOMUtils.getNodeBounds(webContentsRef.get(), "footer");
         final int viewportHeightBeforeCss = getViewportHeight(webContentsRef.get());
-        final float cssToDevicePixFactor = viewCoreRef.get().getPageScaleFactor()
-                * viewCoreRef.get().getDeviceScaleFactor();
+        Coordinates coord = Coordinates.createFor(webContentsRef.get());
+        final float cssToDevicePixFactor =
+                coord.getPageScaleFactor() * coord.getDeviceScaleFactor();
 
         // Click on the unfocused input element for the first time to focus on it. This brings up
         // the OSK.

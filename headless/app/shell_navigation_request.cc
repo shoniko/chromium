@@ -4,6 +4,8 @@
 
 #include "headless/app/shell_navigation_request.h"
 
+#include <memory>
+
 #include "content/public/browser/browser_thread.h"
 #include "headless/app/headless_shell.h"
 
@@ -13,12 +15,12 @@ ShellNavigationRequest::ShellNavigationRequest(
     base::WeakPtr<HeadlessShell> headless_shell,
     const std::string& interception_id)
     : headless_shell_(
-          base::MakeUnique<base::WeakPtr<HeadlessShell>>(headless_shell)),
+          std::make_unique<base::WeakPtr<HeadlessShell>>(headless_shell)),
       interception_id_(interception_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
-ShellNavigationRequest::~ShellNavigationRequest() {}
+ShellNavigationRequest::~ShellNavigationRequest() = default;
 
 void ShellNavigationRequest::StartProcessing(base::Closure done_callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);

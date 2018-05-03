@@ -9,9 +9,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/event.h"
 #include "ui/ozone/platform/wayland/fake_server.h"
-#include "ui/ozone/platform/wayland/mock_platform_window_delegate.h"
 #include "ui/ozone/platform/wayland/wayland_test.h"
 #include "ui/ozone/platform/wayland/wayland_window.h"
+#include "ui/ozone/test/mock_platform_window_delegate.h"
 
 using ::testing::SaveArg;
 using ::testing::_;
@@ -43,7 +43,7 @@ class WaylandPointerTest : public WaylandTest {
 
 TEST_P(WaylandPointerTest, Leave) {
   MockPlatformWindowDelegate other_delegate;
-  WaylandWindow other_window(&other_delegate, &connection,
+  WaylandWindow other_window(&other_delegate, connection.get(),
                              gfx::Rect(0, 0, 10, 10));
   gfx::AcceleratedWidget other_widget = gfx::kNullAcceleratedWidget;
   EXPECT_CALL(other_delegate, OnAcceleratedWidgetAvailable(_, _))
@@ -63,7 +63,7 @@ TEST_P(WaylandPointerTest, Leave) {
                         0);
   wl_pointer_send_button(pointer->resource(), 4, 1004, BTN_LEFT,
                          WL_POINTER_BUTTON_STATE_PRESSED);
-  EXPECT_CALL(delegate, DispatchEvent(_)).Times(0);
+  EXPECT_CALL(delegate, DispatchEvent(_)).Times(1);
 
   // Do an extra Sync() here so that we process the second enter event before we
   // destroy |other_window|.

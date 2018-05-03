@@ -69,7 +69,6 @@ bool ComputedHashes::Reader::InitFromFile(const base::FilePath& path) {
       return false;
     if (block_size <= 0 || ((block_size % 1024) != 0)) {
       LOG(ERROR) << "Invalid block size: " << block_size;
-      block_size = 0;
       return false;
     }
 
@@ -102,9 +101,9 @@ bool ComputedHashes::Reader::InitFromFile(const base::FilePath& path) {
 
 bool ComputedHashes::Reader::GetHashes(const base::FilePath& relative_path,
                                        int* block_size,
-                                       std::vector<std::string>* hashes) {
+                                       std::vector<std::string>* hashes) const {
   base::FilePath path = relative_path.NormalizePathSeparatorsTo('/');
-  std::map<base::FilePath, HashInfo>::iterator i = data_.find(path);
+  std::map<base::FilePath, HashInfo>::const_iterator i = data_.find(path);
   if (i == data_.end()) {
     // If we didn't find the entry using exact match, it's possible the
     // developer is using a path with some letters in the incorrect case, which
@@ -122,7 +121,7 @@ bool ComputedHashes::Reader::GetHashes(const base::FilePath& relative_path,
     if (i == data_.end())
       return false;
   }
-  HashInfo& info = i->second;
+  const HashInfo& info = i->second;
   *block_size = info.first;
   *hashes = info.second;
   return true;

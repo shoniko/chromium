@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/time/time.h"
+#include "ui/gfx/presentation_feedback.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
 #include "ui/ozone/platform/drm/gpu/page_flip_request.h"
 #include "ui/ozone/platform/drm/gpu/scanout_buffer.h"
@@ -32,8 +33,13 @@ CrtcController::~CrtcController() {
 
     SetCursor(nullptr);
     drm_->DisableCrtc(crtc_);
-    if (page_flip_request_)
-      SignalPageFlipRequest(gfx::SwapResult::SWAP_ACK);
+    if (page_flip_request_) {
+      // The controller is being destroyed, so signal the pending page flip
+      // request with an empty presentation feedback which means the buffer
+      // is never presented on a screen.
+      SignalPageFlipRequest(gfx::SwapResult::SWAP_ACK,
+                            gfx::PresentationFeedback());
+    }
   }
 }
 
@@ -80,31 +86,32 @@ bool CrtcController::SchedulePageFlip(
     scoped_refptr<PageFlipRequest> page_flip_request) {
   DCHECK(!page_flip_request_.get() || test_only);
   DCHECK(!is_disabled_);
+
   const OverlayPlane* primary = OverlayPlane::GetPrimaryPlane(overlays);
-  if (primary) {
-    DCHECK(primary->buffer.get());
-    // TODO(dcastagna): Get rid of this. Scaling on the primary plane is
-    // supported on all the devices.
-    if (primary->buffer->GetSize() !=
-        gfx::Size(mode_.hdisplay, mode_.vdisplay)) {
-      VLOG(2) << "Trying to pageflip a buffer with the wrong size. Expected "
-              << mode_.hdisplay << "x" << mode_.vdisplay << " got "
-              << primary->buffer->GetSize().ToString() << " for"
-              << " crtc=" << crtc_ << " connector=" << connector_;
-      page_flip_request->Signal(gfx::SwapResult::SWAP_ACK);
-      return true;
-    }
+  if (primary && !drm_->plane_manager()->ValidatePrimarySize(*primary, mode_)) {
+    VLOG(2) << "Trying to pageflip a buffer with the wrong size. Expected "
+            << mode_.hdisplay << "x" << mode_.vdisplay << " got "
+            << primary->buffer->GetSize().ToString() << " for"
+            << " crtc=" << crtc_ << " connector=" << connector_;
+    page_flip_request->Signal(gfx::SwapResult::SWAP_ACK,
+                              gfx::PresentationFeedback());
+    return true;
   }
 
   if (!drm_->plane_manager()->AssignOverlayPlanes(plane_list, overlays, crtc_,
                                                   this)) {
     PLOG(ERROR) << "Failed to assign overlay planes for crtc " << crtc_;
-    page_flip_request->Signal(gfx::SwapResult::SWAP_FAILED);
+    page_flip_request->Signal(gfx::SwapResult::SWAP_FAILED,
+                              gfx::PresentationFeedback());
     return false;
   }
 
   if (test_only) {
-    page_flip_request->Signal(gfx::SwapResult::SWAP_ACK);
+    // If |test_only| is true, we just verify overlay configuration and don't
+    // present anything on a screen, so signal the request with an empty
+    // presentation feedback.
+    page_flip_request->Signal(gfx::SwapResult::SWAP_ACK,
+                              gfx::PresentationFeedback());
   } else {
     pending_planes_ = overlays;
     page_flip_request_ = page_flip_request;
@@ -126,7 +133,19 @@ std::vector<uint64_t> CrtcController::GetFormatModifiers(uint32_t format) {
 void CrtcController::OnPageFlipEvent(unsigned int frame,
                                      base::TimeTicks timestamp) {
   time_of_last_flip_ = timestamp;
-  SignalPageFlipRequest(gfx::SwapResult::SWAP_ACK);
+  // For Ozone DRM, the page flip is aligned with VSYNC, and the timestamp is
+  // provided by kernel DRM driver (kHWClock) and the buffer has been presented
+  // on the screen (kHWCompletion).
+  const uint32_t kFlags = gfx::PresentationFeedback::Flags::kVSync |
+                          gfx::PresentationFeedback::Flags::kHWClock |
+                          gfx::PresentationFeedback::Flags::kHWCompletion;
+  SignalPageFlipRequest(
+      gfx::SwapResult::SWAP_ACK,
+      gfx::PresentationFeedback(
+          time_of_last_flip_,
+          mode_.vrefresh ? base::TimeDelta::FromSeconds(1) / mode_.vrefresh
+                         : base::TimeDelta(),
+          kFlags));
 }
 
 bool CrtcController::SetCursor(const scoped_refptr<ScanoutBuffer>& buffer) {
@@ -160,7 +179,9 @@ bool CrtcController::ResetCursor() {
   return status;
 }
 
-void CrtcController::SignalPageFlipRequest(gfx::SwapResult result) {
+void CrtcController::SignalPageFlipRequest(
+    gfx::SwapResult result,
+    const gfx::PresentationFeedback& feedback) {
   if (result == gfx::SwapResult::SWAP_ACK)
     current_planes_.swap(pending_planes_);
 
@@ -168,7 +189,7 @@ void CrtcController::SignalPageFlipRequest(gfx::SwapResult result) {
 
   scoped_refptr<PageFlipRequest> request;
   request.swap(page_flip_request_);
-  request->Signal(result);
+  request->Signal(result, feedback);
 }
 
 }  // namespace ui

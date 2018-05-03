@@ -60,6 +60,8 @@ class AuraLinuxApplication
     return platform_node_->GetNativeViewAccessible();
   }
 
+  const ui::AXUniqueId& GetUniqueId() const override { return unique_id_; }
+
   // WidgetObserver:
 
   void OnWidgetDestroying(Widget* widget) override {
@@ -125,12 +127,22 @@ class AuraLinuxApplication
 
   bool ShouldIgnoreHoveredStateForTesting() override { return false; }
 
+  std::set<int32_t> GetReverseRelations(ui::AXIntAttribute attr,
+                                        int32_t dst_id) override {
+    return std::set<int32_t>();
+  }
+
+  std::set<int32_t> GetReverseRelations(ui::AXIntListAttribute attr,
+                                        int32_t dst_id) override {
+    return std::set<int32_t>();
+  }
+
  private:
   friend struct base::DefaultSingletonTraits<AuraLinuxApplication>;
 
-  AuraLinuxApplication()
-      : platform_node_(ui::AXPlatformNode::Create(this)) {
+  AuraLinuxApplication() {
     data_.role = ui::AX_ROLE_APPLICATION;
+    platform_node_ = ui::AXPlatformNode::Create(this);
     if (ViewsDelegate::GetInstance()) {
       data_.AddStringAttribute(
           ui::AX_ATTR_NAME,
@@ -149,6 +161,7 @@ class AuraLinuxApplication
 
   ui::AXPlatformNode* platform_node_;
   ui::AXNodeData data_;
+  ui::AXUniqueId unique_id_;
   std::vector<Widget*> widgets_;
 
   DISALLOW_COPY_AND_ASSIGN(AuraLinuxApplication);
@@ -157,8 +170,7 @@ class AuraLinuxApplication
 }  // namespace
 
 // static
-std::unique_ptr<NativeViewAccessibility> NativeViewAccessibility::Create(
-    View* view) {
+std::unique_ptr<ViewAccessibility> ViewAccessibility::Create(View* view) {
   AuraLinuxApplication::GetInstance()->RegisterWidget(view->GetWidget());
   return std::make_unique<NativeViewAccessibilityAuraLinux>(view);
 }

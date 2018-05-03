@@ -16,6 +16,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/accessibility/platform/ax_platform_node_unittest.h"
 #include "ui/accessibility/platform/ax_platform_node_win.h"
 #include "ui/accessibility/platform/test_ax_node_wrapper.h"
 #include "ui/base/win/atl_module.h"
@@ -34,7 +35,7 @@ ScopedVariant SELF(CHILDID_SELF);
 
 }  // namespace
 
-class AXPlatformNodeWinTest : public testing::Test {
+class AXPlatformNodeWinTest : public ui::AXPlatformNodeTest {
  public:
   AXPlatformNodeWinTest() {}
   ~AXPlatformNodeWinTest() override {}
@@ -43,62 +44,13 @@ class AXPlatformNodeWinTest : public testing::Test {
     win::CreateATLModuleIfNeeded();
   }
 
-  // Initialize given an AXTreeUpdate.
-  void Init(const AXTreeUpdate& initial_state) {
-    tree_.reset(new AXTree(initial_state));
-  }
-
-  // Convenience functions to initialize directly from a few AXNodeData objects.
-  void Init(const AXNodeData& node1) {
-    AXTreeUpdate update;
-    update.root_id = node1.id;
-    update.nodes.push_back(node1);
-    Init(update);
-  }
-
-  void Init(const AXNodeData& node1,
-            const AXNodeData& node2) {
-    AXTreeUpdate update;
-    update.root_id = node1.id;
-    update.nodes.push_back(node1);
-    update.nodes.push_back(node2);
-    Init(update);
-  }
-
-  void Init(const AXNodeData& node1,
-            const AXNodeData& node2,
-            const AXNodeData& node3) {
-    AXTreeUpdate update;
-    update.root_id = node1.id;
-    update.nodes.push_back(node1);
-    update.nodes.push_back(node2);
-    update.nodes.push_back(node3);
-    Init(update);
-  }
-  void Init(const AXNodeData& node1,
-            const AXNodeData& node2,
-            const AXNodeData& node3,
-            const AXNodeData& node4) {
-    AXTreeUpdate update;
-    update.root_id = node1.id;
-    update.nodes.push_back(node1);
-    update.nodes.push_back(node2);
-    update.nodes.push_back(node3);
-    update.nodes.push_back(node4);
-    Init(update);
+  void TearDown() override {
+    // Destroy the tree and make sure we're not leaking any objects.
+    tree_.reset(nullptr);
+    ASSERT_EQ(0U, AXPlatformNodeWin::GetInstanceCountForTesting());
   }
 
  protected:
-  AXNode* GetRootNode() {
-    return tree_->root();
-  }
-
-  void BuildRelationships(ComPtr<IAccessible2> accessible) {
-    CHECK(accessible);
-    AXPlatformNodeWin* node = static_cast<AXPlatformNodeWin*>(accessible.Get());
-    node->CalculateRelationships();
-  }
-
   ComPtr<IAccessible> IAccessibleFromNode(AXNode* node) {
     TestAXNodeWrapper* wrapper =
         TestAXNodeWrapper::GetOrCreate(tree_.get(), node);
@@ -133,6 +85,16 @@ class AXPlatformNodeWinTest : public testing::Test {
     return result;
   }
 
+  ComPtr<IAccessible2_2> ToIAccessible2_2(ComPtr<IAccessible> accessible) {
+    CHECK(accessible);
+    ComPtr<IServiceProvider> service_provider;
+    accessible.CopyTo(service_provider.GetAddressOf());
+    ComPtr<IAccessible2_2> result;
+    CHECK(SUCCEEDED(service_provider->QueryService(IID_IAccessible2_2,
+                                                   result.GetAddressOf())));
+    return result;
+  }
+
   void CheckVariantHasName(ScopedVariant& variant,
                            const wchar_t* expected_name) {
     ASSERT_NE(nullptr, variant.ptr());
@@ -155,203 +117,6 @@ class AXPlatformNodeWinTest : public testing::Test {
     EXPECT_STREQ(expected_name, name);
   }
 
-  AXTreeUpdate BuildTextField() {
-    AXNodeData text_field_node;
-    text_field_node.id = 1;
-    text_field_node.role = AX_ROLE_TEXT_FIELD;
-    text_field_node.AddState(AX_STATE_EDITABLE);
-    text_field_node.SetValue("How now brown cow.");
-
-    AXTreeUpdate update;
-    update.root_id = text_field_node.id;
-    update.nodes.push_back(text_field_node);
-    return update;
-  }
-
-  AXTreeUpdate BuildTextFieldWithSelectionRange(int32_t start, int32_t stop) {
-    AXNodeData text_field_node;
-    text_field_node.id = 1;
-    text_field_node.role = AX_ROLE_TEXT_FIELD;
-    text_field_node.AddState(AX_STATE_EDITABLE);
-    text_field_node.AddState(AX_STATE_SELECTED);
-    text_field_node.AddIntAttribute(ui::AX_ATTR_TEXT_SEL_START, start);
-    text_field_node.AddIntAttribute(ui::AX_ATTR_TEXT_SEL_END, stop);
-    text_field_node.SetValue("How now brown cow.");
-
-    AXTreeUpdate update;
-    update.root_id = text_field_node.id;
-    update.nodes.push_back(text_field_node);
-    return update;
-  }
-
-  AXTreeUpdate BuildContentEditable() {
-    AXNodeData content_editable_node;
-    content_editable_node.id = 1;
-    content_editable_node.role = AX_ROLE_GROUP;
-    content_editable_node.AddState(AX_STATE_RICHLY_EDITABLE);
-    content_editable_node.AddBoolAttribute(ui::AX_ATTR_EDITABLE_ROOT, true);
-    content_editable_node.SetValue("How now brown cow.");
-
-    AXTreeUpdate update;
-    update.root_id = content_editable_node.id;
-    update.nodes.push_back(content_editable_node);
-    return update;
-  }
-
-  AXTreeUpdate BuildContentEditableWithSelectionRange(int32_t start,
-                                                      int32_t end) {
-    AXNodeData content_editable_node;
-    content_editable_node.id = 1;
-    content_editable_node.role = AX_ROLE_GROUP;
-    content_editable_node.AddState(AX_STATE_RICHLY_EDITABLE);
-    content_editable_node.AddState(AX_STATE_SELECTED);
-    content_editable_node.AddBoolAttribute(ui::AX_ATTR_EDITABLE_ROOT, true);
-    content_editable_node.SetValue("How now brown cow.");
-
-    AXTreeUpdate update;
-    update.root_id = content_editable_node.id;
-    update.nodes.push_back(content_editable_node);
-
-    update.has_tree_data = true;
-    update.tree_data.sel_anchor_object_id = content_editable_node.id;
-    update.tree_data.sel_focus_object_id = content_editable_node.id;
-    update.tree_data.sel_anchor_offset = start;
-    update.tree_data.sel_focus_offset = end;
-
-    return update;
-  }
-
-  AXTreeUpdate Build3X3Table() {
-    /*
-      Build a table that looks like:
-
-      ----------------------        (A) Column Header
-      |        | (A) | (B) |        (B) Column Header
-      ----------------------        (C) Row Header
-      |  (C)  |  1  |  2   |        (D) Row Header
-      ----------------------
-      |  (D)  |  3  |  4   |
-      ----------------------
-   */
-
-    AXNodeData table;
-    table.id = 0;
-    table.role = AX_ROLE_TABLE;
-
-    table.AddIntAttribute(AX_ATTR_TABLE_ROW_COUNT, 3);
-    table.AddIntAttribute(AX_ATTR_TABLE_COLUMN_COUNT, 3);
-
-    // Ordering in this list matters.  It is used in the calculation
-    // of where cells are by the following:
-    // int position = row * GetTableColumnCount() + column;
-
-    std::vector<int32_t> ids{51, 52, 53, 2, 3, 4, 11, 12, 13};
-    table.AddIntListAttribute(AX_ATTR_CELL_IDS, ids);
-    table.AddIntListAttribute(AX_ATTR_UNIQUE_CELL_IDS, ids);
-
-    table.child_ids.push_back(50);  // Header
-    table.child_ids.push_back(1);   // Row 1
-    table.child_ids.push_back(10);  // Row 2
-
-    // Table column header
-    AXNodeData table_row_header;
-    table_row_header.id = 50;
-    table_row_header.role = AX_ROLE_ROW;
-    table_row_header.child_ids.push_back(51);
-    table_row_header.child_ids.push_back(52);
-    table_row_header.child_ids.push_back(53);
-
-    AXNodeData table_column_header_1;
-    table_column_header_1.id = 51;
-    table_column_header_1.role = AX_ROLE_COLUMN_HEADER;
-
-    AXNodeData table_column_header_2;
-    table_column_header_2.id = 52;
-    table_column_header_2.role = AX_ROLE_COLUMN_HEADER;
-    table_column_header_2.SetName("column header 1");
-
-    AXNodeData table_column_header_3;
-    table_column_header_3.id = 53;
-    table_column_header_3.role = AX_ROLE_COLUMN_HEADER;
-    // Either AX_ATTR_NAME -or- AX_ATTR_DESCRIPTION is acceptable for a
-    // description
-    table_column_header_3.AddStringAttribute(AX_ATTR_DESCRIPTION,
-                                             "column header 2");
-
-    // Row 1
-    AXNodeData table_row_1;
-    table_row_1.id = 1;
-    table_row_1.role = AX_ROLE_ROW;
-    table_row_1.child_ids.push_back(2);
-    table_row_1.child_ids.push_back(3);
-    table_row_1.child_ids.push_back(4);
-
-    AXNodeData table_row_header_1;
-    table_row_header_1.id = 2;
-    table_row_header_1.role = AX_ROLE_ROW_HEADER;
-    table_row_header_1.SetName("row header 1");
-
-    AXNodeData table_cell_1;
-    table_cell_1.id = 3;
-    table_cell_1.role = AX_ROLE_CELL;
-    table_cell_1.SetName("1");
-
-    AXNodeData table_cell_2;
-    table_cell_2.id = 4;
-    table_cell_2.role = AX_ROLE_CELL;
-    table_cell_2.SetName("2");
-
-    // Row 2
-    AXNodeData table_row_2;
-    table_row_2.id = 10;
-    table_row_2.role = AX_ROLE_ROW;
-    table_row_2.child_ids.push_back(11);
-    table_row_2.child_ids.push_back(12);
-    table_row_2.child_ids.push_back(13);
-
-    AXNodeData table_row_header_2;
-    table_row_header_2.id = 11;
-    table_row_header_2.role = AX_ROLE_ROW_HEADER;
-    // Either AX_ATTR_NAME -or- AX_ATTR_DESCRIPTION is acceptable for a
-    // description
-    table_row_header_2.AddStringAttribute(AX_ATTR_DESCRIPTION, "row header 2");
-
-    AXNodeData table_cell_3;
-    table_cell_3.id = 12;
-    table_cell_3.role = AX_ROLE_CELL;
-    table_cell_3.SetName("3");
-
-    AXNodeData table_cell_4;
-    table_cell_4.id = 13;
-    table_cell_4.role = AX_ROLE_CELL;
-    table_cell_4.SetName("4");
-
-    AXTreeUpdate update;
-    update.root_id = table.id;
-
-    // Some of the table testing code will index into |nodes|
-    // and change the state of the given node.  If you reorder
-    // these, you're going to need to update the tests.
-    update.nodes.push_back(table);  // 0
-
-    update.nodes.push_back(table_row_header);       // 1
-    update.nodes.push_back(table_column_header_1);  // 2
-    update.nodes.push_back(table_column_header_2);  // 3
-    update.nodes.push_back(table_column_header_3);  // 4
-
-    update.nodes.push_back(table_row_1);         // 5
-    update.nodes.push_back(table_row_header_1);  // 6
-    update.nodes.push_back(table_cell_1);        // 7
-    update.nodes.push_back(table_cell_2);        // 8
-
-    update.nodes.push_back(table_row_2);         // 9
-    update.nodes.push_back(table_row_header_2);  // 10
-    update.nodes.push_back(table_cell_3);        // 11
-    update.nodes.push_back(table_cell_4);        // 12
-
-    return update;
-  }
-
   ComPtr<IAccessibleTableCell> GetCellInTable() {
     ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
@@ -369,8 +134,6 @@ class AXPlatformNodeWinTest : public testing::Test {
     cell.CopyTo(table_cell.GetAddressOf());
     return table_cell;
   }
-
-  std::unique_ptr<AXTree> tree_;
 };
 
 TEST_F(AXPlatformNodeWinTest, TestIAccessibleDetachedObject) {
@@ -1274,7 +1037,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2ScrollToPoint) {
   EXPECT_EQ(S_OK,
             ax_child1->accLocation(&x_left, &y_top, &width, &height, SELF));
   EXPECT_EQ(610, x_left);
-  EXPECT_EQ(610, y_top);
+  EXPECT_EQ(660, y_top);
   EXPECT_EQ(10, width);
   EXPECT_EQ(10, height);
 
@@ -1324,8 +1087,8 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2ScrollTo) {
 
   EXPECT_EQ(S_OK,
             ax_child1->accLocation(&x_left, &y_top, &width, &height, SELF));
-  EXPECT_EQ(20, x_left);
-  EXPECT_EQ(20, y_top);
+  EXPECT_EQ(0, x_left);
+  EXPECT_EQ(0, y_top);
   EXPECT_EQ(10, width);
   EXPECT_EQ(10, height);
 }
@@ -1701,10 +1464,6 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
   EXPECT_EQ(S_OK, result.CopyTo(ax_child2.GetAddressOf()));
   result.Reset();
 
-  BuildRelationships(root_iaccessible2);
-  BuildRelationships(ax_child1);
-  BuildRelationships(ax_child2);
-
   LONG n_relations = 0;
   LONG n_targets = 0;
   ScopedBstr relation_type;
@@ -1717,9 +1476,11 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
 
   EXPECT_HRESULT_SUCCEEDED(
       root_iaccessible2->get_relation(0, describedby_relation.GetAddressOf()));
+
   EXPECT_HRESULT_SUCCEEDED(
       describedby_relation->get_relationType(relation_type.Receive()));
   EXPECT_EQ(L"describedBy", base::string16(relation_type));
+
   relation_type.Reset();
 
   EXPECT_HRESULT_SUCCEEDED(describedby_relation->get_nTargets(&n_targets));
@@ -1732,6 +1493,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
   EXPECT_HRESULT_SUCCEEDED(
       describedby_relation->get_target(1, target.GetAddressOf()));
   target.Reset();
+
   describedby_relation.Reset();
 
   // Test the reverse relations.
@@ -1771,6 +1533,92 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
   target.Reset();
 
   // TODO(dougt): Try adding one more relation.
+}
+
+TEST_F(AXPlatformNodeWinTest, TestRelationTargetsOfType) {
+  AXNodeData root;
+  root.id = 1;
+  root.role = AX_ROLE_ROOT_WEB_AREA;
+  root.AddIntAttribute(AX_ATTR_DETAILS_ID, 2);
+
+  AXNodeData child1;
+  child1.id = 2;
+  child1.role = AX_ROLE_STATIC_TEXT;
+
+  root.child_ids.push_back(2);
+
+  AXNodeData child2;
+  child2.id = 3;
+  child2.role = AX_ROLE_STATIC_TEXT;
+  std::vector<int32_t> labelledby_ids = {1, 4};
+  child2.AddIntListAttribute(AX_ATTR_LABELLEDBY_IDS, labelledby_ids);
+
+  root.child_ids.push_back(3);
+
+  AXNodeData child3;
+  child3.id = 4;
+  child3.role = AX_ROLE_STATIC_TEXT;
+  child3.AddIntAttribute(AX_ATTR_DETAILS_ID, 2);
+
+  root.child_ids.push_back(4);
+
+  Init(root, child1, child2, child3);
+  ComPtr<IAccessible> root_iaccessible(GetRootIAccessible());
+  ComPtr<IAccessible2_2> root_iaccessible2 = ToIAccessible2_2(root_iaccessible);
+
+  ComPtr<IDispatch> result;
+  EXPECT_EQ(S_OK, root_iaccessible2->get_accChild(ScopedVariant(1),
+                                                  result.GetAddressOf()));
+  ComPtr<IAccessible2_2> ax_child1;
+  EXPECT_EQ(S_OK, result.CopyTo(ax_child1.GetAddressOf()));
+  result.Reset();
+
+  EXPECT_EQ(S_OK, root_iaccessible2->get_accChild(ScopedVariant(2),
+                                                  result.GetAddressOf()));
+  ComPtr<IAccessible2_2> ax_child2;
+  EXPECT_EQ(S_OK, result.CopyTo(ax_child2.GetAddressOf()));
+  result.Reset();
+
+  EXPECT_EQ(S_OK, root_iaccessible2->get_accChild(ScopedVariant(3),
+                                                  result.GetAddressOf()));
+  ComPtr<IAccessible2_2> ax_child3;
+  EXPECT_EQ(S_OK, result.CopyTo(ax_child3.GetAddressOf()));
+  result.Reset();
+
+  {
+    ScopedBstr type(L"details");
+    IUnknown** targets;
+    LONG n_targets;
+    EXPECT_EQ(S_OK, root_iaccessible2->get_relationTargetsOfType(
+                        type, 0, &targets, &n_targets));
+    ASSERT_EQ(1, n_targets);
+    EXPECT_EQ(ax_child1.Get(), targets[0]);
+    CoTaskMemFree(targets);
+  }
+
+  {
+    ScopedBstr type(IA2_RELATION_LABELLED_BY);
+    IUnknown** targets;
+    LONG n_targets;
+    EXPECT_EQ(S_OK, ax_child2->get_relationTargetsOfType(type, 0, &targets,
+                                                         &n_targets));
+    ASSERT_EQ(2, n_targets);
+    EXPECT_EQ(root_iaccessible2.Get(), targets[0]);
+    EXPECT_EQ(ax_child3.Get(), targets[1]);
+    CoTaskMemFree(targets);
+  }
+
+  {
+    ScopedBstr type(L"detailsFor");
+    IUnknown** targets;
+    LONG n_targets;
+    EXPECT_EQ(S_OK, ax_child1->get_relationTargetsOfType(type, 0, &targets,
+                                                         &n_targets));
+    ASSERT_EQ(2, n_targets);
+    EXPECT_EQ(root_iaccessible2.Get(), targets[0]);
+    EXPECT_EQ(ax_child3.Get(), targets[1]);
+    CoTaskMemFree(targets);
+  }
 }
 
 TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedChildrenZero) {

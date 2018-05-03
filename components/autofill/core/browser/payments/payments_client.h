@@ -117,6 +117,11 @@ class PaymentsClient : public net::URLFetcherDelegate,
   // accepted an upload prompt.
   void Prepare();
 
+  // Sets up the |save_delegate_|. Necessary because CreditCardSaveManager
+  // requires PaymentsClient during initialization, so PaymentsClient can't
+  // start with save_delegate_ initialized.
+  void SetSaveDelegate(PaymentsClientSaveDelegate* save_delegate);
+
   PrefService* GetPrefService() const;
 
   // The user has attempted to unmask a card with the given cvc.
@@ -124,12 +129,18 @@ class PaymentsClient : public net::URLFetcherDelegate,
 
   // Determine if the user meets the Payments service's conditions for upload.
   // The service uses |addresses| (from which names and phone numbers are
-  // removed) and |app_locale| to determine which legal message to display. If
-  // the conditions are met, the legal message will be returned via
-  // OnDidGetUploadDetails. |active_experiments| is used by payments server to
-  // track requests that were triggered by enabled features.
+  // removed) and |app_locale| to determine which legal message to display.
+  // |pan_first_six| is the first six digits of the number of the credit card
+  // being considered for upload. |detected_values| is a bitmask of
+  // CreditCardSaveManager::DetectedValue values that relays what data is
+  // actually available for upload in order to make more informed upload
+  // decisions. If the conditions are met, the legal message will be returned
+  // via OnDidGetUploadDetails. |active_experiments| is used by Payments server
+  // to track requests that were triggered by enabled features.
   virtual void GetUploadDetails(
       const std::vector<AutofillProfile>& addresses,
+      const int detected_values,
+      const std::string& pan_first_six,
       const std::vector<const char*>& active_experiments,
       const std::string& app_locale);
 
@@ -178,7 +189,7 @@ class PaymentsClient : public net::URLFetcherDelegate,
   // Delegates for the results of the various requests to Payments. Both must
   // outlive |this|.
   PaymentsClientUnmaskDelegate* const unmask_delegate_;
-  PaymentsClientSaveDelegate* const save_delegate_;
+  PaymentsClientSaveDelegate* save_delegate_;
 
   // The current request.
   std::unique_ptr<PaymentsRequest> request_;

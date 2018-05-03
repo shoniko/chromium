@@ -41,7 +41,7 @@ Polymer({
     },
   },
 
-  /** @private {!settings.ResetBrowserProxy} */
+  /** @private {?settings.ResetBrowserProxy} */
   browserProxy_: null,
 
   /**
@@ -65,7 +65,7 @@ Polymer({
       return loadTimeData.getStringF(
           'triggeredResetPageTitle', this.triggeredResetToolName_);
     }
-    return loadTimeData.getStringF('resetPageTitle');
+    return loadTimeData.getStringF('resetTrigger');
   },
 
   /** @override */
@@ -87,12 +87,12 @@ Polymer({
 
   /** @private */
   showDialog_: function() {
-    this.$.dialog.showModal();
+    if (!this.$.dialog.open)
+      this.$.dialog.showModal();
     this.browserProxy_.onShowResetProfileDialog();
   },
 
-  /** @override */
-  attached: function() {
+  show: function() {
     this.isTriggered_ =
         settings.getCurrentRoute() == settings.routes.TRIGGERED_RESET_DIALOG;
     if (this.isTriggered_) {
@@ -105,7 +105,7 @@ Polymer({
       // For the non-triggered reset dialog, a '#cct' hash indicates that the
       // reset request came from the Chrome Cleanup Tool by launching Chrome
       // with the startup URL chrome://settings/resetProfileSettings#cct.
-      var origin = window.location.hash.slice(1).toLowerCase() == 'cct' ?
+      const origin = window.location.hash.slice(1).toLowerCase() == 'cct' ?
           'cct' :
           settings.getQueryParameters().get('origin');
       this.resetRequestOrigin_ = origin || '';

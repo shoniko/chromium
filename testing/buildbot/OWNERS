@@ -8,17 +8,15 @@ jochen@chromium.org
 kbr@chromium.org
 machenbach@chromium.org
 maruel@chromium.org
-phajdan.jr@chromium.org
 sky@chromium.org
 tansell@chromium.org
 thakis@chromium.org
-
-per-file chromium.android*.json=bpastene@chromium.org
 
 # For Site Isolation FYI tests:
 per-file chromium.fyi.json=creis@chromium.org
 per-file chromium.fyi.json=nick@chromium.org
 
+per-file chromium.clang.json=hans@chromium.org
 per-file *chromium.perf*.json=dtu@chromium.org
 per-file *chromium.perf*.json=eyaich@chromium.org
 per-file *chromium.perf*.json=martiniss@chromium.org

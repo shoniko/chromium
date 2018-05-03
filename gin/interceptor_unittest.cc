@@ -91,7 +91,7 @@ class MyInterceptor : public Wrappable<MyInterceptor>,
         IndexedPropertyInterceptor(isolate, this),
         value_(0),
         template_cache_(isolate) {}
-  ~MyInterceptor() override {}
+  ~MyInterceptor() override = default;
 
   // gin::Wrappable
   ObjectTemplateBuilder GetObjectTemplateBuilder(
@@ -143,9 +143,10 @@ class InterceptorTest : public V8Test {
     EXPECT_FALSE(source.IsEmpty());
 
     gin::TryCatch try_catch(isolate);
-    v8::Local<v8::Script> script = v8::Script::Compile(source);
-    EXPECT_FALSE(script.IsEmpty());
-    v8::Local<v8::Value> val = script->Run();
+    v8::Local<v8::Script> script =
+        v8::Script::Compile(context_.Get(isolate), source).ToLocalChecked();
+    v8::Local<v8::Value> val =
+        script->Run(context_.Get(isolate)).ToLocalChecked();
     EXPECT_FALSE(val.IsEmpty());
     v8::Local<v8::Function> func;
     EXPECT_TRUE(ConvertFromV8(isolate, val, &func));

@@ -18,7 +18,7 @@
 #include "ui/display/display_layout.h"
 #include "ui/display/manager/display_manager.h"
 
-DECLARE_UI_CLASS_PROPERTY_TYPE(ash::ScreenRotationAnimator*);
+DEFINE_UI_CLASS_PROPERTY_TYPE(ash::ScreenRotationAnimator*);
 
 namespace {
 
@@ -86,8 +86,22 @@ void DisplayConfigurationController::SetDisplayLayout(
   }
 }
 
+void DisplayConfigurationController::SetUnifiedDesktopLayoutMatrix(
+    const display::UnifiedDesktopLayoutMatrix& matrix) {
+  DCHECK(display_manager_->IsInUnifiedMode());
+
+  if (display_animator_) {
+    display_animator_->StartFadeOutAnimation(base::Bind(
+        &DisplayConfigurationController::SetUnifiedDesktopLayoutMatrixImpl,
+        weak_ptr_factory_.GetWeakPtr(), matrix));
+  } else {
+    SetUnifiedDesktopLayoutMatrixImpl(matrix);
+  }
+}
+
 void DisplayConfigurationController::SetMirrorMode(bool mirror) {
-  if (display_manager_->num_connected_displays() > 2) {
+  if (!display_manager_->is_multi_mirroring_enabled() &&
+      display_manager_->num_connected_displays() > 2) {
     ShowDisplayErrorNotification(
         l10n_util::GetStringUTF16(IDS_ASH_DISPLAY_MIRRORING_NOT_SUPPORTED),
         false);
@@ -189,7 +203,9 @@ void DisplayConfigurationController::SetDisplayLayoutImpl(
 }
 
 void DisplayConfigurationController::SetMirrorModeImpl(bool mirror) {
-  display_manager_->SetMirrorMode(mirror);
+  display_manager_->SetMirrorMode(
+      mirror ? display::MirrorMode::kNormal : display::MirrorMode::kOff,
+      base::nullopt);
   if (display_animator_)
     display_animator_->StartFadeInAnimation();
 }
@@ -197,6 +213,13 @@ void DisplayConfigurationController::SetMirrorModeImpl(bool mirror) {
 void DisplayConfigurationController::SetPrimaryDisplayIdImpl(
     int64_t display_id) {
   window_tree_host_manager_->SetPrimaryDisplayId(display_id);
+  if (display_animator_)
+    display_animator_->StartFadeInAnimation();
+}
+
+void DisplayConfigurationController::SetUnifiedDesktopLayoutMatrixImpl(
+    const display::UnifiedDesktopLayoutMatrix& matrix) {
+  display_manager_->SetUnifiedDesktopMatrix(matrix);
   if (display_animator_)
     display_animator_->StartFadeInAnimation();
 }

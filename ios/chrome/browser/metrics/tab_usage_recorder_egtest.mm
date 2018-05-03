@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/ios/ios_util.h"
 #include "base/mac/bind_objc_block.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -14,8 +15,8 @@
 #import "ios/chrome/browser/metrics/tab_usage_recorder_test_util.h"
 #import "ios/chrome/browser/ui/settings/privacy_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_collection_view_controller.h"
-#import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
-#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
+#import "ios/chrome/browser/ui/toolbar/public/toolbar_controller_constants.h"
+#include "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
@@ -101,6 +102,9 @@ void NewMainTabWithURL(const GURL& url, const std::string& word) {
 // Opens 2 new tabs with different URLs.
 void OpenTwoTabs() {
   chrome_test_util::CloseAllTabsInCurrentMode();
+  // TODO(crbug.com/783192): ChromeEarlGrey should have a method to close all
+  // tabs and synchronize with the UI.
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
 
   const GURL url1 = web::test::HttpServer::MakeUrl(kTestUrl1);
   const GURL url2 = web::test::HttpServer::MakeUrl(kTestUrl2);
@@ -196,6 +200,10 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   // This test opens three tabs.
   const int numberOfTabs = 3;
   chrome_test_util::CloseAllTabsInCurrentMode();
+  // TODO(crbug.com/783192): ChromeEarlGrey should have a method to close all
+  // tabs and synchronize with the UI.
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+
   // Open three tabs with http:// urls.
   for (NSUInteger i = 0; i < numberOfTabs; i++) {
     chrome_test_util::OpenNewTab();
@@ -358,6 +366,10 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   };
 
   chrome_test_util::CloseAllTabsInCurrentMode();
+  // TODO(crbug.com/783192): ChromeEarlGrey should have a method to close all
+  // tabs and synchronize with the UI.
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+
   GURL URL = web::test::HttpServer::MakeUrl(kTestUrl1);
   NewMainTabWithURL(URL, kURL1FirstWord);
   OpenNewIncognitoTabUsingUIAndEvictMainTabs();
@@ -381,8 +393,8 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   const GURL slowURL = web::test::HttpServer::MakeUrl("http://slow");
   responses[slowURL] = "Slow Page";
 
-  web::test::SetUpHttpServer(base::MakeUnique<web::DelayedResponseProvider>(
-      base::MakeUnique<HtmlResponseProvider>(responses), kSlowURLDelay));
+  web::test::SetUpHttpServer(std::make_unique<web::DelayedResponseProvider>(
+      std::make_unique<HtmlResponseProvider>(responses), kSlowURLDelay));
 
   chrome_test_util::HistogramTester histogramTester;
   FailureBlock failureBlock = ^(NSString* error) {
@@ -395,8 +407,8 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   chrome_test_util::LoadUrl(slowURL);
   OpenNewIncognitoTabUsingUIAndEvictMainTabs();
 
-  web::test::SetUpHttpServer(base::MakeUnique<web::DelayedResponseProvider>(
-      base::MakeUnique<HtmlResponseProvider>(responses), kSlowURLDelay));
+  web::test::SetUpHttpServer(std::make_unique<web::DelayedResponseProvider>(
+      std::make_unique<HtmlResponseProvider>(responses), kSlowURLDelay));
 
   SwitchToNormalMode();
 
@@ -431,7 +443,7 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   const GURL slowURL = web::test::HttpServer::MakeUrl("http://slow");
   responses[slowURL] = "Slow Page";
 
-  web::test::SetUpHttpServer(base::MakeUnique<HtmlResponseProvider>(responses));
+  web::test::SetUpHttpServer(std::make_unique<HtmlResponseProvider>(responses));
 
   chrome_test_util::HistogramTester histogramTester;
   FailureBlock failureBlock = ^(NSString* error) {
@@ -441,8 +453,8 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   NewMainTabWithURL(slowURL, "Slow");
 
   OpenNewIncognitoTabUsingUIAndEvictMainTabs();
-  web::test::SetUpHttpServer(base::MakeUnique<web::DelayedResponseProvider>(
-      base::MakeUnique<HtmlResponseProvider>(responses), kSlowURLDelay));
+  web::test::SetUpHttpServer(std::make_unique<web::DelayedResponseProvider>(
+      std::make_unique<HtmlResponseProvider>(responses), kSlowURLDelay));
 
   SwitchToNormalMode();
 
@@ -451,6 +463,13 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   [[GREYConfiguration sharedInstance]
           setValue:@(NO)
       forConfigKey:kGREYConfigKeySynchronizationEnabled];
+  // Make sure the button is here and displayed before tapping it.
+  id<GREYMatcher> toolMenuMatcher =
+      grey_accessibilityID(kToolbarToolsMenuButtonIdentifier);
+  Wait(toolMenuMatcher, @"Tool Menu");
+  // Letting page load start.
+  base::test::ios::SpinRunLoopWithMinDelay(base::TimeDelta::FromSecondsD(0.5));
+
   OpenNewMainTabUsingUIUnsynced();
   [[GREYConfiguration sharedInstance]
           setValue:@(YES)
@@ -467,8 +486,8 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   const GURL slowURL = web::test::HttpServer::MakeUrl("http://slow");
   responses[slowURL] = "Slow Page";
 
-  web::test::SetUpHttpServer(base::MakeUnique<web::DelayedResponseProvider>(
-      base::MakeUnique<HtmlResponseProvider>(responses), kSlowURLDelay));
+  web::test::SetUpHttpServer(std::make_unique<web::DelayedResponseProvider>(
+      std::make_unique<HtmlResponseProvider>(responses), kSlowURLDelay));
 
   chrome_test_util::HistogramTester histogramTester;
   FailureBlock failureBlock = ^(NSString* error) {
@@ -500,7 +519,7 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   const GURL slowURL = web::test::HttpServer::MakeUrl("http://slow");
   responses[slowURL] = "Slow Page";
 
-  web::test::SetUpHttpServer(base::MakeUnique<HtmlResponseProvider>(responses));
+  web::test::SetUpHttpServer(std::make_unique<HtmlResponseProvider>(responses));
 
   chrome_test_util::HistogramTester histogramTester;
   chrome_test_util::OpenNewTab();
@@ -508,8 +527,8 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
 
   OpenNewIncognitoTabUsingUIAndEvictMainTabs();
 
-  web::test::SetUpHttpServer(base::MakeUnique<web::DelayedResponseProvider>(
-      base::MakeUnique<HtmlResponseProvider>(responses), kSlowURLDelay));
+  web::test::SetUpHttpServer(std::make_unique<web::DelayedResponseProvider>(
+      std::make_unique<HtmlResponseProvider>(responses), kSlowURLDelay));
   SwitchToNormalMode();
 
   // TODO(crbug.com/640977): EarlGrey synchronize on some animations when a
@@ -520,6 +539,8 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   id<GREYMatcher> toolMenuMatcher =
       grey_accessibilityID(kToolbarToolsMenuButtonIdentifier);
   Wait(toolMenuMatcher, @"Tool Menu");
+  // Letting page load start.
+  base::test::ios::SpinRunLoopWithMinDelay(base::TimeDelta::FromSecondsD(0.5));
 
   GREYAssertTrue(chrome_test_util::SimulateTabsBackgrounding(),
                  @"Failed to simulate tab backgrounding.");
@@ -542,8 +563,8 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
   const GURL slowURL = web::test::HttpServer::MakeUrl("http://slow");
   responses[slowURL] = "Slow Page";
 
-  web::test::SetUpHttpServer(base::MakeUnique<web::DelayedResponseProvider>(
-      base::MakeUnique<HtmlResponseProvider>(responses), kSlowURLDelay));
+  web::test::SetUpHttpServer(std::make_unique<web::DelayedResponseProvider>(
+      std::make_unique<HtmlResponseProvider>(responses), kSlowURLDelay));
 
   chrome_test_util::HistogramTester histogramTester;
 
@@ -621,7 +642,7 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
       "<body><a style='margin-left:50px' href='%s' id='link'>link</a></body>",
       destinationURL.spec().c_str());
   responses[destinationURL] = "Whee!";
-  web::test::SetUpHttpServer(base::MakeUnique<HtmlResponseProvider>(responses));
+  web::test::SetUpHttpServer(std::make_unique<HtmlResponseProvider>(responses));
   chrome_test_util::HistogramTester histogramTester;
   ResetTabUsageRecorder();
 
@@ -672,7 +693,7 @@ void CloseTabAtIndexAndSync(NSUInteger i) {
       "height:100%%;'>link</div></a></body>",
       destinationURL.spec().c_str());
   responses[destinationURL] = "Whee!";
-  web::test::SetUpHttpServer(base::MakeUnique<HtmlResponseProvider>(responses));
+  web::test::SetUpHttpServer(std::make_unique<HtmlResponseProvider>(responses));
   chrome_test_util::HistogramTester histogramTester;
   ResetTabUsageRecorder();
 

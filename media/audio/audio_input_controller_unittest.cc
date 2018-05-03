@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "media/audio/audio_input_controller.h"
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -61,7 +62,7 @@ static void CloseAudioController(AudioInputController* controller) {
 class MockAudioInputControllerEventHandler
     : public AudioInputController::EventHandler {
  public:
-  MockAudioInputControllerEventHandler() {}
+  MockAudioInputControllerEventHandler() = default;
 
   MOCK_METHOD1(OnCreated, void(bool initially_muted));
   MOCK_METHOD1(OnError, void(AudioInputController::ErrorCode error_code));
@@ -74,7 +75,7 @@ class MockAudioInputControllerEventHandler
 
 class MockSyncWriter : public AudioInputController::SyncWriter {
  public:
-  MockSyncWriter() {}
+  MockSyncWriter() = default;
 
   MOCK_METHOD4(Write,
                void(const AudioBus* data,
@@ -86,7 +87,7 @@ class MockSyncWriter : public AudioInputController::SyncWriter {
 
 class MockUserInputMonitor : public UserInputMonitor {
  public:
-  MockUserInputMonitor() {}
+  MockUserInputMonitor() = default;
 
   size_t GetKeyPressCount() const { return 0; }
 
@@ -101,7 +102,7 @@ class AudioInputControllerTest : public testing::Test {
       : suspend_event_(WaitableEvent::ResetPolicy::AUTOMATIC,
                        WaitableEvent::InitialState::NOT_SIGNALED) {
     audio_manager_ =
-        AudioManager::CreateForTesting(base::MakeUnique<AudioThreadImpl>());
+        AudioManager::CreateForTesting(std::make_unique<AudioThreadImpl>());
   }
   ~AudioInputControllerTest() override {
     audio_manager_->Shutdown();

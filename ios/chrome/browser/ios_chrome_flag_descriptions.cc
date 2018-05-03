@@ -11,10 +11,14 @@
 
 namespace flag_descriptions {
 
-const char kBookmarkNewGenerationName[] = "Bookmark New Generation";
-const char kBookmarkNewGenerationDescription[] =
-    "When enabled, change to the new bookmark UI which will support bookmark "
-    "reordering, have reduced favicon size and improved navigation experience.";
+const char kAdaptiveToolbarName[] = "Adaptive Toolbar";
+const char kAdaptiveToolbarDescription[] =
+    "When enabled, the adaptive toolbar will be used.";
+
+const char kBookmarkNewEditPageName[] = "Bookmark New Edit Page";
+const char kBookmarkNewEditPageDescription[] =
+    "When enabled, the new bookmark edit page and folder picker will be used "
+    "in the new bookmark UI.";
 
 const char kBrowserTaskScheduler[] = "Task Scheduler";
 const char kBrowserTaskSchedulerDescription[] =
@@ -24,6 +28,16 @@ const char kCaptivePortalName[] = "Captive Portal";
 const char kCaptivePortalDescription[] =
     "When enabled, the Captive Portal landing page will be displayed if it is "
     "detected that the user is connected to a Captive Portal network.";
+
+const char kCleanToolbarName[] = "Clean Toolbar";
+const char kCleanToolbarDescription[] =
+    "When enabled, the Clean Toolbar will be used instead of "
+    "WebToolbarController.";
+
+const char kClippingTextfieldName[] = "Clipping Textfield";
+const char kClippingTextfieldDescription[] =
+    "When enabled, the new URL clipping implementation compatible with iOS 11 "
+    "is used.";
 
 const char kContextualSearch[] = "Contextual Search";
 const char kContextualSearchDescription[] =
@@ -35,6 +49,11 @@ const char kDragAndDropDescription[] = "Enable support for drag and drop.";
 const char kExternalSearchName[] = "External Search";
 const char kExternalSearchDescription[] = "Enable support for External Search.";
 
+const char kHistoryBatchUpdatesFilterName[] = "History Single Batch Filtering";
+const char kHistoryBatchUpdatesFilterDescription[] =
+    "When enabled History inserts and deletes history items in the same "
+    "BatchUpdates block.";
+
 const char kInProductHelpDemoModeName[] = "In-Product Help Demo Mode";
 const char kInProductHelpDemoModeDescription[] =
     "When enabled, in-product help promotions occur exactly once per cold "
@@ -44,13 +63,19 @@ const char kInProductHelpDemoModeDescription[] =
 
 const char kMarkHttpAsName[] = "Mark non-secure origins as non-secure";
 const char kMarkHttpAsDescription[] = "Change the UI treatment for HTTP pages";
-const char kMarkHttpAsDangerous[] = "Always mark HTTP as actively dangerous";
 
-const char kMailtoPromptForUserChoiceName[] =
-    "Mailto Handler Prompt for User Choice";
-const char kMailtoPromptForUserChoiceDescription[] =
-    "Enable prompt for user to choose a mail client app when user taps on a "
-    "mailto:// URL link.";
+const char kMemexTabSwitcherName[] = "Enable the Memex prototype Tab Switcher.";
+const char kMemexTabSwitcherDescription[] =
+    "When enabled, the TabSwitcher button will navigate to the chrome memex "
+    "prototype site instead of triggering the native Tab Switcher. The native "
+    "TabSwitcher is accessible by long pressing the button";
+
+const char kNewFullscreenName[] = "Enable the new FullscreenController.";
+const char kNewFullscreenDescription[] =
+    "When enabled, the new implementation of FullscreenController will be used "
+    "instead of the legacy version.  This new implementation utilizes the "
+    "observer and broadcaster patterns to simplify interaction with the "
+    "feature and to distribute UI implementations to more specific owners.";
 
 const char kOmniboxUIElideSuggestionUrlAfterHostName[] =
     "Hide the path, query, and ref of omnibox suggestions";
@@ -69,15 +94,42 @@ const char kOmniboxUIHideSuggestionUrlTrivialSubdomainsDescription[] =
     "Elides trivially informative subdomains (www, m) from suggested URLs in "
     "the omnibox dropdown.";
 
+const char kPasswordExportName[] = "Password Export";
+const char kPasswordExportDescription[] =
+    "Enables password exporting functionality in password settings.";
+
 const char kPhysicalWeb[] = "Physical Web";
 const char kPhysicalWebDescription[] =
     "When enabled, the omnibox will include suggestions for web pages "
     "broadcast by devices near you.";
 
-extern const char kSafeAreaCompatibleToolbarName[] =
-    "Safe Area Compatible Toolbar";
-extern const char kSafeAreaCompatibleToolbarDescription[] =
+const char kSafeAreaCompatibleToolbarName[] = "Safe Area Compatible Toolbar";
+const char kSafeAreaCompatibleToolbarDescription[] =
     "When enabled, the toolbar resizes itself when the safe area changes.";
+
+const char kShareCanonicalURLName[] = "Share Canonical URL";
+const char kShareCanonicalURLDescription[] =
+    "When enabled, the current page's canonical URL is shared (if it exists) "
+    "instead of the visible URL.";
+
+const char kSlimNavigationManagerName[] = "Use Slim Navigation Manager";
+const char kSlimNavigationManagerDescription[] =
+    "When enabled, uses the experimental slim navigation manager that provides "
+    "better compatibility with HTML navigation spec.";
+
+const char kNewPassKitDownloadName[] = "Use PassKit with ios/web Download API";
+const char kNewPassKitDownloadDescription[] =
+    "When enabled, uses ios/web Download API as dowload backend for PassKit.";
+
+const char kNewFileDownloadName[] = "Use new Download Manager UI and backend";
+const char kNewFileDownloadDescription[] =
+    "When enabled, uses new Download Manager UI and ios/web Download API as "
+    "backend.";
+
+const char kShowAutofillTypePredictionsName[] = "Show Autofill predictions";
+const char kShowAutofillTypePredictionsDescription[] =
+    "Annotates web forms with Autofill field type predictions as placeholder "
+    "text.";
 
 const char kTabSwitcherPresentsBVCName[] = "TabSwitcher Presents BVC";
 const char kTabSwitcherPresentsBVCDescription[] =
@@ -97,6 +149,10 @@ const char kWebPaymentsNativeAppsName[] = "Web Payments Native Apps";
 const char kWebPaymentsNativeAppsDescription[] =
     "Enable third party iOS native apps as payments methods within Payment "
     "Request.";
+
+const char kWKHTTPSystemCookieStoreName[] = "Use WKHTTPSystemCookieStore.";
+const char kWKHTTPSystemCookieStoreDescription[] =
+    "Use WKHTTPCookieStore backed store for main context URL requests.";
 
 // Please insert your name/description above in alphabetical order.
 

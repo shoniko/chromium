@@ -6,6 +6,9 @@
 
 #include "cc/paint/skia_paint_canvas.h"
 #include "platform/runtime_enabled_features.h"
+#include "third_party/khronos/GLES2/gl2.h"
+#include "third_party/khronos/GLES2/gl2ext.h"
+#include "third_party/khronos/GLES3/gl3.h"
 #include "third_party/skia/include/core/SkSurfaceProps.h"
 #include "ui/gfx/color_space.h"
 
@@ -16,7 +19,6 @@ namespace {
 gfx::ColorSpace::PrimaryID GetPrimaryID(CanvasColorSpace color_space) {
   gfx::ColorSpace::PrimaryID primary_id = gfx::ColorSpace::PrimaryID::BT709;
   switch (color_space) {
-    case kLegacyCanvasColorSpace:
     case kSRGBCanvasColorSpace:
       primary_id = gfx::ColorSpace::PrimaryID::BT709;
       break;
@@ -42,7 +44,7 @@ CanvasColorParams::CanvasColorParams(CanvasColorSpace color_space,
       opacity_mode_(opacity_mode) {}
 
 CanvasColorParams::CanvasColorParams(const SkImageInfo& info) {
-  color_space_ = kLegacyCanvasColorSpace;
+  color_space_ = kSRGBCanvasColorSpace;
   pixel_format_ = kRGBA8CanvasPixelFormat;
   // When there is no color space information, the SkImage is in legacy mode and
   // the color type is kN32_SkColorType (which translates to kRGBA8 canvas pixel
@@ -80,9 +82,8 @@ void CanvasColorParams::SetOpacityMode(OpacityMode opacity_mode) {
 }
 
 bool CanvasColorParams::NeedsSkColorSpaceXformCanvas() const {
-  // TODO: To unify legacy and srgb spaces, return
-  // color_space_ == kSRGBCanvasColorSpace
-  return color_space_ == kLegacyCanvasColorSpace;
+  return color_space_ == kSRGBCanvasColorSpace &&
+         pixel_format_ == kRGBA8CanvasPixelFormat;
 }
 
 std::unique_ptr<cc::PaintCanvas> CanvasColorParams::WrapCanvas(
@@ -97,24 +98,17 @@ std::unique_ptr<cc::PaintCanvas> CanvasColorParams::WrapCanvas(
 sk_sp<SkColorSpace> CanvasColorParams::GetSkColorSpaceForSkSurfaces() const {
   if (NeedsSkColorSpaceXformCanvas())
     return nullptr;
-  switch (color_space_) {
-    case kLegacyCanvasColorSpace:
-      NOTREACHED();
-    case kSRGBCanvasColorSpace:
-      if (pixel_format_ == kF16CanvasPixelFormat)
-        return SkColorSpace::MakeSRGBLinear();
-      return SkColorSpace::MakeSRGB();
-    case kRec2020CanvasColorSpace:
-      return SkColorSpace::MakeRGB(SkColorSpace::kLinear_RenderTargetGamma,
-                                   SkColorSpace::kRec2020_Gamut);
-    case kP3CanvasColorSpace:
-      return SkColorSpace::MakeRGB(SkColorSpace::kLinear_RenderTargetGamma,
-                                   SkColorSpace::kDCIP3_D65_Gamut);
-  }
-  return nullptr;
+  return GetSkColorSpace();
+}
 
-  // TODO(ccameron): This should return GetSkColorSpace if linear pixel math was
-  // requested, and nullptr otherwise.
+bool CanvasColorParams::NeedsColorConversion(
+    const CanvasColorParams& dest_color_params) const {
+  if ((color_space_ == dest_color_params.ColorSpace() &&
+       pixel_format_ == dest_color_params.PixelFormat()) ||
+      (NeedsSkColorSpaceXformCanvas() &&
+       dest_color_params.NeedsSkColorSpaceXformCanvas()))
+    return false;
+  return true;
 }
 
 SkColorType CanvasColorParams::GetSkColorType() const {
@@ -166,24 +160,62 @@ gfx::ColorSpace CanvasColorParams::GetStorageGfxColorSpace() const {
 
 sk_sp<SkColorSpace> CanvasColorParams::GetSkColorSpace() const {
   SkColorSpace::Gamut gamut = SkColorSpace::kSRGB_Gamut;
+  SkColorSpace::RenderTargetGamma gamma = SkColorSpace::kSRGB_RenderTargetGamma;
   switch (color_space_) {
-    case kLegacyCanvasColorSpace:
     case kSRGBCanvasColorSpace:
-      gamut = SkColorSpace::kSRGB_Gamut;
+      if (pixel_format_ == kF16CanvasPixelFormat)
+        gamma = SkColorSpace::kLinear_RenderTargetGamma;
       break;
     case kRec2020CanvasColorSpace:
       gamut = SkColorSpace::kRec2020_Gamut;
+      gamma = SkColorSpace::kLinear_RenderTargetGamma;
       break;
     case kP3CanvasColorSpace:
       gamut = SkColorSpace::kDCIP3_D65_Gamut;
+      gamma = SkColorSpace::kLinear_RenderTargetGamma;
       break;
   }
-
-  SkColorSpace::RenderTargetGamma gamma = SkColorSpace::kSRGB_RenderTargetGamma;
-  if (pixel_format_ == kF16CanvasPixelFormat)
-    gamma = SkColorSpace::kLinear_RenderTargetGamma;
-
   return SkColorSpace::MakeRGB(gamma, gamut);
+}
+
+gfx::BufferFormat CanvasColorParams::GetBufferFormat() const {
+  static_assert(kN32_SkColorType == kRGBA_8888_SkColorType ||
+                    kN32_SkColorType == kBGRA_8888_SkColorType,
+                "Unexpected kN32_SkColorType value.");
+  constexpr gfx::BufferFormat kN32BufferFormat =
+      kN32_SkColorType == kRGBA_8888_SkColorType ? gfx::BufferFormat::RGBA_8888
+                                                 : gfx::BufferFormat::BGRA_8888;
+
+  if (pixel_format_ == kF16CanvasPixelFormat)
+    return gfx::BufferFormat::RGBA_F16;
+
+  return kN32BufferFormat;
+}
+
+GLenum CanvasColorParams::GLInternalFormat() const {
+  // TODO(junov): try GL_RGB when opacity_mode_ == kOpaque
+  static_assert(kN32_SkColorType == kRGBA_8888_SkColorType ||
+                    kN32_SkColorType == kBGRA_8888_SkColorType,
+                "Unexpected kN32_SkColorType value.");
+  constexpr GLenum kN32GLInternalBufferFormat =
+      kN32_SkColorType == kRGBA_8888_SkColorType ? GL_RGBA : GL_BGRA_EXT;
+  if (pixel_format_ == kF16CanvasPixelFormat)
+    return GL_RGBA;
+
+  return kN32GLInternalBufferFormat;
+}
+
+GLenum CanvasColorParams::GLType() const {
+  switch (pixel_format_) {
+    case kRGBA8CanvasPixelFormat:
+      return GL_UNSIGNED_BYTE;
+    case kF16CanvasPixelFormat:
+      return GL_HALF_FLOAT;
+    default:
+      break;
+  }
+  NOTREACHED();
+  return GL_UNSIGNED_BYTE;
 }
 
 }  // namespace blink

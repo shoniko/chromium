@@ -27,12 +27,12 @@
 
 #include "core/svg/graphics/SVGImage.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "core/animation/DocumentAnimations.h"
 #include "core/animation/DocumentTimeline.h"
 #include "core/dom/DocumentParser.h"
 #include "core/dom/FlatTreeTraversal.h"
 #include "core/dom/NodeTraversal.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/LocalFrameView.h"
@@ -56,7 +56,6 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/Color.h"
 #include "platform/graphics/GraphicsContext.h"
-#include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/ImageObserver.h"
 #include "platform/graphics/paint/ClipRecorder.h"
 #include "platform/graphics/paint/CullRect.h"
@@ -64,7 +63,6 @@
 #include "platform/graphics/paint/PaintRecord.h"
 #include "platform/graphics/paint/PaintRecordBuilder.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -219,7 +217,7 @@ FloatSize SVGImage::ConcreteObjectSize(
   if (!layout_object)
     return FloatSize();
 
-  LayoutReplaced::IntrinsicSizingInfo intrinsic_sizing_info;
+  IntrinsicSizingInfo intrinsic_sizing_info;
   layout_object->ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
 
   // https://www.w3.org/TR/css3-images/#default-sizing
@@ -340,11 +338,10 @@ void SVGImage::DrawPatternForContainer(GraphicsContext& context,
   FloatRect spaced_tile(tile);
   spaced_tile.Expand(FloatSize(repeat_spacing));
 
-  PaintRecordBuilder builder(spaced_tile, nullptr, &context);
-
+  PaintRecordBuilder builder(nullptr, &context);
   {
     DrawingRecorder recorder(builder.Context(), builder,
-                             DisplayItem::Type::kSVGImage, spaced_tile);
+                             DisplayItem::Type::kSVGImage);
     // When generating an expanded tile, make sure we don't draw into the
     // spacing area.
     if (tile != spaced_tile)
@@ -493,7 +490,7 @@ sk_sp<PaintRecord> SVGImage::PaintRecordForCurrentFrame(const IntRect& bounds,
   // avoid setting timers from the latter.
   FlushPendingTimelineRewind();
 
-  PaintRecordBuilder builder(bounds, nullptr, nullptr, paint_controller_.get());
+  PaintRecordBuilder builder(nullptr, nullptr, paint_controller_.get());
 
   view->UpdateAllLifecyclePhasesExceptPaint();
   view->PaintWithLifecycleUpdate(builder.Context(), kGlobalPaintNormalPhase,
@@ -692,11 +689,10 @@ void SVGImage::LoadCompleted() {
       // Document::ImplicitClose(), we defer AsyncLoadCompleted() to avoid
       // potential bugs and timing dependencies around ImplicitClose() and
       // to make LoadEventFinished() true when AsyncLoadCompleted() is called.
-      TaskRunnerHelper::Get(TaskType::kUnspecedLoading,
-                            ToLocalFrame(page_->MainFrame()))
-          ->PostTask(BLINK_FROM_HERE,
-                     WTF::Bind(&SVGImage::NotifyAsyncLoadCompleted,
-                               scoped_refptr<SVGImage>(this)));
+      ToLocalFrame(page_->MainFrame())
+          ->GetTaskRunner(TaskType::kUnspecedLoading)
+          ->PostTask(FROM_HERE, WTF::Bind(&SVGImage::NotifyAsyncLoadCompleted,
+                                          scoped_refptr<SVGImage>(this)));
       break;
 
     case kDataChangedNotStarted:
@@ -804,10 +800,12 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
   switch (load_state_) {
     case kInDataChanged:
       load_state_ = kWaitingForAsyncLoadCompletion;
-      return kSizeAvailableAndLoadingAsynchronously;
+      return SvgRootElement(page_.Get())
+                 ? kSizeAvailableAndLoadingAsynchronously
+                 : kSizeUnavailable;
 
     case kLoadCompleted:
-      return kSizeAvailable;
+      return SvgRootElement(page_.Get()) ? kSizeAvailable : kSizeUnavailable;
 
     case kDataChangedNotStarted:
     case kWaitingForAsyncLoadCompletion:

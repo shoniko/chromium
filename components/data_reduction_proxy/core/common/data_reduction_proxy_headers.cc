@@ -23,8 +23,6 @@
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 
-using base::StringPiece;
-
 namespace {
 
 const char kChromeProxyHeader[] = "chrome-proxy";
@@ -46,19 +44,9 @@ const char kCompressedVideoDirective[] = "compressed-video";
 const char kIdentityDirective[] = "identity";
 const char kChromeProxyPagePoliciesDirective[] = "page-policies";
 
-const char kChromeProxyExperimentForceLitePage[] = "force_lite_page";
-const char kChromeProxyExperimentForceEmptyImage[] =
-    "force_page_policies_empty_image";
-
 const char kChromeProxyActionBlockOnce[] = "block-once";
 const char kChromeProxyActionBlock[] = "block";
 const char kChromeProxyActionBypass[] = "bypass";
-
-// Actions for tamper detection fingerprints.
-const char kChromeProxyActionFingerprintChromeProxy[]   = "fcp";
-const char kChromeProxyActionFingerprintVia[]           = "fvia";
-const char kChromeProxyActionFingerprintOtherHeaders[]  = "foh";
-const char kChromeProxyActionFingerprintContentLength[] = "fcl";
 
 const int kShortBypassMaxSeconds = 59;
 const int kMediumBypassMaxSeconds = 300;
@@ -187,14 +175,6 @@ const char* page_policies_directive() {
   return kChromeProxyPagePoliciesDirective;
 }
 
-const char* chrome_proxy_experiment_force_lite_page() {
-  return kChromeProxyExperimentForceLitePage;
-}
-
-const char* chrome_proxy_experiment_force_empty_image() {
-  return kChromeProxyExperimentForceEmptyImage;
-}
-
 TransformDirective ParseRequestTransform(
     const net::HttpRequestHeaders& headers) {
   std::string accept_transform_value;
@@ -206,14 +186,16 @@ TransformDirective ParseRequestTransform(
   if (base::LowerCaseEqualsASCII(accept_transform_value,
                                  lite_page_directive())) {
     return TRANSFORM_LITE_PAGE;
-  } else if (base::LowerCaseEqualsASCII(accept_transform_value,
-                                        empty_image_directive())) {
+  }
+  if (base::LowerCaseEqualsASCII(accept_transform_value,
+                                 empty_image_directive())) {
     return TRANSFORM_EMPTY_IMAGE;
-  } else if (base::LowerCaseEqualsASCII(accept_transform_value,
-                                        compressed_video_directive())) {
+  }
+  if (base::LowerCaseEqualsASCII(accept_transform_value,
+                                 compressed_video_directive())) {
     return TRANSFORM_COMPRESSED_VIDEO;
-  } else if (base::LowerCaseEqualsASCII(accept_transform_value,
-                                        kIdentityDirective)) {
+  }
+  if (base::LowerCaseEqualsASCII(accept_transform_value, kIdentityDirective)) {
     return TRANSFORM_IDENTITY;
   }
 
@@ -232,17 +214,20 @@ TransformDirective ParseResponseTransform(
       return ParsePagePolicyDirective(chrome_proxy_header_value);
     }
     return TRANSFORM_NONE;
-  } else if (base::LowerCaseEqualsASCII(content_transform_value,
-                                        lite_page_directive())) {
+  }
+  if (base::LowerCaseEqualsASCII(content_transform_value,
+                                 lite_page_directive())) {
     return TRANSFORM_LITE_PAGE;
-  } else if (base::LowerCaseEqualsASCII(content_transform_value,
-                                        empty_image_directive())) {
+  }
+  if (base::LowerCaseEqualsASCII(content_transform_value,
+                                 empty_image_directive())) {
     return TRANSFORM_EMPTY_IMAGE;
-  } else if (base::LowerCaseEqualsASCII(content_transform_value,
-                                        kIdentityDirective)) {
+  }
+  if (base::LowerCaseEqualsASCII(content_transform_value, kIdentityDirective)) {
     return TRANSFORM_IDENTITY;
-  } else if (base::LowerCaseEqualsASCII(content_transform_value,
-                                        compressed_video_directive())) {
+  }
+  if (base::LowerCaseEqualsASCII(content_transform_value,
+                                 compressed_video_directive())) {
     return TRANSFORM_COMPRESSED_VIDEO;
   }
   return TRANSFORM_UNKNOWN;
@@ -291,7 +276,8 @@ bool ParseHeadersAndSetBypassDuration(const net::HttpResponseHeaders& headers,
     if (StartsWithActionPrefix(value, action_prefix)) {
       int64_t seconds;
       if (!base::StringToInt64(
-              StringPiece(value).substr(action_prefix.size() + 1), &seconds) ||
+              base::StringPiece(value).substr(action_prefix.size() + 1),
+              &seconds) ||
           seconds < 0) {
         continue;  // In case there is a well formed instruction.
       }
@@ -470,54 +456,14 @@ DataReductionProxyBypassType GetDataReductionProxyBypassType(
   return BYPASS_EVENT_TYPE_MAX;
 }
 
-bool GetDataReductionProxyActionFingerprintChromeProxy(
-    const net::HttpResponseHeaders* headers,
-    std::string* chrome_proxy_fingerprint) {
-  return GetDataReductionProxyActionValue(
-      headers,
-      kChromeProxyActionFingerprintChromeProxy,
-      chrome_proxy_fingerprint);
-}
-
-bool GetDataReductionProxyActionFingerprintVia(
-    const net::HttpResponseHeaders* headers,
-    std::string* via_fingerprint) {
-  return GetDataReductionProxyActionValue(
-      headers,
-      kChromeProxyActionFingerprintVia,
-      via_fingerprint);
-}
-
-bool GetDataReductionProxyActionFingerprintOtherHeaders(
-    const net::HttpResponseHeaders* headers,
-    std::string* other_headers_fingerprint) {
-  return GetDataReductionProxyActionValue(
-      headers,
-      kChromeProxyActionFingerprintOtherHeaders,
-      other_headers_fingerprint);
-}
-
-bool GetDataReductionProxyActionFingerprintContentLength(
-    const net::HttpResponseHeaders* headers,
-    std::string* content_length_fingerprint) {
-  return GetDataReductionProxyActionValue(
-      headers,
-      kChromeProxyActionFingerprintContentLength,
-      content_length_fingerprint);
-}
-
-void GetDataReductionProxyHeaderWithFingerprintRemoved(
-    const net::HttpResponseHeaders* headers,
-    std::vector<std::string>* values) {
-  DCHECK(values);
-
-  std::string value;
-  size_t iter = 0;
-  while (headers->EnumerateHeader(&iter, kChromeProxyHeader, &value)) {
-    if (StartsWithActionPrefix(value, kChromeProxyActionFingerprintChromeProxy))
-      continue;
-    values->push_back(std::move(value));
+int64_t GetDataReductionProxyOFCL(const net::HttpResponseHeaders* headers) {
+  std::string ofcl_str;
+  int64_t ofcl;
+  if (GetDataReductionProxyActionValue(headers, "ofcl", &ofcl_str) &&
+      base::StringToInt64(ofcl_str, &ofcl) && ofcl >= 0) {
+    return ofcl;
   }
+  return -1;
 }
 
 }  // namespace data_reduction_proxy

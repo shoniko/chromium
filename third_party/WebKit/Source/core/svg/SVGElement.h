@@ -22,6 +22,7 @@
 #ifndef SVGElement_h
 #define SVGElement_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/Element.h"
 #include "core/svg/SVGParsingError.h"
@@ -157,8 +158,8 @@ class CORE_EXPORT SVGElement : public Element {
   virtual bool IsAnimatableAttribute(const QualifiedName&) const;
 #endif
 
-  MutableStylePropertySet* AnimatedSMILStyleProperties() const;
-  MutableStylePropertySet* EnsureAnimatedSMILStyleProperties();
+  MutableCSSPropertyValueSet* AnimatedSMILStyleProperties() const;
+  MutableCSSPropertyValueSet* EnsureAnimatedSMILStyleProperties();
   void SetUseOverrideComputedStyle(bool);
 
   virtual bool HaveLoadedRequiredResources();
@@ -181,7 +182,6 @@ class CORE_EXPORT SVGElement : public Element {
 
   class InvalidationGuard {
     STACK_ALLOCATED();
-    WTF_MAKE_NONCOPYABLE(InvalidationGuard);
 
    public:
     InvalidationGuard(SVGElement* element) : element_(element) {}
@@ -189,11 +189,11 @@ class CORE_EXPORT SVGElement : public Element {
 
    private:
     Member<SVGElement> element_;
+    DISALLOW_COPY_AND_ASSIGN(InvalidationGuard);
   };
 
   class InstanceUpdateBlocker {
     STACK_ALLOCATED();
-    WTF_MAKE_NONCOPYABLE(InstanceUpdateBlocker);
 
    public:
     InstanceUpdateBlocker(SVGElement* target_element);
@@ -201,6 +201,7 @@ class CORE_EXPORT SVGElement : public Element {
 
    private:
     Member<SVGElement> target_element_;
+    DISALLOW_COPY_AND_ASSIGN(InstanceUpdateBlocker);
   };
 
   void InvalidateInstances();
@@ -222,9 +223,10 @@ class CORE_EXPORT SVGElement : public Element {
   void ParseAttribute(const AttributeModificationParams&) override;
   void AttributeChanged(const AttributeModificationParams&) override;
 
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;

@@ -447,11 +447,10 @@ void V4L2CaptureDelegate::AllocateAndStart(
     // Now check if the device is able to accept a capture framerate set.
     if (streamparm.parm.capture.capability & V4L2_CAP_TIMEPERFRAME) {
       // |frame_rate| is float, approximate by a fraction.
-      streamparm.parm.capture.timeperframe.numerator =
-          media::kFrameRatePrecision;
+      streamparm.parm.capture.timeperframe.numerator = kFrameRatePrecision;
       streamparm.parm.capture.timeperframe.denominator =
-          (frame_rate) ? (frame_rate * media::kFrameRatePrecision)
-                       : (kTypicalFramerate * media::kFrameRatePrecision);
+          (frame_rate) ? (frame_rate * kFrameRatePrecision)
+                       : (kTypicalFramerate * kFrameRatePrecision);
 
       if (HANDLE_EINTR(ioctl(device_fd_.get(), VIDIOC_S_PARM, &streamparm)) <
           0) {
@@ -753,7 +752,7 @@ base::WeakPtr<V4L2CaptureDelegate> V4L2CaptureDelegate::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-V4L2CaptureDelegate::~V4L2CaptureDelegate() {}
+V4L2CaptureDelegate::~V4L2CaptureDelegate() = default;
 
 bool V4L2CaptureDelegate::MapAndQueueBuffer(int index) {
   v4l2_buffer buffer;
@@ -837,6 +836,11 @@ void V4L2CaptureDelegate::DoCapture() {
       buffer.bytesused = 0;
     } else
 #endif
+        if (buffer.bytesused < capture_format_.ImageAllocationSize()) {
+      LOG(ERROR) << "Dequeued v4l2 buffer contains invalid length ("
+                 << buffer.bytesused << " bytes).";
+      buffer.bytesused = 0;
+    } else
       client_->OnIncomingCapturedData(
           buffer_tracker->start(), buffer_tracker->payload_size(),
           capture_format_, rotation_, now, timestamp);
@@ -869,7 +873,7 @@ void V4L2CaptureDelegate::SetErrorState(const base::Location& from_here,
   client_->OnError(from_here, reason);
 }
 
-V4L2CaptureDelegate::BufferTracker::BufferTracker() {}
+V4L2CaptureDelegate::BufferTracker::BufferTracker() = default;
 
 V4L2CaptureDelegate::BufferTracker::~BufferTracker() {
   if (start_ == nullptr)

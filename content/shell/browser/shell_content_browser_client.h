@@ -26,8 +26,6 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   // Gets the current instance.
   static ShellContentBrowserClient* Get();
 
-  static void SetSwapProcessesForRedirect(bool swap);
-
   ShellContentBrowserClient();
   ~ShellContentBrowserClient() override;
 
@@ -66,21 +64,19 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   SpeechRecognitionManagerDelegate* CreateSpeechRecognitionManagerDelegate()
       override;
   net::NetLog* GetNetLog() override;
-  bool ShouldSwapProcessesForRedirect(BrowserContext* browser_context,
-                                      const GURL& current_url,
-                                      const GURL& new_url) override;
   DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
 
   void OpenURL(BrowserContext* browser_context,
                const OpenURLParams& params,
                const base::Callback<void(WebContents*)>& callback) override;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_ANDROID)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
       content::PosixFileDescriptorInfo* mappings) override;
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
+
 #if defined(OS_WIN)
   bool PreSpawnRenderer(sandbox::TargetPolicy* policy) override;
 #endif

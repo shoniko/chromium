@@ -12,17 +12,17 @@
 
 #include "content/common/content_export.h"
 
-namespace base {
-class TimeTicks;
-}
-
 namespace net {
 struct RedirectInfo;
 }
 
+namespace network {
+struct ResourceResponseInfo;
+struct URLLoaderCompletionStatus;
+}
+
 namespace content {
 
-struct ResourceResponseInfo;
 
 // This is implemented by our custom resource loader within content. The Peer
 // and it's bridge should have identical lifetimes as they represent each end of
@@ -60,12 +60,14 @@ class CONTENT_EXPORT RequestPeer {
   // suppress the redirect.  The ResourceResponseInfo provides information about
   // the redirect response and the RedirectInfo includes information about the
   // request to be made if the method returns true.
-  virtual bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
-                                  const ResourceResponseInfo& info) = 0;
+  virtual bool OnReceivedRedirect(
+      const net::RedirectInfo& redirect_info,
+      const network::ResourceResponseInfo& info) = 0;
 
   // Called when response headers are available (after all redirects have
   // been followed).
-  virtual void OnReceivedResponse(const ResourceResponseInfo& info) = 0;
+  virtual void OnReceivedResponse(
+      const network::ResourceResponseInfo& info) = 0;
 
   // Called when a chunk of response data is downloaded.  This method may be
   // called multiple times or not at all if an error occurs.  This method is
@@ -93,12 +95,8 @@ class CONTENT_EXPORT RequestPeer {
 
   // Called when the response is complete.  This method signals completion of
   // the resource load.
-  virtual void OnCompletedRequest(int error_code,
-                                  bool stale_copy_in_cache,
-                                  const base::TimeTicks& completion_time,
-                                  int64_t total_transfer_size,
-                                  int64_t encoded_body_size,
-                                  int64_t decoded_body_size) = 0;
+  virtual void OnCompletedRequest(
+      const network::URLLoaderCompletionStatus& status) = 0;
 
   virtual ~RequestPeer() {}
 };

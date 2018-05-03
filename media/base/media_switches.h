@@ -82,8 +82,6 @@ MEDIA_EXPORT extern const char kForceVideoOverlays[];
 MEDIA_EXPORT extern const char kMSEAudioBufferSizeLimit[];
 MEDIA_EXPORT extern const char kMSEVideoBufferSizeLimit[];
 
-MEDIA_EXPORT extern const char kIgnoreAutoplayRestrictionsForTests[];
-
 MEDIA_EXPORT extern const char kClearKeyCdmPathForTesting[];
 
 #if !defined(OS_ANDROID)
@@ -106,6 +104,7 @@ namespace media {
 // All features in alphabetical order. The features should be documented
 // alongside the definition of their values in the .cc file.
 
+MEDIA_EXPORT extern const base::Feature kAv1Decoder;
 MEDIA_EXPORT extern const base::Feature kBackgroundVideoPauseOptimization;
 MEDIA_EXPORT extern const base::Feature kBackgroundVideoTrackOptimization;
 MEDIA_EXPORT extern const base::Feature kComplexityBasedVideoBuffering;
@@ -116,13 +115,15 @@ MEDIA_EXPORT extern const base::Feature kRecordMediaEngagementScores;
 MEDIA_EXPORT extern const base::Feature kMediaEngagementBypassAutoplayPolicies;
 MEDIA_EXPORT extern const base::Feature kMemoryPressureBasedSourceBufferGC;
 MEDIA_EXPORT extern const base::Feature kMojoCdm;
+MEDIA_EXPORT extern const base::Feature kMojoVideoDecoder;
 MEDIA_EXPORT extern const base::Feature kMseBufferByPts;
 MEDIA_EXPORT extern const base::Feature kMseFlacInIsobmff;
 MEDIA_EXPORT extern const base::Feature kNewAudioRenderingMixingStrategy;
 MEDIA_EXPORT extern const base::Feature kNewRemotePlaybackPipeline;
 MEDIA_EXPORT extern const base::Feature kOverflowIconsForMediaControls;
 MEDIA_EXPORT extern const base::Feature kOverlayFullscreenVideo;
-MEDIA_EXPORT extern const base::Feature kPreloadDefaultIsMetadata;
+MEDIA_EXPORT extern const base::Feature kPictureInPicture;
+MEDIA_EXPORT extern const base::Feature kPreloadMediaEngagementData;
 MEDIA_EXPORT extern const base::Feature kResumeBackgroundVideo;
 MEDIA_EXPORT extern const base::Feature kSpecCompliantCanPlayThrough;
 MEDIA_EXPORT extern const base::Feature kSupportExperimentalCdmInterface;
@@ -131,6 +132,7 @@ MEDIA_EXPORT extern const base::Feature kUseAndroidOverlayAggressively;
 MEDIA_EXPORT extern const base::Feature kUseNewMediaCache;
 MEDIA_EXPORT extern const base::Feature kUseR16Texture;
 MEDIA_EXPORT extern const base::Feature kVideoBlitColorAccuracy;
+MEDIA_EXPORT extern const base::Feature kUnifiedAutoplay;
 MEDIA_EXPORT extern const base::Feature kUseSurfaceLayerForVideo;
 MEDIA_EXPORT extern const base::Feature kUseModernMediaControls;
 
@@ -145,10 +147,6 @@ MEDIA_EXPORT extern const base::Feature kD3D11VideoDecoding;
 MEDIA_EXPORT extern const base::Feature kDelayCopyNV12Textures;
 MEDIA_EXPORT extern const base::Feature kMediaFoundationH264Encoding;
 #endif  // defined(OS_WIN)
-
-#if defined(OS_MACOSX)
-MEDIA_EXPORT extern const base::Feature kSerializeCoreAudioPauseResume;
-#endif  // defined(OS_MACOSX)
 
 // Based on a |command_line| and the current platform, returns the effective
 // autoplay policy. In other words, it will take into account the default policy

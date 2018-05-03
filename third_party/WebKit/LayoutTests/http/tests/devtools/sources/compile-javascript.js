@@ -6,14 +6,13 @@
   TestRunner.addResult(`Verifies proactive javascript compilation.\n`);
   await TestRunner.loadModule('sources_test_runner');
   await TestRunner.showPanel('sources');
-  await TestRunner.addScriptTag('../resources/editor-test.js');
   await TestRunner.addScriptTag('debugger/resources/edit-me.js');
 
   SourcesTestRunner.showScriptSource('edit-me.js', onSourceFrame);
 
   function onSourceFrame(sourceFrame) {
     TestRunner.addSniffer(
-        Sources.JavaScriptCompiler.prototype, '_compilationFinishedForTest',
+        Sources.JavaScriptCompilerPlugin.prototype, '_compilationFinishedForTest',
         onCompilationFinished.bind(null, sourceFrame));
     sourceFrame.textEditor.setSelection(TextUtils.TextRange.createFromLocation(0, 0));
     SourcesTestRunner.typeIn(sourceFrame.textEditor, 'test!');

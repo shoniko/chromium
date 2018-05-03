@@ -14,7 +14,7 @@ FakeUIResourceLayerTreeHostImpl::FakeUIResourceLayerTreeHostImpl(
     TaskGraphRunner* task_graph_runner)
     : FakeLayerTreeHostImpl(task_runner_provider, task_graph_runner) {}
 
-FakeUIResourceLayerTreeHostImpl::~FakeUIResourceLayerTreeHostImpl() {}
+FakeUIResourceLayerTreeHostImpl::~FakeUIResourceLayerTreeHostImpl() = default;
 
 void FakeUIResourceLayerTreeHostImpl::CreateUIResource(
     UIResourceId uid,
@@ -23,8 +23,8 @@ void FakeUIResourceLayerTreeHostImpl::CreateUIResource(
     DeleteUIResource(uid);
 
   UIResourceData data;
-  data.resource_id = resource_provider()->CreateResource(
-      bitmap.GetSize(), ResourceProvider::TEXTURE_HINT_DEFAULT, viz::RGBA_8888,
+  data.resource_id = resource_provider()->CreateGpuTextureResource(
+      bitmap.GetSize(), viz::ResourceTextureHint::kDefault, viz::RGBA_8888,
       gfx::ColorSpace());
 
   data.opaque = bitmap.GetOpaque();

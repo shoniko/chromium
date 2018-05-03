@@ -72,6 +72,17 @@
       opacity: 0;
     }
 
+    /* The name-container font-sizes is to counteract the countainer's
+     * scale(0.8), so that the text still stays legible. */
+    podrow[ncolumns='6'] .pod .name-container {
+      font-size: 1.25em;
+      transition: font-size 180ms;
+    }
+
+    podrow[ncolumns='6'] .pod.focused .name-container {
+      font-size: 1em;
+    }
+
     .pod {
       box-shadow: 0 2px 2px 0 rgba(0, 0, 0, .24),
                   0 0 2px 0 rgba(0, 0, 0, .12);
@@ -289,6 +300,10 @@
       padding: 12px;
     }
 
+    .action-box-remove-user-warning-text {
+      max-width: 100%;
+    }
+
     .action-box-remove-user-warning > * {
       word-wrap: break-word;
     }
@@ -311,9 +326,20 @@
     }
 
     #user-manager-prompt-message {
+      background-image: url(../../../../ui/webui/resources/images/business.svg);
+      background-position: 0 center;
+      background-repeat: no-repeat;
+      background-size: 19px;
       font-size: 19px;
       margin-bottom: 45px;
+      padding-left: 30px;
       text-align: center;
+    }
+
+    html[dir=rtl] #user-manager-prompt-message {
+      background-position: right center;
+      padding-left: 0;
+      padding-right: 30px;
     }
 
     #user-manager-prompt-message:empty {

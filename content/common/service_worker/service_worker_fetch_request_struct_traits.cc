@@ -10,168 +10,9 @@
 
 namespace mojo {
 
-using blink::mojom::FetchCredentialsMode;
-using blink::mojom::FetchRedirectMode;
-using blink::mojom::FetchRequestMode;
-using blink::mojom::RequestContextFrameType;
 using blink::mojom::RequestContextType;
 using blink::mojom::ServiceWorkerFetchType;
-
-FetchCredentialsMode
-EnumTraits<FetchCredentialsMode, content::FetchCredentialsMode>::ToMojom(
-    content::FetchCredentialsMode input) {
-  switch (input) {
-    case content::FETCH_CREDENTIALS_MODE_OMIT:
-      return FetchCredentialsMode::OMIT;
-    case content::FETCH_CREDENTIALS_MODE_SAME_ORIGIN:
-      return FetchCredentialsMode::SAME_ORIGIN;
-    case content::FETCH_CREDENTIALS_MODE_INCLUDE:
-      return FetchCredentialsMode::INCLUDE;
-    case content::FETCH_CREDENTIALS_MODE_PASSWORD:
-      return FetchCredentialsMode::PASSWORD;
-  }
-
-  NOTREACHED();
-  return FetchCredentialsMode::OMIT;
-}
-
-bool EnumTraits<FetchCredentialsMode, content::FetchCredentialsMode>::FromMojom(
-    FetchCredentialsMode input,
-    content::FetchCredentialsMode* out) {
-  switch (input) {
-    case FetchCredentialsMode::OMIT:
-      *out = content::FETCH_CREDENTIALS_MODE_OMIT;
-      return true;
-    case FetchCredentialsMode::SAME_ORIGIN:
-      *out = content::FETCH_CREDENTIALS_MODE_SAME_ORIGIN;
-      return true;
-    case FetchCredentialsMode::INCLUDE:
-      *out = content::FETCH_CREDENTIALS_MODE_INCLUDE;
-      return true;
-    case FetchCredentialsMode::PASSWORD:
-      *out = content::FETCH_CREDENTIALS_MODE_PASSWORD;
-      return true;
-  }
-
-  return false;
-}
-
-FetchRedirectMode
-EnumTraits<FetchRedirectMode, content::FetchRedirectMode>::ToMojom(
-    content::FetchRedirectMode input) {
-  switch (input) {
-    case content::FetchRedirectMode::FOLLOW_MODE:
-      return FetchRedirectMode::FOLLOW;
-    case content::FetchRedirectMode::ERROR_MODE:
-      return FetchRedirectMode::ERROR_MODE;
-    case content::FetchRedirectMode::MANUAL_MODE:
-      return FetchRedirectMode::MANUAL;
-  }
-
-  NOTREACHED();
-  return FetchRedirectMode::ERROR_MODE;
-}
-
-bool EnumTraits<FetchRedirectMode, content::FetchRedirectMode>::FromMojom(
-    FetchRedirectMode input,
-    content::FetchRedirectMode* out) {
-  switch (input) {
-    case FetchRedirectMode::FOLLOW:
-      *out = content::FetchRedirectMode::FOLLOW_MODE;
-      return true;
-    case FetchRedirectMode::ERROR_MODE:
-      *out = content::FetchRedirectMode::ERROR_MODE;
-      return true;
-    case FetchRedirectMode::MANUAL:
-      *out = content::FetchRedirectMode::MANUAL_MODE;
-      return true;
-  }
-
-  return false;
-}
-
-FetchRequestMode
-EnumTraits<FetchRequestMode, content::FetchRequestMode>::ToMojom(
-    content::FetchRequestMode input) {
-  switch (input) {
-    case content::FETCH_REQUEST_MODE_SAME_ORIGIN:
-      return FetchRequestMode::SAME_ORIGIN;
-    case content::FETCH_REQUEST_MODE_NO_CORS:
-      return FetchRequestMode::NO_CORS;
-    case content::FETCH_REQUEST_MODE_CORS:
-      return FetchRequestMode::CORS;
-    case content::FETCH_REQUEST_MODE_CORS_WITH_FORCED_PREFLIGHT:
-      return FetchRequestMode::CORS_WITH_FORCED_PREFLIGHT;
-    case content::FETCH_REQUEST_MODE_NAVIGATE:
-      return FetchRequestMode::NAVIGATE;
-  }
-
-  NOTREACHED();
-  return FetchRequestMode::NO_CORS;
-}
-
-bool EnumTraits<FetchRequestMode, content::FetchRequestMode>::FromMojom(
-    FetchRequestMode input,
-    content::FetchRequestMode* out) {
-  switch (input) {
-    case FetchRequestMode::SAME_ORIGIN:
-      *out = content::FETCH_REQUEST_MODE_SAME_ORIGIN;
-      return true;
-    case FetchRequestMode::NO_CORS:
-      *out = content::FETCH_REQUEST_MODE_NO_CORS;
-      return true;
-    case FetchRequestMode::CORS:
-      *out = content::FETCH_REQUEST_MODE_CORS;
-      return true;
-    case FetchRequestMode::CORS_WITH_FORCED_PREFLIGHT:
-      *out = content::FETCH_REQUEST_MODE_CORS_WITH_FORCED_PREFLIGHT;
-      return true;
-    case FetchRequestMode::NAVIGATE:
-      *out = content::FETCH_REQUEST_MODE_NAVIGATE;
-      return true;
-  }
-
-  return false;
-}
-
-RequestContextFrameType
-EnumTraits<RequestContextFrameType, content::RequestContextFrameType>::ToMojom(
-    content::RequestContextFrameType input) {
-  switch (input) {
-    case content::REQUEST_CONTEXT_FRAME_TYPE_AUXILIARY:
-      return RequestContextFrameType::AUXILIARY;
-    case content::REQUEST_CONTEXT_FRAME_TYPE_NESTED:
-      return RequestContextFrameType::NESTED;
-    case content::REQUEST_CONTEXT_FRAME_TYPE_NONE:
-      return RequestContextFrameType::NONE;
-    case content::REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL:
-      return RequestContextFrameType::TOP_LEVEL;
-  }
-
-  NOTREACHED();
-  return RequestContextFrameType::NONE;
-}
-
-bool EnumTraits<RequestContextFrameType, content::RequestContextFrameType>::
-    FromMojom(RequestContextFrameType input,
-              content::RequestContextFrameType* out) {
-  switch (input) {
-    case RequestContextFrameType::AUXILIARY:
-      *out = content::REQUEST_CONTEXT_FRAME_TYPE_AUXILIARY;
-      return true;
-    case RequestContextFrameType::NESTED:
-      *out = content::REQUEST_CONTEXT_FRAME_TYPE_NESTED;
-      return true;
-    case RequestContextFrameType::NONE:
-      *out = content::REQUEST_CONTEXT_FRAME_TYPE_NONE;
-      return true;
-    case RequestContextFrameType::TOP_LEVEL:
-      *out = content::REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL;
-      return true;
-  }
-
-  return false;
-}
+using network::mojom::FetchRequestMode;
 
 RequestContextType
 EnumTraits<RequestContextType, content::RequestContextType>::ToMojom(
@@ -368,8 +209,6 @@ EnumTraits<ServiceWorkerFetchType, content::ServiceWorkerFetchType>::ToMojom(
   switch (input) {
     case content::ServiceWorkerFetchType::FETCH:
       return ServiceWorkerFetchType::FETCH;
-    case content::ServiceWorkerFetchType::FOREIGN_FETCH:
-      return ServiceWorkerFetchType::FOREIGN_FETCH;
   }
 
   NOTREACHED();
@@ -382,9 +221,6 @@ bool EnumTraits<ServiceWorkerFetchType, content::ServiceWorkerFetchType>::
   switch (input) {
     case ServiceWorkerFetchType::FETCH:
       *out = content::ServiceWorkerFetchType::FETCH;
-      return true;
-    case ServiceWorkerFetchType::FOREIGN_FETCH:
-      *out = content::ServiceWorkerFetchType::FOREIGN_FETCH;
       return true;
   }
 
@@ -428,6 +264,8 @@ bool StructTraits<blink::mojom::FetchAPIRequestDataView,
   blink::mojom::BlobPtr blob = data.TakeBlob<blink::mojom::BlobPtr>();
   if (blob)
     out->blob = base::MakeRefCounted<storage::BlobHandle>(std::move(blob));
+  out->cache_mode = data.cache_mode();
+  out->keepalive = data.keepalive();
   out->is_reload = data.is_reload();
   return true;
 }

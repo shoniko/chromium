@@ -111,8 +111,6 @@ struct EnumTraits<ash::mojom::ShelfItemStatus, ash::ShelfItemStatus> {
         return ash::mojom::ShelfItemStatus::CLOSED;
       case ash::STATUS_RUNNING:
         return ash::mojom::ShelfItemStatus::RUNNING;
-      case ash::STATUS_ACTIVE:
-        return ash::mojom::ShelfItemStatus::ACTIVE;
       case ash::STATUS_ATTENTION:
         return ash::mojom::ShelfItemStatus::ATTENTION;
     }
@@ -128,9 +126,6 @@ struct EnumTraits<ash::mojom::ShelfItemStatus, ash::ShelfItemStatus> {
         return true;
       case ash::mojom::ShelfItemStatus::RUNNING:
         *out = ash::STATUS_RUNNING;
-        return true;
-      case ash::mojom::ShelfItemStatus::ACTIVE:
-        *out = ash::STATUS_ACTIVE;
         return true;
       case ash::mojom::ShelfItemStatus::ATTENTION:
         *out = ash::STATUS_ATTENTION;
@@ -157,6 +152,8 @@ struct EnumTraits<ash::mojom::ShelfItemType, ash::ShelfItemType> {
         return ash::mojom::ShelfItemType::APP;
       case ash::TYPE_DIALOG:
         return ash::mojom::ShelfItemType::DIALOG;
+      case ash::TYPE_BACK_BUTTON:
+        return ash::mojom::ShelfItemType::BACK_BUTTON;
       case ash::TYPE_UNDEFINED:
         return ash::mojom::ShelfItemType::UNDEFINED;
     }
@@ -184,6 +181,9 @@ struct EnumTraits<ash::mojom::ShelfItemType, ash::ShelfItemType> {
         return true;
       case ash::mojom::ShelfItemType::DIALOG:
         *out = ash::TYPE_DIALOG;
+        return true;
+      case ash::mojom::ShelfItemType::BACK_BUTTON:
+        *out = ash::TYPE_BACK_BUTTON;
         return true;
       case ash::mojom::ShelfItemType::UNDEFINED:
         *out = ash::TYPE_UNDEFINED;

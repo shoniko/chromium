@@ -33,15 +33,14 @@ class ASH_EXPORT ShelfButton : public views::Button {
     STATE_HOVERED = 1 << 0,
     // Underlying ShelfItem has a running instance.
     STATE_RUNNING = 1 << 1,
-    // Underlying ShelfItem is active (i.e. has focus).
-    STATE_ACTIVE = 1 << 2,
     // Underlying ShelfItem needs user's attention.
-    STATE_ATTENTION = 1 << 3,
-    STATE_FOCUSED = 1 << 4,
+    STATE_ATTENTION = 1 << 2,
     // Hide the status (temporarily for some animations).
-    STATE_HIDDEN = 1 << 5,
+    STATE_HIDDEN = 1 << 3,
     // Button is being dragged.
-    STATE_DRAGGING = 1 << 6,
+    STATE_DRAGGING = 1 << 4,
+    // App has at least 1 notification.
+    STATE_NOTIFICATION = 1 << 5,
   };
 
   ShelfButton(InkDropButtonListener* listener, ShelfView* shelf_view);
@@ -82,8 +81,6 @@ class ASH_EXPORT ShelfButton : public views::Button {
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void Layout() override;
   void ChildPreferredSizeChanged(views::View* child) override;
-  void OnFocus() override;
-  void OnBlur() override;
 
   // ui::EventHandler overrides:
   void OnGestureEvent(ui::GestureEvent* event) override;
@@ -93,6 +90,7 @@ class ASH_EXPORT ShelfButton : public views::Button {
   bool ShouldEnterPushedState(const ui::Event& event) override;
   std::unique_ptr<views::InkDrop> CreateInkDrop() override;
   void NotifyClick(const ui::Event& event) override;
+  void PaintButtonContents(gfx::Canvas* canvas) override;
 
   // Sets the icon image with a shadow.
   void SetShadowedImage(const gfx::ImageSkia& bitmap);
@@ -131,6 +129,9 @@ class ASH_EXPORT ShelfButton : public views::Button {
   // If non-null the destuctor sets this to true. This is set while the menu is
   // showing and used to detect if the menu was deleted while running.
   bool* destroyed_flag_;
+
+  // Whether the touchable context menu is enabled.
+  const bool is_touchable_app_context_menu_enabled_;
 
   // A timer to defer showing drag UI when the shelf button is pressed.
   base::OneShotTimer drag_timer_;

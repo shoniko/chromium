@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/views/frame/test_with_browser_view.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
-#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
@@ -36,28 +36,24 @@ namespace {
 std::unique_ptr<KeyedService> CreateTemplateURLService(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return base::MakeUnique<TemplateURLService>(
-      profile->GetPrefs(),
-      std::unique_ptr<SearchTermsData>(new UIThreadSearchTermsData(profile)),
+  return std::make_unique<TemplateURLService>(
+      profile->GetPrefs(), std::make_unique<UIThreadSearchTermsData>(profile),
       WebDataServiceFactory::GetKeywordWebDataForProfile(
           profile, ServiceAccessType::EXPLICIT_ACCESS),
-      std::unique_ptr<TemplateURLServiceClient>(
-          new ChromeTemplateURLServiceClient(
-              HistoryServiceFactory::GetForProfile(
-                  profile, ServiceAccessType::EXPLICIT_ACCESS))),
+      std::make_unique<ChromeTemplateURLServiceClient>(
+          HistoryServiceFactory::GetForProfile(
+              profile, ServiceAccessType::EXPLICIT_ACCESS)),
       nullptr, nullptr, base::Closure());
 }
 
 std::unique_ptr<KeyedService> CreateAutocompleteClassifier(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return base::MakeUnique<AutocompleteClassifier>(
-      base::WrapUnique(new AutocompleteController(
-          base::WrapUnique(new ChromeAutocompleteProviderClient(profile)),
-
-          nullptr, AutocompleteClassifier::DefaultOmniboxProviders())),
-      std::unique_ptr<AutocompleteSchemeClassifier>(
-          new TestSchemeClassifier()));
+  return std::make_unique<AutocompleteClassifier>(
+      std::make_unique<AutocompleteController>(
+          std::make_unique<ChromeAutocompleteProviderClient>(profile), nullptr,
+          AutocompleteClassifier::DefaultOmniboxProviders()),
+      std::make_unique<TestSchemeClassifier>());
 }
 
 }  // namespace
@@ -73,8 +69,6 @@ TestWithBrowserView::~TestWithBrowserView() {
 }
 
 void TestWithBrowserView::SetUp() {
-  local_state_.reset(
-      new ScopedTestingLocalState(TestingBrowserProcess::GetGlobal()));
 #if defined(OS_CHROMEOS)
   chromeos::input_method::InitializeForTesting(
       new chromeos::input_method::MockInputMethodManagerImpl);
@@ -99,7 +93,6 @@ void TestWithBrowserView::TearDown() {
 #if defined(OS_CHROMEOS)
   chromeos::input_method::Shutdown();
 #endif
-  local_state_.reset(nullptr);
 }
 
 TestingProfile* TestWithBrowserView::CreateProfile() {

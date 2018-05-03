@@ -9,6 +9,7 @@
 #include "base/macros.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/core/tls_client_handshaker.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/platform/api/quic_test.h"
@@ -21,7 +22,6 @@
 using base::IntToString;
 using std::string;
 using testing::StrictMock;
-using testing::TestWithParam;
 
 namespace net {
 namespace test {
@@ -39,8 +39,9 @@ class MockQuicSpdyClientSession : public QuicSpdyClientSession {
             QuicServerId("example.com", 443, PRIVACY_MODE_DISABLED),
             &crypto_config_,
             push_promise_index),
-        crypto_config_(crypto_test_utils::ProofVerifierForTesting()) {}
-  ~MockQuicSpdyClientSession() override {}
+        crypto_config_(crypto_test_utils::ProofVerifierForTesting(),
+                       TlsClientHandshaker::CreateSslCtx()) {}
+  ~MockQuicSpdyClientSession() override = default;
 
   MOCK_METHOD1(CloseStream, void(QuicStreamId stream_id));
 

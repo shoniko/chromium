@@ -67,7 +67,8 @@ enum VideoCodecProfile {
   DOLBYVISION_PROFILE5,
   DOLBYVISION_PROFILE7,
   THEORAPROFILE_ANY,
-  VIDEO_CODEC_PROFILE_MAX = THEORAPROFILE_ANY,
+  AV1PROFILE_PROFILE0,
+  VIDEO_CODEC_PROFILE_MAX = AV1PROFILE_PROFILE0,
 };
 
 // Specification of a decoding profile supported by a hardware decoder.
@@ -221,6 +222,9 @@ struct GPU_EXPORT GPUInfo {
   // True if the GPU process is using the passthrough command decoder.
   bool passthrough_cmd_decoder;
 
+  // True if we use direct composition surfaces on Windows.
+  bool direct_composition = false;
+
   // True if the current set of outputs supports overlays.
   bool supports_overlays = false;
 
@@ -290,7 +294,7 @@ struct GPU_EXPORT GPUInfo {
     virtual void EndAuxAttributes() = 0;
 
    protected:
-    virtual ~Enumerator() {}
+    virtual ~Enumerator() = default;
   };
 
   // Outputs the fields in this structure to the provided enumerator.

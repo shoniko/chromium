@@ -66,6 +66,12 @@ class TestButton : public Button, public ButtonListener {
 
   ~TestButton() override {}
 
+  KeyClickAction GetKeyClickActionForEvent(const ui::KeyEvent& event) override {
+    if (custom_key_click_action_ == KeyClickAction::CLICK_NONE)
+      return Button::GetKeyClickActionForEvent(event);
+    return custom_key_click_action_;
+  }
+
   void ButtonPressed(Button* sender, const ui::Event& event) override {
     pressed_ = true;
   }
@@ -87,6 +93,10 @@ class TestButton : public Button, public ButtonListener {
   int ink_drop_layer_add_count() { return ink_drop_layer_add_count_; }
   int ink_drop_layer_remove_count() { return ink_drop_layer_remove_count_; }
 
+  void set_custom_key_click_action(KeyClickAction custom_key_click_action) {
+    custom_key_click_action_ = custom_key_click_action;
+  }
+
   void Reset() {
     pressed_ = false;
     canceled_ = false;
@@ -101,6 +111,8 @@ class TestButton : public Button, public ButtonListener {
 
   int ink_drop_layer_add_count_ = 0;
   int ink_drop_layer_remove_count_ = 0;
+
+  KeyClickAction custom_key_click_action_ = KeyClickAction::CLICK_NONE;
 
   DISALLOW_COPY_AND_ASSIGN(TestButton);
 };
@@ -233,6 +245,19 @@ TEST_F(ButtonTest, HoverStateOnVisibilityChange) {
   button()->SetVisible(true);
   EXPECT_EQ(Button::STATE_NORMAL, button()->state());
 #endif  // !defined(OS_MACOSX) || defined(USE_AURA)
+}
+
+// Tests that the hover state is preserved during a view hierarchy update of a
+// button's child View.
+TEST_F(ButtonTest, HoverStatePreservedOnDescendantViewHierarchyChange) {
+  ui::test::EventGenerator generator(widget()->GetNativeWindow());
+  generator.MoveMouseTo(button()->GetBoundsInScreen().CenterPoint());
+
+  EXPECT_EQ(Button::STATE_HOVERED, button()->state());
+  Label* child = new Label(base::string16());
+  button()->AddChildView(child);
+  delete child;
+  EXPECT_EQ(Button::STATE_HOVERED, button()->state());
 }
 
 // Tests the different types of NotifyActions.
@@ -690,6 +715,27 @@ TEST_F(ButtonTest, ActionOnReturn) {
   ui::KeyEvent return_release(ui::ET_KEY_RELEASED, ui::VKEY_RETURN,
                               ui::EF_NONE);
   EXPECT_FALSE(button()->OnKeyReleased(return_release));
+}
+
+// Verify that a subclass may customize the action for a key pressed event.
+TEST_F(ButtonTest, CustomActionOnKeyPressedEvent) {
+  // Give focus to the button.
+  button()->SetFocusForPlatform();
+  button()->RequestFocus();
+  EXPECT_TRUE(button()->HasFocus());
+
+  // Set the button to handle any key pressed event as |CLICK_ON_KEY_PRESS|.
+  button()->set_custom_key_click_action(
+      Button::KeyClickAction::CLICK_ON_KEY_PRESS);
+
+  ui::KeyEvent control_press(ui::ET_KEY_PRESSED, ui::VKEY_CONTROL, ui::EF_NONE);
+  EXPECT_TRUE(button()->OnKeyPressed(control_press));
+  EXPECT_EQ(Button::STATE_NORMAL, button()->state());
+  EXPECT_TRUE(button()->pressed());
+
+  ui::KeyEvent control_release(ui::ET_KEY_RELEASED, ui::VKEY_CONTROL,
+                               ui::EF_NONE);
+  EXPECT_FALSE(button()->OnKeyReleased(control_release));
 }
 
 }  // namespace views

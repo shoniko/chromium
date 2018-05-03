@@ -33,6 +33,7 @@ namespace {
 
 class MockCompositor : public WindowAndroidCompositor {
  public:
+  ~MockCompositor() override {}
   void AttachLayerForReadback(scoped_refptr<cc::Layer>) override {}
   void RequestCopyOfOutputOnRootLayer(
       std::unique_ptr<viz::CopyOutputRequest>) override {}
@@ -41,6 +42,12 @@ class MockCompositor : public WindowAndroidCompositor {
   MOCK_METHOD0(GetFrameSinkId, viz::FrameSinkId());
   void AddChildFrameSink(const viz::FrameSinkId& frame_sink_id) override {}
   void RemoveChildFrameSink(const viz::FrameSinkId& frame_sink_id) override {}
+  std::unique_ptr<ui::CompositorLock> GetCompositorLock(
+      ui::CompositorLockClient* client,
+      base::TimeDelta timeout) override {
+    return nullptr;
+  }
+  bool IsDrawingFirstVisibleFrame() const override { return false; }
 };
 
 class MockGlowClient : public OverscrollGlowClient {
@@ -71,9 +78,9 @@ class MockRefresh : public OverscrollRefresh {
 class OverscrollControllerAndroidUnitTest : public testing::Test {
  public:
   OverscrollControllerAndroidUnitTest() {
-    std::unique_ptr<MockGlow> glow_ptr = base::MakeUnique<MockGlow>();
-    std::unique_ptr<MockRefresh> refresh_ptr = base::MakeUnique<MockRefresh>();
-    compositor_ = base::MakeUnique<MockCompositor>();
+    std::unique_ptr<MockGlow> glow_ptr = std::make_unique<MockGlow>();
+    std::unique_ptr<MockRefresh> refresh_ptr = std::make_unique<MockRefresh>();
+    compositor_ = std::make_unique<MockCompositor>();
     glow_ = glow_ptr.get();
     refresh_ = refresh_ptr.get();
     controller_ = OverscrollControllerAndroid::CreateForTests(
@@ -97,10 +104,10 @@ class OverscrollControllerAndroidUnitTest : public testing::Test {
 };
 
 TEST_F(OverscrollControllerAndroidUnitTest,
-       ScrollBoundaryBehaviorAutoAllowsGlowAndNavigation) {
+       OverscrollBehaviorAutoAllowsGlowAndNavigation) {
   ui::DidOverscrollParams params = CreateVerticalOverscrollParams();
-  params.scroll_boundary_behavior.y = cc::ScrollBoundaryBehavior::
-      ScrollBoundaryBehaviorType::kScrollBoundaryBehaviorTypeAuto;
+  params.overscroll_behavior.y = cc::OverscrollBehavior::
+      OverscrollBehaviorType::kOverscrollBehaviorTypeAuto;
 
   EXPECT_CALL(*refresh_, OnOverscrolled());
   EXPECT_CALL(*refresh_, IsActive()).WillOnce(Return(true));
@@ -112,10 +119,10 @@ TEST_F(OverscrollControllerAndroidUnitTest,
 }
 
 TEST_F(OverscrollControllerAndroidUnitTest,
-       ScrollBoundaryBehaviorContainPreventsNavigation) {
+       OverscrollBehaviorContainPreventsNavigation) {
   ui::DidOverscrollParams params = CreateVerticalOverscrollParams();
-  params.scroll_boundary_behavior.y = cc::ScrollBoundaryBehavior::
-      ScrollBoundaryBehaviorType::kScrollBoundaryBehaviorTypeContain;
+  params.overscroll_behavior.y = cc::OverscrollBehavior::
+      OverscrollBehaviorType::kOverscrollBehaviorTypeContain;
 
   EXPECT_CALL(*refresh_, OnOverscrolled()).Times(0);
   EXPECT_CALL(*refresh_, Reset());
@@ -130,10 +137,10 @@ TEST_F(OverscrollControllerAndroidUnitTest,
   testing::Mock::VerifyAndClearExpectations(glow_);
 
   // Test that the "contain" set on x-axis would not affect navigation.
-  params.scroll_boundary_behavior.y = cc::ScrollBoundaryBehavior::
-      ScrollBoundaryBehaviorType::kScrollBoundaryBehaviorTypeAuto;
-  params.scroll_boundary_behavior.x = cc::ScrollBoundaryBehavior::
-      ScrollBoundaryBehaviorType::kScrollBoundaryBehaviorTypeContain;
+  params.overscroll_behavior.y = cc::OverscrollBehavior::
+      OverscrollBehaviorType::kOverscrollBehaviorTypeAuto;
+  params.overscroll_behavior.x = cc::OverscrollBehavior::
+      OverscrollBehaviorType::kOverscrollBehaviorTypeContain;
 
   EXPECT_CALL(*refresh_, OnOverscrolled());
   EXPECT_CALL(*refresh_, Reset()).Times(0);
@@ -147,10 +154,10 @@ TEST_F(OverscrollControllerAndroidUnitTest,
 }
 
 TEST_F(OverscrollControllerAndroidUnitTest,
-       ScrollBoundaryBehaviorNonePreventsNavigationAndGlow) {
+       OverscrollBehaviorNonePreventsNavigationAndGlow) {
   ui::DidOverscrollParams params = CreateVerticalOverscrollParams();
-  params.scroll_boundary_behavior.y = cc::ScrollBoundaryBehavior::
-      ScrollBoundaryBehaviorType::kScrollBoundaryBehaviorTypeNone;
+  params.overscroll_behavior.y = cc::OverscrollBehavior::
+      OverscrollBehaviorType::kOverscrollBehaviorTypeNone;
 
   EXPECT_CALL(*refresh_, OnOverscrolled()).Times(0);
   EXPECT_CALL(*refresh_, Reset());
@@ -184,8 +191,8 @@ TEST_F(OverscrollControllerAndroidUnitTest,
 TEST_F(OverscrollControllerAndroidUnitTest,
        ConsumedUpdateDoesNotResetEnabledRefresh) {
   ui::DidOverscrollParams params = CreateVerticalOverscrollParams();
-  params.scroll_boundary_behavior.y = cc::ScrollBoundaryBehavior::
-      ScrollBoundaryBehaviorType::kScrollBoundaryBehaviorTypeAuto;
+  params.overscroll_behavior.y = cc::OverscrollBehavior::
+      OverscrollBehaviorType::kOverscrollBehaviorTypeAuto;
 
   EXPECT_CALL(*refresh_, OnOverscrolled());
   EXPECT_CALL(*refresh_, IsActive()).WillOnce(Return(true));

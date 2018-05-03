@@ -21,6 +21,7 @@ from devil.android import logcat_monitor
 from devil.android.tools import system_app
 from devil.utils import reraiser_thread
 from incremental_install import installer
+from pylib import constants
 from pylib import valgrind_tools
 from pylib.base import base_test_result
 from pylib.base import output_manager
@@ -28,6 +29,7 @@ from pylib.constants import host_paths
 from pylib.instrumentation import instrumentation_test_instance
 from pylib.local.device import local_device_environment
 from pylib.local.device import local_device_test_run
+from pylib.output import remote_output_manager
 from pylib.utils import instrumentation_tracing
 from pylib.utils import shared_preference_utils
 
@@ -202,16 +204,19 @@ class LocalDeviceInstrumentationTestRun(
       def set_debug_app(dev):
         # Set debug app in order to enable reading command line flags on user
         # builds
-        if not self._test_instance.package_info:
-          logging.error("Couldn't set debug app: no package info")
-        elif not self._test_instance.package_info.package:
-          logging.error("Couldn't set debug app: no package defined")
+        package_name = None
+        if self._test_instance.apk_under_test:
+          package_name = self._test_instance.apk_under_test.GetPackageName()
+        elif self._test_instance.test_apk:
+          package_name = self._test_instance.test_apk.GetPackageName()
         else:
-          cmd = ['am', 'set-debug-app', '--persistent']
-          if self._test_instance.wait_for_java_debugger:
-            cmd.append('-w')
-          cmd.append(self._test_instance.package_info.package)
-          dev.RunShellCommand(cmd, check_return=True)
+          logging.error("Couldn't set debug app: no package name found")
+          return
+        cmd = ['am', 'set-debug-app', '--persistent']
+        if self._test_instance.wait_for_java_debugger:
+          cmd.append('-w')
+        cmd.append(package_name)
+        dev.RunShellCommand(cmd, check_return=True)
 
       @trace_event.traced
       def edit_shared_prefs(dev):
@@ -240,15 +245,10 @@ class LocalDeviceInstrumentationTestRun(
       @trace_event.traced
       def create_flag_changer(dev):
         if self._test_instance.flags:
-          if not self._test_instance.package_info:
-            logging.error("Couldn't set flags: no package info")
-          elif not self._test_instance.package_info.cmdline_file:
-            logging.error("Couldn't set flags: no cmdline_file")
-          else:
-            self._CreateFlagChangerIfNeeded(dev)
-            logging.debug('Attempting to set flags: %r',
-                          self._test_instance.flags)
-            self._flag_changers[str(dev)].AddFlags(self._test_instance.flags)
+          self._CreateFlagChangerIfNeeded(dev)
+          logging.debug('Attempting to set flags: %r',
+                        self._test_instance.flags)
+          self._flag_changers[str(dev)].AddFlags(self._test_instance.flags)
 
         valgrind_tools.SetChromeTimeoutScale(
             dev, self._test_instance.timeout_scale)
@@ -274,17 +274,38 @@ class LocalDeviceInstrumentationTestRun(
 
       steps = [bind_crash_handler(s, device) for s in steps]
 
-      if self._env.concurrent_adb:
-        reraiser_thread.RunAsync(steps)
-      else:
-        for step in steps:
-          step()
-      if self._test_instance.store_tombstones:
-        tombstones.ClearAllTombstones(device)
+      try:
+        if self._env.concurrent_adb:
+          reraiser_thread.RunAsync(steps)
+        else:
+          for step in steps:
+            step()
+        if self._test_instance.store_tombstones:
+          tombstones.ClearAllTombstones(device)
+      except device_errors.CommandFailedError:
+        # A bugreport can be large and take a while to generate, so only capture
+        # one if we're using a remote manager.
+        if isinstance(
+            self._env.output_manager,
+            remote_output_manager.RemoteOutputManager):
+          logging.error(
+              'Error when setting up device for tests. Taking a bugreport for '
+              'investigation. This may take a while...')
+          report_name = '%s.bugreport' % device.serial
+          with self._env.output_manager.ArchivedTempfile(
+              report_name, 'bug_reports') as report_file:
+            device.TakeBugReport(report_file.name)
+          logging.error('Bug report saved to %s', report_file.Link())
+        raise
 
     self._env.parallel_devices.pMap(
         individual_device_set_up,
         self._test_instance.GetDataDependencies())
+    if self._test_instance.wait_for_java_debugger:
+      logging.warning('*' * 80)
+      logging.warning('Waiting for debugger to attach to process: %s',
+                      self._test_instance.apk_under_test.GetPackageName())
+      logging.warning('*' * 80)
 
   #override
   def TearDown(self):
@@ -322,7 +343,7 @@ class LocalDeviceInstrumentationTestRun(
   def _CreateFlagChangerIfNeeded(self, device):
     if not str(device) in self._flag_changers:
       self._flag_changers[str(device)] = flag_changer.FlagChanger(
-        device, self._test_instance.package_info.cmdline_file)
+        device, "test-cmdline-file")
 
   #override
   def _CreateShards(self, tests):
@@ -445,18 +466,23 @@ class LocalDeviceInstrumentationTestRun(
 
     with self._env.output_manager.ArchivedTempfile(
         stream_name, 'logcat') as logcat_file:
-      with logcat_monitor.LogcatMonitor(
-          device.adb,
-          filter_specs=local_device_environment.LOGCAT_FILTERS,
-          output_file=logcat_file.name,
-          transform_func=self._test_instance.MaybeDeobfuscateLines) as logmon:
-        with _LogTestEndpoints(device, test_name):
-          with contextlib_ext.Optional(
-              trace_event.trace(test_name),
-              self._env.trace_output):
-            output = device.StartInstrumentation(
-                target, raw=True, extras=extras, timeout=timeout, retries=0)
-      logmon.Close()
+      try:
+        with logcat_monitor.LogcatMonitor(
+            device.adb,
+            filter_specs=local_device_environment.LOGCAT_FILTERS,
+            output_file=logcat_file.name,
+            transform_func=self._test_instance.MaybeDeobfuscateLines) as logmon:
+          with _LogTestEndpoints(device, test_name):
+            with contextlib_ext.Optional(
+                trace_event.trace(test_name),
+                self._env.trace_output):
+              output = device.StartInstrumentation(
+                  target, raw=True, extras=extras, timeout=timeout, retries=0)
+      finally:
+        logmon.Close()
+
+    if logcat_file.Link():
+      logging.info('Logcat saved to %s', logcat_file.Link())
 
     duration_ms = time_ms() - start_ms
 
@@ -598,9 +624,20 @@ class LocalDeviceInstrumentationTestRun(
   def _GetTestsFromRunner(self):
     test_apk_path = self._test_instance.test_apk.path
     pickle_path = '%s-runner.pickle' % test_apk_path
+    # For incremental APKs, the code doesn't live in the apk, so instead check
+    # the timestamp of the target's .stamp file.
+    if self._test_instance.test_apk_incremental_install_json:
+      with open(self._test_instance.test_apk_incremental_install_json) as f:
+        data = json.load(f)
+      out_dir = constants.GetOutDirectory()
+      test_mtime = max(
+          os.path.getmtime(os.path.join(out_dir, p)) for p in data['dex_files'])
+    else:
+      test_mtime = os.path.getmtime(test_apk_path)
+
     try:
       return instrumentation_test_instance.GetTestsFromPickle(
-          pickle_path, test_apk_path)
+          pickle_path, test_mtime)
     except instrumentation_test_instance.TestListPickleException as e:
       logging.info('Could not get tests from pickle: %s', e)
     logging.info('Getting tests by having %s list them.',
@@ -616,11 +653,11 @@ class LocalDeviceInstrumentationTestRun(
           extras['log'] = 'true'
           extras[_EXTRA_TEST_LIST] = dev_test_list_json.name
           target = '%s/%s' % (test_package, junit4_runner_class)
-          kwargs = {}
+          timeout = 120
           if self._test_instance.wait_for_java_debugger:
-            kwargs['timeout'] = None
+            timeout = None
           test_list_run_output = dev.StartInstrumentation(
-              target, extras=extras, retries=0, **kwargs)
+              target, extras=extras, retries=0, timeout=timeout)
           if any(test_list_run_output):
             logging.error('Unexpected output while listing tests:')
             for line in test_list_run_output:
@@ -643,8 +680,7 @@ class LocalDeviceInstrumentationTestRun(
     # Get the first viable list of raw tests
     raw_tests = [tl for tl in raw_test_lists if tl][0]
 
-    instrumentation_test_instance.SaveTestsToPickle(
-        pickle_path, test_apk_path, raw_tests)
+    instrumentation_test_instance.SaveTestsToPickle(pickle_path, raw_tests)
     return raw_tests
 
   def _SaveTraceData(self, trace_device_file, device, test_class):
@@ -791,18 +827,11 @@ class LocalDeviceInstrumentationTestRun(
 
   #override
   def _ShouldRetry(self, test, result):
-    def not_run(res):
-      if isinstance(res, list):
-        return any(not_run(r) for r in res)
-      return res.GetType() == base_test_result.ResultType.NOTRUN
-
-    if 'RetryOnFailure' in test.get('annotations', {}) or not_run(result):
-      return True
-
-    # TODO(jbudorick): Remove this log message once @RetryOnFailure has been
-    # enabled for a while. See crbug.com/619055 for more details.
-    logging.error('Default retries are being phased out. crbug.com/619055')
-    return False
+    # We've tried to disable retries in the past with mixed results.
+    # See crbug.com/619055 for historical context and crbug.com/797002
+    # for ongoing efforts.
+    del test, result
+    return True
 
   #override
   def _ShouldShard(self):

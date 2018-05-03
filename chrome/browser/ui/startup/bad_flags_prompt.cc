@@ -16,7 +16,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/switch_utils.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/autofill_switches.h"
@@ -38,26 +37,6 @@
 #include "ui/base/resource/resource_bundle.h"
 
 namespace chrome {
-
-namespace {
-
-void ShowBadFlagsInfoBar(content::WebContents* web_contents,
-                         int message_id,
-                         const char* flag) {
-  std::string switch_value =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(flag);
-  if (!switch_value.empty())
-    switch_value = "=" + switch_value;
-  SimpleAlertInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents),
-      infobars::InfoBarDelegate::BAD_FLAGS_PROMPT, nullptr,
-      l10n_util::GetStringFUTF16(
-          message_id,
-          base::UTF8ToUTF16(std::string("--") + flag + switch_value)),
-      false);
-}
-
-}  // namespace
 
 void ShowBadFlagsPrompt(Browser* browser) {
   content::WebContents* web_contents =
@@ -91,6 +70,9 @@ void ShowBadFlagsPrompt(Browser* browser) {
     service_manager::switches::kDisableGpuSandbox,
     service_manager::switches::kDisableSeccompFilterSandbox,
     service_manager::switches::kDisableSetuidSandbox,
+#if defined(OS_WIN)
+    service_manager::switches::kAllowThirdPartyModules,
+#endif
     switches::kDisableWebSecurity,
 #if BUILDFLAG(ENABLE_NACL)
     switches::kNaClDangerousNoSandboxNonSfi,
@@ -146,6 +128,22 @@ void ShowBadFlagsPrompt(Browser* browser) {
       return;
     }
   }
+}
+
+void ShowBadFlagsInfoBar(content::WebContents* web_contents,
+                         int message_id,
+                         const char* flag) {
+  std::string switch_value =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(flag);
+  if (!switch_value.empty())
+    switch_value = "=" + switch_value;
+  SimpleAlertInfoBarDelegate::Create(
+      InfoBarService::FromWebContents(web_contents),
+      infobars::InfoBarDelegate::BAD_FLAGS_INFOBAR_DELEGATE, nullptr,
+      l10n_util::GetStringFUTF16(
+          message_id,
+          base::UTF8ToUTF16(std::string("--") + flag + switch_value)),
+      false);
 }
 
 void MaybeShowInvalidUserDataDirWarningDialog() {

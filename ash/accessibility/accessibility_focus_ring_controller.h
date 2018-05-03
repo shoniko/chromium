@@ -10,7 +10,9 @@
 
 #include "ash/accessibility/accessibility_cursor_ring_layer.h"
 #include "ash/accessibility/accessibility_focus_ring_layer.h"
+#include "ash/accessibility/accessibility_highlight_layer.h"
 #include "ash/ash_export.h"
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/optional.h"
@@ -24,7 +26,7 @@ namespace ash {
 // the focused object, cursor, and/or caret for accessibility.
 // TODO(mash): Provide mojo API for access from chrome.
 class ASH_EXPORT AccessibilityFocusRingController
-    : public FocusRingLayerDelegate {
+    : public AccessibilityLayerDelegate {
  public:
   // Get the single instance of this class.
   static AccessibilityFocusRingController* GetInstance();
@@ -50,14 +52,35 @@ class ASH_EXPORT AccessibilityFocusRingController
   void SetCaretRing(const gfx::Point& location);
   void HideCaretRing();
 
+  // Draw a highlight at the given rects, in global screen coordinates.
+  // Rects may be overlapping and will be merged into one layer.
+  // This looks similar to selecting a region with the cursor, except
+  // it is drawn in the foreground rather than behind a text layer.
+  void SetHighlights(const std::vector<gfx::Rect>& rects, SkColor color);
+  void HideHighlights();
+
   // Don't fade in / out, for testing.
   void SetNoFadeForTesting();
 
+  // Get accessibility layers, for testing.
   AccessibilityCursorRingLayer* cursor_layer_for_testing() {
     return cursor_layer_.get();
   }
   AccessibilityCursorRingLayer* caret_layer_for_testing() {
     return caret_layer_.get();
+  }
+  const std::vector<std::unique_ptr<AccessibilityFocusRingLayer>>&
+  focus_ring_layers_for_testing() {
+    return focus_layers_;
+  }
+  AccessibilityHighlightLayer* highlight_layer_for_testing() {
+    return highlight_layer_.get();
+  }
+
+  // Sets an observer of focus ring layer changes.
+  void set_focus_ring_observer_for_testing(
+      base::RepeatingCallback<void()> observer) {
+    focus_ring_observer_for_testing_ = observer;
   }
 
  protected:
@@ -74,12 +97,21 @@ class ASH_EXPORT AccessibilityFocusRingController
 
   virtual int GetMargin() const;
 
+  // Breaks an SkColor into its opacity and color. If the opacity is
+  // not set (or is 0xFF), uses the |default_opacity| instead.
+  // Visible for testing.
+  static void GetColorAndOpacityFromColor(SkColor color,
+                                          float default_opacity,
+                                          SkColor* result_color,
+                                          float* result_opacity);
+
  private:
-  // FocusRingLayerDelegate overrides.
+  // AccessibilityLayerDelegate overrides.
   void OnDeviceScaleFactorChanged() override;
   void OnAnimationStep(base::TimeTicks timestamp) override;
 
   void UpdateFocusRingsFromFocusRects();
+  void UpdateHighlightFromHighlightRects();
 
   void AnimateFocusRings(base::TimeTicks timestamp);
   void AnimateCursorRing(base::TimeTicks timestamp);
@@ -121,7 +153,14 @@ class ASH_EXPORT AccessibilityFocusRingController
   gfx::Point caret_location_;
   std::unique_ptr<AccessibilityCursorRingLayer> caret_layer_;
 
+  std::vector<gfx::Rect> highlight_rects_;
+  std::unique_ptr<AccessibilityHighlightLayer> highlight_layer_;
+  SkColor highlight_color_;
+  float highlight_opacity_;
+
   friend struct base::DefaultSingletonTraits<AccessibilityFocusRingController>;
+
+  base::RepeatingCallback<void()> focus_ring_observer_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(AccessibilityFocusRingController);
 };

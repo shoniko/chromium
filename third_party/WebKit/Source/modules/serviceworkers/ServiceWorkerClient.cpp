@@ -6,6 +6,7 @@
 #include "modules/serviceworkers/ServiceWorkerWindowClient.h"
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/serialization/SerializedScriptValue.h"
@@ -13,8 +14,9 @@
 #include "core/frame/UseCounter.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebString.h"
+#include "services/network/public/interfaces/request_context_frame_type.mojom-blink.h"
+#include "third_party/WebKit/common/service_worker/service_worker_client.mojom-blink.h"
 
 namespace blink {
 
@@ -25,12 +27,11 @@ ServiceWorkerClient* ServiceWorkerClient::Take(
     return nullptr;
 
   switch (web_client->client_type) {
-    case kWebServiceWorkerClientTypeWindow:
+    case mojom::ServiceWorkerClientType::kWindow:
       return ServiceWorkerWindowClient::Create(*web_client);
-    case kWebServiceWorkerClientTypeWorker:
-    case kWebServiceWorkerClientTypeSharedWorker:
+    case mojom::ServiceWorkerClientType::kSharedWorker:
       return ServiceWorkerClient::Create(*web_client);
-    case kWebServiceWorkerClientTypeLast:
+    case mojom::ServiceWorkerClientType::kAll:
       NOTREACHED();
       return nullptr;
   }
@@ -49,17 +50,15 @@ ServiceWorkerClient::ServiceWorkerClient(const WebServiceWorkerClientInfo& info)
       type_(info.client_type),
       frame_type_(info.frame_type) {}
 
-ServiceWorkerClient::~ServiceWorkerClient() {}
+ServiceWorkerClient::~ServiceWorkerClient() = default;
 
 String ServiceWorkerClient::type() const {
   switch (type_) {
-    case kWebServiceWorkerClientTypeWindow:
+    case mojom::ServiceWorkerClientType::kWindow:
       return "window";
-    case kWebServiceWorkerClientTypeWorker:
-      return "worker";
-    case kWebServiceWorkerClientTypeSharedWorker:
+    case mojom::ServiceWorkerClientType::kSharedWorker:
       return "sharedworker";
-    case kWebServiceWorkerClientTypeAll:
+    case mojom::ServiceWorkerClientType::kAll:
       NOTREACHED();
       return String();
   }
@@ -72,13 +71,13 @@ String ServiceWorkerClient::frameType(ScriptState* script_state) const {
   UseCounter::Count(ExecutionContext::From(script_state),
                     WebFeature::kServiceWorkerClientFrameType);
   switch (frame_type_) {
-    case WebURLRequest::kFrameTypeAuxiliary:
+    case network::mojom::RequestContextFrameType::kAuxiliary:
       return "auxiliary";
-    case WebURLRequest::kFrameTypeNested:
+    case network::mojom::RequestContextFrameType::kNested:
       return "nested";
-    case WebURLRequest::kFrameTypeNone:
+    case network::mojom::RequestContextFrameType::kNone:
       return "none";
-    case WebURLRequest::kFrameTypeTopLevel:
+    case network::mojom::RequestContextFrameType::kTopLevel:
       return "top-level";
   }
 

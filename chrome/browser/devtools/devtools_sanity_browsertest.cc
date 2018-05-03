@@ -42,7 +42,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -67,8 +66,6 @@
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_controller.h"
-#include "content/public/browser/worker_service.h"
-#include "content/public/browser/worker_service_observer.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -96,12 +93,11 @@ using app_modal::JavaScriptAppModalDialog;
 using app_modal::NativeAppModalDialog;
 using content::BrowserThread;
 using content::DevToolsAgentHost;
+using content::DevToolsAgentHostObserver;
 using content::NavigationController;
 using content::RenderFrameHost;
 using content::RenderViewHost;
 using content::WebContents;
-using content::WorkerService;
-using content::WorkerServiceObserver;
 using extensions::Extension;
 
 namespace {
@@ -659,116 +655,53 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
   WorkerDevToolsSanityTest() : window_(NULL) {}
 
  protected:
-  class WorkerData : public base::RefCountedThreadSafe<WorkerData> {
+  class WorkerCreationObserver : public DevToolsAgentHostObserver {
    public:
-    WorkerData() : worker_process_id(0), worker_route_id(0) {}
-    int worker_process_id;
-    int worker_route_id;
-
-   private:
-    friend class base::RefCountedThreadSafe<WorkerData>;
-    ~WorkerData() {}
-  };
-
-  class WorkerCreationObserver : public WorkerServiceObserver {
-   public:
-    explicit WorkerCreationObserver(const std::string& path,
-                                    WorkerData* worker_data)
-        : path_(path), worker_data_(worker_data) {}
-
-   private:
-    ~WorkerCreationObserver() override {}
-
-    void WorkerCreated(const GURL& url,
-                       const std::string& name,
-                       int process_id,
-                       int route_id) override {
-      if (url.path().rfind(path_) == std::string::npos)
-        return;
-      worker_data_->worker_process_id = process_id;
-      worker_data_->worker_route_id = route_id;
-      WorkerService::GetInstance()->RemoveObserver(this);
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              base::MessageLoop::QuitWhenIdleClosure());
-      delete this;
+    WorkerCreationObserver(const std::string& path,
+                           scoped_refptr<DevToolsAgentHost>* out_host,
+                           base::Closure quit)
+        : path_(path), out_host_(out_host), quit_(quit) {
+      DevToolsAgentHost::AddObserver(this);
     }
+
+   private:
+    ~WorkerCreationObserver() override {
+      DevToolsAgentHost::RemoveObserver(this);
+    }
+
+    void DevToolsAgentHostCreated(DevToolsAgentHost* host) override {
+      if (host->GetType() == DevToolsAgentHost::kTypeSharedWorker &&
+          host->GetURL().path().rfind(path_) != std::string::npos) {
+        *out_host_ = host;
+        BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, quit_);
+        delete this;
+      }
+    }
+
     std::string path_;
-    scoped_refptr<WorkerData> worker_data_;
+    scoped_refptr<DevToolsAgentHost>* out_host_;
+    base::Closure quit_;
   };
 
-  class WorkerTerminationObserver : public WorkerServiceObserver {
-   public:
-    explicit WorkerTerminationObserver(WorkerData* worker_data)
-        : worker_data_(worker_data) {
+  static scoped_refptr<DevToolsAgentHost> WaitForFirstSharedWorker(
+      const char* path) {
+    for (auto& host : DevToolsAgentHost::GetOrCreateAll()) {
+      if (host->GetType() == DevToolsAgentHost::kTypeSharedWorker &&
+          host->GetURL().path().rfind(path) != std::string::npos) {
+        return host;
+      }
     }
-
-   private:
-    ~WorkerTerminationObserver() override {}
-
-    void WorkerDestroyed(int process_id, int route_id) override {
-      ASSERT_EQ(worker_data_->worker_process_id, process_id);
-      ASSERT_EQ(worker_data_->worker_route_id, route_id);
-      WorkerService::GetInstance()->RemoveObserver(this);
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              base::MessageLoop::QuitWhenIdleClosure());
-      delete this;
-    }
-    scoped_refptr<WorkerData> worker_data_;
-  };
-
-  void RunTest(const char* test_name,
-               const char* test_page,
-               const char* worker_path) {
-    ASSERT_TRUE(spawned_test_server()->Start());
-    GURL url = spawned_test_server()->GetURL(test_page);
-    ui_test_utils::NavigateToURL(browser(), url);
-
-    scoped_refptr<WorkerData> worker_data =
-        WaitForFirstSharedWorker(worker_path);
-    OpenDevToolsWindowForSharedWorker(worker_data.get());
-    RunTestFunction(window_, test_name);
-    CloseDevToolsWindow();
+    scoped_refptr<DevToolsAgentHost> host;
+    base::RunLoop run_loop;
+    new WorkerCreationObserver(path, &host, run_loop.QuitWhenIdleClosure());
+    content::RunThisRunLoop(&run_loop);
+    return host;
   }
 
-  static void TerminateWorker(scoped_refptr<WorkerData> worker_data) {
-    if (!WorkerService::GetInstance()->TerminateWorker(
-        worker_data->worker_process_id, worker_data->worker_route_id))
-      FAIL() << "Failed to terminate worker.\n";
-
-    WorkerService::GetInstance()->AddObserver(
-        new WorkerTerminationObserver(worker_data.get()));
-
-    content::RunMessageLoop();
-  }
-
-  static scoped_refptr<WorkerData> WaitForFirstSharedWorker(const char* path) {
-    scoped_refptr<WorkerData> worker_data(new WorkerData());
-
-    std::vector<WorkerService::WorkerInfo> worker_info =
-        WorkerService::GetInstance()->GetWorkers();
-    for (size_t i = 0; i < worker_info.size(); i++) {
-      if (worker_info[i].url.path().rfind(path) == std::string::npos)
-        continue;
-      worker_data->worker_process_id = worker_info[0].process_id;
-      worker_data->worker_route_id = worker_info[0].route_id;
-      return worker_data;
-    }
-
-    WorkerService::GetInstance()->AddObserver(
-        new WorkerCreationObserver(path, worker_data.get()));
-
-    content::RunMessageLoop();
-    return worker_data;
-  }
-
-  void OpenDevToolsWindowForSharedWorker(WorkerData* worker_data) {
+  void OpenDevToolsWindow(scoped_refptr<DevToolsAgentHost> agent_host) {
     Profile* profile = browser()->profile();
-    scoped_refptr<DevToolsAgentHost> agent_host(
-        DevToolsAgentHost::GetForWorker(
-            worker_data->worker_process_id,
-            worker_data->worker_route_id));
-    window_ = DevToolsWindowTesting::OpenDevToolsWindowForWorkerSync(
-        profile, agent_host.get());
+    window_ =
+        DevToolsWindowTesting::OpenDevToolsWindowSync(profile, agent_host);
   }
 
   void CloseDevToolsWindow() {
@@ -1865,7 +1798,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsReattachAfterCrashTest,
 
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, AutoAttachToWindowOpen) {
   OpenDevToolsWindow(kWindowOpenTestPage, false);
-  DispatchOnTestSuite(window_, "enableAutoAttachToCreatedPages");
+  DevToolsWindowTesting::Get(window_)->SetOpenNewWindowForPopups(true);
   DevToolsWindowCreationObserver observer;
   ASSERT_TRUE(content::ExecuteScript(
       GetInspectedTab(), "window.open('window_open.html', '_blank');"));
@@ -1893,25 +1826,33 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, SecondTabAfterDevTools) {
 }
 
 IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest, InspectSharedWorker) {
-  RunTest("testSharedWorker", kSharedWorkerTestPage, kSharedWorkerTestWorker);
+  ASSERT_TRUE(spawned_test_server()->Start());
+  GURL url = spawned_test_server()->GetURL(kSharedWorkerTestPage);
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  scoped_refptr<DevToolsAgentHost> host =
+      WaitForFirstSharedWorker(kSharedWorkerTestWorker);
+  OpenDevToolsWindow(host);
+  RunTestFunction(window_, "testSharedWorker");
+  CloseDevToolsWindow();
 }
 
 // Flaky on multiple platforms. See http://crbug.com/432444
 IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest,
-                       DISABLED_PauseInSharedWorkerInitialization) {
+                       PauseInSharedWorkerInitialization) {
   ASSERT_TRUE(spawned_test_server()->Start());
   GURL url = spawned_test_server()->GetURL(kReloadSharedWorkerTestPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
-  scoped_refptr<WorkerData> worker_data =
+  scoped_refptr<DevToolsAgentHost> host =
       WaitForFirstSharedWorker(kReloadSharedWorkerTestWorker);
-  OpenDevToolsWindowForSharedWorker(worker_data.get());
+  OpenDevToolsWindow(host);
 
   // We should make sure that the worker inspector has loaded before
   // terminating worker.
   RunTestFunction(window_, "testPauseInSharedWorkerInitialization1");
 
-  TerminateWorker(worker_data);
+  host->Close();
 
   // Reload page to restart the worker.
   ui_test_utils::NavigateToURL(browser(), url);
@@ -2086,9 +2027,8 @@ class MockWebUIProvider
 // This tests checks that window is correctly initialized when DevTools is
 // opened while navigation through history with forward and back actions.
 // (crbug.com/627407)
-// Flaky on Windows and ChromeOS. http://crbug.com/628174#c4
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
-                       DISABLED_TestWindowInitializedOnNavigateBack) {
+                       TestWindowInitializedOnNavigateBack) {
   TestChromeWebUIControllerFactory test_factory;
   MockWebUIProvider mock_provider("dummyurl",
                                   "<script>\n"

@@ -53,18 +53,17 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/util_constants.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/browser_watcher/stability_paths.h"
+#include "components/crash/core/common/crash_keys.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/component_metrics_provider.h"
 #include "components/metrics/drive_metrics_provider.h"
 #include "components/metrics/field_trials_provider.h"
-#include "components/metrics/file_metrics_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
 #include "components/metrics/metrics_log_uploader.h"
 #include "components/metrics/metrics_pref_names.h"
@@ -100,7 +99,11 @@
 #include "chrome/browser/ui/android/tab_model/tab_model_list_observer.h"
 #endif
 
-#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+#if defined(OS_POSIX)
+#include <signal.h>
+#endif
+
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
 #include "chrome/browser/service_process/service_process_control.h"
 #endif
 
@@ -144,7 +147,7 @@
 
 namespace {
 
-#if defined(OS_ANDROID) || defined(OS_IOS) || defined(OS_CHROMEOS)
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
 const int kMaxHistogramStorageKiB = 100 << 10;  // 100 MiB
 #else
 const int kMaxHistogramStorageKiB = 500 << 10;  // 500 MiB
@@ -251,13 +254,15 @@ std::unique_ptr<metrics::FileMetricsProvider> CreateFileMetricsProvider(
     base::FilePath browser_metrics_upload_dir = user_data_dir.AppendASCII(
         ChromeMetricsServiceClient::kBrowserMetricsName);
     if (metrics_reporting_enabled) {
-      metrics::FileMetricsProvider::Params params(
+      metrics::FileMetricsProvider::Params browser_metrics_params(
           browser_metrics_upload_dir,
           metrics::FileMetricsProvider::SOURCE_HISTOGRAMS_ATOMIC_DIR,
           metrics::FileMetricsProvider::ASSOCIATE_INTERNAL_PROFILE,
           ChromeMetricsServiceClient::kBrowserMetricsName);
-      params.max_dir_kib = kMaxHistogramStorageKiB;
-      file_metrics_provider->RegisterSource(params);
+      browser_metrics_params.max_dir_kib = kMaxHistogramStorageKiB;
+      browser_metrics_params.filter = base::BindRepeating(
+          &ChromeMetricsServiceClient::FilterBrowserMetricsFiles);
+      file_metrics_provider->RegisterSource(browser_metrics_params);
 
       base::FilePath active_path;
       base::GlobalHistogramAllocator::ConstructFilePaths(
@@ -341,6 +346,34 @@ class AndroidIncognitoObserver : public TabModelListObserver {
 };
 #endif
 
+ChromeMetricsServiceClient::IsProcessRunningFunction g_is_process_running =
+    nullptr;
+
+bool IsProcessRunning(base::ProcessId pid) {
+  // Use any "override" method if one is set (for testing).
+  if (g_is_process_running)
+    return g_is_process_running(pid);
+
+#if defined(OS_WIN)
+  HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+  if (process) {
+    DWORD ret = WaitForSingleObject(process, 0);
+    CloseHandle(process);
+    if (ret == WAIT_TIMEOUT)
+      return true;
+  }
+#elif defined(OS_POSIX)
+  // Sending a signal value of 0 will cause error checking to be performed
+  // with no signal being sent.
+  if (kill(pid, 0) == 0 || errno != ESRCH)
+    return true;
+#else
+#error Unsupported OS. Might be okay to just return false.
+#endif
+
+  return false;
+}
+
 }  // namespace
 
 const char ChromeMetricsServiceClient::kBrowserMetricsName[] = "BrowserMetrics";
@@ -367,16 +400,6 @@ ChromeMetricsServiceClient::ChromeMetricsServiceClient(
 
 ChromeMetricsServiceClient::~ChromeMetricsServiceClient() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  base::GlobalHistogramAllocator* allocator =
-      base::GlobalHistogramAllocator::Get();
-  if (allocator) {
-    // A normal shutdown is almost complete so there is no benefit in keeping a
-    // file with no new data to be processed during the next startup sequence.
-    // Deleting the file during shutdown adds an extra disk-access or two to
-    // shutdown but eliminates the unnecessary processing of the contents during
-    // startup only to find nothing.
-    allocator->DeletePersistentLocation();
-  }
 }
 
 // static
@@ -483,12 +506,13 @@ void ChromeMetricsServiceClient::CollectFinalMetricsForLog(
 std::unique_ptr<metrics::MetricsLogUploader>
 ChromeMetricsServiceClient::CreateUploader(
     base::StringPiece server_url,
+    base::StringPiece insecure_server_url,
     base::StringPiece mime_type,
     metrics::MetricsLogUploader::MetricServiceType service_type,
     const metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
   return base::MakeUnique<metrics::NetMetricsLogUploader>(
-      g_browser_process->system_request_context(), server_url, mime_type,
-      service_type, on_upload_complete);
+      g_browser_process->system_request_context(), server_url,
+      insecure_server_url, mime_type, service_type, on_upload_complete);
 }
 
 base::TimeDelta ChromeMetricsServiceClient::GetStandardUploadInterval() {
@@ -576,7 +600,7 @@ void ChromeMetricsServiceClient::RegisterMetricsServiceProviders() {
       base::MakeUnique<metrics::ScreenInfoMetricsProvider>());
 
   metrics_service_->RegisterMetricsProvider(CreateFileMetricsProvider(
-      ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled()));
+      metrics_state_manager_->IsMetricsReportingEnabled()));
 
   metrics_service_->RegisterMetricsProvider(
       base::MakeUnique<metrics::DriveMetricsProvider>(
@@ -723,9 +747,7 @@ void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
 
   DCHECK_EQ(num_async_histogram_fetches_in_progress_, 0);
 
-#if !BUILDFLAG(ENABLE_PRINT_PREVIEW)
-  num_async_histogram_fetches_in_progress_ = 2;
-#else   // !ENABLE_PRINT_PREVIEW
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
   num_async_histogram_fetches_in_progress_ = 3;
   // Run requests to service and content in parallel.
   if (!ServiceProcessControl::GetInstance()->GetHistograms(callback, timeout)) {
@@ -736,7 +758,9 @@ void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
     // here to make code work even if |GetHistograms()| fired |callback|.
     --num_async_histogram_fetches_in_progress_;
   }
-#endif  // !ENABLE_PRINT_PREVIEW
+#else
+  num_async_histogram_fetches_in_progress_ = 2;
+#endif
 
   // Merge histograms from metrics providers into StatisticsRecorder.
   content::BrowserThread::PostTaskAndReply(
@@ -903,6 +927,31 @@ void ChromeMetricsServiceClient::OnSyncPrefsChanged(bool must_purge) {
   }
   // Signal service manager to enable/disable UKM based on new state.
   UpdateRunningServices();
+}
+
+// static
+metrics::FileMetricsProvider::FilterAction
+ChromeMetricsServiceClient::FilterBrowserMetricsFiles(
+    const base::FilePath& path) {
+  base::ProcessId pid;
+  if (!base::GlobalHistogramAllocator::ParseFilePath(path, nullptr, nullptr,
+                                                     &pid)) {
+    return metrics::FileMetricsProvider::FILTER_PROCESS_FILE;
+  }
+
+  if (pid == base::GetCurrentProcId())
+    return metrics::FileMetricsProvider::FILTER_ACTIVE_THIS_PID;
+
+  if (IsProcessRunning(pid))
+    return metrics::FileMetricsProvider::FILTER_TRY_LATER;
+
+  return metrics::FileMetricsProvider::FILTER_PROCESS_FILE;
+}
+
+// static
+void ChromeMetricsServiceClient::SetIsProcessRunningForTesting(
+    ChromeMetricsServiceClient::IsProcessRunningFunction func) {
+  g_is_process_running = func;
 }
 
 bool ChromeMetricsServiceClient::IsHistorySyncEnabledOnAllProfiles() {

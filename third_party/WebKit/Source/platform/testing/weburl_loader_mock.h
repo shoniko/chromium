@@ -7,13 +7,14 @@
 
 #include <memory>
 #include "base/macros.h"
-#include "platform/wtf/WeakPtr.h"
+#include "base/memory/weak_ptr.h"
+#include "platform/wtf/Optional.h"
+#include "public/platform/WebURLError.h"
 #include "public/platform/WebURLLoader.h"
 
 namespace blink {
 
 class WebData;
-struct WebURLError;
 class WebURLLoaderClient;
 class WebURLLoaderMockFactoryImpl;
 class WebURLLoaderTestDelegate;
@@ -37,7 +38,7 @@ class WebURLLoaderMock : public WebURLLoader {
   void ServeAsynchronousRequest(WebURLLoaderTestDelegate* delegate,
                                 const WebURLResponse& response,
                                 const WebData& data,
-                                const WebURLError& error);
+                                const Optional<WebURLError>& error);
 
   // Simulates the redirect being served.
   WebURL ServeRedirect(const WebURLRequest& request,
@@ -46,7 +47,7 @@ class WebURLLoaderMock : public WebURLLoader {
   // WebURLLoader methods:
   void LoadSynchronously(const WebURLRequest& request,
                          WebURLResponse& response,
-                         WebURLError& error,
+                         Optional<WebURLError>& error,
                          WebData& data,
                          int64_t& encoded_data_length,
                          int64_t& encoded_body_length) override;
@@ -60,7 +61,7 @@ class WebURLLoaderMock : public WebURLLoader {
   bool is_deferred() { return is_deferred_; }
   bool is_cancelled() { return !client_; }
 
-  WeakPtr<WebURLLoaderMock> GetWeakPtr();
+  base::WeakPtr<WebURLLoaderMock> GetWeakPtr();
 
  private:
   WebURLLoaderMockFactoryImpl* factory_ = nullptr;
@@ -69,7 +70,7 @@ class WebURLLoaderMock : public WebURLLoader {
   bool using_default_loader_ = false;
   bool is_deferred_ = false;
 
-  WeakPtrFactory<WebURLLoaderMock> weak_factory_;
+  base::WeakPtrFactory<WebURLLoaderMock> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebURLLoaderMock);
 };

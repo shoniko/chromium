@@ -27,7 +27,7 @@ class LoginTestBase : public AshTestBase {
   ~LoginTestBase() override;
 
   // Sets the primary test widget. The widget can be retrieved using |widget()|.
-  // This can be used to make a wdiget scoped to the whole test, e.g. if the
+  // This can be used to make a widget scoped to the whole test, e.g. if the
   // widget is created in a SetUp override.
   // May be called at most once.
   void SetWidget(std::unique_ptr<views::Widget> widget);
@@ -48,7 +48,6 @@ class LoginTestBase : public AshTestBase {
   LoginDataDispatcher* data_dispatcher() { return &data_dispatcher_; }
 
   // AshTestBase:
-  void SetUp() override;
   void TearDown() override;
 
  private:

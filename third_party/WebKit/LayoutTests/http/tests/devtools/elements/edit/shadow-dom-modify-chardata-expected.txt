@@ -1,13 +1,12 @@
 Tests that elements panel updates shadow dom tree structure upon typing.
 
 
-
 Running: testDumpInitial
 ========= Original ========
 - <div id="container">
     - <input type="text" id="input1">
         - #shadow-root (user-agent)
-              <div id="inner-editor"></div>
+              <div></div>
       </input>
   </div>
 
@@ -16,7 +15,7 @@ Running: testAppend
 - <div id="container">
     - <input type="text" id="input1">
         - #shadow-root (user-agent)
-              <div id="inner-editor">Bar</div>
+              <div>Bar</div>
       </input>
   </div>
 

@@ -16,6 +16,7 @@
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/ios/block_types.h"
+#include "base/ios/callback_counter.h"
 #import "base/mac/bind_objc_block.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
@@ -31,13 +32,13 @@
 #include "components/feature_engagement/public/tracker.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
+#include "components/ntp_snippets/content_suggestions_service.h"
 #include "components/payments/core/features.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/url_formatter/url_formatter.h"
 #include "components/web_resource/web_resource_pref_names.h"
 #import "ios/chrome/app/application_delegate/app_state.h"
-#import "ios/chrome/app/application_delegate/background_activity.h"
 #import "ios/chrome/app/application_delegate/metrics_mediator.h"
 #import "ios/chrome/app/application_delegate/url_opener.h"
 #include "ios/chrome/app/application_mode.h"
@@ -64,15 +65,14 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state_removal_controller.h"
 #import "ios/chrome/browser/browsing_data/browsing_data_removal_controller.h"
 #include "ios/chrome/browser/browsing_data/ios_chrome_browsing_data_remover.h"
-#include "ios/chrome/browser/callback_counter.h"
 #include "ios/chrome/browser/chrome_paths.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/chrome_url_util.h"
 #include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "ios/chrome/browser/crash_loop_detection_util.h"
 #include "ios/chrome/browser/crash_report/breakpad_helper.h"
-#import "ios/chrome/browser/crash_report/crash_report_background_uploader.h"
 #import "ios/chrome/browser/crash_report/crash_restore_helper.h"
+#include "ios/chrome/browser/download/download_directory_util.h"
 #include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/feature_engagement/tracker_factory.h"
 #include "ios/chrome/browser/file_metadata_util.h"
@@ -83,6 +83,7 @@
 #include "ios/chrome/browser/metrics/first_user_action_recorder.h"
 #import "ios/chrome/browser/metrics/previous_session_info.h"
 #import "ios/chrome/browser/net/cookie_util.h"
+#include "ios/chrome/browser/ntp_snippets/ios_chrome_content_suggestions_service_factory.h"
 #include "ios/chrome/browser/payments/ios_payment_instrument_launcher.h"
 #include "ios/chrome/browser/payments/ios_payment_instrument_launcher_factory.h"
 #import "ios/chrome/browser/payments/payment_request_constants.h"
@@ -95,10 +96,13 @@
 #import "ios/chrome/browser/share_extension/share_extension_service.h"
 #import "ios/chrome/browser/share_extension/share_extension_service_factory.h"
 #include "ios/chrome/browser/signin/authentication_service.h"
+#include "ios/chrome/browser/signin/authentication_service_delegate.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
+#import "ios/chrome/browser/signin/browser_state_data_remover.h"
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
 #import "ios/chrome/browser/snapshots/snapshot_cache.h"
 #import "ios/chrome/browser/snapshots/snapshot_cache_factory.h"
+#import "ios/chrome/browser/snapshots/snapshot_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_model_observer.h"
@@ -112,15 +116,16 @@
 #import "ios/chrome/browser/ui/commands/open_url_command.h"
 #import "ios/chrome/browser/ui/commands/show_signin_command.h"
 #import "ios/chrome/browser/ui/commands/start_voice_search_command.h"
-#import "ios/chrome/browser/ui/downloads/download_manager_controller.h"
+#import "ios/chrome/browser/ui/download/legacy_download_manager_controller.h"
 #import "ios/chrome/browser/ui/external_file_remover_factory.h"
 #import "ios/chrome/browser/ui/external_file_remover_impl.h"
 #import "ios/chrome/browser/ui/first_run/first_run_util.h"
 #import "ios/chrome/browser/ui/first_run/welcome_to_chrome_view_controller.h"
-#import "ios/chrome/browser/ui/fullscreen_controller.h"
+#import "ios/chrome/browser/ui/fullscreen/legacy_fullscreen_controller.h"
 #import "ios/chrome/browser/ui/history/history_panel_view_controller.h"
 #import "ios/chrome/browser/ui/main/browser_view_wrangler.h"
 #import "ios/chrome/browser/ui/main/main_coordinator.h"
+#import "ios/chrome/browser/ui/main/main_feature_flags.h"
 #import "ios/chrome/browser/ui/main/view_controller_swapping.h"
 #import "ios/chrome/browser/ui/orientation_limiting_navigation_controller.h"
 #import "ios/chrome/browser/ui/promos/signin_promo_view_controller.h"
@@ -128,10 +133,13 @@
 #import "ios/chrome/browser/ui/signin_interaction/signin_interaction_coordinator.h"
 #import "ios/chrome/browser/ui/stack_view/stack_view_controller.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_controller.h"
+#import "ios/chrome/browser/ui/toolbar/public/omnibox_focuser.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/browser/ui/util/top_view_controller.h"
 #import "ios/chrome/browser/ui/webui/chrome_web_ui_ios_controller_factory.h"
+#import "ios/chrome/browser/web/tab_id_tab_helper.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
 #include "ios/chrome/common/app_group/app_group_utils.h"
 #include "ios/net/cookies/cookie_store_ios.h"
 #import "ios/net/crn_http_protocol_handler.h"
@@ -229,6 +237,36 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 
 // The delay, in seconds, for cleaning external files.
 const int kExternalFilesCleanupDelaySeconds = 60;
+
+// Delegate for the AuthenticationService.
+class MainControllerAuthenticationServiceDelegate
+    : public AuthenticationServiceDelegate {
+ public:
+  explicit MainControllerAuthenticationServiceDelegate(
+      ios::ChromeBrowserState* browser_state);
+  ~MainControllerAuthenticationServiceDelegate() override;
+
+  // AuthenticationServiceDelegate implementation.
+  void ClearBrowsingData(ProceduralBlock completion) override;
+
+ private:
+  ios::ChromeBrowserState* browser_state_ = nullptr;
+
+  DISALLOW_COPY_AND_ASSIGN(MainControllerAuthenticationServiceDelegate);
+};
+
+MainControllerAuthenticationServiceDelegate::
+    MainControllerAuthenticationServiceDelegate(
+        ios::ChromeBrowserState* browser_state)
+    : browser_state_(browser_state) {}
+
+MainControllerAuthenticationServiceDelegate::
+    ~MainControllerAuthenticationServiceDelegate() = default;
+
+void MainControllerAuthenticationServiceDelegate::ClearBrowsingData(
+    ProceduralBlock completion) {
+  BrowserStateDataRemover::ClearData(browser_state_, completion);
+}
 
 }  // namespace
 
@@ -367,13 +405,6 @@ const int kExternalFilesCleanupDelaySeconds = 60;
 - (void)activateBVCAndMakeCurrentBVCPrimary;
 // Sets |currentBVC| as the root view controller for the window.
 - (void)displayCurrentBVC;
-// Invokes the sign in flow with the specified authentication operation and
-// invokes |callback| when finished.
-- (void)showSigninWithOperation:(AuthenticationOperation)operation
-                       identity:(ChromeIdentity*)identity
-                    accessPoint:(signin_metrics::AccessPoint)accessPoint
-                    promoAction:(signin_metrics::PromoAction)promoAction
-                       callback:(ShowSigninCommandCompletionCallback)callback;
 // Shows the tab switcher UI.
 - (void)showTabSwitcher;
 // Starts a voice search on the current BVC.
@@ -533,7 +564,6 @@ const int kExternalFilesCleanupDelaySeconds = 60;
 }
 
 - (void)dealloc {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
   net::HTTPProtocolHandlerDelegate::SetInstance(nullptr);
   net::RequestTracker::SetRequestTrackerFactory(nullptr);
   [NSObject cancelPreviousPerformRequestsWithTarget:self];
@@ -628,14 +658,6 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   // and setting up the required support structures.
   [_metricsMediator updateMetricsStateBasedOnPrefsUserTriggered:NO];
 
-  // Resets the number of crash reports that have been uploaded since the
-  // previous Foreground initialization.
-  [CrashReportBackgroundUploader resetReportsUploadedInBackgroundCount];
-
-  // Resets the interval stats between two background fetch as this value may be
-  // obsolete.
-  [BackgroundActivity foregroundStarted];
-
   // Crash the app during startup if requested but only after we have enabled
   // uploading crash reports.
   [self crashIfRequested];
@@ -677,6 +699,16 @@ const int kExternalFilesCleanupDelaySeconds = 60;
                                        tabModelObserver:self
                              applicationCommandEndpoint:self];
 
+  // Force an obvious initialization of the AuthenticationService. This must
+  // be done before creation of the UI to ensure the service is initialised
+  // before use (it is a security issue, so accessing the service CHECK if
+  // this is not the case).
+  DCHECK(_mainBrowserState);
+  AuthenticationServiceFactory::CreateAndInitializeForBrowserState(
+      _mainBrowserState,
+      std::make_unique<MainControllerAuthenticationServiceDelegate>(
+          _mainBrowserState));
+
   // Send "Chrome Opened" event to the feature_engagement::Tracker on cold
   // start.
   feature_engagement::TrackerFactory::GetForBrowserState(chromeBrowserState)
@@ -706,6 +738,12 @@ const int kExternalFilesCleanupDelaySeconds = 60;
     startInIncognito = NO;
 
   [MDCTypography setFontLoader:[MDFRobotoFontLoader sharedInstance]];
+
+  if ([PreviousSessionInfo sharedInstance].isFirstSessionAfterLanguageChange) {
+    IOSChromeContentSuggestionsServiceFactory::GetForBrowserState(
+        chromeBrowserState)
+        ->ClearAllCachedSuggestions();
+  }
 
   [self createInitialUI:(startInIncognito ? ApplicationMode::INCOGNITO
                                           : ApplicationMode::NORMAL)];
@@ -916,10 +954,6 @@ const int kExternalFilesCleanupDelaySeconds = 60;
 
 #pragma mark - BrowserViewInformation implementation.
 
-- (void)haltAllTabs {
-  [_browserViewWrangler haltAllTabs];
-}
-
 - (void)cleanDeviceSharingManager {
   [_browserViewWrangler cleanDeviceSharingManager];
 }
@@ -1009,22 +1043,9 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   [[DeferredInitializationRunner sharedInstance]
       enqueueBlockNamed:kAuthenticationServiceNotification
                   block:^{
-                    DCHECK(_mainBrowserState);
-                    // Force an obvious initialization of the
-                    // AuthenticationService.
-                    // This is done for clarity purpose only, and should be
-                    // removed
-                    // alongside the delayed initialization. See
-                    // crbug.com/464306.
-                    AuthenticationServiceFactory::GetForBrowserState(
-                        _mainBrowserState);
-                    if (![self currentBrowserState]) {
-                      // Active browser state should have been set before
-                      // scheduling
-                      // any authentication service notification.
-                      NOTREACHED();
-                      return;
-                    }
+                    // Active browser state should have been set before
+                    // scheduling any authentication service notification.
+                    DCHECK([self currentBrowserState]);
                     if ([SignedInAccountsViewController
                             shouldBePresentedForBrowserState:
                                 [self currentBrowserState]]) {
@@ -1136,7 +1157,7 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   [[DeferredInitializationRunner sharedInstance]
       enqueueBlockNamed:kDeleteDownloads
                   block:^{
-                    [DownloadManagerController clearDownloadsDirectory];
+                    DeleteDownloadsDirectory();
                   }];
 }
 
@@ -1256,6 +1277,7 @@ const int kExternalFilesCleanupDelaySeconds = 60;
       [[WelcomeToChromeViewController alloc]
           initWithBrowserState:_mainBrowserState
                       tabModel:self.mainTabModel
+                     presenter:self.mainBVC
                     dispatcher:self.mainBVC.dispatcher];
   UINavigationController* navController =
       [[OrientationLimitingNavigationController alloc]
@@ -1401,44 +1423,35 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   }
 }
 
-- (void)showClearBrowsingDataSettings {
+- (void)showClearBrowsingDataSettingsFromViewController:
+    (UIViewController*)baseViewController {
   if (_settingsNavigationController)
     return;
   _settingsNavigationController = [SettingsNavigationController
       newClearBrowsingDataController:_mainBrowserState
                             delegate:self];
-  [[self topPresentedViewController]
-      presentViewController:_settingsNavigationController
-                   animated:YES
-                 completion:nil];
+  [baseViewController presentViewController:_settingsNavigationController
+                                   animated:YES
+                                 completion:nil];
 }
 
-- (void)showAutofillSettings {
+// TODO(crbug.com/779791) : Remove showing settings from MainController.
+- (void)showAutofillSettingsFromViewController:
+    (UIViewController*)baseViewController {
   if (_settingsNavigationController)
     return;
   _settingsNavigationController =
       [SettingsNavigationController newAutofillController:_mainBrowserState
                                                  delegate:self];
-  [[self topPresentedViewController]
-      presentViewController:_settingsNavigationController
-                   animated:YES
-                 completion:nil];
+  [baseViewController presentViewController:_settingsNavigationController
+                                   animated:YES
+                                 completion:nil];
 }
 
-- (void)showSavePasswordsSettings {
-  // Do not display password settings if settings screen is already displayed.
-  if (_settingsNavigationController)
-    return;
-  _settingsNavigationController =
-      [SettingsNavigationController newSavePasswordsController:_mainBrowserState
-                                                      delegate:self];
-  [[self topPresentedViewController]
-      presentViewController:_settingsNavigationController
-                   animated:YES
-                 completion:nil];
-}
-
-- (void)showReportAnIssue {
+- (void)showReportAnIssueFromViewController:
+    (UIViewController*)baseViewController {
+  DCHECK(baseViewController);
+  DCHECK(![baseViewController presentedViewController]);
   // This dispatch is necessary to give enough time for the tools menu to
   // disappear before taking a screenshot.
   dispatch_async(dispatch_get_main_queue(), ^{
@@ -1448,10 +1461,9 @@ const int kExternalFilesCleanupDelaySeconds = 60;
         newUserFeedbackController:_mainBrowserState
                          delegate:self
                feedbackDataSource:self];
-    [[self topPresentedViewController]
-        presentViewController:_settingsNavigationController
-                     animated:YES
-                   completion:nil];
+    [baseViewController presentViewController:_settingsNavigationController
+                                     animated:YES
+                                   completion:nil];
   });
 }
 
@@ -1474,19 +1486,44 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   }
 }
 
-- (void)showSignin:(ShowSigninCommand*)command {
+// TODO(crbug.com/779791) : Do not pass |baseViewController| through dispatcher.
+- (void)showSignin:(ShowSigninCommand*)command
+    baseViewController:(UIViewController*)baseViewController {
   if (command.operation == AUTHENTICATION_OPERATION_DISMISS) {
     [self dismissSigninInteractionCoordinator];
-  } else {
-    [self showSigninWithOperation:command.operation
-                         identity:command.identity
-                      accessPoint:command.accessPoint
-                      promoAction:command.promoAction
-                         callback:command.callback];
+    return;
+  }
+
+  if (!self.signinInteractionCoordinator) {
+    self.signinInteractionCoordinator = [[SigninInteractionCoordinator alloc]
+        initWithBrowserState:_mainBrowserState
+                  dispatcher:self.mainBVC.dispatcher];
+  }
+
+  switch (command.operation) {
+    case AUTHENTICATION_OPERATION_DISMISS:
+      // Special case handled above.
+      NOTREACHED();
+      break;
+    case AUTHENTICATION_OPERATION_REAUTHENTICATE:
+      [self.signinInteractionCoordinator
+          reAuthenticateWithAccessPoint:command.accessPoint
+                            promoAction:command.promoAction
+               presentingViewController:baseViewController
+                             completion:command.callback];
+      break;
+    case AUTHENTICATION_OPERATION_SIGNIN:
+      [self.signinInteractionCoordinator signInWithIdentity:command.identity
+                                                accessPoint:command.accessPoint
+                                                promoAction:command.promoAction
+                                   presentingViewController:baseViewController
+                                                 completion:command.callback];
+      break;
   }
 }
 
-- (void)showAddAccount {
+// TODO(crbug.com/779791) : Remove settings commands from MainController.
+- (void)showAddAccountFromViewController:(UIViewController*)baseViewController {
   if (!self.signinInteractionCoordinator) {
     self.signinInteractionCoordinator = [[SigninInteractionCoordinator alloc]
         initWithBrowserState:_mainBrowserState
@@ -1498,57 +1535,68 @@ const int kExternalFilesCleanupDelaySeconds = 60;
                                     ACCESS_POINT_UNKNOWN
                     promoAction:signin_metrics::PromoAction::
                                     PROMO_ACTION_NO_SIGNIN_PROMO
-       presentingViewController:[self topPresentedViewController]
+       presentingViewController:baseViewController
                      completion:nil];
 }
 
 #pragma mark - ApplicationSettingsCommands
 
-- (void)showAccountsSettings {
+// TODO(crbug.com/779791) : Remove show settings from MainController.
+- (void)showAccountsSettingsFromViewController:
+    (UIViewController*)baseViewController {
+  if (!baseViewController) {
+    DCHECK_EQ(self.currentBVC, self.mainViewController.activeViewController);
+    baseViewController = self.currentBVC;
+  }
+  DCHECK(![baseViewController presentedViewController]);
   if ([self currentBrowserState]->IsOffTheRecord()) {
     NOTREACHED();
     return;
   }
   if (_settingsNavigationController) {
-    [_settingsNavigationController showAccountsSettings];
+    [_settingsNavigationController
+        showAccountsSettingsFromViewController:baseViewController];
     return;
   }
   _settingsNavigationController = [SettingsNavigationController
       newAccountsController:self.currentBrowserState
                    delegate:self];
-  [[self topPresentedViewController]
-      presentViewController:_settingsNavigationController
-                   animated:YES
-                 completion:nil];
+  [baseViewController presentViewController:_settingsNavigationController
+                                   animated:YES
+                                 completion:nil];
 }
 
-- (void)showSyncSettings {
+// TODO(crbug.com/779791) : Remove show settings commands from MainController.
+- (void)showSyncSettingsFromViewController:
+    (UIViewController*)baseViewController {
   if (_settingsNavigationController) {
-    [_settingsNavigationController showSyncSettings];
+    [_settingsNavigationController
+        showSyncSettingsFromViewController:baseViewController];
     return;
   }
   _settingsNavigationController =
       [SettingsNavigationController newSyncController:_mainBrowserState
                                allowSwitchSyncAccount:YES
                                              delegate:self];
-  [[self topPresentedViewController]
-      presentViewController:_settingsNavigationController
-                   animated:YES
-                 completion:nil];
+  [baseViewController presentViewController:_settingsNavigationController
+                                   animated:YES
+                                 completion:nil];
 }
 
-- (void)showSyncPassphraseSettings {
+// TODO(crbug.com/779791) : Remove show settings commands from MainController.
+- (void)showSyncPassphraseSettingsFromViewController:
+    (UIViewController*)baseViewController {
   if (_settingsNavigationController) {
-    [_settingsNavigationController showSyncPassphraseSettings];
+    [_settingsNavigationController
+        showSyncPassphraseSettingsFromViewController:baseViewController];
     return;
   }
   _settingsNavigationController = [SettingsNavigationController
       newSyncEncryptionPassphraseController:_mainBrowserState
                                    delegate:self];
-  [[self topPresentedViewController]
-      presentViewController:_settingsNavigationController
-                   animated:YES
-                 completion:nil];
+  [baseViewController presentViewController:_settingsNavigationController
+                                   animated:YES
+                                 completion:nil];
 }
 
 #pragma mark - chromeExecuteCommand
@@ -1783,12 +1831,18 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   // expensive we activate snapshot coalescing in the scope of this function
   // which will cache the first snapshot for the tab and reuse it instead of
   // regenerating a new one each time.
-  [currentTab setSnapshotCoalescingEnabled:YES];
-  base::ScopedClosureRunner runner(base::BindBlockArc(^{
-    [currentTab setSnapshotCoalescingEnabled:NO];
-  }));
+  base::ScopedClosureRunner runner;
+  if (currentTab && currentTab.webState) {
+    SnapshotTabHelper::FromWebState(currentTab.webState)
+        ->SetSnapshotCoalescingEnabled(true);
+    runner.ReplaceClosure(base::BindBlockArc(^{
+      SnapshotTabHelper::FromWebState(currentTab.webState)
+          ->SetSnapshotCoalescingEnabled(false);
+    }));
 
-  [currentTab updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
+    SnapshotTabHelper::FromWebState(currentTab.webState)
+        ->UpdateSnapshot(/*with_overlays=*/true, /*visible_frame_only=*/true);
+  }
 
   if (!_tabSwitcherController) {
     if (IsIPadIdiom()) {
@@ -1844,14 +1898,18 @@ const int kExternalFilesCleanupDelaySeconds = 60;
     if (![self.mainTabModel isEmpty] || ![self.otrTabModel isEmpty])
       return NO;
 
-    UIViewController* viewController = [self topPresentedViewController];
-    while (viewController) {
-      if ([viewController.presentingViewController
-              isEqual:_tabSwitcherController]) {
-        return NO;
-      }
-      viewController = viewController.presentingViewController;
+    // If the tabSwitcher is contained, check if the parent container is
+    // presenting another view controller.
+    if ([[_tabSwitcherController parentViewController]
+            presentedViewController]) {
+      return NO;
     }
+
+    // Check if the tabSwitcher is directly presenting another view controller.
+    if ([_tabSwitcherController presentedViewController]) {
+      return NO;
+    }
+
     return YES;
   }
   return ![tabModel count] && [tabModel browserState] &&
@@ -1907,11 +1965,32 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   BrowserViewController* targetBVC =
       (tabModel == self.mainTabModel) ? self.mainBVC : self.otrBVC;
   self.currentBVC = targetBVC;
+
+  // The call to set currentBVC above does not actually display the BVC, because
+  // _dismissingStackView is YES.  When the presentation experiment is enabled,
+  // force the BVC transition to start.
+  if (TabSwitcherPresentsBVCEnabled()) {
+    [self displayCurrentBVC];
+  }
 }
 
 - (void)finishDismissingStackView {
-  DCHECK_EQ(self.mainViewController.activeViewController,
-            _tabSwitcherController);
+  // The tab switcher presentation experiment modifies the app's VC hierarchy.
+  // As a result, the "active" VC when the animation completes differs based on
+  // the experiment state.
+  if (TabSwitcherPresentsBVCEnabled()) {
+    // When the experiment is enabled, the tab switcher dismissal animation runs
+    // as part of the BVC presentation process.  The BVC is presented before the
+    // animations begin, so it is the current active VC at this point.
+    DCHECK_EQ(self.mainViewController.activeViewController, self.currentBVC);
+  } else {
+    // Without the experiment, the BVC is added as a child and made visible in
+    // the call to |displayCurrentBVC| below, after the tab switcher dismissal
+    // animation is complete.  At this point in the process, the tab switcher is
+    // still the active VC.
+    DCHECK_EQ(self.mainViewController.activeViewController,
+              _tabSwitcherController);
+  }
 
   if (_modeToDisplayOnStackViewDismissal == StackViewDismissalMode::NORMAL) {
     self.currentBVC = self.mainBVC;
@@ -1922,7 +2001,9 @@ const int kExternalFilesCleanupDelaySeconds = 60;
 
   _modeToDisplayOnStackViewDismissal = StackViewDismissalMode::NONE;
 
-  // Displaying the current BVC dismisses the stack view.
+  // Displaying the current BVC dismisses the stack view.  When the tabswitcher
+  // presentation experiment is enabled, this call does nothing because the BVC
+  // is already presented.
   [self displayCurrentBVC];
 
   ProceduralBlock action = [self completionBlockForTriggeringAction:
@@ -1987,7 +2068,7 @@ const int kExternalFilesCleanupDelaySeconds = 60;
                  completion:nil];
 }
 
-- (void)showSettings {
+- (void)showSettingsFromViewController:(UIViewController*)baseViewController {
   if (_settingsNavigationController)
     return;
   [[DeferredInitializationRunner sharedInstance]
@@ -1996,46 +2077,9 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   _settingsNavigationController = [SettingsNavigationController
       newSettingsMainControllerWithBrowserState:_mainBrowserState
                                        delegate:self];
-  [[self topPresentedViewController]
-      presentViewController:_settingsNavigationController
-                   animated:YES
-                 completion:nil];
-}
-
-- (void)showSigninWithOperation:(AuthenticationOperation)operation
-                       identity:(ChromeIdentity*)identity
-                    accessPoint:(signin_metrics::AccessPoint)accessPoint
-                    promoAction:(signin_metrics::PromoAction)promoAction
-                       callback:(ShowSigninCommandCompletionCallback)callback {
-  DCHECK_NE(AUTHENTICATION_OPERATION_DISMISS, operation);
-
-  if (!self.signinInteractionCoordinator) {
-    self.signinInteractionCoordinator = [[SigninInteractionCoordinator alloc]
-        initWithBrowserState:_mainBrowserState
-                  dispatcher:self.mainBVC.dispatcher];
-  }
-
-  switch (operation) {
-    case AUTHENTICATION_OPERATION_DISMISS:
-      // Special case handled above.
-      NOTREACHED();
-      break;
-    case AUTHENTICATION_OPERATION_REAUTHENTICATE:
-      [self.signinInteractionCoordinator
-          reAuthenticateWithAccessPoint:accessPoint
-                            promoAction:promoAction
-               presentingViewController:[self topPresentedViewController]
-                             completion:callback];
-      break;
-    case AUTHENTICATION_OPERATION_SIGNIN:
-      [self.signinInteractionCoordinator
-                signInWithIdentity:identity
-                       accessPoint:accessPoint
-                       promoAction:promoAction
-          presentingViewController:[self topPresentedViewController]
-                        completion:callback];
-      break;
-  }
+  [baseViewController presentViewController:_settingsNavigationController
+                                   animated:YES
+                                 completion:nil];
 }
 
 - (void)dismissSigninInteractionCoordinator {
@@ -2047,7 +2091,6 @@ const int kExternalFilesCleanupDelaySeconds = 60;
 - (void)closeSettingsAnimated:(BOOL)animated
                    completion:(ProceduralBlock)completion {
   DCHECK(_settingsNavigationController);
-  [_settingsNavigationController settingsWillBeDismissed];
   UIViewController* presentingViewController =
       [_settingsNavigationController presentingViewController];
   DCHECK(presentingViewController);
@@ -2142,7 +2185,7 @@ const int kExternalFilesCleanupDelaySeconds = 60;
       };
     case FOCUS_OMNIBOX:
       return ^{
-        [self.currentBVC focusOmnibox];
+        [self.currentBVC.dispatcher focusOmnibox];
       };
     default:
       return nil;
@@ -2302,9 +2345,11 @@ const int kExternalFilesCleanupDelaySeconds = 60;
 }
 
 - (NSMutableSet*)liveSessionsForTabModel:(TabModel*)tabModel {
-  NSMutableSet* result = [NSMutableSet setWithCapacity:[tabModel count]];
-  for (Tab* tab in tabModel) {
-    [result addObject:tab.tabId];
+  WebStateList* webStateList = tabModel.webStateList;
+  NSMutableSet* result = [NSMutableSet setWithCapacity:webStateList->count()];
+  for (int index = 0; index < webStateList->count(); ++index) {
+    web::WebState* webState = webStateList->GetWebStateAt(index);
+    [result addObject:TabIdTabHelper::FromWebState(webState)->tab_id()];
   }
   return result;
 }
@@ -2402,14 +2447,6 @@ const int kExternalFilesCleanupDelaySeconds = 60;
   [self closeSettingsUI];
 }
 
-- (void)closeSettingsAndOpenNewIncognitoTab {
-  [self closeSettingsAnimated:NO
-                   completion:^{
-                     [self switchModesAndOpenNewTab:[OpenNewTabCommand
-                                                        incognitoTabCommand]];
-                   }];
-}
-
 - (id<ApplicationCommands, BrowserCommands>)dispatcherForSettings {
   // Assume that settings always wants the dispatcher from the main BVC.
   return self.mainBVC.dispatcher;
@@ -2430,7 +2467,7 @@ const int kExternalFilesCleanupDelaySeconds = 60;
 }
 
 - (UIImage*)currentPageScreenshot {
-  UIView* lastView = self.mainViewController.view;
+  UIView* lastView = self.mainViewController.activeViewController.view;
   DCHECK(lastView);
   CGFloat scale = 0.0;
   // For screenshots of the Stack View we need to use a scale of 1.0 to avoid

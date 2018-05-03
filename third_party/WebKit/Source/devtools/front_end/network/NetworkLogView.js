@@ -144,7 +144,7 @@ Network.NetworkLogView = class extends UI.VBox {
     this._summaryBarElement = this.element.createChild('div', 'network-summary-bar');
 
     new UI.DropTarget(
-        this.element, [UI.DropTarget.Types.Files], Common.UIString('Drop HAR files here'), this._handleDrop.bind(this));
+        this.element, [UI.DropTarget.Type.File], Common.UIString('Drop HAR files here'), this._handleDrop.bind(this));
 
     Common.moduleSetting('networkColorCodeResourceTypes')
         .addChangeListener(this._invalidateAllItems.bind(this, false), this);
@@ -493,7 +493,7 @@ Network.NetworkLogView = class extends UI.VBox {
    * @return {number}
    */
   _computeRowHeight() {
-    return Math.floor(this._rawRowHeight * window.devicePixelRatio) / window.devicePixelRatio;
+    return Math.round(this._rawRowHeight * window.devicePixelRatio) / window.devicePixelRatio;
   }
 
   /**
@@ -716,7 +716,7 @@ Network.NetworkLogView = class extends UI.VBox {
       // TODO(allada) inspectedURL should be stored in PageLoad used instead of target so HAR requests can have an
       // inspected url.
       if (networkManager && request.url() === networkManager.target().inspectedURL() &&
-          request.resourceType() === Common.resourceTypes.Document)
+          request.resourceType() === Common.resourceTypes.Document && !networkManager.target().parentTarget())
         baseTime = request.startTime;
       if (request.endTime > maxTime)
         maxTime = request.endTime;
@@ -1147,74 +1147,80 @@ Network.NetworkLogView = class extends UI.VBox {
    */
   handleContextMenuForRequest(contextMenu, request) {
     contextMenu.appendApplicableItems(request);
-    var copyMenu = contextMenu.appendSubMenuItem(Common.UIString('Copy'));
+    var copyMenu = contextMenu.clipboardSection().appendSubMenuItem(Common.UIString('Copy'));
+    var footerSection = copyMenu.footerSection();
     if (request) {
-      copyMenu.appendItem(
+      copyMenu.defaultSection().appendItem(
           UI.copyLinkAddressLabel(), InspectorFrontendHost.copyText.bind(InspectorFrontendHost, request.contentURL()));
-      copyMenu.appendSeparator();
-
       if (request.requestHeadersText()) {
-        copyMenu.appendItem(
+        copyMenu.defaultSection().appendItem(
             Common.UIString('Copy request headers'), Network.NetworkLogView._copyRequestHeaders.bind(null, request));
       }
 
       if (request.responseHeadersText) {
-        copyMenu.appendItem(
+        copyMenu.defaultSection().appendItem(
             Common.UIString('Copy response headers'), Network.NetworkLogView._copyResponseHeaders.bind(null, request));
       }
 
-      if (request.finished)
-        copyMenu.appendItem(Common.UIString('Copy response'), Network.NetworkLogView._copyResponse.bind(null, request));
+      if (request.finished) {
+        copyMenu.defaultSection().appendItem(
+            Common.UIString('Copy response'), Network.NetworkLogView._copyResponse.bind(null, request));
+      }
 
       if (Host.isWin()) {
-        copyMenu.appendItem(Common.UIString('Copy as cURL (cmd)'), this._copyCurlCommand.bind(this, request, 'win'));
-        copyMenu.appendItem(Common.UIString('Copy as cURL (bash)'), this._copyCurlCommand.bind(this, request, 'unix'));
-        copyMenu.appendItem(Common.UIString('Copy All as cURL (cmd)'), this._copyAllCurlCommand.bind(this, 'win'));
-        copyMenu.appendItem(Common.UIString('Copy All as cURL (bash)'), this._copyAllCurlCommand.bind(this, 'unix'));
+        footerSection.appendItem(
+            Common.UIString('Copy as PowerShell'), this._copyPowerShellCommand.bind(this, request));
+        footerSection.appendItem(
+            Common.UIString('Copy as cURL (cmd)'), this._copyCurlCommand.bind(this, request, 'win'));
+        footerSection.appendItem(
+            Common.UIString('Copy as cURL (bash)'), this._copyCurlCommand.bind(this, request, 'unix'));
+        footerSection.appendItem(Common.UIString('Copy all as PowerShell'), this._copyAllPowerShellCommand.bind(this));
+        footerSection.appendItem(Common.UIString('Copy all as cURL (cmd)'), this._copyAllCurlCommand.bind(this, 'win'));
+        footerSection.appendItem(
+            Common.UIString('Copy all as cURL (bash)'), this._copyAllCurlCommand.bind(this, 'unix'));
       } else {
-        copyMenu.appendItem(Common.UIString('Copy as cURL'), this._copyCurlCommand.bind(this, request, 'unix'));
-        copyMenu.appendItem(Common.UIString('Copy All as cURL'), this._copyAllCurlCommand.bind(this, 'unix'));
+        footerSection.appendItem(Common.UIString('Copy as cURL'), this._copyCurlCommand.bind(this, request, 'unix'));
+        footerSection.appendItem(Common.UIString('Copy all as cURL'), this._copyAllCurlCommand.bind(this, 'unix'));
       }
     } else {
-      copyMenu = contextMenu.appendSubMenuItem(Common.UIString('Copy'));
+      copyMenu = contextMenu.clipboardSection().appendSubMenuItem(Common.UIString('Copy'));
     }
-    copyMenu.appendItem(Common.UIString('Copy all as HAR'), this._copyAll.bind(this));
+    footerSection.appendItem(Common.UIString('Copy all as HAR'), this._copyAll.bind(this));
 
-    contextMenu.appendSeparator();
-    contextMenu.appendItem(Common.UIString('Save as HAR with content'), this._exportAll.bind(this));
+    contextMenu.saveSection().appendItem(Common.UIString('Save as HAR with content'), this._exportAll.bind(this));
 
-    contextMenu.appendSeparator();
-    contextMenu.appendItem(Common.UIString('Clear browser cache'), this._clearBrowserCache.bind(this));
-    contextMenu.appendItem(Common.UIString('Clear browser cookies'), this._clearBrowserCookies.bind(this));
+    contextMenu.editSection().appendItem(Common.UIString('Clear browser cache'), this._clearBrowserCache.bind(this));
+    contextMenu.editSection().appendItem(
+        Common.UIString('Clear browser cookies'), this._clearBrowserCookies.bind(this));
 
     if (request) {
-      contextMenu.appendSeparator();
-
       const maxBlockedURLLength = 20;
       var manager = SDK.multitargetNetworkManager;
       var patterns = manager.blockedPatterns();
 
       var urlWithoutScheme = request.parsedURL.urlWithoutScheme();
       if (urlWithoutScheme && !patterns.find(pattern => pattern.url === urlWithoutScheme)) {
-        contextMenu.appendItem(Common.UIString('Block request URL'), addBlockedURL.bind(null, urlWithoutScheme));
+        contextMenu.debugSection().appendItem(
+            Common.UIString('Block request URL'), addBlockedURL.bind(null, urlWithoutScheme));
       } else if (urlWithoutScheme) {
         const croppedURL = urlWithoutScheme.trimMiddle(maxBlockedURLLength);
-        contextMenu.appendItem(
+        contextMenu.debugSection().appendItem(
             Common.UIString('Unblock %s', croppedURL), removeBlockedURL.bind(null, urlWithoutScheme));
       }
 
       var domain = request.parsedURL.domain();
       if (domain && !patterns.find(pattern => pattern.url === domain)) {
-        contextMenu.appendItem(Common.UIString('Block request domain'), addBlockedURL.bind(null, domain));
+        contextMenu.debugSection().appendItem(
+            Common.UIString('Block request domain'), addBlockedURL.bind(null, domain));
       } else if (domain) {
         const croppedDomain = domain.trimMiddle(maxBlockedURLLength);
-        contextMenu.appendItem(Common.UIString('Unblock %s', croppedDomain), removeBlockedURL.bind(null, domain));
+        contextMenu.debugSection().appendItem(
+            Common.UIString('Unblock %s', croppedDomain), removeBlockedURL.bind(null, domain));
       }
 
       if (SDK.NetworkManager.canReplayRequest(request)) {
-        contextMenu.appendSeparator();
-        contextMenu.appendItem(Common.UIString('Replay XHR'), SDK.NetworkManager.replayRequest.bind(null, request));
-        contextMenu.appendSeparator();
+        contextMenu.debugSection().appendItem(
+            Common.UIString('Replay XHR'), SDK.NetworkManager.replayRequest.bind(null, request));
       }
 
       /**
@@ -1268,6 +1274,19 @@ Network.NetworkLogView = class extends UI.VBox {
       InspectorFrontendHost.copyText(commands.join(' &\r\n'));
     else
       InspectorFrontendHost.copyText(commands.join(' ;\n'));
+  }
+
+  /**
+   * @param {!SDK.NetworkRequest} request
+   */
+  _copyPowerShellCommand(request) {
+    InspectorFrontendHost.copyText(this._generatePowerShellCommand(request));
+  }
+
+  _copyAllPowerShellCommand() {
+    var requests = NetworkLog.networkLog.requests();
+    var commands = requests.map(this._generatePowerShellCommand.bind(this));
+    InspectorFrontendHost.copyText(commands.join(';\r\n'));
   }
 
   async _exportAll() {
@@ -1734,6 +1753,56 @@ Network.NetworkLogView = class extends UI.VBox {
 
     if (request.securityState() === Protocol.Security.SecurityState.Insecure)
       command.push('--insecure');
+    return command.join(' ');
+  }
+
+  /**
+   * @param {!SDK.NetworkRequest} request
+   * @return {string}
+   */
+  _generatePowerShellCommand(request) {
+    var command = ['Invoke-WebRequest'];
+    var ignoredHeaders = new Set(['host', 'connection', 'proxy-connection', 'content-length', 'expect', 'range']);
+
+    /**
+     * @param {string} str
+     * @return {string}
+     */
+    function escapeString(str) {
+      return '"' +
+          str.replace(/[`\$"]/g, '`$&').replace(/[^\x20-\x7E]/g, char => '$([char]' + char.charCodeAt(0) + ')') + '"';
+    }
+
+    command.push('-Uri');
+    command.push(escapeString(request.url()));
+
+    if (request.requestMethod !== 'GET') {
+      command.push('-Method');
+      command.push(escapeString(request.requestMethod));
+    }
+
+    var requestHeaders = request.requestHeaders();
+    var headerNameValuePairs = [];
+    for (var header of requestHeaders) {
+      var name = header.name.replace(/^:/, '');  // Translate h2 headers to HTTP headers.
+      if (ignoredHeaders.has(name.toLowerCase()))
+        continue;
+      headerNameValuePairs.push(escapeString(name) + '=' + escapeString(header.value));
+    }
+    if (headerNameValuePairs.length) {
+      command.push('-Headers');
+      command.push('@{' + headerNameValuePairs.join('; ') + '}');
+    }
+
+    if (request.requestFormData) {
+      command.push('-Body');
+      var body = escapeString(request.requestFormData);
+      if (/[^\x20-\x7E]/.test(request.requestFormData))
+        command.push('([System.Text.Encoding]::UTF8.GetBytes(' + body + '))');
+      else
+        command.push(body);
+    }
+
     return command.join(' ');
   }
 };

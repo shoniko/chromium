@@ -63,7 +63,7 @@ HttpCache::DefaultBackend::DefaultBackend(CacheType type,
       path_(path),
       max_bytes_(max_bytes) {}
 
-HttpCache::DefaultBackend::~DefaultBackend() {}
+HttpCache::DefaultBackend::~DefaultBackend() = default;
 
 // static
 std::unique_ptr<HttpCache::BackendFactory> HttpCache::DefaultBackend::InMemory(
@@ -113,7 +113,12 @@ bool HttpCache::ActiveEntry::HasNoTransactions() {
 }
 
 bool HttpCache::ActiveEntry::SafeToDestroy() {
-  return HasNoTransactions() && !writers;
+  return HasNoTransactions() && !writers && !will_process_queued_transactions;
+}
+
+bool HttpCache::ActiveEntry::TransactionInReaders(
+    Transaction* transaction) const {
+  return readers.count(transaction) > 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -122,7 +127,7 @@ bool HttpCache::ActiveEntry::SafeToDestroy() {
 // open cache entries or the backend itself.
 struct HttpCache::PendingOp {
   PendingOp() : disk_entry(NULL) {}
-  ~PendingOp() {}
+  ~PendingOp() = default;
 
   // Returns the estimate of dynamically allocated memory in bytes.
   size_t EstimateMemoryUsage() const {
@@ -167,7 +172,7 @@ class HttpCache::WorkItem {
         entry_(NULL),
         callback_(cb),
         backend_(backend) {}
-  ~WorkItem() {}
+  ~WorkItem() = default;
 
   // Calls back the transaction with the result of the operation.
   void NotifyTransaction(int result, ActiveEntry* entry) {
@@ -217,7 +222,7 @@ class HttpCache::MetadataWriter {
   explicit MetadataWriter(HttpCache::Transaction* trans)
       : verified_(false), buf_len_(0), transaction_(trans) {}
 
-  ~MetadataWriter() {}
+  ~MetadataWriter() = default;
 
   // Implements the bulk of HttpCache::WriteMetadata.
   void Write(const GURL& url,
@@ -316,7 +321,7 @@ HttpCache::HttpCache(std::unique_ptr<HttpTransactionFactory> network_layer,
       fail_conditionalization_for_test_(false),
       mode_(NORMAL),
       network_layer_(std::move(network_layer)),
-      clock_(new base::DefaultClock()),
+      clock_(base::DefaultClock::GetInstance()),
       weak_factory_(this) {
   HttpNetworkSession* session = network_layer_->GetSession();
   // Session may be NULL in unittests.
@@ -612,8 +617,7 @@ int HttpCache::DoomEntry(const std::string& key, Transaction* trans) {
   entry_ptr->disk_entry->Doom();
   entry_ptr->doomed = true;
 
-  DCHECK(!entry_ptr->HasNoTransactions() ||
-         entry_ptr->will_process_queued_transactions);
+  DCHECK(!entry_ptr->SafeToDestroy());
   return OK;
 }
 
@@ -681,7 +685,6 @@ HttpCache::ActiveEntry* HttpCache::ActivateEntry(
 }
 
 void HttpCache::DeactivateEntry(ActiveEntry* entry) {
-  DCHECK(!entry->will_process_queued_transactions);
   DCHECK(!entry->doomed);
   DCHECK(entry->disk_entry);
   DCHECK(entry->SafeToDestroy());
@@ -743,11 +746,7 @@ void HttpCache::DeletePendingOp(PendingOp* pending_op) {
 
 int HttpCache::OpenEntry(const std::string& key, ActiveEntry** entry,
                          Transaction* trans) {
-  ActiveEntry* active_entry = FindActiveEntry(key);
-  if (active_entry) {
-    *entry = active_entry;
-    return OK;
-  }
+  DCHECK(!FindActiveEntry(key));
 
   std::unique_ptr<WorkItem> item =
       std::make_unique<WorkItem>(WI_OPEN_ENTRY, trans, entry);
@@ -840,27 +839,13 @@ int HttpCache::DoneWithResponseHeaders(ActiveEntry* entry,
   // through done_headers_queue for performance benefit. (Also, in case of
   // writer transaction, the consumer sometimes depend on synchronous behaviour
   // e.g. while computing raw headers size. (crbug.com/711766))
-  if (transaction->mode() & Transaction::WRITE) {
-    // Partial requests may have write mode even when there is a writer present
-    // since they may be reader for a particular range and writer for another
-    // range.
-    if (!is_partial) {
-      // TODO(crbug.com/750725)
-      DCHECK(!entry->writers || entry->writers->CanAddWriters());
-      DCHECK(entry->done_headers_queue.empty());
-    }
-
-    if (!entry->writers) {
-      AddTransactionToWriters(entry, transaction);
-      ProcessQueuedTransactions(entry);
-      return OK;
-    }
+  if ((transaction->mode() & Transaction::WRITE) && !entry->writers &&
+      entry->readers.empty()) {
+    AddTransactionToWriters(entry, transaction,
+                            CanTransactionJoinExistingWriters(transaction));
+    ProcessQueuedTransactions(entry);
+    return OK;
   }
-
-  // If this is not the first transaction in done_headers_queue, it should be a
-  // read-mode transaction except if it is a partial request.
-  DCHECK(is_partial || (entry->done_headers_queue.empty() ||
-                        !(transaction->mode() & Transaction::WRITE)));
 
   entry->done_headers_queue.push_back(transaction);
   ProcessQueuedTransactions(entry);
@@ -920,12 +905,12 @@ void HttpCache::DoneWithEntry(ActiveEntry* entry,
 
 void HttpCache::WritersDoomEntryRestartTransactions(ActiveEntry* entry) {
   DCHECK(!entry->writers->IsEmpty());
-  DCHECK(!entry->writers->ShouldKeepEntry());
   ProcessEntryFailure(entry);
 }
 
 void HttpCache::WritersDoneWritingToEntry(ActiveEntry* entry,
                                           bool success,
+                                          bool should_keep_entry,
                                           TransactionSet make_readers) {
   // Impacts the queued transactions in one of the following ways:
   // - restart them but do not doom the entry since entry can be saved in
@@ -938,24 +923,29 @@ void HttpCache::WritersDoneWritingToEntry(ActiveEntry* entry,
   DCHECK(entry->writers->IsEmpty());
   DCHECK(success || make_readers.empty());
 
-  if (!success && entry->writers->ShouldKeepEntry()) {
+  if (!success && should_keep_entry) {
     // Restart already validated transactions so that they are able to read
     // the truncated status of the entry.
     RestartHeadersPhaseTransactions(entry);
     entry->writers.reset();
-    if (entry->HasNoTransactions() &&
-        !entry->will_process_queued_transactions) {
+    if (entry->SafeToDestroy()) {
       DestroyEntry(entry);
     }
     return;
   }
 
-  // Add any idle writers to readers.
-  entry->writers.reset();
   if (success) {
-    entry->readers.insert(make_readers.begin(), make_readers.end());
+    // Add any idle writers to readers.
+    for (auto* reader : make_readers) {
+      reader->WriteModeTransactionAboutToBecomeReader();
+      entry->readers.insert(reader);
+    }
+    // Reset writers here so that WriteModeTransactionAboutToBecomeReader can
+    // access the network transaction.
+    entry->writers.reset();
     ProcessQueuedTransactions(entry);
   } else {
+    entry->writers.reset();
     ProcessEntryFailure(entry);
   }
 }
@@ -965,7 +955,7 @@ void HttpCache::DoomEntryValidationNoMatch(ActiveEntry* entry) {
   DCHECK(entry->headers_transaction);
 
   entry->headers_transaction = nullptr;
-  if (entry->SafeToDestroy() && !entry->will_process_queued_transactions) {
+  if (entry->SafeToDestroy()) {
     entry->disk_entry->Doom();
     DestroyEntry(entry);
     return;
@@ -1010,7 +1000,7 @@ void HttpCache::ProcessEntryFailure(ActiveEntry* entry) {
   TransactionList list;
   RemoveAllQueuedTransactions(entry, &list);
 
-  if (entry->SafeToDestroy() && !entry->will_process_queued_transactions) {
+  if (entry->SafeToDestroy()) {
     entry->disk_entry->Doom();
     DestroyEntry(entry);
   } else {
@@ -1070,21 +1060,64 @@ void HttpCache::ProcessAddToEntryQueue(ActiveEntry* entry) {
   transaction->io_callback().Run(OK);
 }
 
+HttpCache::ParallelWritingPattern HttpCache::CanTransactionJoinExistingWriters(
+    Transaction* transaction) {
+  if (transaction->method() != "GET")
+    return PARALLEL_WRITING_NOT_JOIN_METHOD_NOT_GET;
+  if (transaction->partial())
+    return PARALLEL_WRITING_NOT_JOIN_RANGE;
+  if (transaction->mode() == Transaction::READ)
+    return PARALLEL_WRITING_NOT_JOIN_READ_ONLY;
+  return PARALLEL_WRITING_JOIN;
+}
+
 void HttpCache::ProcessDoneHeadersQueue(ActiveEntry* entry) {
-  DCHECK(!entry->writers || entry->writers->CanAddWriters());
+  ParallelWritingPattern writers_pattern;
+  DCHECK(!entry->writers || entry->writers->CanAddWriters(&writers_pattern));
   DCHECK(!entry->done_headers_queue.empty());
 
   Transaction* transaction = entry->done_headers_queue.front();
 
-  // If this transaction is responsible for writing the response body.
-  if (transaction->mode() & Transaction::WRITE) {
-    AddTransactionToWriters(entry, transaction);
-  } else {
-    // If a transaction is in front of this queue with only read mode set and
-    // there is no writer, it implies response body is already written, convert
-    // to a reader.
-    auto return_val = entry->readers.insert(transaction);
-    DCHECK_EQ(return_val.second, true);
+  ParallelWritingPattern parallel_writing_pattern =
+      CanTransactionJoinExistingWriters(transaction);
+  if (IsWritingInProgress(entry)) {
+    transaction->MaybeSetParallelWritingPatternForMetrics(
+        parallel_writing_pattern);
+    if (parallel_writing_pattern != PARALLEL_WRITING_JOIN) {
+      // TODO(shivanisha): Returning from here instead of checking the next
+      // transaction in the queue because the FIFO order is maintained
+      // throughout, until it becomes a reader or writer. May be at this point
+      // the ordering is not important but that would be optimizing a rare
+      // scenario where write mode transactions are insterspersed with read-only
+      // transactions.
+      return;
+    }
+    AddTransactionToWriters(entry, transaction, parallel_writing_pattern);
+  } else {  // no writing in progress
+    if (transaction->mode() & Transaction::WRITE) {
+      if (transaction->partial()) {
+        if (entry->readers.empty())
+          AddTransactionToWriters(entry, transaction, parallel_writing_pattern);
+        else
+          return;
+      } else {
+        // Add the transaction to readers since the response body should have
+        // already been written. (If it was the first writer about to start
+        // writing to the cache, it would have been added to writers in
+        // DoneWithResponseHeaders, thus no writers here signify the response
+        // was completely written).
+        transaction->WriteModeTransactionAboutToBecomeReader();
+        auto return_val = entry->readers.insert(transaction);
+        DCHECK(return_val.second);
+        transaction->MaybeSetParallelWritingPatternForMetrics(
+            PARALLEL_WRITING_NONE_CACHE_READ);
+      }
+    } else {  // mode READ
+      auto return_val = entry->readers.insert(transaction);
+      DCHECK(return_val.second);
+      transaction->MaybeSetParallelWritingPatternForMetrics(
+          PARALLEL_WRITING_NONE_CACHE_READ);
+    }
   }
 
   // Post another task to give a chance to more transactions to either join
@@ -1095,20 +1128,25 @@ void HttpCache::ProcessDoneHeadersQueue(ActiveEntry* entry) {
   transaction->io_callback().Run(OK);
 }
 
-void HttpCache::AddTransactionToWriters(ActiveEntry* entry,
-                                        Transaction* transaction) {
+void HttpCache::AddTransactionToWriters(
+    ActiveEntry* entry,
+    Transaction* transaction,
+    ParallelWritingPattern parallel_writing_pattern) {
   if (!entry->writers) {
     entry->writers = std::make_unique<Writers>(this, entry);
+    transaction->MaybeSetParallelWritingPatternForMetrics(
+        PARALLEL_WRITING_CREATE);
+  } else {
+    ParallelWritingPattern writers_pattern;
+    DCHECK(entry->writers->CanAddWriters(&writers_pattern));
+    DCHECK_EQ(PARALLEL_WRITING_JOIN, writers_pattern);
   }
 
-  DCHECK(entry->writers->CanAddWriters());
-
-  // TODO(shivanisha), is_exclusive should be set conditionally. Currently
-  // setting it for all cases to test the reduced case of at most 1 writer.
   Writers::TransactionInfo info(transaction->partial(),
                                 transaction->is_truncated(),
                                 *(transaction->GetResponseInfo()));
-  entry->writers->AddTransaction(transaction, true /* is_exclusive */,
+
+  entry->writers->AddTransaction(transaction, parallel_writing_pattern,
                                  transaction->priority(), info);
 }
 
@@ -1242,10 +1280,19 @@ void HttpCache::OnProcessQueuedTransactions(ActiveEntry* entry) {
   // If another transaction is writing the response, let validated transactions
   // wait till the response is complete. If the response is not yet started, the
   // done_headers_queue transaction should start writing it.
-  if ((!entry->writers || entry->writers->CanAddWriters()) &&
-      !entry->done_headers_queue.empty()) {
-    ProcessDoneHeadersQueue(entry);
-    return;
+  if (!entry->done_headers_queue.empty()) {
+    ParallelWritingPattern reason = PARALLEL_WRITING_NONE;
+    if (entry->writers && !entry->writers->CanAddWriters(&reason)) {
+      if (reason != PARALLEL_WRITING_NONE) {
+        for (auto* done_headers_transaction : entry->done_headers_queue) {
+          done_headers_transaction->MaybeSetParallelWritingPatternForMetrics(
+              reason);
+        }
+      }
+    } else {
+      ProcessDoneHeadersQueue(entry);
+      return;
+    }
   }
 
   if (!entry->add_to_entry_queue.empty())

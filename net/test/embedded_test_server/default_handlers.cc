@@ -28,7 +28,9 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "base/unguessable_token.h"
 #include "net/base/escape.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/url_util.h"
 #include "net/filter/filter_source_stream_test_util.h"
 #include "net/test/embedded_test_server/http_request.h"
@@ -148,7 +150,7 @@ std::unique_ptr<HttpResponse> HandleEchoAll(const HttpRequest& request) {
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
 
   std::string body =
-      "<html><head><style>"
+      "<html><head><title>EmbeddedTestServer - EchoAll</title><style>"
       "pre { border: 1px solid black; margin: 5px; padding: 5px }"
       "</style></head><body>"
       "<div style=\"float: right\">"
@@ -165,9 +167,9 @@ std::unique_ptr<HttpResponse> HandleEchoAll(const HttpRequest& request) {
   body +=
       "</pre>"
       "<h1>Request Headers:</h1><pre>" +
-      request.all_headers +
-      "</pre>"
-      "</body></html>";
+      request.all_headers + "</pre>" +
+      "<h1>Response nonce:</h1><pre id='response-nonce'>" +
+      base::UnguessableToken::Create().ToString() + "</pre></body></html>";
 
   http_response->set_content_type("text/html");
   http_response->set_content(body);
@@ -496,15 +498,16 @@ std::unique_ptr<HttpResponse> HandleAuthDigest(const HttpRequest& request) {
   return std::move(http_response);
 }
 
-// /server-redirect?URL
-// Returns a server-redirect (301) to URL.
-std::unique_ptr<HttpResponse> HandleServerRedirect(const HttpRequest& request) {
+// /server-redirect?URL (Also /server-redirect-xxx?URL)
+// Returns a server redirect to URL.
+std::unique_ptr<HttpResponse> HandleServerRedirect(HttpStatusCode redirect_code,
+                                                   const HttpRequest& request) {
   GURL request_url = request.GetURL();
   std::string dest =
       net::UnescapeURLComponent(request_url.query(), kUnescapeAll);
 
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
-  http_response->set_code(HTTP_MOVED_PERMANENTLY);
+  http_response->set_code(redirect_code);
   http_response->AddCustomHeader("Location", dest);
   http_response->set_content_type("text/html");
   http_response->set_content(base::StringPrintf(
@@ -607,7 +610,7 @@ std::unique_ptr<HttpResponse> HandleSlowServer(const HttpRequest& request) {
 // Never returns a response.
 class HungHttpResponse : public HttpResponse {
  public:
-  HungHttpResponse() {}
+  HungHttpResponse() = default;
 
   void SendResponse(const SendBytesCallback& send,
                     const SendCompleteCallback& done) override {}
@@ -625,7 +628,7 @@ std::unique_ptr<HttpResponse> HandleHungResponse(const HttpRequest& request) {
 // Return headers, then hangs.
 class HungAfterHeadersHttpResponse : public HttpResponse {
  public:
-  HungAfterHeadersHttpResponse() {}
+  HungAfterHeadersHttpResponse() = default;
 
   void SendResponse(const SendBytesCallback& send,
                     const SendCompleteCallback& done) override {
@@ -667,10 +670,26 @@ std::unique_ptr<HttpResponse> HandleGzipBody(const HttpRequest& request) {
   return std::move(http_response);
 }
 
+// /self.pac
+// Returns a response that is a PAC script making requests use the
+// EmbeddedTestServer itself as a proxy.
+std::unique_ptr<HttpResponse> HandleSelfPac(const HttpRequest& request) {
+  std::unique_ptr<BasicHttpResponse> http_response =
+      std::make_unique<BasicHttpResponse>();
+  http_response->set_content(base::StringPrintf(
+      "function FindProxyForURL(url, host) {\n"
+      "return 'PROXY %s';\n"
+      "}",
+      net::HostPortPair::FromURL(request.base_url).ToString().c_str()));
+  return std::move(http_response);
+}
+
 }  // anonymous namespace
 
 #define PREFIXED_HANDLER(prefix, handler) \
   base::Bind(&HandlePrefixedRequest, prefix, base::Bind(handler))
+#define SERVER_REDIRECT_HANDLER(prefix, handler, status_code) \
+  base::Bind(&HandlePrefixedRequest, prefix, base::Bind(handler, status_code))
 
 void RegisterDefaultHandlers(EmbeddedTestServer* server) {
   server->RegisterDefaultHandler(base::Bind(&HandleDefaultConnect));
@@ -702,8 +721,20 @@ void RegisterDefaultHandlers(EmbeddedTestServer* server) {
       PREFIXED_HANDLER("/auth-basic", &HandleAuthBasic));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/auth-digest", &HandleAuthDigest));
-  server->RegisterDefaultHandler(
-      PREFIXED_HANDLER("/server-redirect", &HandleServerRedirect));
+
+  server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
+      "/server-redirect", &HandleServerRedirect, HTTP_MOVED_PERMANENTLY));
+  server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
+      "/server-redirect-301", &HandleServerRedirect, HTTP_MOVED_PERMANENTLY));
+  server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
+      "/server-redirect-302", &HandleServerRedirect, HTTP_FOUND));
+  server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
+      "/server-redirect-303", &HandleServerRedirect, HTTP_SEE_OTHER));
+  server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
+      "/server-redirect-307", &HandleServerRedirect, HTTP_TEMPORARY_REDIRECT));
+  server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
+      "/server-redirect-308", &HandleServerRedirect, HTTP_PERMANENT_REDIRECT));
+
   server->RegisterDefaultHandler(base::Bind(&HandleCrossSiteRedirect, server));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/client-redirect", &HandleClientRedirect));
@@ -716,6 +747,7 @@ void RegisterDefaultHandlers(EmbeddedTestServer* server) {
       PREFIXED_HANDLER("/hung-after-headers", &HandleHungAfterHeadersResponse));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/gzip-body", &HandleGzipBody));
+  server->RegisterDefaultHandler(PREFIXED_HANDLER("/self.pac", &HandleSelfPac));
 
   // TODO(svaldez): HandleDownload
   // TODO(svaldez): HandleDownloadFinish

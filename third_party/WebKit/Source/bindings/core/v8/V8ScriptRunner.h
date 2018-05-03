@@ -29,58 +29,43 @@
 #include <stdint.h>
 
 #include "bindings/core/v8/ReferrerScriptInfo.h"
+#include "bindings/core/v8/ScriptSourceLocationType.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8CacheOptions.h"
 #include "core/CoreExport.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8BindingMacros.h"
 #include "platform/loader/fetch/AccessControlStatus.h"
-#include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/text/TextPosition.h"
 #include "platform/wtf/text/WTFString.h"
 #include "v8/include/v8.h"
 
+namespace WTF {
+class TextEncoding;
+}  // namespace WTF
+
 namespace blink {
 
+class CachedMetadata;
 class CachedMetadataHandler;
 class ExecutionContext;
-class ScriptResource;
 class ScriptSourceCode;
-class ScriptStreamer;
 
 class CORE_EXPORT V8ScriptRunner final {
   STATIC_ONLY(V8ScriptRunner);
 
  public:
+  enum class OpaqueMode {
+    kOpaque,
+    kNotOpaque,
+  };
+
   // For the following methods, the caller sites have to hold
   // a HandleScope and a ContextScope.
+  // CachedMetadataHandler is set when metadata caching is supported.
   static v8::MaybeLocal<v8::Script> CompileScript(ScriptState*,
                                                   const ScriptSourceCode&,
-                                                  const ScriptFetchOptions&,
-                                                  AccessControlStatus,
-                                                  V8CacheOptions);
-  static v8::MaybeLocal<v8::Script> CompileScript(ScriptState*,
-                                                  const String&,
-                                                  const String& file_name,
-                                                  const String& source_map_url,
-                                                  const TextPosition&,
-                                                  CachedMetadataHandler*,
-                                                  AccessControlStatus,
-                                                  V8CacheOptions,
-                                                  const ReferrerScriptInfo&);
-  // CachedMetadataHandler is set when metadata caching is supported. For
-  // normal scripe resources, CachedMetadataHandler is from ScriptResource.
-  // For worker script, ScriptResource is null but CachedMetadataHandler may be
-  // set. When ScriptStreamer is set, ScriptResource must be set.
-  static v8::MaybeLocal<v8::Script> CompileScript(ScriptState*,
-                                                  v8::Local<v8::String>,
-                                                  const String& file_name,
-                                                  const String& source_map_url,
-                                                  const TextPosition&,
-                                                  ScriptResource*,
-                                                  ScriptStreamer*,
-                                                  CachedMetadataHandler*,
                                                   AccessControlStatus,
                                                   V8CacheOptions,
                                                   const ReferrerScriptInfo&);
@@ -94,11 +79,9 @@ class CORE_EXPORT V8ScriptRunner final {
                                                      v8::Local<v8::Script>,
                                                      ExecutionContext*);
   static v8::MaybeLocal<v8::Value> CompileAndRunInternalScript(
-      ScriptState*,
-      v8::Local<v8::String>,
       v8::Isolate*,
-      const String& = String(),
-      const TextPosition& = TextPosition());
+      ScriptState*,
+      const ScriptSourceCode&);
   static v8::MaybeLocal<v8::Value> RunCompiledInternalScript(
       v8::Isolate*,
       v8::Local<v8::Script>);
@@ -107,22 +90,22 @@ class CORE_EXPORT V8ScriptRunner final {
       v8::Local<v8::Object>,
       ExecutionContext*,
       int argc = 0,
-      v8::Local<v8::Value> argv[] = 0);
+      v8::Local<v8::Value> argv[] = nullptr);
   static v8::MaybeLocal<v8::Value> CallInternalFunction(
+      v8::Isolate*,
       v8::Local<v8::Function>,
       v8::Local<v8::Value> receiver,
       int argc,
-      v8::Local<v8::Value> info[],
-      v8::Isolate*);
+      v8::Local<v8::Value> info[]);
   static v8::MaybeLocal<v8::Value> CallFunction(v8::Local<v8::Function>,
                                                 ExecutionContext*,
                                                 v8::Local<v8::Value> receiver,
                                                 int argc,
                                                 v8::Local<v8::Value> info[],
                                                 v8::Isolate*);
-  static v8::MaybeLocal<v8::Value> EvaluateModule(v8::Local<v8::Module>,
-                                                  v8::Local<v8::Context>,
-                                                  v8::Isolate*);
+  static v8::MaybeLocal<v8::Value> EvaluateModule(v8::Isolate*,
+                                                  v8::Local<v8::Module>,
+                                                  v8::Local<v8::Context>);
 
   // Only to be used from ScriptModule::ReportException().
   static void ReportExceptionForModule(v8::Isolate*,
@@ -157,6 +140,13 @@ class CORE_EXPORT V8ScriptRunner final {
   // TODO(adamk): This should live on V8ThrowException, but it depends on
   // V8Initializer and so can't trivially move to platform/bindings.
   static void ReportException(v8::Isolate*, v8::Local<v8::Value> exception);
+
+  static scoped_refptr<CachedMetadata> GenerateFullCodeCache(
+      ScriptState*,
+      const String& script_string,
+      const String& file_name,
+      const WTF::TextEncoding&,
+      OpaqueMode);
 
  private:
   static v8::MaybeLocal<v8::Value> CallExtraHelper(ScriptState*,

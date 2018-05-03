@@ -9,8 +9,9 @@
 #include <cstdint>
 
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "core/dom/MessagePort.h"
+#include "build/build_config.h"
 #include "core/frame/Settings.h"
+#include "core/messaging/MessagePort.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8PerIsolateData.h"
@@ -83,7 +84,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   v8::TryCatch try_catch(isolate);
 
   // Deserialize.
-  RefPtr<SerializedScriptValue> serialized_script_value =
+  scoped_refptr<SerializedScriptValue> serialized_script_value =
       SerializedScriptValue::Create(reinterpret_cast<const char*>(data), size);
   serialized_script_value->Deserialize(isolate, options);
   CHECK(!try_catch.HasCaught())
@@ -103,7 +104,14 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
 }  // namespace blink
 
-extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
+// Explicitly specify some attributes to avoid issues with the linker dead-
+// stripping the following function on macOS, as it is not called directly
+// by fuzz target. LibFuzzer runtime uses dlsym() to resolve that function.
+#if defined(OS_MACOSX)
+__attribute__((used)) __attribute__((visibility("default")))
+#endif  // defined(OS_MACOSX)
+extern "C" int
+LLVMFuzzerInitialize(int* argc, char*** argv) {
   return blink::LLVMFuzzerInitialize(argc, argv);
 }
 

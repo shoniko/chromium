@@ -27,11 +27,11 @@
 #define ScriptProcessorNode_h
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_refptr.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "modules/webaudio/AudioNode.h"
 #include "platform/audio/AudioBus.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -102,6 +102,8 @@ class ScriptProcessorHandler final : public AudioHandler {
   scoped_refptr<AudioBus> internal_input_bus_;
   // Synchronize process() with fireProcessEvent().
   mutable Mutex process_event_lock_;
+
+  scoped_refptr<WebTaskRunner> task_runner_;
 
   FRIEND_TEST_ALL_PREFIXES(ScriptProcessorNodeTest, BufferLifetime);
 };

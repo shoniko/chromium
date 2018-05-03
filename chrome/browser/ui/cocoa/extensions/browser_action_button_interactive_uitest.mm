@@ -12,7 +12,6 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -40,7 +39,7 @@
 
 // A helper class to wait for a menu to open and close.
 @interface MenuWatcher : NSObject
-- (id)initWithController:(MenuController*)controller;
+- (id)initWithController:(MenuControllerCocoa*)controller;
 @property(nonatomic, assign) base::Closure openClosure;
 @property(nonatomic, assign) base::Closure closeClosure;
 @end
@@ -180,8 +179,8 @@ void ClickOnOverflowedAction(
 @end
 
 @implementation MenuWatcher {
-  // The MenuController for the menu this object is watching.
-  MenuController* menuController_;
+  // The MenuControllerCocoa for the menu this object is watching.
+  MenuControllerCocoa* menuController_;
 
   // The closure to run when the menu opens, if any.
   base::Closure openClosure_;
@@ -193,7 +192,7 @@ void ClickOnOverflowedAction(
 @synthesize openClosure = openClosure_;
 @synthesize closeClosure = closeClosure_;
 
-- (id)initWithController:(MenuController*)controller {
+- (id)initWithController:(MenuControllerCocoa*)controller {
   if (self = [super init]) {
     menuController_ = controller;
     [[NSNotificationCenter defaultCenter]
@@ -520,7 +519,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionButtonUiTest,
   // up the overflow container's bounds (crbug.com/511326).
   GlobalErrorService* error_service =
       GlobalErrorServiceFactory::GetForProfile(profile());
-  error_service->AddGlobalError(base::MakeUnique<MenuError>());
+  error_service->AddGlobalError(std::make_unique<MenuError>());
 
   // It's probably excessive to test every level of the overflow here. Test
   // having all actions overflowed, some actions overflowed, and one action

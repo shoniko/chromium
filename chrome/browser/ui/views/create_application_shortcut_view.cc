@@ -19,7 +19,6 @@
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/window/dialog_client_view.h"
 
 #if defined(OS_WIN)
 #include "base/win/shortcut.h"
@@ -51,7 +50,7 @@ CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
       quick_launch_check_box_(nullptr),
       weak_ptr_factory_(this) {
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
-      views::TEXT, views::CONTROL));
+      views::TEXT, views::TEXT));
   InitControls();
 
   // Get shortcut and icon information; needed for creating the shortcut.
@@ -107,7 +106,8 @@ void CreateChromeApplicationShortcutView::InitControls() {
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
   // Layout controls
-  views::GridLayout* layout = views::GridLayout::CreateAndInstall(this);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   static const int kHeaderColumnSetId = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(kHeaderColumnSetId);
@@ -234,7 +234,7 @@ void CreateChromeApplicationShortcutView::ButtonPressed(
   }
 
   // When no checkbox is checked we should not have the action button enabled.
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
 }
 
 views::Checkbox* CreateChromeApplicationShortcutView::AddCheckbox(

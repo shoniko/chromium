@@ -9,6 +9,7 @@
 
 #include "ios/web/public/favicon_url.h"
 #include "ios/web/public/load_committed_details.h"
+#include "ios/web/public/web_state/form_activity_params.h"
 #include "url/gurl.h"
 
 namespace web {
@@ -54,11 +55,6 @@ struct TestLoadPageInfo {
   bool success;
 };
 
-// Arguments passed to |InterstitialDismissed|.
-struct TestDismissInterstitialInfo {
-  WebState* web_state;
-};
-
 // Arguments passed to |LoadProgressChanged|.
 struct TestChangeLoadingProgressInfo {
   WebState* web_state;
@@ -96,6 +92,7 @@ struct TestSubmitDocumentInfo {
   WebState* web_state;
   std::string form_name;
   bool user_initiated;
+  bool is_main_frame;
 };
 
 // Arguments passed to |FormActivityRegistered|.
@@ -103,11 +100,7 @@ struct TestFormActivityInfo {
   TestFormActivityInfo();
   ~TestFormActivityInfo();
   WebState* web_state;
-  std::string form_name;
-  std::string field_name;
-  std::string type;
-  std::string value;
-  bool input_missing;
+  FormActivityParams form_activity;
 };
 
 // Arguments passed to |FaviconUrlUpdated|.

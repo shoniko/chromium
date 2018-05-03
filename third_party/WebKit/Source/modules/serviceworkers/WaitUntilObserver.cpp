@@ -15,7 +15,7 @@
 #include "platform/bindings/Microtask.h"
 #include "platform/wtf/Assertions.h"
 #include "public/platform/Platform.h"
-#include "public/platform/modules/serviceworker/service_worker_event_status.mojom-blink.h"
+#include "third_party/WebKit/common/service_worker/service_worker_event_status.mojom-blink.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -71,7 +71,7 @@ class WaitUntilObserver::ThenFunction final : public ScriptFunction {
     DCHECK(observer_);
     DCHECK(resolve_type_ == kFulfilled || resolve_type_ == kRejected);
     if (callback_)
-      callback_(value);
+      callback_.Run(value);
     // According from step 4 of ExtendableEvent::waitUntil() in spec:
     // https://w3c.github.io/ServiceWorker/#dom-extendableevent-waituntil
     // "Upon fulfillment or rejection of f, queue a microtask to run these
@@ -174,9 +174,10 @@ void WaitUntilObserver::WaitUntil(ScriptState* script_state,
   // waitUntil() is being used, opening or closing a window must happen in a
   // timeframe specified by windowInteractionTimeout(), otherwise the calls
   // will fail.
-  if (type_ == kNotificationClick)
+  if (type_ == kNotificationClick) {
     consume_window_interaction_timer_.StartOneShot(WindowInteractionTimeout(),
-                                                   BLINK_FROM_HERE);
+                                                   FROM_HERE);
+  }
 
   IncrementPendingPromiseCount();
   script_promise.Then(
@@ -262,6 +263,7 @@ void WaitUntilObserver::MaybeCompleteEvent() {
       client->DidHandleFetchEvent(event_id_, status, event_dispatch_time_);
       break;
     case kInstall:
+      ToServiceWorkerGlobalScope(execution_context_)->SetIsInstalling(false);
       client->DidHandleInstallEvent(event_id_, status, event_dispatch_time_);
       break;
     case kMessage:

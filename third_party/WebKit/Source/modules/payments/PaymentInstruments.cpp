@@ -12,6 +12,7 @@
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/DOMException.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "modules/payments/BasicCardHelper.h"
 #include "modules/payments/PaymentInstrument.h"
 #include "modules/payments/PaymentManager.h"
 #include "platform/wtf/Vector.h"
@@ -33,8 +34,7 @@ bool rejectError(ScriptPromiseResolver* resolver,
           DOMException::Create(kNotSupportedError, "Not implemented yet"));
       return true;
     case payments::mojom::blink::PaymentHandlerStatus::NOT_FOUND:
-      resolver->Reject(DOMException::Create(kNotFoundError,
-                                            "There is no stored instrument"));
+      resolver->Resolve();
       return true;
     case payments::mojom::blink::PaymentHandlerStatus::NO_ACTIVE_WORKER:
       resolver->Reject(
@@ -55,14 +55,8 @@ bool rejectError(ScriptPromiseResolver* resolver,
       // fetching payment handler's name and/or icon from its web app manifest.
       // The origin or name will be used to label this payment handler in
       // UI in this case, so only show warnning message instead of reject the
-      // promise.
-      ExecutionContext* context =
-          ExecutionContext::From(resolver->GetScriptState());
-      context->AddConsoleMessage(ConsoleMessage::Create(
-          kJSMessageSource, kWarningMessageLevel,
-          "Unable to fetch payment handler's name and/or icon from its web app "
-          "manifest. User may not recognize this payment handler in UI, "
-          "because it will be labeled only by its origin."));
+      // promise. The warning message was printed by
+      // payment_app_info_fetcher.cc.
       return false;
   }
   NOTREACHED();
@@ -88,9 +82,9 @@ ScriptPromise PaymentInstruments::deleteInstrument(
   ScriptPromise promise = resolver->Promise();
 
   manager_->DeletePaymentInstrument(
-      instrument_key, ConvertToBaseCallback(WTF::Bind(
-                          &PaymentInstruments::onDeletePaymentInstrument,
-                          WrapPersistent(this), WrapPersistent(resolver))));
+      instrument_key,
+      WTF::Bind(&PaymentInstruments::onDeletePaymentInstrument,
+                WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
@@ -106,9 +100,9 @@ ScriptPromise PaymentInstruments::get(ScriptState* script_state,
   ScriptPromise promise = resolver->Promise();
 
   manager_->GetPaymentInstrument(
-      instrument_key, ConvertToBaseCallback(WTF::Bind(
-                          &PaymentInstruments::onGetPaymentInstrument,
-                          WrapPersistent(this), WrapPersistent(resolver))));
+      instrument_key,
+      WTF::Bind(&PaymentInstruments::onGetPaymentInstrument,
+                WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
@@ -122,9 +116,9 @@ ScriptPromise PaymentInstruments::keys(ScriptState* script_state) {
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  manager_->KeysOfPaymentInstruments(ConvertToBaseCallback(
+  manager_->KeysOfPaymentInstruments(
       WTF::Bind(&PaymentInstruments::onKeysOfPaymentInstruments,
-                WrapPersistent(this), WrapPersistent(resolver))));
+                WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
@@ -140,9 +134,9 @@ ScriptPromise PaymentInstruments::has(ScriptState* script_state,
   ScriptPromise promise = resolver->Promise();
 
   manager_->HasPaymentInstrument(
-      instrument_key, ConvertToBaseCallback(WTF::Bind(
-                          &PaymentInstruments::onHasPaymentInstrument,
-                          WrapPersistent(this), WrapPersistent(resolver))));
+      instrument_key,
+      WTF::Bind(&PaymentInstruments::onHasPaymentInstrument,
+                WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
@@ -200,15 +194,19 @@ ScriptPromise PaymentInstruments::set(ScriptState* script_state,
       return exception_state.Reject(script_state);
     }
     instrument->stringified_capabilities = ToCoreString(value);
+    if (instrument->enabled_methods.Contains("basic-card")) {
+      BasicCardHelper::ParseBasiccardData(
+          details.capabilities(), instrument->supported_networks,
+          instrument->supported_types, exception_state);
+    }
   } else {
     instrument->stringified_capabilities = WTF::g_empty_string;
   }
 
   manager_->SetPaymentInstrument(
       instrument_key, std::move(instrument),
-      ConvertToBaseCallback(
-          WTF::Bind(&PaymentInstruments::onSetPaymentInstrument,
-                    WrapPersistent(this), WrapPersistent(resolver))));
+      WTF::Bind(&PaymentInstruments::onSetPaymentInstrument,
+                WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
@@ -222,9 +220,9 @@ ScriptPromise PaymentInstruments::clear(ScriptState* script_state) {
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  manager_->ClearPaymentInstruments(ConvertToBaseCallback(
+  manager_->ClearPaymentInstruments(
       WTF::Bind(&PaymentInstruments::onClearPaymentInstruments,
-                WrapPersistent(this), WrapPersistent(resolver))));
+                WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
@@ -274,6 +272,7 @@ void PaymentInstruments::onGetPaymentInstrument(
     instrument.setCapabilities(
         ScriptValue(resolver->GetScriptState(),
                     FromJSONString(resolver->GetScriptState()->GetIsolate(),
+                                   resolver->GetScriptState()->GetContext(),
                                    stored_instrument->stringified_capabilities,
                                    exception_state)));
     if (exception_state.HadException()) {

@@ -11,171 +11,11 @@
 #include "platform/mojo/ReferrerStructTraits.h"
 #include "platform/weborigin/Referrer.h"
 #include "public/platform/WebReferrerPolicy.h"
+#include "services/network/public/interfaces/fetch_api.mojom-blink.h"
 
 namespace mojo {
 
-using blink::mojom::FetchCredentialsMode;
-using blink::mojom::FetchRedirectMode;
-using blink::mojom::FetchRequestMode;
-using blink::mojom::RequestContextFrameType;
 using blink::mojom::RequestContextType;
-
-FetchCredentialsMode
-EnumTraits<FetchCredentialsMode, blink::WebURLRequest::FetchCredentialsMode>::
-    ToMojom(blink::WebURLRequest::FetchCredentialsMode input) {
-  switch (input) {
-    case blink::WebURLRequest::kFetchCredentialsModeOmit:
-      return FetchCredentialsMode::OMIT;
-    case blink::WebURLRequest::kFetchCredentialsModeSameOrigin:
-      return FetchCredentialsMode::SAME_ORIGIN;
-    case blink::WebURLRequest::kFetchCredentialsModeInclude:
-      return FetchCredentialsMode::INCLUDE;
-    case blink::WebURLRequest::kFetchCredentialsModePassword:
-      return FetchCredentialsMode::PASSWORD;
-  }
-
-  NOTREACHED();
-  return FetchCredentialsMode::OMIT;
-}
-
-bool EnumTraits<FetchCredentialsMode,
-                blink::WebURLRequest::FetchCredentialsMode>::
-    FromMojom(FetchCredentialsMode input,
-              blink::WebURLRequest::FetchCredentialsMode* out) {
-  switch (input) {
-    case FetchCredentialsMode::OMIT:
-      *out = blink::WebURLRequest::kFetchCredentialsModeOmit;
-      return true;
-    case FetchCredentialsMode::SAME_ORIGIN:
-      *out = blink::WebURLRequest::kFetchCredentialsModeSameOrigin;
-      return true;
-    case FetchCredentialsMode::INCLUDE:
-      *out = blink::WebURLRequest::kFetchCredentialsModeInclude;
-      return true;
-    case FetchCredentialsMode::PASSWORD:
-      *out = blink::WebURLRequest::kFetchCredentialsModePassword;
-      return true;
-  }
-
-  return false;
-}
-
-FetchRedirectMode
-EnumTraits<FetchRedirectMode, blink::WebURLRequest::FetchRedirectMode>::ToMojom(
-    blink::WebURLRequest::FetchRedirectMode input) {
-  switch (input) {
-    case blink::WebURLRequest::kFetchRedirectModeFollow:
-      return FetchRedirectMode::FOLLOW;
-    case blink::WebURLRequest::kFetchRedirectModeError:
-      return FetchRedirectMode::ERROR_MODE;
-    case blink::WebURLRequest::kFetchRedirectModeManual:
-      return FetchRedirectMode::MANUAL;
-  }
-
-  NOTREACHED();
-  return FetchRedirectMode::ERROR_MODE;
-}
-
-bool EnumTraits<FetchRedirectMode, blink::WebURLRequest::FetchRedirectMode>::
-    FromMojom(FetchRedirectMode input,
-              blink::WebURLRequest::FetchRedirectMode* out) {
-  switch (input) {
-    case FetchRedirectMode::FOLLOW:
-      *out = blink::WebURLRequest::kFetchRedirectModeFollow;
-      return true;
-    case FetchRedirectMode::ERROR_MODE:
-      *out = blink::WebURLRequest::kFetchRedirectModeError;
-      return true;
-    case FetchRedirectMode::MANUAL:
-      *out = blink::WebURLRequest::kFetchRedirectModeManual;
-      return true;
-  }
-
-  return false;
-}
-
-FetchRequestMode
-EnumTraits<FetchRequestMode, blink::WebURLRequest::FetchRequestMode>::ToMojom(
-    blink::WebURLRequest::FetchRequestMode input) {
-  switch (input) {
-    case blink::WebURLRequest::kFetchRequestModeSameOrigin:
-      return FetchRequestMode::SAME_ORIGIN;
-    case blink::WebURLRequest::kFetchRequestModeNoCORS:
-      return FetchRequestMode::NO_CORS;
-    case blink::WebURLRequest::kFetchRequestModeCORS:
-      return FetchRequestMode::CORS;
-    case blink::WebURLRequest::kFetchRequestModeCORSWithForcedPreflight:
-      return FetchRequestMode::CORS_WITH_FORCED_PREFLIGHT;
-    case blink::WebURLRequest::kFetchRequestModeNavigate:
-      return FetchRequestMode::NAVIGATE;
-  }
-
-  NOTREACHED();
-  return FetchRequestMode::NO_CORS;
-}
-
-bool EnumTraits<FetchRequestMode, blink::WebURLRequest::FetchRequestMode>::
-    FromMojom(FetchRequestMode input,
-              blink::WebURLRequest::FetchRequestMode* out) {
-  switch (input) {
-    case FetchRequestMode::SAME_ORIGIN:
-      *out = blink::WebURLRequest::kFetchRequestModeSameOrigin;
-      return true;
-    case FetchRequestMode::NO_CORS:
-      *out = blink::WebURLRequest::kFetchRequestModeNoCORS;
-      return true;
-    case FetchRequestMode::CORS:
-      *out = blink::WebURLRequest::kFetchRequestModeCORS;
-      return true;
-    case FetchRequestMode::CORS_WITH_FORCED_PREFLIGHT:
-      *out = blink::WebURLRequest::kFetchRequestModeCORSWithForcedPreflight;
-      return true;
-    case FetchRequestMode::NAVIGATE:
-      *out = blink::WebURLRequest::kFetchRequestModeNavigate;
-      return true;
-  }
-
-  return false;
-}
-
-RequestContextFrameType
-EnumTraits<RequestContextFrameType, blink::WebURLRequest::FrameType>::ToMojom(
-    blink::WebURLRequest::FrameType input) {
-  switch (input) {
-    case blink::WebURLRequest::kFrameTypeAuxiliary:
-      return RequestContextFrameType::AUXILIARY;
-    case blink::WebURLRequest::kFrameTypeNested:
-      return RequestContextFrameType::NESTED;
-    case blink::WebURLRequest::kFrameTypeNone:
-      return RequestContextFrameType::NONE;
-    case blink::WebURLRequest::kFrameTypeTopLevel:
-      return RequestContextFrameType::TOP_LEVEL;
-  }
-
-  NOTREACHED();
-  return RequestContextFrameType::NONE;
-}
-
-bool EnumTraits<RequestContextFrameType, blink::WebURLRequest::FrameType>::
-    FromMojom(RequestContextFrameType input,
-              blink::WebURLRequest::FrameType* out) {
-  switch (input) {
-    case RequestContextFrameType::AUXILIARY:
-      *out = blink::WebURLRequest::kFrameTypeAuxiliary;
-      return true;
-    case RequestContextFrameType::NESTED:
-      *out = blink::WebURLRequest::kFrameTypeNested;
-      return true;
-    case RequestContextFrameType::NONE:
-      *out = blink::WebURLRequest::kFrameTypeNone;
-      return true;
-    case RequestContextFrameType::TOP_LEVEL:
-      *out = blink::WebURLRequest::kFrameTypeTopLevel;
-      return true;
-  }
-
-  return false;
-}
 
 RequestContextType
 EnumTraits<RequestContextType, blink::WebURLRequest::RequestContext>::ToMojom(
@@ -450,17 +290,17 @@ bool StructTraits<blink::mojom::FetchAPIRequestDataView,
                   blink::WebServiceWorkerRequest>::
     Read(blink::mojom::FetchAPIRequestDataView data,
          blink::WebServiceWorkerRequest* out) {
-  blink::WebURLRequest::FetchRequestMode mode;
+  network::mojom::FetchRequestMode mode;
   blink::WebURLRequest::RequestContext requestContext;
-  blink::WebURLRequest::FrameType frameType;
+  network::mojom::RequestContextFrameType frameType;
   blink::KURL url;
   WTF::String method;
   WTF::HashMap<WTF::String, WTF::String> headers;
   WTF::String blobUuid;
   blink::mojom::blink::BlobPtr blob;
   blink::Referrer referrer;
-  blink::WebURLRequest::FetchCredentialsMode credentialsMode;
-  blink::WebURLRequest::FetchRedirectMode redirectMode;
+  network::mojom::FetchCredentialsMode credentialsMode;
+  network::mojom::FetchRedirectMode redirectMode;
   WTF::String integrity;
   WTF::String clientId;
 
@@ -487,8 +327,10 @@ bool StructTraits<blink::mojom::FetchAPIRequestDataView,
   out->SetReferrer(referrer.referrer, static_cast<blink::WebReferrerPolicy>(
                                           referrer.referrer_policy));
   out->SetCredentialsMode(credentialsMode);
+  out->SetCacheMode(data.cache_mode());
   out->SetRedirectMode(redirectMode);
   out->SetIntegrity(integrity);
+  out->SetKeepalive(data.keepalive());
   out->SetClientId(clientId);
   out->SetIsReload(data.is_reload());
   return true;

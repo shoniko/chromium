@@ -7,6 +7,8 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/android/jni_string.h"
 #include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -18,13 +20,13 @@
 namespace chrome {
 namespace android {
 
-void SetCaptivePortalCertificateForTesting(
+void JNI_CaptivePortalHelper_SetCaptivePortalCertificateForTesting(
     JNIEnv* env,
     const base::android::JavaParamRef<jclass>& jcaller,
     const base::android::JavaParamRef<jstring>& jhash) {
   const std::string hash = ConvertJavaStringToUTF8(env, jhash);
   auto config_proto =
-      base::MakeUnique<chrome_browser_ssl::SSLErrorAssistantConfig>();
+      std::make_unique<chrome_browser_ssl::SSLErrorAssistantConfig>();
   config_proto->set_version_id(INT_MAX);
   config_proto->add_captive_portal_cert()->set_sha256_hash(hash);
 
@@ -34,7 +36,7 @@ void SetCaptivePortalCertificateForTesting(
                      std::move(config_proto)));
 }
 
-void SetOSReportsCaptivePortalForTesting(
+void JNI_CaptivePortalHelper_SetOSReportsCaptivePortalForTesting(
     JNIEnv* env,
     const base::android::JavaParamRef<jclass>& jcaller,
     jboolean os_reports_captive_portal) {

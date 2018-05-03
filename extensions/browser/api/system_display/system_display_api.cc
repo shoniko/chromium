@@ -222,8 +222,9 @@ SystemDisplaySetDisplayPropertiesFunction::Run() {
 ExtensionFunction::ResponseAction SystemDisplaySetDisplayLayoutFunction::Run() {
   std::unique_ptr<display::SetDisplayLayout::Params> params(
       display::SetDisplayLayout::Params::Create(*args_));
-  if (!DisplayInfoProvider::Get()->SetDisplayLayout(params->layouts))
-    return RespondNow(Error("Unable to set display layout"));
+  std::string error;
+  if (!DisplayInfoProvider::Get()->SetDisplayLayout(params->layouts, &error))
+    return RespondNow(Error("Unable to set display layout: " + error));
   return RespondNow(NoArguments());
 }
 
@@ -350,6 +351,18 @@ SystemDisplayClearTouchCalibrationFunction::Run() {
 
   if (!DisplayInfoProvider::Get()->ClearTouchCalibration(params->id, &error))
     return RespondNow(Error(error));
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction SystemDisplaySetMirrorModeFunction::Run() {
+  std::unique_ptr<display::SetMirrorMode::Params> params(
+      display::SetMirrorMode::Params::Create(*args_));
+
+  std::string error;
+  if (!DisplayInfoProvider::Get()->SetMirrorMode(params->info, &error)) {
+    return RespondNow(Error(error));
+  }
+
   return RespondNow(NoArguments());
 }
 

@@ -4,8 +4,9 @@
 
 #include "chromeos/components/tether/crash_recovery_manager_impl.h"
 
+#include <memory>
+
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "chromeos/components/tether/host_scan_cache.h"
 #include "chromeos/network/network_state.h"
@@ -40,14 +41,14 @@ void CrashRecoveryManagerImpl::Factory::SetInstanceForTesting(
   factory_instance_ = factory;
 }
 
-CrashRecoveryManagerImpl::Factory::~Factory() {}
+CrashRecoveryManagerImpl::Factory::~Factory() = default;
 
 std::unique_ptr<CrashRecoveryManager>
 CrashRecoveryManagerImpl::Factory::BuildInstance(
     NetworkStateHandler* network_state_handler,
     ActiveHost* active_host,
     HostScanCache* host_scan_cache) {
-  return base::MakeUnique<CrashRecoveryManagerImpl>(
+  return std::make_unique<CrashRecoveryManagerImpl>(
       network_state_handler, active_host, host_scan_cache);
 }
 
@@ -60,7 +61,7 @@ CrashRecoveryManagerImpl::CrashRecoveryManagerImpl(
       host_scan_cache_(host_scan_cache),
       weak_ptr_factory_(this) {}
 
-CrashRecoveryManagerImpl::~CrashRecoveryManagerImpl() {}
+CrashRecoveryManagerImpl::~CrashRecoveryManagerImpl() = default;
 
 void CrashRecoveryManagerImpl::RestorePreCrashStateIfNecessary(
     const base::Closure& on_restoration_finished) {

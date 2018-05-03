@@ -13,12 +13,15 @@
 #include "ui/message_center/views/message_view.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/view_targeter_delegate.h"
 
 namespace views {
 class Label;
 class LabelButton;
 class ProgressBar;
+class RadioButton;
 }
 
 namespace message_center {
@@ -103,8 +106,15 @@ class LargeImageContainerView : public views::View {
 // This button capitalizes the given label string.
 class NotificationButtonMD : public views::LabelButton {
  public:
+  // |is_inline_reply| is true when the notification action takes text as the
+  // return value i.e. the notification action is inline reply.
+  // The input field would be shown when the button is clicked.
+  // |placeholder| is placeholder text shown on the input field. Only used when
+  // |is_inline_reply| is true.
   NotificationButtonMD(views::ButtonListener* listener,
-                       const base::string16& text);
+                       bool is_inline_reply,
+                       const base::string16& label,
+                       const base::string16& placeholder);
   ~NotificationButtonMD() override;
 
   void SetText(const base::string16& text) override;
@@ -115,8 +125,43 @@ class NotificationButtonMD : public views::LabelButton {
 
   SkColor enabled_color_for_testing() { return label()->enabled_color(); }
 
+  bool is_inline_reply() const { return is_inline_reply_; }
+  const base::string16& placeholder() const { return placeholder_; }
+
  private:
+  const bool is_inline_reply_;
+  const base::string16 placeholder_;
+
   DISALLOW_COPY_AND_ASSIGN(NotificationButtonMD);
+};
+
+class NotificationInputDelegate {
+ public:
+  virtual void OnNotificationInputSubmit(size_t index,
+                                         const base::string16& text) = 0;
+  virtual ~NotificationInputDelegate() = default;
+};
+
+class NotificationInputMD : public views::Textfield,
+                            public views::TextfieldController {
+ public:
+  NotificationInputMD(NotificationInputDelegate* delegate);
+  ~NotificationInputMD() override;
+
+  bool HandleKeyEvent(views::Textfield* sender,
+                      const ui::KeyEvent& key_event) override;
+
+  void set_index(size_t index) { index_ = index; }
+  void set_placeholder(const base::string16& placeholder);
+
+ private:
+  NotificationInputDelegate* const delegate_;
+
+  // |index_| is the notification action index that should be passed as the
+  // argument of ClickOnNotificationButtonWithReply.
+  size_t index_ = 0;
+
+  DISALLOW_COPY_AND_ASSIGN(NotificationInputMD);
 };
 
 // View that displays all current types of notification (web, basic, image, and
@@ -125,11 +170,11 @@ class NotificationButtonMD : public views::LabelButton {
 // returned by the Create() factory method below.
 class MESSAGE_CENTER_EXPORT NotificationViewMD
     : public MessageView,
+      public NotificationInputDelegate,
       public views::ButtonListener,
       public views::ViewTargeterDelegate {
  public:
-  NotificationViewMD(MessageCenterController* controller,
-                     const Notification& notification);
+  explicit NotificationViewMD(const Notification& notification);
   ~NotificationViewMD() override;
 
   void Activate();
@@ -141,6 +186,7 @@ class MESSAGE_CENTER_EXPORT NotificationViewMD
   gfx::NativeCursor GetCursor(const ui::MouseEvent& event) override;
   void OnMouseEntered(const ui::MouseEvent& event) override;
   void OnMouseExited(const ui::MouseEvent& event) override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
 
   // Overridden from MessageView:
   void UpdateWithNotification(const Notification& notification) override;
@@ -151,6 +197,11 @@ class MESSAGE_CENTER_EXPORT NotificationViewMD
   NotificationControlButtonsView* GetControlButtonsView() const override;
   bool IsExpanded() const override;
   void SetExpanded(bool expanded) override;
+  void OnSettingsButtonPressed() override;
+
+  // Overridden from NotificationInputDelegate:
+  void OnNotificationInputSubmit(size_t index,
+                                 const base::string16& text) override;
 
   // views::ViewTargeterDelegate:
   views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
@@ -160,9 +211,12 @@ class MESSAGE_CENTER_EXPORT NotificationViewMD
   FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, TestIconSizing);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, UpdateButtonsStateTest);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, UpdateButtonCountTest);
+  FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, TestActionButtonClick);
+  FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, TestInlineReply);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, ExpandLongMessage);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, TestAccentColor);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, UseImageAsIcon);
+  FRIEND_TEST_ALL_PREFIXES(NotificationViewMDTest, InlineSettings);
 
   friend class NotificationViewMDTest;
 
@@ -182,10 +236,12 @@ class MESSAGE_CENTER_EXPORT NotificationViewMD
   void CreateOrUpdateSmallIconView(const Notification& notification);
   void CreateOrUpdateImageView(const Notification& notification);
   void CreateOrUpdateActionButtonViews(const Notification& notification);
+  void CreateOrUpdateInlineSettingsViews(const Notification& notification);
 
   bool IsExpandable();
   void ToggleExpanded();
   void UpdateViewForExpandedState(bool expanded);
+  void ToggleInlineSettings();
 
   // View containing close and settings buttons
   std::unique_ptr<NotificationControlButtonsView> control_buttons_view_;
@@ -206,12 +262,13 @@ class MESSAGE_CENTER_EXPORT NotificationViewMD
   NotificationHeaderView* header_row_ = nullptr;
   views::View* content_row_ = nullptr;
   views::View* actions_row_ = nullptr;
+  views::View* settings_row_ = nullptr;
 
   // Containers for left and right side on |content_row_|
   views::View* left_content_ = nullptr;
   views::View* right_content_ = nullptr;
 
-  // Views which are dinamicallly created inside view hierarchy.
+  // Views which are dynamically created inside view hierarchy.
   views::Label* title_view_ = nullptr;
   BoundedLabel* message_view_ = nullptr;
   views::Label* status_view_ = nullptr;
@@ -221,6 +278,13 @@ class MESSAGE_CENTER_EXPORT NotificationViewMD
   std::vector<ItemView*> item_views_;
   views::ProgressBar* progress_bar_view_ = nullptr;
   CompactTitleMessageView* compact_title_message_view_ = nullptr;
+  views::View* action_buttons_row_ = nullptr;
+  NotificationInputMD* inline_reply_ = nullptr;
+
+  // Views for inline settings.
+  views::RadioButton* block_all_button_ = nullptr;
+  views::RadioButton* dont_block_button_ = nullptr;
+  views::LabelButton* settings_done_button_ = nullptr;
 
   std::unique_ptr<ui::EventHandler> click_activator_;
 

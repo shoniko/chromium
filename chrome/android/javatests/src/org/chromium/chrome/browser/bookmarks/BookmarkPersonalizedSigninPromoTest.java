@@ -11,7 +11,6 @@ import static android.support.test.espresso.assertion.ViewAssertions.doesNotExis
 import static android.support.test.espresso.assertion.ViewAssertions.matches;
 import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static android.support.test.espresso.matcher.ViewMatchers.withId;
-import static android.support.test.espresso.matcher.ViewMatchers.withText;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertFalse;
@@ -32,6 +31,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
@@ -54,8 +54,8 @@ import java.util.List;
  * Tests for the personalized signin promo on the Bookmarks page.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        "enable-features=AndroidSigninPromos"})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@RetryOnFailure(message = "crbug.com/789531")
 public class BookmarkPersonalizedSigninPromoTest {
     private static final String TEST_ACCOUNT_NAME = "test@gmail.com";
     private static final String TEST_FULL_NAME = "Test Account";
@@ -82,6 +82,7 @@ public class BookmarkPersonalizedSigninPromoTest {
         onView(withId(R.id.signin_promo_view_container)).check(doesNotExist());
     }
 
+    // If this starts flaking again, disable the test. See crbug.com/789531.
     @Test
     @LargeTest
     @DisableIf.Device(type = {UiDisableIf.TABLET}) // https://crbug.com/776405.
@@ -159,8 +160,8 @@ public class BookmarkPersonalizedSigninPromoTest {
     }
 
     private void openBookmarkManager() throws InterruptedException {
-        onView(withId(R.id.menu_button)).perform(click());
-        onView(withText("Bookmarks")).perform(click());
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> BookmarkUtils.showBookmarkManager(mActivityTestRule.getActivity(), false));
     }
 
     private void addTestAccount() {

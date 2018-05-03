@@ -26,7 +26,6 @@
 #define WebMediaStream_h
 
 #include "WebCommon.h"
-#include "WebNonCopyable.h"
 #include "WebPrivatePtr.h"
 #include "WebVector.h"
 
@@ -44,12 +43,12 @@ class BLINK_PLATFORM_EXPORT WebMediaStreamObserver {
   virtual void TrackRemoved(const blink::WebMediaStreamTrack&) = 0;
 
  protected:
-  virtual ~WebMediaStreamObserver() {}
+  virtual ~WebMediaStreamObserver() = default;
 };
 
 class WebMediaStream {
  public:
-  WebMediaStream() {}
+  WebMediaStream() = default;
   WebMediaStream(const WebMediaStream& other) { Assign(other); }
   ~WebMediaStream() { Reset(); }
 

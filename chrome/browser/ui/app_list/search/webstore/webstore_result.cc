@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -24,10 +23,13 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
+#include "content/public/browser/storage_partition.h"
+#include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension_urls.h"
 #include "net/base/url_util.h"
+#include "ui/app_list/app_list_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -55,12 +57,11 @@ WebstoreResult::WebstoreResult(Profile* profile,
   InitAndStartObserving();
   UpdateActions();
 
-  int icon_dimension = GetPreferredIconDimension();
+  int icon_dimension = GetPreferredIconDimension(this);
   icon_ = gfx::ImageSkia(
-      base::MakeUnique<UrlIconSource>(
+      std::make_unique<UrlIconSource>(
           base::Bind(&WebstoreResult::OnIconLoaded, weak_factory_.GetWeakPtr()),
-          profile_->GetRequestContext(), icon_url_, icon_dimension,
-          IDR_WEBSTORE_ICON_32),
+          profile_, icon_url_, icon_dimension, IDR_WEBSTORE_ICON_32),
       gfx::Size(icon_dimension, icon_dimension));
   SetIcon(icon_);
 }

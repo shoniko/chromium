@@ -21,12 +21,10 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/media/webrtc/media_stream_devices_controller.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search/hotword_service.h"
-#include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
+#include "chrome/browser/speech/speech_recognizer.h"
 #include "chrome/browser/ui/app_list/speech_auth_helper.h"
-#include "chrome/browser/ui/app_list/speech_recognizer.h"
 #include "chrome/browser/ui/app_list/start_page_observer.h"
 #include "chrome/browser/ui/app_list/start_page_service_factory.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -36,6 +34,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/audio/cras_audio_handler.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/zoom/zoom_controller.h"
@@ -60,7 +59,6 @@
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_fetcher.h"
 #include "ui/app_list/app_list_switches.h"
-#include "chromeos/audio/cras_audio_handler.h"
 
 using base::RecordAction;
 using base::UserMetricsAction;
@@ -105,9 +103,9 @@ const net::BackoffEntry::Policy kDoodleBackoffPolicy = {
   false,
 };
 
-bool InSpeechRecognition(SpeechRecognitionState state) {
-  return state == SPEECH_RECOGNITION_RECOGNIZING ||
-      state == SPEECH_RECOGNITION_IN_SPEECH;
+bool InSpeechRecognition(SpeechRecognizerState state) {
+  return state == SPEECH_RECOGNIZER_RECOGNIZING ||
+         state == SPEECH_RECOGNIZER_IN_SPEECH;
 }
 
 }  // namespace
@@ -177,17 +175,17 @@ class StartPageService::StartPageWebContentsDelegate
       const content::OpenURLParams& params) override {
     // Force all links to open in a new tab, even if they were trying to open a
     // window.
-    chrome::NavigateParams new_tab_params(
-        static_cast<Browser*>(nullptr), params.url, params.transition);
+    NavigateParams new_tab_params(static_cast<Browser*>(nullptr), params.url,
+                                  params.transition);
     if (params.disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB) {
       new_tab_params.disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
     } else {
       new_tab_params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-      new_tab_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
+      new_tab_params.window_action = NavigateParams::SHOW_WINDOW;
     }
 
     new_tab_params.initiating_profile = profile_;
-    chrome::Navigate(&new_tab_params);
+    Navigate(&new_tab_params);
 
     return new_tab_params.target_contents;
   }
@@ -228,8 +226,6 @@ class StartPageService::AudioStatus
 
  private:
   void CheckAndUpdate() {
-    // TODO(mukai): If the system can listen, this should also restart the
-    // hotword recognition.
     start_page_service_->OnMicrophoneChanged(CanListen());
   }
 
@@ -296,7 +292,7 @@ StartPageService* StartPageService::Get(Profile* profile) {
 StartPageService::StartPageService(Profile* profile)
     : profile_(profile),
       profile_destroy_observer_(new ProfileDestroyObserver(this)),
-      state_(app_list::SPEECH_RECOGNITION_READY),
+      state_(SPEECH_RECOGNIZER_READY),
       speech_button_toggled_manually_(false),
       speech_result_obtained_(false),
       webui_finished_loading_(false),
@@ -340,12 +336,13 @@ void StartPageService::OnNetworkChanged(bool available) {
 
 void StartPageService::UpdateRecognitionState() {
   if (ShouldEnableSpeechRecognition()) {
-    if (state_ == SPEECH_RECOGNITION_OFF ||
-        state_ == SPEECH_RECOGNITION_NETWORK_ERROR)
-      OnSpeechRecognitionStateChanged(SPEECH_RECOGNITION_READY);
+    if (state_ == SPEECH_RECOGNIZER_OFF ||
+        state_ == SPEECH_RECOGNIZER_NETWORK_ERROR)
+      OnSpeechRecognitionStateChanged(SPEECH_RECOGNIZER_READY);
   } else {
-    OnSpeechRecognitionStateChanged(network_available_ ? SPEECH_RECOGNITION_OFF
-                                        : SPEECH_RECOGNITION_NETWORK_ERROR);
+    OnSpeechRecognitionStateChanged(network_available_
+                                        ? SPEECH_RECOGNIZER_OFF
+                                        : SPEECH_RECOGNIZER_NETWORK_ERROR);
   }
 }
 
@@ -421,15 +418,7 @@ void StartPageService::StopSpeechRecognition() {
   // When the SpeechRecognizer is destroyed above, we get stuck in the current
   // speech state instead of being reset into the READY state. Reset the speech
   // state explicitly so that speech works when the launcher is opened again.
-  OnSpeechRecognitionStateChanged(SPEECH_RECOGNITION_READY);
-}
-
-bool StartPageService::HotwordEnabled() {
-  HotwordService* service = HotwordServiceFactory::GetForProfile(profile_);
-  return state_ != SPEECH_RECOGNITION_OFF &&
-      service &&
-      (service->IsSometimesOnEnabled() || service->IsAlwaysOnEnabled()) &&
-      service->IsServiceAvailable();
+  OnSpeechRecognitionStateChanged(SPEECH_RECOGNIZER_READY);
 }
 
 content::WebContents* StartPageService::GetStartPageContents() {
@@ -451,8 +440,6 @@ void StartPageService::OnSpeechResult(
     speech_result_obtained_ = true;
     RecordAction(UserMetricsAction("AppList_SearchedBySpeech"));
   }
-  for (auto& observer : observers_)
-    observer.OnSpeechResult(query, is_final);
 }
 
 void StartPageService::OnSpeechSoundLevelChanged(int16_t level) {
@@ -461,32 +448,27 @@ void StartPageService::OnSpeechSoundLevelChanged(int16_t level) {
 }
 
 void StartPageService::OnSpeechRecognitionStateChanged(
-    SpeechRecognitionState new_state) {
+    SpeechRecognizerState new_state) {
   // Sometimes this can be called even though there are no audio input devices.
   if (audio_status_ && !audio_status_->CanListen())
-    new_state = SPEECH_RECOGNITION_OFF;
+    new_state = SPEECH_RECOGNIZER_OFF;
   if (!microphone_available_)
-    new_state = SPEECH_RECOGNITION_OFF;
+    new_state = SPEECH_RECOGNIZER_OFF;
   if (!network_available_)
-    new_state = SPEECH_RECOGNITION_NETWORK_ERROR;
+    new_state = SPEECH_RECOGNIZER_NETWORK_ERROR;
 
   if (state_ == new_state)
     return;
 
-  if ((new_state == SPEECH_RECOGNITION_READY ||
-       new_state == SPEECH_RECOGNITION_OFF ||
-       new_state == SPEECH_RECOGNITION_NETWORK_ERROR) &&
+  if ((new_state == SPEECH_RECOGNIZER_READY ||
+       new_state == SPEECH_RECOGNIZER_OFF ||
+       new_state == SPEECH_RECOGNIZER_NETWORK_ERROR) &&
       speech_recognizer_) {
     speech_recognizer_->Stop();
   }
 
   if (!InSpeechRecognition(state_) && InSpeechRecognition(new_state)) {
-    if (!speech_button_toggled_manually_ &&
-        state_ == SPEECH_RECOGNITION_HOTWORD_LISTENING) {
-      RecordAction(UserMetricsAction("AppList_HotwordRecognized"));
-    } else {
       RecordAction(UserMetricsAction("AppList_VoiceSearchStartedManually"));
-    }
   } else if (InSpeechRecognition(state_) && !InSpeechRecognition(new_state) &&
              !speech_result_obtained_) {
     RecordAction(UserMetricsAction("AppList_VoiceSearchCanceled"));
@@ -496,18 +478,6 @@ void StartPageService::OnSpeechRecognitionStateChanged(
   state_ = new_state;
   for (auto& observer : observers_)
     observer.OnSpeechRecognitionStateChanged(new_state);
-}
-
-void StartPageService::GetSpeechAuthParameters(std::string* auth_scope,
-                                               std::string* auth_token) {
-  HotwordService* service = HotwordServiceFactory::GetForProfile(profile_);
-  if (service &&
-      service->IsOptedIntoAudioLogging() &&
-      service->IsAlwaysOnEnabled() &&
-      !speech_auth_helper_->GetToken().empty()) {
-    *auth_scope = speech_auth_helper_->GetScope();
-    *auth_token = speech_auth_helper_->GetToken();
-  }
 }
 
 void StartPageService::Shutdown() {

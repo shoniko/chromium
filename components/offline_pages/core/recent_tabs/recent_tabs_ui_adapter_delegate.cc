@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/offline_pages/core/client_policy_controller.h"
 #include "components/offline_pages/core/offline_page_model.h"
@@ -32,7 +33,7 @@ RecentTabsUIAdapterDelegate::GetOrCreateRecentTabsUIAdapter(
 
   if (!recent_tabs_ui_adapter) {
     auto delegate =
-        base::MakeUnique<RecentTabsUIAdapterDelegate>(offline_page_model);
+        std::make_unique<RecentTabsUIAdapterDelegate>(offline_page_model);
     recent_tabs_ui_adapter = new DownloadUIAdapter(
         nullptr, offline_page_model, request_coordinator, std::move(delegate));
     offline_page_model->SetUserData(kRecentTabsUIAdapterKey,

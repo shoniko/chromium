@@ -194,8 +194,12 @@ void PDFResource::SetAccessibilityPageInfo(
 }
 
 void PDFResource::SetCrashData(const char* pdf_url, const char* top_level_url) {
-  if (pdf_url)
-    base::debug::SetCrashKeyValue("subresource_url", pdf_url);
+  if (pdf_url) {
+    static base::debug::CrashKeyString* subresource_url =
+        base::debug::AllocateCrashKeyString("subresource_url",
+                                            base::debug::CrashKeySize::Size256);
+    base::debug::SetCrashKeyString(subresource_url, pdf_url);
+  }
   if (top_level_url)
     PluginGlobals::Get()->SetActiveURL(top_level_url);
 }
@@ -206,6 +210,10 @@ void PDFResource::SelectionChanged(const PP_FloatPoint& left,
                                    int32_t right_height) {
   Post(RENDERER, PpapiHostMsg_PDF_SelectionChanged(left, left_height, right,
                                                    right_height));
+}
+
+void PDFResource::DidScroll() {
+  Post(RENDERER, PpapiHostMsg_PDF_DidScroll());
 }
 
 }  // namespace proxy

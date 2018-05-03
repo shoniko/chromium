@@ -39,7 +39,7 @@ class StatusAreaWidgetDelegateAnimationSettings
     SetTweenType(gfx::Tween::EASE_IN_OUT);
   }
 
-  ~StatusAreaWidgetDelegateAnimationSettings() override {}
+  ~StatusAreaWidgetDelegateAnimationSettings() override = default;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StatusAreaWidgetDelegateAnimationSettings);
@@ -60,7 +60,7 @@ StatusAreaWidgetDelegate::StatusAreaWidgetDelegate(Shelf* shelf)
   layer()->SetFillsBoundsOpaquely(false);
 }
 
-StatusAreaWidgetDelegate::~StatusAreaWidgetDelegate() {}
+StatusAreaWidgetDelegate::~StatusAreaWidgetDelegate() = default;
 
 void StatusAreaWidgetDelegate::SetFocusCyclerForTesting(
     const FocusCycler* focus_cycler) {
@@ -121,7 +121,8 @@ bool StatusAreaWidgetDelegate::CanActivate() const {
 void StatusAreaWidgetDelegate::DeleteDelegate() {}
 
 void StatusAreaWidgetDelegate::AddTray(views::View* tray) {
-  SetLayoutManager(NULL);  // Reset layout manager before adding a child.
+  // Reset layout manager before adding a child.
+  SetLayoutManager(nullptr);
   AddChildView(tray);
   // Set the layout manager with the new list of children.
   UpdateLayout();
@@ -130,7 +131,8 @@ void StatusAreaWidgetDelegate::AddTray(views::View* tray) {
 void StatusAreaWidgetDelegate::UpdateLayout() {
   // Use a grid layout so that the trays can be centered in each cell, and
   // so that the widget gets laid out correctly when tray sizes change.
-  views::GridLayout* layout = views::GridLayout::CreateAndInstall(this);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   // Update tray border based on layout.
   bool is_child_on_edge = true;

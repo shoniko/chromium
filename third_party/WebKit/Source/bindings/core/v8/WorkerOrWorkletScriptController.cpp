@@ -46,7 +46,7 @@
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerOrWorkletGlobalScope.h"
 #include "core/workers/WorkerThread.h"
-#include "platform/bindings/ConditionalFeatures.h"
+#include "platform/bindings/OriginTrialFeatures.h"
 #include "platform/bindings/V8DOMWrapper.h"
 #include "platform/bindings/V8ObjectConstructor.h"
 #include "platform/bindings/WrapperTypeInfo.h"
@@ -145,7 +145,7 @@ bool WorkerOrWorkletScriptController::InitializeContextIfNeeded(
 
   // Create a new v8::Context with the worker/worklet as the global object
   // (aka the inner global).
-  ScriptWrappable* script_wrappable = global_scope_->GetScriptWrappable();
+  auto* script_wrappable = static_cast<ScriptWrappable*>(global_scope_);
   const WrapperTypeInfo* wrapper_type_info =
       script_wrappable->GetWrapperTypeInfo();
   v8::Local<v8::FunctionTemplate> global_interface_template =
@@ -238,24 +238,9 @@ bool WorkerOrWorkletScriptController::InitializeContextIfNeeded(
                                              human_readable_name);
   }
 
-  InstallConditionalFeaturesOnGlobal(wrapper_type_info, script_state_.get());
-
-  return true;
-}
-
-ScriptValue WorkerOrWorkletScriptController::Evaluate(
-    const String& script,
-    const String& file_name,
-    const TextPosition& script_start_position,
-    CachedMetadataHandler* cache_handler,
-    V8CacheOptions v8_cache_options) {
-  TRACE_EVENT1("devtools.timeline", "EvaluateScript", "data",
-               InspectorEvaluateScriptEvent::Data(nullptr, file_name,
-                                                  script_start_position));
-  if (!InitializeContextIfNeeded(String()))
-    return ScriptValue();
-
-  ScriptState::Scope scope(script_state_.get());
+  wrapper_type_info->InstallConditionalFeatures(
+      context, *world_, global_object, v8::Local<v8::Object>(),
+      v8::Local<v8::Function>(), global_interface_template);
 
   if (!disable_eval_pending_.IsEmpty()) {
     script_state_->GetContext()->AllowCodeGenerationFromStrings(false);
@@ -263,6 +248,20 @@ ScriptValue WorkerOrWorkletScriptController::Evaluate(
         V8String(isolate_, disable_eval_pending_));
     disable_eval_pending_ = String();
   }
+
+  return true;
+}
+
+ScriptValue WorkerOrWorkletScriptController::EvaluateInternal(
+    const ScriptSourceCode& source_code,
+    V8CacheOptions v8_cache_options) {
+  TRACE_EVENT1("devtools.timeline", "EvaluateScript", "data",
+               InspectorEvaluateScriptEvent::Data(nullptr, source_code.Url(),
+                                                  source_code.StartPosition()));
+  if (!InitializeContextIfNeeded(String()))
+    return ScriptValue();
+
+  ScriptState::Scope scope(script_state_.get());
 
   v8::TryCatch block(isolate_);
 
@@ -272,10 +271,9 @@ ScriptValue WorkerOrWorkletScriptController::Evaluate(
   // - A work{er,let} script doesn't have a nonce, and
   // - a work{er,let} script is always "not parser inserted".
   ReferrerScriptInfo referrer_info;
-  if (V8ScriptRunner::CompileScript(script_state_.get(), script, file_name,
-                                    String(), script_start_position,
-                                    cache_handler, kSharableCrossOrigin,
-                                    v8_cache_options, referrer_info)
+  if (V8ScriptRunner::CompileScript(script_state_.get(), source_code,
+                                    kSharableCrossOrigin, v8_cache_options,
+                                    referrer_info)
           .ToLocal(&compiled_script))
     maybe_result = V8ScriptRunner::RunCompiledScript(isolate_, compiled_script,
                                                      global_scope_);
@@ -308,14 +306,12 @@ ScriptValue WorkerOrWorkletScriptController::Evaluate(
 bool WorkerOrWorkletScriptController::Evaluate(
     const ScriptSourceCode& source_code,
     ErrorEvent** error_event,
-    CachedMetadataHandler* cache_handler,
     V8CacheOptions v8_cache_options) {
   if (IsExecutionForbidden())
     return false;
 
   ExecutionState state(this);
-  Evaluate(source_code.Source(), source_code.Url().GetString(),
-           source_code.StartPosition(), cache_handler, v8_cache_options);
+  EvaluateInternal(source_code, v8_cache_options);
   if (IsExecutionForbidden())
     return false;
 
@@ -359,8 +355,7 @@ bool WorkerOrWorkletScriptController::Evaluate(
 ScriptValue WorkerOrWorkletScriptController::EvaluateAndReturnValueForTest(
     const ScriptSourceCode& source_code) {
   ExecutionState state(this);
-  return Evaluate(source_code.Source(), source_code.Url().GetString(),
-                  source_code.StartPosition(), nullptr, kV8CacheOptionsDefault);
+  return EvaluateInternal(source_code, kV8CacheOptionsDefault);
 }
 
 void WorkerOrWorkletScriptController::ForbidExecution() {

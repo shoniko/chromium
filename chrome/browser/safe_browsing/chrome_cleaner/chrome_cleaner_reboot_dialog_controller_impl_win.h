@@ -8,13 +8,15 @@
 #include "base/sequence_checker.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_controller_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_reboot_dialog_controller_win.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 
 class Browser;
 
 namespace safe_browsing {
 
 class ChromeCleanerRebootDialogControllerImpl
-    : public ChromeCleanerRebootDialogController {
+    : public ChromeCleanerRebootDialogController,
+      public BrowserListObserver {
  public:
   class PromptDelegate {
    public:
@@ -23,6 +25,7 @@ class ChromeCleanerRebootDialogControllerImpl
         Browser* browser,
         ChromeCleanerRebootDialogControllerImpl* controller) = 0;
     virtual void OpenSettingsPage(Browser* browser) = 0;
+    virtual void OnSettingsPageIsActiveTab() = 0;
   };
 
   // Creates a new controller object and either starts or schedules the reboot
@@ -42,6 +45,9 @@ class ChromeCleanerRebootDialogControllerImpl
   void Cancel() override;
   void Close() override;
 
+  // chrome::BrowserListObserver overrides.
+  void OnBrowserSetLastActive(Browser* browser) override;
+
  protected:
   // Use Create() to create and initialize new objects.
   ChromeCleanerRebootDialogControllerImpl(
@@ -55,8 +61,9 @@ class ChromeCleanerRebootDialogControllerImpl
   void MaybeStartRebootPrompt();
 
   // Shows the reboot prompt dialog in |browser| if the reboot prompt experiment
-  // is on and the Settings page is not the currently active tab. Otherwise,
-  // this will reopen the Settings page on a background tab.
+  // is on and the Settings page containing Chrome Cleanup UI is not the
+  // currently active tab. Otherwise, this will reopen the Settings page on a
+  // background tab.
   void StartRebootPromptForBrowser(Browser* browser);
 
   void OnInteractionDone();
@@ -64,6 +71,8 @@ class ChromeCleanerRebootDialogControllerImpl
   ChromeCleanerController* cleaner_controller_ = nullptr;
 
   std::unique_ptr<PromptDelegate> prompt_delegate_;
+
+  bool waiting_for_browser_ = false;
 
   // Used to check that modifications to |profile_resetters_| are sequenced
   // correctly.

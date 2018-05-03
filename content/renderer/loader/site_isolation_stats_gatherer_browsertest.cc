@@ -13,6 +13,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -23,9 +24,7 @@ namespace content {
 // resources from other websites, not constrained by the Same Origin Policy.  We
 // are trying to verify that the renderer cannot fetch any cross-site document
 // responses even when the Same Origin Policy is turned off inside the renderer.
-class SiteIsolationStatsGathererBrowserTest
-    : public ContentBrowserTest,
-      public testing::WithParamInterface<bool> {
+class SiteIsolationStatsGathererBrowserTest : public ContentBrowserTest {
  public:
   SiteIsolationStatsGathererBrowserTest() {}
   ~SiteIsolationStatsGathererBrowserTest() override {}
@@ -48,11 +47,6 @@ class SiteIsolationStatsGathererBrowserTest
     // Since we assume exploited renderer process, it can bypass the same origin
     // policy at will. Simulate that by passing the disable-web-security flag.
     command_line->AppendSwitch(switches::kDisableWebSecurity);
-
-    if (GetParam()) {
-      command_line->AppendSwitchASCII("--enable-blink-features",
-                                      "LoadingWithMojo");
-    }
   }
 
   void SetUpOnMainThread() override {
@@ -107,6 +101,10 @@ class SiteIsolationStatsGathererBrowserTest
         expected_metrics[base + ".NotBlocked.MaybeJS"] = 1;
       }
     }
+    // This metric from the browser process also records start and stop actions
+    // for the blocking logic, even though blocking is disabled in the browser
+    // process when this test runs.
+    expected_metrics["SiteIsolation.XSD.Browser.Action"] = 2;
 
     // Make sure that the expected metrics, and only those metrics, were
     // incremented.
@@ -131,17 +129,23 @@ class SiteIsolationStatsGathererBrowserTest
   DISALLOW_COPY_AND_ASSIGN(SiteIsolationStatsGathererBrowserTest);
 };
 
-IN_PROC_BROWSER_TEST_P(SiteIsolationStatsGathererBrowserTest,
+IN_PROC_BROWSER_TEST_F(SiteIsolationStatsGathererBrowserTest,
                        CrossSiteDocumentBlockingForMimeType) {
+  // This test is disabled in --site-per-process, since the documents are
+  // blocked before arriving in the renderer process and thus the existing
+  // histograms do not work.
+  if (AreAllSitesIsolatedForTesting())
+    return;
+
   // Load a page that issues illegal cross-site document requests to bar.com.
   // The page uses XHR to request HTML/XML/JSON documents from bar.com, and
   // inspects if any of them were successfully received. Currently, on illegal
   // access, the XHR requests should succeed, but the UMA histograms should
   // record that they would have been blocked. This test is only possible since
   // we run the browser without the same origin policy.
-  GURL foo("http://foo.com/cross_site_document_request.html");
+  GURL foo("http://foo.com/cross_site_document_blocking/request.html");
 
-  NavigateToURL(shell(), foo);
+  EXPECT_TRUE(NavigateToURL(shell(), foo));
 
   // Flush out existing histogram activity.
   FetchHistogramsFromChildProcesses();
@@ -149,18 +153,9 @@ IN_PROC_BROWSER_TEST_P(SiteIsolationStatsGathererBrowserTest,
   // The following are files under content/test/data/site_isolation. All
   // should be disallowed for cross site XHR under the document blocking policy.
   const char* blocked_resources[] = {
-      "comment_valid.html",
-      "html.txt",
-      "html4_dtd.html",
-      "html4_dtd.txt",
-      "html5_dtd.html",
-      "html5_dtd.txt",
-      "json.txt",
-      "valid.html",
-      "valid.json",
-      "valid.xml",
-      "xml.txt",
-  };
+      "comment_valid.html", "html.txt",      "html4_dtd.html", "html4_dtd.txt",
+      "html5_dtd.html",     "html5_dtd.txt", "json.txt",       "valid.html",
+      "valid.json",         "valid.xml",     "xml.txt"};
 
   for (const char* resource : blocked_resources) {
     SCOPED_TRACE(base::StringPrintf("... while testing page: %s", resource));
@@ -168,7 +163,7 @@ IN_PROC_BROWSER_TEST_P(SiteIsolationStatsGathererBrowserTest,
 
     bool was_blocked;
     ASSERT_TRUE(ExecuteScriptAndExtractBool(
-        shell(), base::StringPrintf("sendRequest(\"%s\");", resource),
+        shell(), base::StringPrintf("sendRequest('%s');", resource),
         &was_blocked));
     ASSERT_FALSE(was_blocked);
 
@@ -176,23 +171,16 @@ IN_PROC_BROWSER_TEST_P(SiteIsolationStatsGathererBrowserTest,
   }
 
   // These files should be allowed for XHR under the document blocking policy.
-  const char* allowed_resources[] = {"js.html",
-                                     "comment_js.html",
-                                     "js.xml",
-                                     "js.json",
-                                     "js.txt",
-                                     "img.html",
-                                     "img.xml",
-                                     "img.json",
-                                     "img.txt",
-                                     "comment_js.html"};
+  const char* allowed_resources[] = {"js.html", "comment_js.html", "js.xml",
+                                     "js.json", "js.txt",          "img.html",
+                                     "img.xml", "img.json",        "img.txt"};
   for (const char* resource : allowed_resources) {
     SCOPED_TRACE(base::StringPrintf("... while testing page: %s", resource));
     base::HistogramTester histograms;
 
     bool was_blocked;
     ASSERT_TRUE(ExecuteScriptAndExtractBool(
-        shell(), base::StringPrintf("sendRequest(\"%s\");", resource),
+        shell(), base::StringPrintf("sendRequest('%s');", resource),
         &was_blocked));
     ASSERT_FALSE(was_blocked);
 
@@ -200,7 +188,7 @@ IN_PROC_BROWSER_TEST_P(SiteIsolationStatsGathererBrowserTest,
   }
 }
 
-IN_PROC_BROWSER_TEST_P(SiteIsolationStatsGathererBrowserTest,
+IN_PROC_BROWSER_TEST_F(SiteIsolationStatsGathererBrowserTest,
                        CrossSiteDocumentBlockingForDifferentTargets) {
   // This webpage loads a cross-site HTML page in different targets such as
   // <img>,<link>,<embed>, etc. Since the requested document is blocked, and one
@@ -211,12 +199,8 @@ IN_PROC_BROWSER_TEST_P(SiteIsolationStatsGathererBrowserTest,
 
   // TODO(nick): Split up these cases, and add positive assertions here about
   // what actually happens in these various resource-block cases.
-  GURL foo("http://foo.com/cross_site_document_request_target.html");
-  NavigateToURL(shell(), foo);
+  GURL foo("http://foo.com/cross_site_document_blocking/request_target.html");
+  EXPECT_TRUE(NavigateToURL(shell(), foo));
 }
-
-INSTANTIATE_TEST_CASE_P(SiteIsolationStatsGathererBrowserTest,
-                        SiteIsolationStatsGathererBrowserTest,
-                        ::testing::Values(false, true));
 
 }  // namespace content

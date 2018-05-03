@@ -5,7 +5,11 @@
 #ifndef WebURLLoaderFactory_h
 #define WebURLLoaderFactory_h
 
-#include "public/platform/scheduler/single_thread_task_runner.h"
+#include "base/memory/scoped_refptr.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace blink {
 
@@ -16,13 +20,13 @@ class WebURLRequest;
 // loading context holds its own per-context WebURLLoaderFactory.
 class WebURLLoaderFactory {
  public:
-  virtual ~WebURLLoaderFactory() {}
+  virtual ~WebURLLoaderFactory() = default;
 
   // Returns a new WebURLLoader instance. This should internally choose
   // the most appropriate URLLoaderFactory implementation.
   virtual std::unique_ptr<WebURLLoader> CreateURLLoader(
       const WebURLRequest&,
-      SingleThreadTaskRunnerRefPtr) = 0;
+      scoped_refptr<base::SingleThreadTaskRunner>) = 0;
 };
 
 }  // namespace blink

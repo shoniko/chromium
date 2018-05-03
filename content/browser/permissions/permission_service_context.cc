@@ -72,7 +72,16 @@ PermissionServiceContext::~PermissionServiceContext() {
 
 void PermissionServiceContext::CreateService(
     blink::mojom::PermissionServiceRequest request) {
-  services_.AddBinding(base::MakeUnique<PermissionServiceImpl>(this),
+  DCHECK(render_frame_host_);
+  services_.AddBinding(std::make_unique<PermissionServiceImpl>(
+                           this, render_frame_host_->GetLastCommittedOrigin()),
+                       std::move(request));
+}
+
+void PermissionServiceContext::CreateServiceForWorker(
+    blink::mojom::PermissionServiceRequest request,
+    const url::Origin& origin) {
+  services_.AddBinding(std::make_unique<PermissionServiceImpl>(this, origin),
                        std::move(request));
 }
 
@@ -85,7 +94,7 @@ void PermissionServiceContext::CreateSubscription(
     return;
 
   auto subscription =
-      base::MakeUnique<PermissionSubscription>(this, std::move(observer));
+      std::make_unique<PermissionSubscription>(this, std::move(observer));
   GURL requesting_origin(origin.Serialize());
   GURL embedding_origin = GetEmbeddingOrigin();
   int subscription_id =

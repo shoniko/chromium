@@ -9,18 +9,24 @@
 #include <utility>
 #include <vector>
 
+#include "base/json/json_reader.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
+#include "chrome/browser/printing/print_view_manager.h"
+#include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/browser/ui/webui/print_preview/printer_handler.h"
 #include "chrome/common/cloud_print/cloud_print_cdd_conversion.h"
 #include "chrome/common/crash_keys.h"
+#include "content/public/browser/render_frame_host.h"
 #include "printing/backend/print_backend.h"
 #include "printing/backend/print_backend_consts.h"
+#include "printing/page_range.h"
 
 #if defined(OS_WIN)
 #include "base/strings/string_split.h"
@@ -101,7 +107,7 @@ std::string GetUserFriendlyName(const std::string& printer_name) {
 void PrintersToValues(const PrinterList& printer_list,
                       base::ListValue* printers) {
   for (const PrinterBasicInfo& printer : printer_list) {
-    auto printer_info = base::MakeUnique<base::DictionaryValue>();
+    auto printer_info = std::make_unique<base::DictionaryValue>();
     printer_info->SetString(kSettingDeviceName, printer.printer_name);
 
     const auto printer_name_description = GetPrinterNameAndDescription(printer);
@@ -110,7 +116,7 @@ void PrintersToValues(const PrinterList& printer_list,
     printer_info->SetString(kSettingPrinterName, printer_name);
     printer_info->SetString(kSettingPrinterDescription, printer_description);
 
-    auto options = base::MakeUnique<base::DictionaryValue>();
+    auto options = std::make_unique<base::DictionaryValue>();
     for (const auto opt_it : printer.options)
       options->SetString(opt_it.first, opt_it.second);
 
@@ -143,22 +149,26 @@ bool VendorCapabilityInvalid(const base::Value& val) {
   if (!val.is_dict())
     return true;
   const base::Value* option_type =
-      val.FindPathOfType({kTypeKey}, base::Value::Type::STRING);
+      val.FindKeyOfType(kTypeKey, base::Value::Type::STRING);
   if (!option_type)
     return true;
   if (option_type->GetString() != kSelectString)
     return false;
   const base::Value* select_cap =
-      val.FindPathOfType({kSelectCapKey}, base::Value::Type::DICTIONARY);
+      val.FindKeyOfType(kSelectCapKey, base::Value::Type::DICTIONARY);
   if (!select_cap)
     return true;
   const base::Value* options_list =
-      select_cap->FindPathOfType({kOptionKey}, base::Value::Type::LIST);
+      select_cap->FindKeyOfType(kOptionKey, base::Value::Type::LIST);
   if (!options_list || options_list->GetList().empty() ||
       GetFilteredList(options_list, ValueIsNull).GetList().empty()) {
     return true;
   }
   return false;
+}
+
+void SystemDialogDone(const base::Value& error) {
+  // intentional no-op
 }
 
 }  // namespace
@@ -193,7 +203,7 @@ std::unique_ptr<base::DictionaryValue> GetSettingsOnBlockingPool(
   const std::string& printer_name = printer_name_description.first;
   const std::string& printer_description = printer_name_description.second;
 
-  auto printer_info = base::MakeUnique<base::DictionaryValue>();
+  auto printer_info = std::make_unique<base::DictionaryValue>();
   printer_info->SetString(kSettingDeviceName, device_name);
   printer_info->SetString(kSettingPrinterName, printer_name);
   printer_info->SetString(kSettingPrinterDescription, printer_description);
@@ -213,7 +223,7 @@ std::unique_ptr<base::DictionaryValue> GetSettingsOnBlockingPool(
 
 void ConvertPrinterListForCallback(
     const PrinterHandler::AddedPrintersCallback& callback,
-    const PrinterHandler::GetPrintersDoneCallback& done_callback,
+    PrinterHandler::GetPrintersDoneCallback done_callback,
     const PrinterList& printer_list) {
   base::ListValue printers;
   PrintersToValues(printer_list, &printers);
@@ -222,33 +232,33 @@ void ConvertPrinterListForCallback(
           << " printers";
   if (!printers.empty())
     callback.Run(printers);
-  done_callback.Run();
+  std::move(done_callback).Run();
 }
 
 std::unique_ptr<base::DictionaryValue> ValidateCddForPrintPreview(
     const base::DictionaryValue& cdd) {
   auto validated_cdd =
       base::DictionaryValue::From(base::Value::ToUniquePtrValue(cdd.Clone()));
-  const base::Value* caps = cdd.FindPath({kPrinter});
+  const base::Value* caps = cdd.FindKey(kPrinter);
   if (!caps || !caps->is_dict())
     return validated_cdd;
-  validated_cdd->RemovePath({kPrinter});
+  validated_cdd->RemoveKey(kPrinter);
   auto out_caps = std::make_unique<base::DictionaryValue>();
   for (const auto& capability : caps->DictItems()) {
-    const auto& path = capability.first;
+    const auto& key = capability.first;
     const base::Value& value = capability.second;
 
     const base::Value* list = nullptr;
     if (value.is_dict())
-      list = value.FindPathOfType({kOptionKey}, base::Value::Type::LIST);
+      list = value.FindKeyOfType(kOptionKey, base::Value::Type::LIST);
     else if (value.is_list())
       list = &value;
     if (!list) {
-      out_caps->SetPath({path}, value.Clone());
+      out_caps->SetKey(key, value.Clone());
       continue;
     }
 
-    bool is_vendor_capability = path == kVendorCapabilityKey;
+    bool is_vendor_capability = key == kVendorCapabilityKey;
     base::Value out_list = GetFilteredList(
         list, is_vendor_capability ? VendorCapabilityInvalid : ValueIsNull);
     if (out_list.GetList().empty())  // leave out empty lists.
@@ -257,29 +267,66 @@ std::unique_ptr<base::DictionaryValue> ValidateCddForPrintPreview(
       // Need to also filter the individual capability lists.
       for (auto& vendor_option : out_list.GetList()) {
         const base::Value* option_type =
-            vendor_option.FindPathOfType({kTypeKey}, base::Value::Type::STRING);
+            vendor_option.FindKeyOfType(kTypeKey, base::Value::Type::STRING);
         if (option_type->GetString() != kSelectString)
           continue;
 
-        base::Value* options_dict = vendor_option.FindPathOfType(
-            {kSelectCapKey}, base::Value::Type::DICTIONARY);
+        base::Value* options_dict = vendor_option.FindKeyOfType(
+            kSelectCapKey, base::Value::Type::DICTIONARY);
         const base::Value* options_list =
-            options_dict->FindPathOfType({kOptionKey}, base::Value::Type::LIST);
-        options_dict->SetPath({kOptionKey},
-                              GetFilteredList(options_list, ValueIsNull));
+            options_dict->FindKeyOfType(kOptionKey, base::Value::Type::LIST);
+        options_dict->SetKey(kOptionKey,
+                             GetFilteredList(options_list, ValueIsNull));
       }
     }
     if (value.is_dict()) {
-      base::Value::DictStorage option_dict;
-      option_dict[kOptionKey] =
-          base::Value::ToUniquePtrValue(std::move(out_list));
-      out_caps->SetPath({path}, base::Value(option_dict));
+      base::Value option_dict(base::Value::Type::DICTIONARY);
+      option_dict.SetKey(kOptionKey, std::move(out_list));
+      out_caps->SetKey(key, std::move(option_dict));
     } else {
-      out_caps->SetPath({path}, std::move(out_list));
+      out_caps->SetKey(key, std::move(out_list));
     }
   }
   validated_cdd->SetDictionary(kPrinter, std::move(out_caps));
   return validated_cdd;
 }
 
+void StartLocalPrint(const std::string& ticket_json,
+                     const scoped_refptr<base::RefCountedBytes>& print_data,
+                     content::WebContents* preview_web_contents,
+                     PrinterHandler::PrintCallback callback) {
+  std::unique_ptr<base::DictionaryValue> job_settings =
+      base::DictionaryValue::From(base::JSONReader::Read(ticket_json));
+  if (!job_settings) {
+    std::move(callback).Run(base::Value("Invalid settings"));
+    return;
+  }
+
+  // Get print view manager.
+  PrintPreviewDialogController* dialog_controller =
+      PrintPreviewDialogController::GetInstance();
+  content::WebContents* initiator =
+      dialog_controller ? dialog_controller->GetInitiator(preview_web_contents)
+                        : nullptr;
+  PrintViewManager* print_view_manager =
+      initiator ? PrintViewManager::FromWebContents(initiator) : nullptr;
+  if (!print_view_manager) {
+    std::move(callback).Run(base::Value("Initiator closed"));
+    return;
+  }
+
+  bool system_dialog = false;
+  job_settings->GetBoolean(printing::kSettingShowSystemDialog, &system_dialog);
+  bool open_in_pdf = false;
+  job_settings->GetBoolean(printing::kSettingOpenPDFInPreview, &open_in_pdf);
+  if (system_dialog || open_in_pdf) {
+    // Run the callback early, or the modal dialogs will prevent the preview
+    // from closing until they do.
+    std::move(callback).Run(base::Value());
+    callback = base::BindOnce(&SystemDialogDone);
+  }
+  print_view_manager->PrintForPrintPreview(std::move(job_settings), print_data,
+                                           preview_web_contents->GetMainFrame(),
+                                           std::move(callback));
+}
 }  // namespace printing

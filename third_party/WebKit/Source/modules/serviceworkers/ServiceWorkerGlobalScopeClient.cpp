@@ -33,8 +33,8 @@
 #include <memory>
 #include <utility>
 #include "core/dom/ExecutionContext.h"
+#include "core/fetch/Response.h"
 #include "core/workers/WorkerGlobalScope.h"
-#include "modules/fetch/Response.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/modules/payments/WebPaymentHandlerResponse.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
@@ -67,7 +67,7 @@ void ServiceWorkerGlobalScopeClient::OpenWindowForClients(
 void ServiceWorkerGlobalScopeClient::OpenWindowForPaymentHandler(
     const WebURL& url,
     std::unique_ptr<WebServiceWorkerClientCallbacks> callbacks) {
-  client_.OpenNewPopup(url, std::move(callbacks));
+  client_.OpenPaymentHandlerWindow(url, std::move(callbacks));
 }
 
 void ServiceWorkerGlobalScopeClient::SetCachedMetadata(const WebURL& url,
@@ -78,10 +78,6 @@ void ServiceWorkerGlobalScopeClient::SetCachedMetadata(const WebURL& url,
 
 void ServiceWorkerGlobalScopeClient::ClearCachedMetadata(const WebURL& url) {
   client_.ClearCachedMetadata(url);
-}
-
-WebURL ServiceWorkerGlobalScopeClient::Scope() const {
-  return client_.Scope();
 }
 
 void ServiceWorkerGlobalScopeClient::DidHandleActivateEvent(
@@ -272,13 +268,6 @@ void ServiceWorkerGlobalScopeClient::Navigate(
     const WebURL& url,
     std::unique_ptr<WebServiceWorkerClientCallbacks> callback) {
   client_.Navigate(client_uuid, url, std::move(callback));
-}
-
-void ServiceWorkerGlobalScopeClient::RegisterForeignFetchScopes(
-    int install_event_id,
-    const WebVector<WebURL>& sub_scopes,
-    const WebVector<WebSecurityOrigin>& origins) {
-  client_.RegisterForeignFetchScopes(install_event_id, sub_scopes, origins);
 }
 
 const char* ServiceWorkerGlobalScopeClient::SupplementName() {

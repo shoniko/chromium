@@ -29,10 +29,10 @@ TrayItemView::TrayItemView(SystemTrayItem* owner)
     : owner_(owner), label_(NULL), image_view_(NULL) {
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 }
 
-TrayItemView::~TrayItemView() {}
+TrayItemView::~TrayItemView() = default;
 
 void TrayItemView::CreateLabel() {
   label_ = new views::Label;

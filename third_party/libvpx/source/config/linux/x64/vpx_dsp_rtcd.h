@@ -1,3 +1,4 @@
+// This file is generated. Do not edit.
 #ifndef VPX_DSP_RTCD_H_
 #define VPX_DSP_RTCD_H_
 
@@ -972,24 +973,29 @@ void vpx_h_predictor_8x8_sse2(uint8_t* dst,
 #define vpx_h_predictor_8x8 vpx_h_predictor_8x8_sse2
 
 void vpx_hadamard_16x16_c(const int16_t* src_diff,
-                          int src_stride,
+                          ptrdiff_t src_stride,
                           tran_low_t* coeff);
 void vpx_hadamard_16x16_sse2(const int16_t* src_diff,
-                             int src_stride,
+                             ptrdiff_t src_stride,
                              tran_low_t* coeff);
-#define vpx_hadamard_16x16 vpx_hadamard_16x16_sse2
+void vpx_hadamard_16x16_avx2(const int16_t* src_diff,
+                             ptrdiff_t src_stride,
+                             tran_low_t* coeff);
+RTCD_EXTERN void (*vpx_hadamard_16x16)(const int16_t* src_diff,
+                                       ptrdiff_t src_stride,
+                                       tran_low_t* coeff);
 
 void vpx_hadamard_8x8_c(const int16_t* src_diff,
-                        int src_stride,
+                        ptrdiff_t src_stride,
                         tran_low_t* coeff);
 void vpx_hadamard_8x8_sse2(const int16_t* src_diff,
-                           int src_stride,
+                           ptrdiff_t src_stride,
                            tran_low_t* coeff);
 void vpx_hadamard_8x8_ssse3(const int16_t* src_diff,
-                            int src_stride,
+                            ptrdiff_t src_stride,
                             tran_low_t* coeff);
 RTCD_EXTERN void (*vpx_hadamard_8x8)(const int16_t* src_diff,
-                                     int src_stride,
+                                     ptrdiff_t src_stride,
                                      tran_low_t* coeff);
 
 void vpx_he_predictor_4x4_c(uint8_t* dst,
@@ -6260,7 +6266,8 @@ RTCD_EXTERN void (*vpx_sad8x8x8)(const uint8_t* src_ptr,
 
 int vpx_satd_c(const tran_low_t* coeff, int length);
 int vpx_satd_sse2(const tran_low_t* coeff, int length);
-#define vpx_satd vpx_satd_sse2
+int vpx_satd_avx2(const tran_low_t* coeff, int length);
+RTCD_EXTERN int (*vpx_satd)(const tran_low_t* coeff, int length);
 
 void vpx_scaled_2d_c(const uint8_t* src,
                      ptrdiff_t src_stride,
@@ -7604,6 +7611,9 @@ static void setup_rtcd_internal(void) {
   vpx_get16x16var = vpx_get16x16var_sse2;
   if (flags & HAS_AVX2)
     vpx_get16x16var = vpx_get16x16var_avx2;
+  vpx_hadamard_16x16 = vpx_hadamard_16x16_sse2;
+  if (flags & HAS_AVX2)
+    vpx_hadamard_16x16 = vpx_hadamard_16x16_avx2;
   vpx_hadamard_8x8 = vpx_hadamard_8x8_sse2;
   if (flags & HAS_SSSE3)
     vpx_hadamard_8x8 = vpx_hadamard_8x8_ssse3;
@@ -7813,6 +7823,9 @@ static void setup_rtcd_internal(void) {
   vpx_sad8x8x8 = vpx_sad8x8x8_c;
   if (flags & HAS_SSE4_1)
     vpx_sad8x8x8 = vpx_sad8x8x8_sse4_1;
+  vpx_satd = vpx_satd_sse2;
+  if (flags & HAS_AVX2)
+    vpx_satd = vpx_satd_avx2;
   vpx_scaled_2d = vpx_scaled_2d_c;
   if (flags & HAS_SSSE3)
     vpx_scaled_2d = vpx_scaled_2d_ssse3;

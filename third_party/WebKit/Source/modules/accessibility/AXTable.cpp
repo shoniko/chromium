@@ -55,7 +55,7 @@ AXTable::AXTable(LayoutObject* layout_object,
       header_container_(nullptr),
       is_ax_table_(true) {}
 
-AXTable::~AXTable() {}
+AXTable::~AXTable() = default;
 
 void AXTable::Init() {
   AXLayoutObject::Init();
@@ -183,7 +183,7 @@ bool AXTable::IsDataTable() const {
   if (!table_style)
     return false;
   Color table_bg_color =
-      table_style->VisitedDependentColor(CSSPropertyBackgroundColor);
+      table_style->VisitedDependentColor(GetCSSPropertyBackgroundColor());
 
   // check enough of the cells to find if the table matches our criteria
   // Criteria:
@@ -267,8 +267,8 @@ bool AXTable::IsDataTable() const {
       // If the cell has a different color from the table and there is cell
       // spacing, then it is probably a data table cell (spacing and colors take
       // the place of borders).
-      Color cell_color =
-          computed_style->VisitedDependentColor(CSSPropertyBackgroundColor);
+      Color cell_color = computed_style->VisitedDependentColor(
+          GetCSSPropertyBackgroundColor());
       if (table->HBorderSpacing() > 0 && table->VBorderSpacing() > 0 &&
           table_bg_color != cell_color && cell_color.Alpha() != 1)
         background_difference_cell_count++;
@@ -288,7 +288,7 @@ bool AXTable::IsDataTable() const {
         if (!row_computed_style)
           continue;
         Color row_color = row_computed_style->VisitedDependentColor(
-            CSSPropertyBackgroundColor);
+            GetCSSPropertyBackgroundColor());
         alternating_row_colors[alternating_row_color_count] = row_color;
         alternating_row_color_count++;
       }
@@ -379,7 +379,7 @@ void AXTable::AddChildren() {
     return;
 
   LayoutTable* table = ToLayoutTable(layout_object_);
-  AXObjectCacheImpl& ax_cache = AxObjectCache();
+  AXObjectCacheImpl& ax_cache = AXObjectCache();
 
   Node* table_node = table->GetNode();
   if (!IsHTMLTableElement(table_node))
@@ -451,7 +451,7 @@ AXObject* AXTable::HeaderContainer() {
     return header_container_.Get();
 
   AXMockObject* table_header =
-      ToAXMockObject(AxObjectCache().GetOrCreate(kTableHeaderContainerRole));
+      ToAXMockObject(AXObjectCache().GetOrCreate(kTableHeaderContainerRole));
   table_header->SetParent(this);
 
   header_container_ = table_header;

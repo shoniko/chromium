@@ -4,7 +4,12 @@
 
 #import "ios/chrome/browser/ui/dialogs/java_script_dialog_blocking_state.h"
 
+#include <memory>
+
 #include "ios/web/public/load_committed_details.h"
+#import "ios/web/public/navigation_item.h"
+#import "ios/web/public/test/fakes/fake_navigation_context.h"
+#import "ios/web/public/test/fakes/test_navigation_manager.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -18,27 +23,33 @@ namespace {
 // TestWebState subclass that allows simulating page loads.
 class JavaScriptBlockingTestWebState : public web::TestWebState {
  public:
-  JavaScriptBlockingTestWebState() : web::TestWebState(), observer_(nullptr) {}
-  ~JavaScriptBlockingTestWebState() override {
-    observer_->WebStateDestroyed(this);
+  JavaScriptBlockingTestWebState() : web::TestWebState() {
+    last_committed_item_ = web::NavigationItem::Create();
+    std::unique_ptr<web::TestNavigationManager> manager =
+        std::make_unique<web::TestNavigationManager>();
+    manager->SetLastCommittedItem(last_committed_item_.get());
+    manager_ = manager.get();
+    SetNavigationManager(std::move(manager));
   }
 
-  // Simulates committing a navigation by sending a WebStateObserver callback.
-  void SimulateNavigationCommitted() {
-    web::LoadCommittedDetails details;
-    observer_->NavigationItemCommitted(this, details);
-  }
-
- protected:
-  // WebState:
-  void AddObserver(web::WebStateObserver* observer) override {
-    // Only one observer is supported.
-    ASSERT_EQ(observer_, nullptr);
-    observer_ = observer;
+  // Simulates a navigation by sending a WebStateObserver callback.
+  void SimulateNavigationStarted(bool renderer_initiated,
+                                 bool same_document,
+                                 ui::PageTransition transition,
+                                 bool change_last_committed_item) {
+    if (change_last_committed_item) {
+      last_committed_item_ = web::NavigationItem::Create();
+      manager_->SetLastCommittedItem(last_committed_item_.get());
+    }
+    web::FakeNavigationContext context;
+    context.SetIsRendererInitiated(renderer_initiated);
+    context.SetIsSameDocument(same_document);
+    OnNavigationStarted(&context);
   }
 
  private:
-  web::WebStateObserver* observer_;
+  web::TestNavigationManager* manager_ = nullptr;
+  std::unique_ptr<web::NavigationItem> last_committed_item_;
 };
 }  // namespace
 
@@ -74,11 +85,62 @@ TEST_F(JavaScriptDialogBlockingStateTest, BlockingOptionSelected) {
   EXPECT_TRUE(state().blocked());
 }
 
-// Tests that blocked() returns false after a  page load.
-TEST_F(JavaScriptDialogBlockingStateTest, StopBlocking) {
-  EXPECT_FALSE(state().blocked());
+// Tests that blocked() returns false after user-initiated navigations.
+TEST_F(JavaScriptDialogBlockingStateTest, StopBlockingForUserInitiated) {
+  // Verify that the blocked bit is unset after a document-changing, user-
+  // initiated navigation.
   state().JavaScriptDialogBlockingOptionSelected();
   EXPECT_TRUE(state().blocked());
-  web_state().SimulateNavigationCommitted();
+  web_state().SimulateNavigationStarted(
+      false /* renderer_initiated */, false /* same_document */,
+      ui::PAGE_TRANSITION_TYPED, /* transition */
+      true /* change_last_committed_item */);
   EXPECT_FALSE(state().blocked());
+
+  // Verify that the blocked bit is unset after a same-changing, user-
+  // initiated navigation.
+  state().JavaScriptDialogBlockingOptionSelected();
+  EXPECT_TRUE(state().blocked());
+  web_state().SimulateNavigationStarted(
+      false /* renderer_initiated */, true /* same_document */,
+      ui::PAGE_TRANSITION_LINK, /* transition */
+      true /* change_last_committed_item */);
+  EXPECT_FALSE(state().blocked());
+}
+
+// Tests that blocked() returns false after document-changing navigations.
+TEST_F(JavaScriptDialogBlockingStateTest, StopBlockingForDocumentChange) {
+  // Verify that the blocked bit is unset after a document-changing, renderer-
+  // initiated navigation.
+  state().JavaScriptDialogBlockingOptionSelected();
+  EXPECT_TRUE(state().blocked());
+  web_state().SimulateNavigationStarted(
+      true /* renderer_initiated */, false /* same_document */,
+      ui::PAGE_TRANSITION_LINK, /* transition */
+      true /* change_last_committed_item */);
+  EXPECT_FALSE(state().blocked());
+}
+
+// Tests that blocked() continues to return true after a reload.
+TEST_F(JavaScriptDialogBlockingStateTest, ContinueBlockingForReload) {
+  state().JavaScriptDialogBlockingOptionSelected();
+  EXPECT_TRUE(state().blocked());
+  web_state().SimulateNavigationStarted(
+      true /* renderer_initiated */, true /* same_document */,
+      ui::PAGE_TRANSITION_RELOAD, /* transition */
+      true /* change_last_committed_item */);
+  EXPECT_TRUE(state().blocked());
+}
+
+// Tests that blocked() returns true after a renderer-initiated, same-document
+// navigation.
+TEST_F(JavaScriptDialogBlockingStateTest,
+       ContinueBlockingForRendererInitiatedSameDocument) {
+  state().JavaScriptDialogBlockingOptionSelected();
+  EXPECT_TRUE(state().blocked());
+  web_state().SimulateNavigationStarted(
+      true /* renderer_initiated */, true /* same_document */,
+      ui::PAGE_TRANSITION_LINK, /* transition */
+      false /* change_last_committed_item */);
+  EXPECT_TRUE(state().blocked());
 }

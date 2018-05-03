@@ -336,7 +336,8 @@ void TestHelper::SetupContextGroupInitExpectations(
   EXPECT_CALL(*gl, GetIntegerv(GL_MAX_RENDERBUFFER_SIZE, _))
       .WillOnce(SetArgPointee<1>(kMaxRenderbufferSize))
       .RetiresOnSaturation();
-  if (gl::HasExtension(extension_set, "GL_EXT_framebuffer_multisample") ||
+  if (gl::HasExtension(extension_set, "GL_ARB_framebuffer_object") ||
+      gl::HasExtension(extension_set, "GL_EXT_framebuffer_multisample") ||
       gl::HasExtension(extension_set,
                        "GL_EXT_multisampled_render_to_texture") ||
       gl_info.is_es3 || gl_info.is_desktop_core_profile) {
@@ -516,7 +517,8 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
       .WillOnce(Return(reinterpret_cast<const uint8_t*>(gl_renderer)))
       .RetiresOnSaturation();
 
-  if (enable_es3) {
+  if (enable_es3 ||
+      gl::HasExtension(extension_set, "GL_NV_pixel_buffer_object")) {
     EXPECT_CALL(*gl, GetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, _))
       .WillOnce(SetArgPointee<1>(0))
       .RetiresOnSaturation();
@@ -671,6 +673,11 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
   if (gl_info.is_es3 || gl_info.is_desktop_core_profile ||
       gl::HasExtension(extension_set, "GL_EXT_texture_rg") ||
       (gl::HasExtension(extension_set, "GL_ARB_texture_rg"))) {
+#if DCHECK_IS_ON()
+    EXPECT_CALL(*gl, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+#endif
     static const GLuint tx_ids[] = {101, 102};
     static const GLuint fb_ids[] = {103, 104};
     const GLsizei width = 1;

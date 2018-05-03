@@ -81,7 +81,7 @@ namespace chromeos {
 NetworkState::NetworkState(const std::string& path)
     : ManagedState(MANAGED_TYPE_NETWORK, path) {}
 
-NetworkState::~NetworkState() {}
+NetworkState::~NetworkState() = default;
 
 bool NetworkState::PropertyChanged(const std::string& key,
                                    const base::Value& value) {
@@ -184,16 +184,17 @@ bool NetworkState::PropertyChanged(const std::string& key,
       return false;
     }
 
-    if (vpn_provider_type == shill::kProviderThirdPartyVpn) {
-      // If the network uses a third-party VPN provider, copy over the
-      // provider's extension ID, which is held in |shill::kHostProperty|.
-      if (!dict->GetStringWithoutPathExpansion(
-              shill::kHostProperty, &third_party_vpn_provider_extension_id_)) {
+    if (vpn_provider_type == shill::kProviderThirdPartyVpn ||
+        vpn_provider_type == shill::kProviderArcVpn) {
+      // If the network uses a third-party or Arc VPN provider,
+      // |shill::kHostProperty| contains the extension ID or Arc package name.
+      if (!dict->GetStringWithoutPathExpansion(shill::kHostProperty,
+                                               &vpn_provider_id_)) {
         NET_LOG(ERROR) << "Failed to parse " << path() << "." << key;
         return false;
       }
     } else {
-      third_party_vpn_provider_extension_id_.clear();
+      vpn_provider_id_.clear();
     }
 
     vpn_provider_type_ = vpn_provider_type;
@@ -206,8 +207,9 @@ bool NetworkState::PropertyChanged(const std::string& key,
 
 bool NetworkState::InitialPropertiesReceived(
     const base::DictionaryValue& properties) {
-  NET_LOG(EVENT) << "InitialPropertiesReceived: " << path() << ": " << name()
-                 << " State: " << connection_state_ << " Visible: " << visible_;
+  NET_LOG(EVENT) << "InitialPropertiesReceived: " << name() << " (" << path()
+                 << ") State: " << connection_state_
+                 << " Visible: " << visible_;
   if (!properties.HasKey(shill::kTypeProperty)) {
     NET_LOG(ERROR) << "NetworkState has no type: "
                    << shill_property_util::GetNetworkIdFromProperties(
@@ -253,10 +255,10 @@ void NetworkState::GetStateProperties(base::DictionaryValue* dictionary) const {
         new base::DictionaryValue);
     provider_property->SetKey(shill::kTypeProperty,
                               base::Value(vpn_provider_type_));
-    if (vpn_provider_type_ == shill::kProviderThirdPartyVpn) {
-      provider_property->SetKey(
-          shill::kHostProperty,
-          base::Value(third_party_vpn_provider_extension_id_));
+    if (vpn_provider_type_ == shill::kProviderThirdPartyVpn ||
+        vpn_provider_type_ == shill::kProviderArcVpn) {
+      provider_property->SetKey(shill::kHostProperty,
+                                base::Value(vpn_provider_id_));
     }
     dictionary->SetWithoutPathExpansion(shill::kProviderProperty,
                                         std::move(provider_property));
@@ -335,9 +337,15 @@ GURL NetworkState::GetWebProxyAutoDiscoveryUrl() const {
 }
 
 bool NetworkState::RequiresActivation() const {
-  return (type() == shill::kTypeCellular &&
-          activation_state() != shill::kActivationStateActivated &&
-          activation_state() != shill::kActivationStateUnknown);
+  return type() == shill::kTypeCellular &&
+         activation_state() != shill::kActivationStateActivated &&
+         activation_state() != shill::kActivationStateUnknown;
+}
+
+bool NetworkState::SecurityRequiresPassphraseOnly() const {
+  return type() == shill::kTypeWifi &&
+         (security_class() == shill::kSecurityPsk ||
+          security_class() == shill::kSecurityWep);
 }
 
 std::string NetworkState::connection_state() const {

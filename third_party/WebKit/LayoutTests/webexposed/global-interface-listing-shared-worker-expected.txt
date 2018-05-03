@@ -19,11 +19,8 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     attribute @@toStringTag
 [Worker]     getter downloadTotal
 [Worker]     getter downloaded
-[Worker]     getter icons
 [Worker]     getter id
 [Worker]     getter onprogress
-[Worker]     getter title
-[Worker]     getter totalDownloadSize
 [Worker]     getter uploadTotal
 [Worker]     getter uploaded
 [Worker]     method abort
@@ -639,6 +636,16 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter width
 [Worker]     method constructor
 [Worker]     method getColorSettings
+[Worker] interface Lock
+[Worker]     attribute @@toStringTag
+[Worker]     getter mode
+[Worker]     getter name
+[Worker]     method constructor
+[Worker] interface LockManager
+[Worker]     attribute @@toStringTag
+[Worker]     method acquire
+[Worker]     method constructor
+[Worker]     method query
 [Worker] interface MessageChannel
 [Worker]     attribute @@toStringTag
 [Worker]     getter port1
@@ -732,6 +739,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter onchange
 [Worker]     getter ontypechange
 [Worker]     getter rtt
+[Worker]     getter saveData
 [Worker]     getter type
 [Worker]     method constructor
 [Worker]     setter onchange
@@ -892,6 +900,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method constructor
 [Worker]     method disconnect
 [Worker]     method observe
+[Worker]     method takeRecords
 [Worker] interface PerformanceObserverEntryList
 [Worker]     attribute @@toStringTag
 [Worker]     method constructor
@@ -919,6 +928,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter transferSize
 [Worker]     getter workerStart
 [Worker]     method constructor
+[Worker]     method toJSON
 [Worker] interface PerformanceServerTiming
 [Worker]     attribute @@toStringTag
 [Worker]     getter description
@@ -984,8 +994,10 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter bodyUsed
 [Worker]     getter cache
 [Worker]     getter credentials
+[Worker]     getter destination
 [Worker]     getter headers
 [Worker]     getter integrity
+[Worker]     getter keepalive
 [Worker]     getter method
 [Worker]     getter mode
 [Worker]     getter redirect
@@ -1030,6 +1042,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter pushManager
 [Worker]     getter scope
 [Worker]     getter sync
+[Worker]     getter updateViaCache
 [Worker]     getter waiting
 [Worker]     method constructor
 [Worker]     method getNotifications
@@ -1037,11 +1050,6 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method unregister
 [Worker]     method update
 [Worker]     setter onupdatefound
-[Worker] interface SharedArrayBuffer
-[Worker]     attribute @@toStringTag
-[Worker]     getter byteLength
-[Worker]     method constructor
-[Worker]     method slice
 [Worker] interface SharedWorkerGlobalScope : WorkerGlobalScope
 [Worker]     attribute @@toStringTag
 [Worker]     attribute PERSISTENT
@@ -1088,6 +1096,10 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter encoding
 [Worker]     method constructor
 [Worker]     method encode
+[Worker] interface TransformStream
+[Worker]     getter readable
+[Worker]     getter writable
+[Worker]     method constructor
 [Worker] interface TrustedHTML
 [Worker]     static method escape
 [Worker]     static method unsafelyCreate
@@ -2406,6 +2418,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     attribute @@toStringTag
 [Worker]     getter caches
 [Worker]     getter crypto
+[Worker]     getter fonts
 [Worker]     getter indexedDB
 [Worker]     getter isSecureContext
 [Worker]     getter location
@@ -2450,7 +2463,9 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter appVersion
 [Worker]     getter budget
 [Worker]     getter connection
+[Worker]     getter deviceMemory
 [Worker]     getter hardwareConcurrency
+[Worker]     getter locks
 [Worker]     getter onLine
 [Worker]     getter permissions
 [Worker]     getter platform
@@ -2515,7 +2530,6 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     attribute @@toStringTag
 [Worker]     method constructor
 [Worker] [GLOBAL OBJECT]
-[Worker]     attribute Atomics
 [Worker]     attribute console
 [Worker]     attribute internals
 [Worker]     getter name

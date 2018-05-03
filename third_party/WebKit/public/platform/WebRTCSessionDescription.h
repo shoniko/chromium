@@ -32,7 +32,6 @@
 #define WebRTCSessionDescription_h
 
 #include "WebCommon.h"
-#include "WebNonCopyable.h"
 #include "WebPrivatePtr.h"
 #include "WebString.h"
 
@@ -54,7 +53,7 @@ class WebRTCSessionDescriptionPrivate;
 
 class WebRTCSessionDescription {
  public:
-  WebRTCSessionDescription() {}
+  WebRTCSessionDescription() = default;
   WebRTCSessionDescription(const WebRTCSessionDescription& other) {
     Assign(other);
   }

@@ -11,7 +11,6 @@
 #include "ash/display/screen_orientation_controller_test_api.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/public/cpp/ash_switches.h"
-#include "ash/public/cpp/config.h"
 #include "ash/rotator/screen_rotation_animator_observer.h"
 #include "ash/rotator/screen_rotation_animator_test_api.h"
 #include "ash/shell.h"
@@ -58,7 +57,7 @@ OverviewButtonTray* GetTray() {
 
 class AnimationObserver : public ScreenRotationAnimatorObserver {
  public:
-  AnimationObserver() {}
+  AnimationObserver() = default;
 
   bool notified() const { return notified_; }
 
@@ -78,7 +77,7 @@ class TestScreenRotationAnimator : public ScreenRotationAnimator {
   TestScreenRotationAnimator(aura::Window* root_window,
                              const base::Closure& before_callback,
                              const base::Closure& after_callback);
-  ~TestScreenRotationAnimator() override {}
+  ~TestScreenRotationAnimator() override = default;
 
  private:
   CopyCallback CreateAfterCopyCallbackBeforeRotation(
@@ -143,8 +142,8 @@ void TestScreenRotationAnimator::IntersectAfter(
 
 class ScreenRotationAnimatorSlowAnimationTest : public AshTestBase {
  public:
-  ScreenRotationAnimatorSlowAnimationTest() {}
-  ~ScreenRotationAnimatorSlowAnimationTest() override {}
+  ScreenRotationAnimatorSlowAnimationTest() = default;
+  ~ScreenRotationAnimatorSlowAnimationTest() override = default;
 
   // AshTestBase:
   void SetUp() override;
@@ -183,8 +182,8 @@ void ScreenRotationAnimatorSlowAnimationTest::SetUp() {
 
 class ScreenRotationAnimatorSmoothAnimationTest : public AshTestBase {
  public:
-  ScreenRotationAnimatorSmoothAnimationTest() {}
-  ~ScreenRotationAnimatorSmoothAnimationTest() override {}
+  ScreenRotationAnimatorSmoothAnimationTest() = default;
+  ~ScreenRotationAnimatorSmoothAnimationTest() override = default;
 
   // AshTestBase:
   void SetUp() override;
@@ -396,11 +395,6 @@ TEST_F(ScreenRotationAnimatorSlowAnimationTest,
 // Test enable smooth screen rotation code path.
 TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
        RotatesToDifferentRotationWithCopyCallback) {
-  // TODO(sky): remove this, temporary until mash_unittests as a separate
-  // executable is nuked. http://crbug.com/729810.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   const int64_t display_id = display_manager()->GetDisplayAt(0).id();
   SetScreenRotationAnimator(
       Shell::GetRootWindowForDisplayId(display_id),
@@ -484,11 +478,6 @@ TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
 // request callback called, it should stop rotating.
 TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
        RemoveExternalSecondaryDisplayBeforeSecondCopyCallback) {
-  // TODO(sky): remove this, temporary until mash_unittests as a separate
-  // executable is nuked. http://crbug.com/729810.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   UpdateDisplay("640x480,800x600");
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
 
@@ -513,11 +502,6 @@ TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
 // request callback called, it should stop rotating.
 TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
        RemoveExternalPrimaryDisplayBeforeSecondCopyCallback) {
-  // TODO(sky): remove this, temporary until mash_unittests as a separate
-  // executable is nuked. http://crbug.com/729810.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   UpdateDisplay("640x480,800x600");
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
 
@@ -572,11 +556,6 @@ TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
 // The OverviewButton should be hidden.
 TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
        OverviewButtonTrayHideAnimationAlwaysCompletes) {
-  // TODO(sky): remove this, temporary until mash_unittests as a separate
-  // executable is nuked. http://crbug.com/729810.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
 
   // Long duration for hide animation, to allow it to be interrupted.
@@ -608,11 +587,6 @@ TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
 // recreated.
 TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
        ShouldRotateAfterRecreateLayers) {
-  // TODO(sky): remove this, temporary until mash_unittests as a separate
-  // executable is nuked. http://crbug.com/729810.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   const int64_t display_id = display_manager()->GetDisplayAt(0).id();
   aura::Window* root_window = Shell::GetRootWindowForDisplayId(display_id);
   SetScreenRotationAnimator(
@@ -649,10 +623,6 @@ TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
 }
 
 TEST_F(ScreenRotationAnimatorSmoothAnimationTest, DisplayChangeDuringCopy) {
-  // TODO(sky): remove this, temporary until mash_unittests as a separate
-  // executable is nuked. http://crbug.com/729810.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
   const int64_t internal_display_id =
       display::test::DisplayManagerTestApi(display_manager())
           .SetFirstDisplayAsInternalDisplay();

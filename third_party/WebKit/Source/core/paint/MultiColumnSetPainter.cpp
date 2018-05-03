@@ -47,10 +47,8 @@ void MultiColumnSetPainter::PaintColumnRules(const PaintInfo& paint_info,
                                                   DisplayItem::kColumnRules))
     return;
 
-  LayoutRect paint_rect = layout_multi_column_set_.VisualOverflowRect();
-  paint_rect.MoveBy(paint_offset);
   DrawingRecorder recorder(paint_info.context, layout_multi_column_set_,
-                           DisplayItem::kColumnRules, paint_rect);
+                           DisplayItem::kColumnRules);
 
   const ComputedStyle& block_style =
       layout_multi_column_set_.MultiColumnBlockFlow()->StyleRef();
@@ -58,10 +56,10 @@ void MultiColumnSetPainter::PaintColumnRules(const PaintInfo& paint_info,
   bool left_to_right =
       layout_multi_column_set_.Style()->IsLeftToRightDirection();
   BoxSide box_side = layout_multi_column_set_.IsHorizontalWritingMode()
-                         ? left_to_right ? kBSLeft : kBSRight
-                         : left_to_right ? kBSTop : kBSBottom;
+                         ? left_to_right ? BoxSide::kLeft : BoxSide::kRight
+                         : left_to_right ? BoxSide::kTop : BoxSide::kBottom;
   const Color& rule_color = layout_multi_column_set_.ResolveColor(
-      block_style, CSSPropertyColumnRuleColor);
+      block_style, GetCSSPropertyColumnRuleColor());
 
   for (auto& bound : column_rule_bounds) {
     IntRect pixel_snapped_rule_rect = PixelSnappedIntRect(bound);

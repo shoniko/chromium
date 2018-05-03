@@ -12,7 +12,9 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/time/time.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
+#include "chromeos/dbus/login_manager/arc.pb.h"
 #include "chromeos/dbus/session_manager_client.h"
 
 namespace chromeos {
@@ -45,20 +47,20 @@ class FakeSessionManagerClient : public SessionManagerClient {
   void NotifyLockScreenShown() override;
   void NotifyLockScreenDismissed() override;
   void RetrieveActiveSessions(ActiveSessionsCallback callback) override;
-  void RetrieveDevicePolicy(const RetrievePolicyCallback& callback) override;
+  void RetrieveDevicePolicy(RetrievePolicyCallback callback) override;
   RetrievePolicyResponseType BlockingRetrieveDevicePolicy(
       std::string* policy_out) override;
   void RetrievePolicyForUser(const cryptohome::Identification& cryptohome_id,
-                             const RetrievePolicyCallback& callback) override;
+                             RetrievePolicyCallback callback) override;
   RetrievePolicyResponseType BlockingRetrievePolicyForUser(
       const cryptohome::Identification& cryptohome_id,
       std::string* policy_out) override;
   void RetrievePolicyForUserWithoutSession(
       const cryptohome::Identification& cryptohome_id,
-      const RetrievePolicyCallback& callback) override;
+      RetrievePolicyCallback callback) override;
   void RetrieveDeviceLocalAccountPolicy(
       const std::string& account_id,
-      const RetrievePolicyCallback& callback) override;
+      RetrievePolicyCallback callback) override;
   RetrievePolicyResponseType BlockingRetrieveDeviceLocalAccountPolicy(
       const std::string& account_id,
       std::string* policy_out) override;
@@ -73,13 +75,9 @@ class FakeSessionManagerClient : public SessionManagerClient {
   bool SupportsRestartToApplyUserFlags() const override;
   void SetFlagsForUser(const cryptohome::Identification& cryptohome_id,
                        const std::vector<std::string>& flags) override;
-  void GetServerBackedStateKeys(const StateKeysCallback& callback) override;
+  void GetServerBackedStateKeys(StateKeysCallback callback) override;
 
-  void StartArcInstance(ArcStartupMode startup_mode,
-                        const cryptohome::Identification& cryptohome_id,
-                        bool disable_boot_completed_broadcast,
-                        bool enable_vendor_privileged,
-                        bool native_bridge_experiment,
+  void StartArcInstance(const login_manager::StartArcInstanceRequest& request,
                         StartArcInstanceCallback callback) override;
   void StopArcInstance(VoidDBusMethodCallback callback) override;
   void SetArcCpuRestriction(
@@ -90,6 +88,10 @@ class FakeSessionManagerClient : public SessionManagerClient {
   void GetArcStartTime(DBusMethodCallback<base::TimeTicks> callback) override;
   void RemoveArcData(const cryptohome::Identification& cryptohome_id,
                      VoidDBusMethodCallback callback) override;
+
+  // Notifies observers as if ArcInstanceStopped signal is received.
+  void NotifyArcInstanceStopped(bool clean,
+                                const std::string& conainer_instance_id);
 
   void set_store_device_policy_success(bool success) {
     store_device_policy_success_ = success;
@@ -113,6 +115,10 @@ class FakeSessionManagerClient : public SessionManagerClient {
       const std::string& account_id) const;
   void set_device_local_account_policy(const std::string& account_id,
                                        const std::string& policy_blob);
+
+  const login_manager::StartArcInstanceRequest& last_start_arc_request() const {
+    return last_start_arc_request_;
+  }
 
   // Notify observers about a property change completion.
   void OnPropertyChangeComplete(bool success);
@@ -142,6 +148,15 @@ class FakeSessionManagerClient : public SessionManagerClient {
   }
 
   void set_arc_available(bool available) { arc_available_ = available; }
+  void set_arc_start_time(base::TimeTicks arc_start_time) {
+    arc_start_time_ = arc_start_time;
+  }
+
+  void set_low_disk(bool low_disk) { low_disk_ = low_disk; }
+
+  const std::string& container_instance_id() const {
+    return container_instance_id_;
+  }
 
  private:
   bool store_device_policy_success_ = true;
@@ -164,7 +179,16 @@ class FakeSessionManagerClient : public SessionManagerClient {
   int notify_lock_screen_dismissed_call_count_;
 
   bool arc_available_;
+  base::TimeTicks arc_start_time_;
 
+  bool low_disk_ = false;
+  // Pseudo running container id. If not running, empty.
+  std::string container_instance_id_;
+
+  // Contains last requst passed to StartArcInstance
+  login_manager::StartArcInstanceRequest last_start_arc_request_;
+
+  base::WeakPtrFactory<FakeSessionManagerClient> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(FakeSessionManagerClient);
 };
 

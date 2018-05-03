@@ -24,7 +24,7 @@ import file_format
 import match_util
 import models
 import nm
-import paths
+import path_util
 
 
 # Number of lines before using less for Print().
@@ -51,8 +51,7 @@ def _WriteToStream(lines, use_pager=None, to_file=None):
   if use_pager is None and sys.stdout.isatty():
     # Does not take into account line-wrapping... Oh well.
     first_lines = list(itertools.islice(lines, _THRESHOLD_FOR_PAGER))
-    if len(first_lines) == _THRESHOLD_FOR_PAGER:
-      use_pager = True
+    use_pager = len(first_lines) == _THRESHOLD_FOR_PAGER
     lines = itertools.chain(first_lines, lines)
 
   if use_pager:
@@ -68,7 +67,7 @@ def _WriteToStream(lines, use_pager=None, to_file=None):
 class _Session(object):
   _readline_initialized = False
 
-  def __init__(self, size_infos, lazy_paths):
+  def __init__(self, size_infos, output_directory_finder, tool_prefix_finder):
     self._printed_variables = []
     self._variables = {
         'Print': self._PrintFunc,
@@ -82,7 +81,8 @@ class _Session(object):
         'printed': self._printed_variables,
         'models': models,
     }
-    self._lazy_paths = lazy_paths
+    self._output_directory_finder = output_directory_finder
+    self._tool_prefix_finder = tool_prefix_finder
     self._size_infos = size_infos
     self._disassemble_prefix_len = None
 
@@ -92,7 +92,7 @@ class _Session(object):
       for i, size_info in enumerate(size_infos):
         self._variables['size_info%d' % (i + 1)] = size_info
 
-  def _ReadStringLiterals(self, thing=None, elf_path=None):
+  def _ReadStringLiterals(self, thing=None, all_rodata=False, elf_path=None):
     """Returns a list of (symbol, string value) for all string literal symbols.
 
     E.g.:
@@ -101,6 +101,8 @@ class _Session(object):
     Args:
       thing: Can be a Symbol, iterable of symbols, or SizeInfo.
            Defaults to the current SizeInfo.
+      all_rodata: Assume every symbol within .rodata that ends in a \0 is a
+           string literal.
       elf_path: Path to the executable containing the symbol. Required only
           when auto-detection fails.
     """
@@ -116,17 +118,27 @@ class _Session(object):
     if not first_sym:
       return []
     size_info = self._SizeInfoForSymbol(first_sym)
-    elf_path, tool_prefix = self._ElfPathAndToolPrefixForSymbol(
-        size_info, elf_path)
+    tool_prefix = self._ToolPrefixForSymbol(size_info)
+    elf_path = self._ElfPathForSymbol(
+        size_info, tool_prefix, elf_path)
 
     address, offset, _ = nm.LookupElfRodataInfo(elf_path, tool_prefix)
     adjust = offset - address
     ret = []
-    with open(elf_path) as f:
+    with open(elf_path, 'rb') as f:
       for symbol in thing:
-        if symbol.IsStringLiteral():
-          f.seek(symbol.address + adjust)
-          data = f.read(symbol.size_without_padding)
+        if symbol.section != 'r' or (
+            not all_rodata and not symbol.IsStringLiteral()):
+          continue
+        f.seek(symbol.address + adjust)
+        data = f.read(symbol.size_without_padding)
+        # As of Oct 2017, there are ~90 symbols name .L.str(.##). These appear
+        # in the linker map file explicitly, and there doesn't seem to be a
+        # pattern as to which variables lose their kConstant name (the more
+        # common case), or which string literals don't get moved to
+        # ** merge strings (less common).
+        if symbol.IsStringLiteral() or (
+            all_rodata and data and data[-1] == '\0'):
           ret.append((symbol, data))
     return ret
 
@@ -152,14 +164,6 @@ class _Session(object):
     logging.debug('Diff complete')
     return ret
 
-  def _GetObjToPrint(self, obj=None):
-    if isinstance(obj, int):
-      obj = self._printed_variables[obj]
-    elif not self._printed_variables or self._printed_variables[-1] != obj:
-      if not isinstance(obj, models.SymbolGroup) or len(obj) > 0:
-        self._printed_variables.append(obj)
-    return obj if obj is not None else self._size_infos[-1]
-
   def _PrintFunc(self, obj=None, verbose=False, summarize=True, recursive=False,
                  use_pager=None, to_file=None):
     """Prints out the given Symbol / SymbolGroup / SizeInfo.
@@ -167,9 +171,7 @@ class _Session(object):
     For convenience, |obj| will be appended to the global "printed" list.
 
     Args:
-      obj: The object to be printed. Defaults to |size_infos[-1]|. Also accepts
-          an index into the |_printed_variables| array for showing previous
-          results.
+      obj: The object to be printed.
       verbose: Show more detailed output.
       summarize: If False, show symbols only (no headers / summaries).
       recursive: Print children of nested SymbolGroups.
@@ -177,7 +179,8 @@ class _Session(object):
           default is to automatically pipe when output is long.
       to_file: Rather than print to stdio, write to the given file.
     """
-    obj = self._GetObjToPrint(obj)
+    if obj is not None:
+      self._printed_variables.append(obj)
     lines = describe.GenerateLines(
         obj, verbose=verbose, recursive=recursive, summarize=summarize,
         format_name='text')
@@ -189,24 +192,23 @@ class _Session(object):
     For convenience, |obj| will be appended to the global "printed" list.
 
     Args:
-      obj: The object to be printed as CSV. Defaults to |size_infos[-1]|. Also
-          accepts an index into the |_printed_variables| array for showing
-          previous results.
+      obj: The object to be printed as CSV.
       use_pager: Pipe output through `less`. Ignored when |obj| is a Symbol.
           default is to automatically pipe when output is long.
       to_file: Rather than print to stdio, write to the given file.
     """
-    obj = self._GetObjToPrint(obj)
+    if obj is not None:
+      self._printed_variables.append(obj)
     lines = describe.GenerateLines(obj, verbose=verbose, recursive=False,
                                    format_name='csv')
     _WriteToStream(lines, use_pager=use_pager, to_file=to_file)
 
-  def _ElfPathAndToolPrefixForSymbol(self, size_info, elf_path):
-    tool_prefix = self._lazy_paths.tool_prefix
+  def _ToolPrefixForSymbol(self, size_info):
+    tool_prefix = self._tool_prefix_finder.Tentative()
     orig_tool_prefix = size_info.metadata.get(models.METADATA_TOOL_PREFIX)
     if orig_tool_prefix:
-      orig_tool_prefix = paths.FromSrcRootRelative(orig_tool_prefix)
-      if os.path.exists(orig_tool_prefix + 'objdump'):
+      orig_tool_prefix = path_util.FromSrcRootRelative(orig_tool_prefix)
+      if os.path.exists(path_util.GetObjDumpPath(orig_tool_prefix)):
         tool_prefix = orig_tool_prefix
 
     # TODO(agrieve): Would be even better to use objdump --info to check that
@@ -214,7 +216,9 @@ class _Session(object):
     assert tool_prefix is not None, (
         'Could not determine --tool-prefix. Possible fixes include setting '
         '--tool-prefix, or setting --output-directory')
+    return tool_prefix
 
+  def _ElfPathForSymbol(self, size_info, tool_prefix, elf_path):
     def build_id_matches(elf_path):
       found_build_id = archive.BuildIdFromElf(elf_path, tool_prefix)
       expected_build_id = size_info.metadata.get(models.METADATA_ELF_BUILD_ID)
@@ -225,11 +229,12 @@ class _Session(object):
     if elf_path:
       paths_to_try.append(elf_path)
     else:
-      auto_lazy_paths = [
-          paths.LazyPaths(any_path_within_output_directory=s.size_path)
-          for s in self._size_infos]
-      for lazy_paths in auto_lazy_paths + [self._lazy_paths]:
-        output_dir = lazy_paths.output_directory
+      auto_output_directory_finders = [
+          path_util.OutputDirectoryFinder(
+              any_path_within_output_directory=s.size_path)
+          for s in self._size_infos] + [self._output_directory_finder]
+      for output_directory_finder in auto_output_directory_finders:
+        output_dir = output_directory_finder.Tentative()
         if output_dir:
           # Local build: File is located in output directory.
           paths_to_try.append(
@@ -242,7 +247,7 @@ class _Session(object):
 
     for i, elf_path in enumerate(paths_to_try):
       if build_id_matches(elf_path):
-        return elf_path, tool_prefix
+        return elf_path
 
       # Show an error only once all paths are tried.
       if i + 1 == len(paths_to_try):
@@ -290,15 +295,15 @@ class _Session(object):
           when auto-detection fails.
     """
     assert not symbol.IsGroup()
-    assert symbol.address and symbol.section_name == '.text'
+    assert symbol.address and symbol.section_name == models.SECTION_TEXT
     assert not symbol.IsDelta(), ('Cannot disasseble a Diff\'ed symbol. Try '
                                   'passing .before_symbol or .after_symbol.')
     size_info = self._SizeInfoForSymbol(symbol)
+    tool_prefix = self._ToolPrefixForSymbol(size_info)
+    elf_path = self._ElfPathForSymbol(
+        size_info, tool_prefix, elf_path)
 
-    elf_path, tool_prefix = self._ElfPathAndToolPrefixForSymbol(
-        size_info, elf_path)
-
-    args = [tool_prefix + 'objdump', '--disassemble', '--source',
+    args = [path_util.GetObjDumpPath(tool_prefix), '--disassemble', '--source',
             '--line-numbers', '--demangle',
             '--start-address=0x%x' % symbol.address,
             '--stop-address=0x%x' % symbol.end_address, elf_path]
@@ -308,10 +313,10 @@ class _Session(object):
         self._disassemble_prefix_len = prefix_len
 
     if self._disassemble_prefix_len is not None:
-      output_directory = self._lazy_paths.output_directory
+      output_directory = self._output_directory_finder.Tentative()
       # Only matters for non-generated paths, so be lenient here.
       if output_directory is None:
-        output_directory = os.path.join(paths.SRC_ROOT, 'out', 'Release')
+        output_directory = os.path.join(path_util.SRC_ROOT, 'out', 'Release')
         if not os.path.exists(output_directory):
           os.makedirs(output_directory)
 
@@ -461,10 +466,13 @@ def Run(args, parser):
       parser.error('All inputs must end with ".size"')
 
   size_infos = [archive.LoadAndPostProcessSizeInfo(p) for p in args.inputs]
-  lazy_paths = paths.LazyPaths(tool_prefix=args.tool_prefix,
-                               output_directory=args.output_directory,
-                               any_path_within_output_directory=args.inputs[0])
-  session = _Session(size_infos, lazy_paths)
+  output_directory_finder = path_util.OutputDirectoryFinder(
+      value=args.output_directory,
+      any_path_within_output_directory=args.inputs[0])
+  tool_prefix_finder = path_util.ToolPrefixFinder(
+      value=args.tool_prefix,
+      output_directory_finder=output_directory_finder)
+  session = _Session(size_infos, output_directory_finder, tool_prefix_finder)
 
   if args.query:
     logging.info('Running query from command-line.')

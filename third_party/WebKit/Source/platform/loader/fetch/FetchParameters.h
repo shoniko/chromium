@@ -53,7 +53,6 @@ struct CrossThreadFetchParametersData;
 // one in CrossThreadFetchParametersData and write copying logic.
 class PLATFORM_EXPORT FetchParameters {
   DISALLOW_NEW();
-  WTF_MAKE_NONCOPYABLE(FetchParameters);
 
  public:
   enum DeferOption { kNoDefer, kLazyLoad, kIdleLoad };
@@ -149,11 +148,12 @@ class PLATFORM_EXPORT FetchParameters {
   }
   // Configures the request to use the "cors" mode and the credentials mode
   // specified by the crossOrigin attribute.
-  void SetCrossOriginAccessControl(SecurityOrigin*, CrossOriginAttributeValue);
+  void SetCrossOriginAccessControl(const SecurityOrigin*,
+                                   CrossOriginAttributeValue);
   // Configures the request to use the "cors" mode and the specified
   // credentials mode.
-  void SetCrossOriginAccessControl(SecurityOrigin*,
-                                   WebURLRequest::FetchCredentialsMode);
+  void SetCrossOriginAccessControl(const SecurityOrigin*,
+                                   network::mojom::FetchCredentialsMode);
   OriginRestriction GetOriginRestriction() const { return origin_restriction_; }
   void SetOriginRestriction(OriginRestriction restriction) {
     origin_restriction_ = restriction;

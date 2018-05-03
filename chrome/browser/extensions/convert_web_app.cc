@@ -19,7 +19,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -74,17 +73,17 @@ std::string GenerateKey(const GURL& app_url) {
 std::unique_ptr<base::DictionaryValue> CreateURLHandlersForBookmarkApp(
     const GURL& scope_url,
     const base::string16& title) {
-  auto matches = base::MakeUnique<base::ListValue>();
+  auto matches = std::make_unique<base::ListValue>();
   matches->AppendString(scope_url.GetOrigin().Resolve(scope_url.path()).spec() +
                         "*");
 
-  auto scope_handler = base::MakeUnique<base::DictionaryValue>();
+  auto scope_handler = std::make_unique<base::DictionaryValue>();
   scope_handler->SetList(keys::kMatches, std::move(matches));
   // The URL handler title is not used anywhere but we set it to the
   // web app's title just in case.
   scope_handler->SetString(keys::kUrlHandlerTitle, base::UTF16ToUTF8(title));
 
-  auto url_handlers = base::MakeUnique<base::DictionaryValue>();
+  auto url_handlers = std::make_unique<base::DictionaryValue>();
   // Use "scope" as the url handler's identifier.
   url_handlers->SetDictionary(kScopeUrlHandlerId, std::move(scope_handler));
   return url_handlers;
@@ -143,7 +142,6 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
     const WebApplicationInfo& web_app,
     const Time& create_time,
     const base::FilePath& extensions_dir) {
-  VLOG(1) << "Converting web app to extension";
   base::FilePath install_temp_dir =
       file_util::GetInstallTempDir(extensions_dir);
   if (install_temp_dir.empty()) {
@@ -156,8 +154,6 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
     LOG(ERROR) << "Could not create temporary directory.";
     return NULL;
   }
-
-  VLOG(1) << "App URL " << web_app.app_url.spec();
 
   // Create the manifest
   std::unique_ptr<base::DictionaryValue> root(new base::DictionaryValue);
@@ -182,25 +178,20 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
   }
 
   // Add the icons and linked icon information.
-  auto icons = base::MakeUnique<base::DictionaryValue>();
-  auto linked_icons = base::MakeUnique<base::ListValue>();
+  auto icons = std::make_unique<base::DictionaryValue>();
+  auto linked_icons = std::make_unique<base::ListValue>();
   for (const auto& icon : web_app.icons) {
     std::string size = base::StringPrintf("%i", icon.width);
     std::string icon_path = base::StringPrintf("%s/%s.png", kIconsDirName,
                                                size.c_str());
     icons->SetString(size, icon_path);
 
-    VLOG(1) << "Adding icon of size " << size << ": " << icon_path;
-
     if (icon.url.is_valid()) {
-      VLOG(1) << "Adding linked icon URL " << icon.url.spec();
       std::unique_ptr<base::DictionaryValue> linked_icon(
           new base::DictionaryValue());
       linked_icon->SetString(keys::kLinkedAppIconURL, icon.url.spec());
       linked_icon->SetInteger(keys::kLinkedAppIconSize, icon.width);
       linked_icons->Append(std::move(linked_icon));
-    } else {
-      VLOG(1) << "Icon URL wasn't valid: " << icon.url.spec();
     }
   }
   root->Set(keys::kIcons, std::move(icons));

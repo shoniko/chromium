@@ -25,8 +25,10 @@
 class BackgroundModeManager;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
+#if defined(OS_ANDROID)
+class GpuDriverInfoManager;
+#endif
 class GpuModeManager;
-class GpuProfileCache;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
@@ -41,6 +43,10 @@ class WatchDogThread;
 #if BUILDFLAG(ENABLE_WEBRTC)
 class WebRtcLogUploader;
 #endif
+
+namespace content {
+class NetworkConnectionTracker;
+}
 
 namespace safe_browsing {
 class SafeBrowsingService;
@@ -91,12 +97,16 @@ namespace network_time {
 class NetworkTimeTracker;
 }
 
+namespace optimization_guide {
+class OptimizationGuideService;
+}
+
 namespace physical_web {
 class PhysicalWebDataSource;
 }
 
 namespace policy {
-class BrowserPolicyConnector;
+class ChromeBrowserPolicyConnector;
 class PolicyService;
 }
 
@@ -185,11 +195,15 @@ class BrowserProcess {
   // backed by the IOThread's URLRequestContext.
   virtual SystemNetworkContextManager* system_network_context_manager() = 0;
 
+  // Returns a NetworkConnectionTracker that can be used to subscribe for
+  // network change events.
+  virtual content::NetworkConnectionTracker* network_connection_tracker() = 0;
+
   // Returns the thread that is used for health check of all browser threads.
   virtual WatchDogThread* watchdog_thread() = 0;
 
   // Starts and manages the policy system.
-  virtual policy::BrowserPolicyConnector* browser_policy_connector() = 0;
+  virtual policy::ChromeBrowserPolicyConnector* browser_policy_connector() = 0;
 
   // This is the main interface for chromium components to retrieve policy
   // information from the policy system.
@@ -199,7 +213,9 @@ class BrowserProcess {
 
   virtual GpuModeManager* gpu_mode_manager() = 0;
 
-  virtual GpuProfileCache* gpu_profile_cache() = 0;
+#if defined(OS_ANDROID)
+  virtual GpuDriverInfoManager* gpu_driver_info_manager() = 0;
+#endif
 
   // Create and bind remote debugging server to a given |ip| and |port|.
   // Passing empty |ip| results in binding to localhost:
@@ -250,6 +266,11 @@ class BrowserProcess {
   // Browsing subresource filter.
   virtual subresource_filter::ContentRulesetService*
   subresource_filter_ruleset_service() = 0;
+
+  // Returns the service used to provide hints for what optimizations can be
+  // performed on slow page loads.
+  virtual optimization_guide::OptimizationGuideService*
+  optimization_guide_service() = 0;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   // This will start a timer that, if Chrome is in persistent mode, will check

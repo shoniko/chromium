@@ -99,6 +99,8 @@ void ExpectAllContainers() {
       Shell::GetContainer(root_window, kShellWindowId_OverlayContainer));
   EXPECT_TRUE(Shell::GetContainer(root_window,
                                   kShellWindowId_ImeWindowParentContainer));
+  EXPECT_TRUE(Shell::GetContainer(root_window,
+                                  kShellWindowId_VirtualKeyboardContainer));
   EXPECT_TRUE(
       Shell::GetContainer(root_window, kShellWindowId_MouseCursorContainer));
 
@@ -109,8 +111,8 @@ void ExpectAllContainers() {
 
 class ModalWindow : public views::WidgetDelegateView {
  public:
-  ModalWindow() {}
-  ~ModalWindow() override {}
+  ModalWindow() = default;
+  ~ModalWindow() override = default;
 
   // Overridden from views::WidgetDelegate:
   bool CanResize() const override { return true; }
@@ -125,8 +127,8 @@ class ModalWindow : public views::WidgetDelegateView {
 
 class SimpleMenuDelegate : public ui::SimpleMenuModel::Delegate {
  public:
-  SimpleMenuDelegate() {}
-  ~SimpleMenuDelegate() override {}
+  SimpleMenuDelegate() = default;
+  ~SimpleMenuDelegate() override = default;
 
   bool IsCommandIdChecked(int command_id) const override { return false; }
 
@@ -291,7 +293,7 @@ TEST_F(ShellTest, CreateModalWindow) {
 
 class TestModalDialogDelegate : public views::DialogDelegateView {
  public:
-  TestModalDialogDelegate() {}
+  TestModalDialogDelegate() = default;
 
   // Overridden from views::WidgetDelegate:
   ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_SYSTEM; }
@@ -485,10 +487,6 @@ TEST_F(ShellTest, ToggleAutoHide) {
 // Tests that the cursor-filter is ahead of the drag-drop controller in the
 // pre-target list.
 TEST_F(ShellTest, TestPreTargetHandlerOrder) {
-  // TODO: investigate failure in mash, http://crbug.com/695758.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   Shell* shell = Shell::Get();
   ui::EventTargetTestApi test_api(shell);
   ShellTestApi shell_test_api(shell);
@@ -515,8 +513,6 @@ TEST_F(ShellTest, EnvPreTargetHandler) {
 
 // Verifies keyboard is re-created on proper timing.
 TEST_F(ShellTest, KeyboardCreation) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       keyboard::switches::kEnableVirtualKeyboard);
 
@@ -539,8 +535,8 @@ TEST_F(ShellTest, KeyboardCreation) {
 // this will crash.
 class ShellTest2 : public AshTestBase {
  public:
-  ShellTest2() {}
-  ~ShellTest2() override {}
+  ShellTest2() = default;
+  ~ShellTest2() override = default;
 
  protected:
   std::unique_ptr<aura::Window> window_;

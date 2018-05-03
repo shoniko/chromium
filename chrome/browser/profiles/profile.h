@@ -16,20 +16,19 @@
 #include "components/domain_reliability/clear_mode.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/common/network_service.mojom.h"
+#include "services/network/public/interfaces/network_service.mojom.h"
 
 #if !defined(OS_ANDROID)
 class ChromeZoomLevelPrefs;
 #endif
 
 class ExtensionSpecialStoragePolicy;
-class PrefProxyConfigTracker;
 class PrefService;
+class PrefStore;
 class TestingProfile;
 
 namespace base {
 class SequencedTaskRunner;
-class Time;
 }
 
 namespace chrome_browser_net {
@@ -162,6 +161,10 @@ class Profile : public content::BrowserContext {
   // profile is not incognito.
   virtual Profile* GetOriginalProfile() = 0;
 
+  // Return the original "recording" profile. This method returns this if the
+  // profile is not incognito.
+  virtual const Profile* GetOriginalProfile() const = 0;
+
   // Returns whether the profile is supervised (either a legacy supervised
   // user or a child account; see SupervisedUserService).
   virtual bool IsSupervised() const = 0;
@@ -247,10 +250,6 @@ class Profile : public content::BrowserContext {
   virtual void InitChromeOSPreferences() = 0;
 #endif  // defined(OS_CHROMEOS)
 
-  // Returns the helper object that provides the proxy configuration service
-  // access to the the proxy configuration possibly defined by preferences.
-  virtual PrefProxyConfigTracker* GetProxyConfigTracker() = 0;
-
   // Returns the Predictor object used for dns prefetch.
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() = 0;
 
@@ -290,9 +289,14 @@ class Profile : public content::BrowserContext {
   // Returns how the last session was shutdown.
   virtual ExitType GetLastSessionExitType() = 0;
 
+  // Returns whether session cookies are restored and saved. The value is
+  // ignored for in-memory profiles.
+  virtual bool ShouldRestoreOldSessionCookies();
+  virtual bool ShouldPersistSessionCookies();
+
   // Creates the main NetworkContext for the profile, or returns nullptr to
   // defer NetworkContext creation to the caller.
-  virtual content::mojom::NetworkContextPtr CreateMainNetworkContext();
+  virtual network::mojom::NetworkContextPtr CreateMainNetworkContext();
 
   // Stop sending accessibility events until ResumeAccessibilityEvents().
   // Calls to Pause nest; no events will be sent until the number of
@@ -340,6 +344,11 @@ class Profile : public content::BrowserContext {
   void set_is_system_profile(bool is_system_profile) {
     is_system_profile_ = is_system_profile;
   }
+
+  // Returns a newly created ExtensionPrefStore suitable for the supplied
+  // Profile.
+  static PrefStore* CreateExtensionPrefStore(Profile*,
+                                             bool incognito_pref_store);
 
  private:
   bool restored_last_session_;

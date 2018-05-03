@@ -82,6 +82,10 @@ ukm::UkmRecorder* AwAutofillClient::GetUkmRecorder() {
   return nullptr;
 }
 
+autofill::AddressNormalizer* AwAutofillClient::GetAddressNormalizer() {
+  return nullptr;
+}
+
 autofill::SaveCardBubbleController*
 AwAutofillClient::GetSaveCardBubbleController() {
   return nullptr;
@@ -186,8 +190,7 @@ void AwAutofillClient::DidFillOrPreviewField(
     const base::string16& autofilled_value,
     const base::string16& profile_full_name) {}
 
-void AwAutofillClient::DidInteractWithNonsecureCreditCardInput(
-    content::RenderFrameHost* rfh) {}
+void AwAutofillClient::DidInteractWithNonsecureCreditCardInput() {}
 
 bool AwAutofillClient::IsContextSecure() {
   content::SSLStatus ssl_status;

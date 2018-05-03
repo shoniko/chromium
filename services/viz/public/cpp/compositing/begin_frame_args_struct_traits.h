@@ -28,7 +28,7 @@ struct StructTraits<viz::mojom::BeginFrameArgsDataView, viz::BeginFrameArgs> {
     return args.sequence_number;
   }
 
-  static uint32_t source_id(const viz::BeginFrameArgs& args) {
+  static uint64_t source_id(const viz::BeginFrameArgs& args) {
     return args.source_id;
   }
 
@@ -38,6 +38,10 @@ struct StructTraits<viz::mojom::BeginFrameArgsDataView, viz::BeginFrameArgs> {
 
   static bool on_critical_path(const viz::BeginFrameArgs& args) {
     return args.on_critical_path;
+  }
+
+  static bool animate_only(const viz::BeginFrameArgs& args) {
+    return args.animate_only;
   }
 
   static bool Read(viz::mojom::BeginFrameArgsDataView data,
@@ -50,8 +54,12 @@ struct StructTraits<viz::mojom::BeginFrameAckDataView, viz::BeginFrameAck> {
     return ack.sequence_number;
   }
 
-  static uint32_t source_id(const viz::BeginFrameAck& ack) {
+  static uint64_t source_id(const viz::BeginFrameAck& ack) {
     return ack.source_id;
+  }
+
+  static bool has_damage(const viz::BeginFrameAck& ack) {
+    return ack.has_damage;
   }
 
   static bool Read(viz::mojom::BeginFrameAckDataView data,

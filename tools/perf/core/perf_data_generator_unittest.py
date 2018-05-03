@@ -7,7 +7,6 @@ from core import perf_data_generator
 from core.perf_data_generator import BenchmarkMetadata
 
 from telemetry import benchmark
-from telemetry import story
 
 import mock
 
@@ -92,7 +91,7 @@ class PerfDataGeneratorTest(unittest.TestCase):
           'can_use_on_swarming_builders': True,
           'expiration': 36000,
           'io_timeout': 600,
-          'upload_test_results': False,
+          'upload_test_results': True,
         },
         'name': 'speedometer',
         'isolate_name': 'telemetry_perf_tests',
@@ -116,7 +115,7 @@ class PerfDataGeneratorTest(unittest.TestCase):
           'can_use_on_swarming_builders': True,
           'expiration': 36000,
           'io_timeout': 600,
-          'upload_test_results': False,
+          'upload_test_results': True,
         },
         'name': 'speedometer.reference',
         'isolate_name': 'telemetry_perf_tests',
@@ -149,28 +148,6 @@ class PerfDataGeneratorTest(unittest.TestCase):
         '--browser=android-webview', '--output-format=chartjson',
         '--webview-embedder-apk=../../out/Release/apks/SystemWebViewShell.apk'])
     self.assertEquals(test['isolate_name'], 'telemetry_perf_webview_tests')
-
-  def testGenerateTelemetryTestsWithUploadToFlakinessDashboard(self):
-    swarming_dimensions = [{'os': 'SkyNet', 'id': 'T-850', 'pool': 'T-RIP'}]
-    test = perf_data_generator.generate_telemetry_test(
-        swarming_dimensions, 'system_health.common_desktop', 'release')
-    expected_generated_test = {
-        'override_compile_targets': ['telemetry_perf_tests'],
-        'args': ['system_health.common_desktop', '-v', '--upload-results',
-                 '--browser=release', '--output-format=chartjson'],
-        'swarming': {
-          'ignore_task_failure': False,
-          'dimension_sets': [{'os': 'SkyNet', 'id': 'T-850', 'pool': 'T-RIP'}],
-          'hard_timeout': 10800,
-          'can_use_on_swarming_builders': True,
-          'expiration': 36000,
-          'io_timeout': 600,
-          'upload_test_results': True,
-        },
-        'name': 'system_health.common_desktop',
-        'isolate_name': 'telemetry_perf_tests',
-      }
-    self.assertEquals(test, expected_generated_test)
 
   def testGenerateTelemetryTestsBlacklistedReferenceBuildTest(self):
     class BlacklistedBenchmark(benchmark.Benchmark):
@@ -305,24 +282,6 @@ class PerfDataGeneratorTest(unittest.TestCase):
           perf_data_generator.ShouldBenchmarksBeScheduled(
               RegularBenchmark, 'bot_name', os, None))
 
-  def testShouldBenchmarksBeScheduledDisabledButScheduled(self):
-    class RegularBenchmark(benchmark.Benchmark):
-      @classmethod
-      def Name(cls):
-        return 'regular'
-
-      def GetExpectations(self):
-        class Expectations(story.expectations.StoryExpectations):
-          def SetExpectations(self):
-            self.DisableBenchmark([story.expectations.ALL], 'reason')
-        return Expectations()
-
-    valid_os_list = ['mac', 'android', 'windows', 'linux']
-    for os in valid_os_list:
-      self.assertTrue(
-          perf_data_generator.ShouldBenchmarksBeScheduled(
-              RegularBenchmark, 'bot_name', os, None))
-
   def testShouldBenchmarkBeScheduledSupportedPlatform(self):
     class RegularBenchmark(benchmark.Benchmark):
       SUPPORTED_PLATFORMS = []
@@ -337,10 +296,50 @@ class PerfDataGeneratorTest(unittest.TestCase):
 
   def testListsAlphabetical(self):
     keys = [
-        'BENCHMARKS_TO_UPLOAD_TO_FLAKINESS_DASHBOARD',
         'BENCHMARK_REF_BUILD_BLACKLIST',
         'SVELTE_DEVICE_LIST'
     ]
     for key in keys:
       lst = getattr(perf_data_generator, key)
       self.assertEqual(sorted(lst), lst, 'please sort %s' % key)
+
+  def testGenerateCplusplusIsolateScriptTest(self):
+    dimension={
+        'gpu': '10de:104a',
+        'os': 'Windows-2008ServerR2-SP1',
+        'pool': 'Chrome-perf',
+        'device_ids': [
+          'build92-m1', 'build93-m1',
+          'build94-m1', 'build95-m1', 'build96-m1'
+        ],
+        'perf_tests': [
+          ('angle_perftests', 'build94-m1'),
+        ],
+      }
+    test = perf_data_generator.generate_cplusplus_isolate_script_test(dimension)
+    test = test[0]
+    self.assertEqual(test['name'], 'angle_perftests')
+    self.assertEqual(test['isolate_name'], 'angle_perftests')
+
+  def testGenerateCplusplusIsolateScriptTestWithArgs(self):
+    dimension={
+      'gpu': '10de:104a',
+      'os': 'Windows-2008ServerR2-SP1',
+      'pool': 'Chrome-perf',
+      'device_ids': [
+        'build92-m1', 'build93-m1',
+        'build94-m1', 'build95-m1', 'build96-m1'
+      ],
+      'perf_tests_with_args': [
+        ('passthrough_command_buffer_perftests', 'build94-m1',
+          ['--use-cmd-decoder=passthrough', '--use-angle=gl-null'],
+          'command_buffer_perftests')
+      ]
+    }
+    test = perf_data_generator.generate_cplusplus_isolate_script_test_with_args(
+              dimension)
+    test = test[0]
+    self.assertEqual(test['name'], 'passthrough_command_buffer_perftests')
+    self.assertEqual(test['isolate_name'], 'command_buffer_perftests')
+    self.assertTrue('--use-cmd-decoder=passthrough' in test['args'])
+    self.assertTrue('--use-angle=gl-null' in test['args'])

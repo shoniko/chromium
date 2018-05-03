@@ -55,6 +55,7 @@
 #include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/zygote_features.h"
 #include "ipc/ipc_channel.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "net/socket/socket_descriptor.h"
@@ -64,6 +65,10 @@
 #include "ppapi/shared_impl/ppapi_constants.h"
 #include "ppapi/shared_impl/ppapi_nacl_plugin_args.h"
 
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#include "content/public/common/zygote_handle.h"
+#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+
 #if defined(OS_POSIX)
 
 #include <arpa/inet.h>
@@ -71,7 +76,6 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-#include "content/public/browser/zygote_handle_linux.h"
 #elif defined(OS_WIN)
 #include <windows.h>
 #include <winsock2.h>
@@ -178,11 +182,14 @@ class NaClSandboxedProcessLauncherDelegate
       DLOG(WARNING) << "Failed to reserve address space for Native Client";
     }
   }
-#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // OS_WIN
+
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
   content::ZygoteHandle GetZygote() override {
     return content::GetGenericZygote();
   }
-#endif  // OS_WIN
+#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+
   service_manager::SandboxType GetSandboxType() override {
     return service_manager::SANDBOX_TYPE_PPAPI;
   }
@@ -728,9 +735,8 @@ net::SocketDescriptor NaClProcessHost::GetDebugStubSocketHandle() {
   if (s == net::kInvalidSocket) {
     LOG(ERROR) << "failed to open socket for debug stub";
     return net::kInvalidSocket;
-  } else {
-    LOG(WARNING) << "debug stub on port " << port;
   }
+  LOG(WARNING) << "debug stub on port " << port;
   if (listen(s, 1)) {
     LOG(ERROR) << "listen() failed on debug stub socket";
     if (IGNORE_EINTR(close(s)) < 0)
@@ -900,6 +906,7 @@ bool NaClProcessHost::StartPPAPIProxy(
 
   ipc_proxy_channel_ = IPC::ChannelProxy::Create(
       channel_handle.release(), IPC::Channel::MODE_CLIENT, NULL,
+      base::ThreadTaskRunnerHandle::Get().get(),
       base::ThreadTaskRunnerHandle::Get().get());
   // Create the browser ppapi host and enable PPAPI message dispatching to the
   // browser process.
@@ -974,17 +981,16 @@ void NaClProcessHost::OnPpapiChannelsCreated(
 bool NaClProcessHost::StartWithLaunchedProcess() {
   NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
 
-  if (nacl_browser->IsReady()) {
+  if (nacl_browser->IsReady())
     return StartNaClExecution();
-  } else if (nacl_browser->IsOk()) {
+  if (nacl_browser->IsOk()) {
     nacl_browser->WaitForResources(
         base::Bind(&NaClProcessHost::OnResourcesReady,
                    weak_factory_.GetWeakPtr()));
     return true;
-  } else {
-    SendErrorToRenderer("previously failed to acquire shared resources");
-    return false;
   }
+  SendErrorToRenderer("previously failed to acquire shared resources");
+  return false;
 }
 
 void NaClProcessHost::OnQueryKnownToValidate(const std::string& signature,
@@ -1125,13 +1131,12 @@ bool NaClProcessHost::AttachDebugExceptionHandler(const std::string& info,
     return NaClBrokerService::GetInstance()->LaunchDebugExceptionHandler(
                weak_factory_.GetWeakPtr(), nacl_pid, process.Handle(),
                info);
-  } else {
-    NaClStartDebugExceptionHandlerThread(
-        std::move(process), info, base::ThreadTaskRunnerHandle::Get(),
-        base::Bind(&NaClProcessHost::OnDebugExceptionHandlerLaunchedByBroker,
-                   weak_factory_.GetWeakPtr()));
-    return true;
   }
+  NaClStartDebugExceptionHandlerThread(
+      std::move(process), info, base::ThreadTaskRunnerHandle::Get(),
+      base::Bind(&NaClProcessHost::OnDebugExceptionHandlerLaunchedByBroker,
+                 weak_factory_.GetWeakPtr()));
+  return true;
 }
 #endif
 

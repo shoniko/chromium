@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -15,7 +16,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_checker.h"
@@ -54,12 +54,11 @@ class UpdateCheckerImpl : public UpdateChecker {
   ~UpdateCheckerImpl() override;
 
   // Overrides for UpdateChecker.
-  void CheckForUpdates(
-      const std::vector<std::string>& ids_checked,
-      const IdToComponentPtrMap& components,
-      const std::string& additional_attributes,
-      bool enabled_component_updates,
-      const UpdateCheckCallback& update_check_callback) override;
+  void CheckForUpdates(const std::vector<std::string>& ids_checked,
+                       const IdToComponentPtrMap& components,
+                       const std::string& additional_attributes,
+                       bool enabled_component_updates,
+                       UpdateCheckCallback update_check_callback) override;
 
  private:
   void ReadUpdaterStateAttributes();
@@ -102,11 +101,11 @@ void UpdateCheckerImpl::CheckForUpdates(
     const IdToComponentPtrMap& components,
     const std::string& additional_attributes,
     bool enabled_component_updates,
-    const UpdateCheckCallback& update_check_callback) {
+    UpdateCheckCallback update_check_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   ids_checked_ = ids_checked;
-  update_check_callback_ = update_check_callback;
+  update_check_callback_ = std::move(update_check_callback);
 
   base::PostTaskWithTraitsAndReply(
       FROM_HERE, kTaskTraits,
@@ -133,15 +132,15 @@ void UpdateCheckerImpl::CheckForUpdatesHelper(
   if (IsEncryptionRequired(components))
     RemoveUnsecureUrls(&urls);
 
-  request_sender_ = base::MakeUnique<RequestSender>(config_);
+  request_sender_ = std::make_unique<RequestSender>(config_);
   request_sender_->Send(
       config_->EnabledCupSigning(),
       BuildUpdateCheckRequest(*config_, ids_checked_, components, metadata_,
                               additional_attributes, enabled_component_updates,
                               updater_state_attributes_),
       urls,
-      base::Bind(&UpdateCheckerImpl::OnRequestSenderComplete,
-                 base::Unretained(this), base::ConstRef(components)));
+      base::BindOnce(&UpdateCheckerImpl::OnRequestSenderComplete,
+                     base::Unretained(this), base::ConstRef(components)));
 }
 
 void UpdateCheckerImpl::OnRequestSenderComplete(
@@ -199,7 +198,8 @@ void UpdateCheckerImpl::UpdateCheckSucceeded(
   }
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(update_check_callback_, 0, retry_after_sec));
+      FROM_HERE,
+      base::BindOnce(std::move(update_check_callback_), 0, retry_after_sec));
 }
 
 void UpdateCheckerImpl::UpdateCheckFailed(const IdToComponentPtrMap& components,
@@ -214,8 +214,8 @@ void UpdateCheckerImpl::UpdateCheckFailed(const IdToComponentPtrMap& components,
   }
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::BindOnce(update_check_callback_, error, retry_after_sec));
+      FROM_HERE, base::BindOnce(std::move(update_check_callback_), error,
+                                retry_after_sec));
 }
 
 }  // namespace
@@ -223,7 +223,7 @@ void UpdateCheckerImpl::UpdateCheckFailed(const IdToComponentPtrMap& components,
 std::unique_ptr<UpdateChecker> UpdateChecker::Create(
     const scoped_refptr<Configurator>& config,
     PersistedData* persistent) {
-  return base::MakeUnique<UpdateCheckerImpl>(config, persistent);
+  return std::make_unique<UpdateCheckerImpl>(config, persistent);
 }
 
 }  // namespace update_client

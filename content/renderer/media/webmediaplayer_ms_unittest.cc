@@ -291,7 +291,7 @@ void MockMediaStreamVideoRenderer::QueueFrames(
       }
 
       auto frame = media::VideoFrame::CreateZeroInitializedFrame(
-          opaque_frame ? media::PIXEL_FORMAT_YV12 : media::PIXEL_FORMAT_YV12A,
+          opaque_frame ? media::PIXEL_FORMAT_I420 : media::PIXEL_FORMAT_I420A,
           frame_size, gfx::Rect(frame_size), frame_size,
           base::TimeDelta::FromMilliseconds(token));
 
@@ -455,7 +455,7 @@ class WebMediaPlayerMSTest
             nullptr,
             this,
             &delegate_,
-            base::MakeUnique<media::MediaLog>(),
+            std::make_unique<media::MediaLog>(),
             std::unique_ptr<MediaStreamRendererFactory>(render_factory_),
             message_loop_.task_runner(),
             message_loop_.task_runner(),
@@ -525,7 +525,8 @@ class WebMediaPlayerMSTest
   void ActivateViewportIntersectionMonitoring(bool activate) override {}
   void MediaRemotingStarted(
       const blink::WebString& remote_device_friendly_name) override {}
-  void MediaRemotingStopped() override {}
+  void MediaRemotingStopped(
+      blink::WebLocalizedString::Name error_msg) override {}
 
   // Implementation of cc::VideoFrameProvider::Client
   void StopUsingProvider() override;

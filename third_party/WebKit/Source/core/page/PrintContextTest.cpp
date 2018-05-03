@@ -37,7 +37,7 @@ class MockPageContextCanvas : public SkCanvas {
   };
 
   MockPageContextCanvas() : SkCanvas(kPageWidth, kPageHeight) {}
-  ~MockPageContextCanvas() override {}
+  ~MockPageContextCanvas() override = default;
 
   void onDrawAnnotation(const SkRect& rect,
                         const char key[],
@@ -66,7 +66,7 @@ class PrintContextTest : public RenderingTest {
  protected:
   explicit PrintContextTest(LocalFrameClient* local_frame_client = nullptr)
       : RenderingTest(local_frame_client) {}
-  ~PrintContextTest() override {}
+  ~PrintContextTest() override = default;
 
   void SetUp() override {
     RenderingTest::SetUp();
@@ -84,15 +84,15 @@ class PrintContextTest : public RenderingTest {
     IntRect page_rect(0, 0, kPageWidth, kPageHeight);
     GetPrintContext().BeginPrintMode(page_rect.Width(), page_rect.Height());
     GetDocument().View()->UpdateAllLifecyclePhases();
-    PaintRecordBuilder builder(page_rect);
+    PaintRecordBuilder builder;
     GraphicsContext& context = builder.Context();
     context.SetPrinting(true);
     GetDocument().View()->PaintContents(context, kGlobalPaintPrinting,
                                         page_rect);
     {
-      DrawingRecorder recorder(context, *GetDocument().GetLayoutView(),
-                               DisplayItem::kPrintedContentDestinationLocations,
-                               page_rect);
+      DrawingRecorder recorder(
+          context, *GetDocument().GetLayoutView(),
+          DisplayItem::kPrintedContentDestinationLocations);
       GetPrintContext().OutputLinkedDestinations(context, page_rect);
     }
     builder.EndRecording()->Playback(&canvas);
@@ -165,6 +165,7 @@ TEST_F(PrintContextTest, LinkTarget) {
 }
 
 TEST_F(PrintContextTest, LinkTargetUnderAnonymousBlockBeforeBlock) {
+  GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   MockPageContextCanvas canvas;
   SetBodyInnerHTML("<div style='padding-top: 50px'>" +
                    InlineHtmlForLink("http://www.google.com",
@@ -184,6 +185,7 @@ TEST_F(PrintContextTest, LinkTargetUnderAnonymousBlockBeforeBlock) {
 }
 
 TEST_F(PrintContextTest, LinkTargetContainingABlock) {
+  GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   MockPageContextCanvas canvas;
   SetBodyInnerHTML(
       "<div style='padding-top: 50px'>" +
@@ -229,13 +231,14 @@ TEST_F(PrintContextTest, LinkTargetUnderRelativelyPositionedInline) {
 
 TEST_F(PrintContextTest, LinkTargetSvg) {
   MockPageContextCanvas canvas;
-  SetBodyInnerHTML(
-      "<svg width='100' height='100'>"
-      "<a xlink:href='http://www.w3.org'><rect x='20' y='20' width='50' "
-      "height='50'/></a>"
-      "<text x='10' y='90'><a "
-      "xlink:href='http://www.google.com'><tspan>google</tspan></a></text>"
-      "</svg>");
+  SetBodyInnerHTML(R"HTML(
+    <svg width='100' height='100'>
+    <a xlink:href='http://www.w3.org'><rect x='20' y='20' width='50'
+    height='50'/></a>
+    <text x='10' y='90'><a
+    xlink:href='http://www.google.com'><tspan>google</tspan></a></text>
+    </svg>
+  )HTML");
   PrintSinglePage(canvas);
 
   const Vector<MockPageContextCanvas::Operation>& operations =
@@ -305,11 +308,12 @@ TEST_F(PrintContextTest, LinkTargetBoundingBox) {
 
 TEST_F(PrintContextFrameTest, WithSubframe) {
   GetDocument().SetBaseURLOverride(KURL("http://a.com/"));
-  SetBodyInnerHTML(
-      "<style>::-webkit-scrollbar { display: none }</style>"
-      "<iframe src='http://b.com/' width='500' height='500'"
-      " style='border-width: 5px; margin: 5px; position: absolute; top: 90px; "
-      "left: 90px'></iframe>");
+  SetBodyInnerHTML(R"HTML(
+    <style>::-webkit-scrollbar { display: none }</style>
+    <iframe src='http://b.com/' width='500' height='500'
+     style='border-width: 5px; margin: 5px; position: absolute; top: 90px;
+    left: 90px'></iframe>
+  )HTML");
   SetChildFrameHTML(
       AbsoluteBlockHtmlForLink(50, 60, 70, 80, "#fragment") +
       AbsoluteBlockHtmlForLink(150, 160, 170, 180, "http://www.google.com") +
@@ -330,11 +334,12 @@ TEST_F(PrintContextFrameTest, WithSubframe) {
 
 TEST_F(PrintContextFrameTest, WithScrolledSubframe) {
   GetDocument().SetBaseURLOverride(KURL("http://a.com/"));
-  SetBodyInnerHTML(
-      "<style>::-webkit-scrollbar { display: none }</style>"
-      "<iframe src='http://b.com/' width='500' height='500'"
-      " style='border-width: 5px; margin: 5px; position: absolute; top: 90px; "
-      "left: 90px'></iframe>");
+  SetBodyInnerHTML(R"HTML(
+    <style>::-webkit-scrollbar { display: none }</style>
+    <iframe src='http://b.com/' width='500' height='500'
+     style='border-width: 5px; margin: 5px; position: absolute; top: 90px;
+    left: 90px'></iframe>
+  )HTML");
   SetChildFrameHTML(
       AbsoluteBlockHtmlForLink(10, 10, 20, 20, "http://invisible.com") +
       AbsoluteBlockHtmlForLink(50, 60, 70, 80, "http://partly.visible.com") +

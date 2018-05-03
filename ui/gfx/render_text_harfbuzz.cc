@@ -137,6 +137,16 @@ bool AsciiBreak(UChar32 first_char, UChar32 current_char) {
   return scripts_size != 0;
 }
 
+// When a string of "unusual" characters ends, the run usually breaks. However,
+// variation selectors should still attach to the run of unusual characters.
+// Detect this situation so that FindRunBreakingCharacter() can continue
+// tracking the unusual block. Otherwise, just returns |current|.
+UBlockCode MaybeCombineUnusualBlock(UBlockCode preceding, UBlockCode current) {
+  return IsUnusualBlockCode(preceding) && current == UBLOCK_VARIATION_SELECTORS
+             ? preceding
+             : current;
+}
+
 // Returns the boundary between a special and a regular character. Special
 // characters are brackets or characters that satisfy |IsUnusualBlockCode|.
 size_t FindRunBreakingCharacter(const base::string16& text,
@@ -156,7 +166,8 @@ size_t FindRunBreakingCharacter(const base::string16& text,
 
   while (iter.Advance() && iter.array_pos() < run_length) {
     const UChar32 current_char = iter.get();
-    const UBlockCode current_block = ublock_getCode(current_char);
+    const UBlockCode current_block =
+        MaybeCombineUnusualBlock(first_block, ublock_getCode(current_char));
     const bool block_break = current_block != first_block &&
         (first_block_unusual || IsUnusualBlockCode(current_block));
     if (block_break || current_char == '\n' ||
@@ -468,6 +479,7 @@ class HarfBuzzLineBreaker {
       }
     }
     line->segments.push_back(segment);
+    line->size.set_width(line->size.width() + segment.width());
 
     SkPaint paint;
     paint.setTypeface(run.skia_face);
@@ -476,11 +488,10 @@ class HarfBuzzLineBreaker {
     SkPaint::FontMetrics metrics;
     paint.getFontMetrics(&metrics);
 
-    line->size.set_width(line->size.width() + segment.width());
-    // TODO(dschuyler): Account for stylized baselines in string sizing.
-    max_descent_ = std::max(max_descent_, metrics.fDescent);
-    // fAscent is always negative.
-    max_ascent_ = std::max(max_ascent_, -metrics.fAscent);
+    // max_descent_ is y-down, fDescent is y-down, baseline_offset is y-down
+    max_descent_ = std::max(max_descent_, metrics.fDescent+run.baseline_offset);
+    // max_ascent_ is y-up, fAscent is y-down, baseline_offset is y-down
+    max_ascent_ = std::max(max_ascent_, -(metrics.fAscent+run.baseline_offset));
 
     if (run.is_rtl) {
       rtl_segments_.push_back(
@@ -714,7 +725,7 @@ void TextRunHarfBuzz::GetClusterAt(size_t pos,
   if (!success) {
     std::string glyph_to_char_string;
     for (size_t i = 0; i < glyph_count && i < glyph_to_char.size(); ++i) {
-      glyph_to_char_string += base::SizeTToString(i) + "->" +
+      glyph_to_char_string += base::NumberToString(i) + "->" +
                               base::UintToString(glyph_to_char[i]) + ", ";
     }
     LOG(ERROR) << " TextRunHarfBuzz error, please report at crbug.com/724880:"
@@ -738,14 +749,17 @@ RangeF TextRunHarfBuzz::GetGraphemeBounds(RenderTextHarfBuzz* render_text,
   const float cluster_begin_x = positions[glyphs.start()].x();
   const float cluster_end_x = glyphs.end() < glyph_count ?
       positions[glyphs.end()].x() : SkFloatToScalar(width);
+  DCHECK_LE(cluster_begin_x, cluster_end_x);
 
   // A cluster consists of a number of code points and corresponds to a number
   // of glyphs that should be drawn together. A cluster can contain multiple
   // graphemes. In order to place the cursor at a grapheme boundary inside the
   // cluster, we simply divide the cluster width by the number of graphemes.
   // Note: The first call to GetGraphemeIterator() can be expensive, so avoid
-  // doing it unless it's actually needed (when length > 1).
-  if (chars.length() > 1 && render_text->GetGraphemeIterator()) {
+  // doing it unless it's actually needed (when |code_point_count| > 1).
+  ptrdiff_t code_point_count = UTF16IndexToOffset(render_text->GetDisplayText(),
+                                                  chars.start(), chars.end());
+  if (code_point_count > 1 && render_text->GetGraphemeIterator()) {
     int before = 0;
     int total = 0;
     base::i18n::BreakIterator* grapheme_iterator =
@@ -789,10 +803,18 @@ RangeF TextRunHarfBuzz::GetGraphemeSpanForCharRange(
 
   DCHECK(!char_range.is_reversed());
   DCHECK(range.Contains(char_range));
-  size_t left_index = is_rtl ? char_range.end() - 1 : char_range.start();
-  size_t right_index = is_rtl ? char_range.start() : char_range.end() - 1;
-  return RangeF(GetGraphemeBounds(render_text, left_index).GetMin(),
-                GetGraphemeBounds(render_text, right_index).GetMax());
+  size_t left_index = char_range.start();
+  size_t right_index = gfx::UTF16OffsetToIndex(render_text->GetDisplayText(),
+                                               char_range.end(), -1);
+  DCHECK_LE(left_index, right_index);
+  if (is_rtl)
+    std::swap(left_index, right_index);
+
+  const RangeF left_span = GetGraphemeBounds(render_text, left_index);
+  return left_index == right_index
+             ? left_span
+             : RangeF(left_span.start(),
+                      GetGraphemeBounds(render_text, right_index).end());
 }
 
 SkScalar TextRunHarfBuzz::GetGlyphWidthForCharRange(
@@ -1002,17 +1024,30 @@ std::vector<RenderText::FontSpan> RenderTextHarfBuzz::GetFontSpansForTesting() {
   return spans;
 }
 
-Range RenderTextHarfBuzz::GetGlyphBounds(size_t index) {
+Range RenderTextHarfBuzz::GetCursorSpan(const Range& text_range) {
+  DCHECK(!text_range.is_reversed());
   EnsureLayout();
+  const size_t index = text_range.start();
   const size_t run_index =
       GetRunContainingCaret(SelectionModel(index, CURSOR_FORWARD));
   internal::TextRunList* run_list = GetRunList();
   // Return edge bounds if the index is invalid or beyond the layout text size.
   if (run_index >= run_list->size())
     return Range(GetStringSize().width());
-  const size_t layout_index = TextIndexToDisplayIndex(index);
+
   internal::TextRunHarfBuzz* run = run_list->runs()[run_index].get();
-  RangeF bounds = run->GetGraphemeBounds(this, layout_index);
+
+  Range display_range(TextIndexToDisplayIndex(text_range.start()),
+                      TextIndexToDisplayIndex(text_range.end()));
+
+  // Although highly likely, there's no guarantee that a single text run is used
+  // for the entire cursor span. For example, Unicode Variation Selectors are
+  // incorrectly placed in the next run; see crbug.com/775404. (For these, the
+  // variation selector has zero width, so it's safe to ignore the second run).
+  // TODO(tapted): Change this to a DCHECK when crbug.com/775404 is fixed.
+  display_range = display_range.Intersect(run->range);
+
+  RangeF bounds = run->GetGraphemeSpanForCharRange(this, display_range);
   // If cursor is enabled, extend the last glyph up to the rightmost cursor
   // position since clients expect them to be contiguous.
   if (cursor_enabled() && run_index == run_list->size() - 1 &&
@@ -1102,8 +1137,13 @@ SelectionModel RenderTextHarfBuzz::AdjacentWordSelectionModel(
     pos = std::min(selection.caret_pos() + 1, text().length());
     while (iter.Advance()) {
       pos = iter.pos();
-      if (iter.IsWord() && pos > selection.caret_pos())
+      if (iter.IsWord() && pos > selection.caret_pos()) {
+        // In Windows, word move advances past any characters separating the
+        // end of the current word from the next word.
+        while (iter.Advance() && !iter.IsWord())
+          pos = iter.pos();
         break;
+      }
     }
   } else {  // direction == CURSOR_LEFT
     // Notes: We always iterate words from the beginning.
@@ -1183,10 +1223,10 @@ std::vector<Rect> RenderTextHarfBuzz::GetSubstringBounds(const Range& range) {
         const internal::TextRunHarfBuzz& run = *run_list->runs()[segment.run];
         RangeF selected_span =
             run.GetGraphemeSpanForCharRange(this, intersection);
-        // Note "ceil" here matches what's done in GetGlyphBounds().
         int start_x = std::ceil(selected_span.start() - line_start_x);
         int end_x = std::ceil(selected_span.end() - line_start_x);
-        gfx::Rect rect(start_x, 0, end_x - start_x, line.size.height());
+        gfx::Rect rect(start_x, 0, end_x - start_x,
+                       std::ceil(line.size.height()));
         rects.push_back(rect + GetLineOffset(line_index));
       }
     }
@@ -1640,29 +1680,31 @@ bool RenderTextHarfBuzz::ShapeRunWithFont(const base::string16& text,
   run->positions.reset(new SkPoint[run->glyph_count]);
   run->width = 0.0f;
 
+#if defined(OS_MACOSX)
+  // Mac 10.9 and 10.10 give a quirky offset for whitespace glyphs in RTL,
+  // which requires tests relying on the behavior of |glyph_width_for_test_|
+  // to also be given a zero x_offset, otherwise expectations get thrown off.
+  const bool force_zero_offset =
+      glyph_width_for_test_ > 0 && base::mac::IsAtMostOS10_10();
+#else
+  constexpr bool force_zero_offset = false;
+#endif
+
+  DCHECK(obscured() || glyph_spacing() == 0);
   for (size_t i = 0; i < run->glyph_count; ++i) {
     DCHECK_LE(infos[i].codepoint, std::numeric_limits<uint16_t>::max());
     run->glyphs[i] = static_cast<uint16_t>(infos[i].codepoint);
     run->glyph_to_char[i] = infos[i].cluster;
-
-#if defined(OS_MACOSX)
-    // Mac 10.9 and 10.10 give a quirky offset for whitespace glyphs in RTL,
-    // which requires tests relying on the behavior of |glyph_width_for_test_|
-    // to also be given a zero x_offset, otherwise expectations get thrown off.
-    const bool force_zero_offset =
-        glyph_width_for_test_ > 0 && base::mac::IsAtMostOS10_10();
-#else
-    constexpr bool force_zero_offset = false;
-#endif
     const SkScalar x_offset =
         force_zero_offset ? 0
                           : HarfBuzzUnitsToSkiaScalar(hb_positions[i].x_offset);
     const SkScalar y_offset =
         HarfBuzzUnitsToSkiaScalar(hb_positions[i].y_offset);
     run->positions[i].set(run->width + x_offset, -y_offset);
-    run->width += (glyph_width_for_test_ > 0)
-                      ? glyph_width_for_test_
-                      : HarfBuzzUnitsToFloat(hb_positions[i].x_advance);
+    run->width +=
+        (glyph_width_for_test_ > 0)
+            ? glyph_width_for_test_
+            : HarfBuzzUnitsToFloat(hb_positions[i].x_advance) + glyph_spacing();
     // Round run widths if subpixel positioning is off to match native behavior.
     if (!run->render_params.subpixel_positioning)
       run->width = std::round(run->width);

@@ -20,8 +20,8 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
@@ -37,6 +37,7 @@
 #include "net/disk_cache/simple/simple_entry_format.h"
 #include "net/disk_cache/simple/simple_entry_impl.h"
 #include "net/disk_cache/simple/simple_experiment.h"
+#include "net/disk_cache/simple/simple_file_tracker.h"
 #include "net/disk_cache/simple/simple_histogram_macros.h"
 #include "net/disk_cache/simple/simple_index.h"
 #include "net/disk_cache/simple/simple_index_file.h"
@@ -69,7 +70,7 @@ scoped_refptr<base::SequencedTaskRunner> FallbackToInternalIfNull(
 
 bool g_fd_limit_histogram_has_been_populated = false;
 
-void MaybeHistogramFdLimit(net::CacheType cache_type) {
+void MaybeHistogramFdLimit() {
   if (g_fd_limit_histogram_has_been_populated)
     return;
 
@@ -95,18 +96,22 @@ void MaybeHistogramFdLimit(net::CacheType cache_type) {
   }
 #endif
 
-  SIMPLE_CACHE_UMA(ENUMERATION,
-                   "FileDescriptorLimitStatus", cache_type,
-                   fd_limit_status, FD_LIMIT_STATUS_MAX);
+  UMA_HISTOGRAM_ENUMERATION("SimpleCache.FileDescriptorLimitStatus",
+                            fd_limit_status, FD_LIMIT_STATUS_MAX);
   if (fd_limit_status == FD_LIMIT_STATUS_SUCCEEDED) {
-    SIMPLE_CACHE_UMA(SPARSE_SLOWLY,
-                     "FileDescriptorLimitSoft", cache_type, soft_fd_limit);
-    SIMPLE_CACHE_UMA(SPARSE_SLOWLY,
-                     "FileDescriptorLimitHard", cache_type, hard_fd_limit);
+    base::UmaHistogramSparse("SimpleCache.FileDescriptorLimitSoft",
+                             soft_fd_limit);
+    base::UmaHistogramSparse("SimpleCache.FileDescriptorLimitHard",
+                             hard_fd_limit);
   }
 
   g_fd_limit_histogram_has_been_populated = true;
 }
+
+// Global context of all the files we have open --- this permits some to be
+// closed on demand if too many FDs are being used, to avoid running out.
+base::LazyInstance<SimpleFileTracker>::Leaky g_simple_file_tracker =
+    LAZY_INSTANCE_INITIALIZER;
 
 // Detects if the files in the cache directory match the current disk cache
 // backend type and version. If the directory contains no cache, occupies it
@@ -196,8 +201,7 @@ class SimpleBackendImpl::ActiveEntryProxy
  public:
   ~ActiveEntryProxy() override {
     if (backend_) {
-      CHECK(backend_->io_thread_checker_.CalledOnValidThread());
-      CHECK_EQ(1U, backend_->active_entries_.count(entry_hash_));
+      DCHECK_EQ(1U, backend_->active_entries_.count(entry_hash_));
       backend_->active_entries_.erase(entry_hash_);
     }
   }
@@ -221,11 +225,14 @@ class SimpleBackendImpl::ActiveEntryProxy
 SimpleBackendImpl::SimpleBackendImpl(
     const FilePath& path,
     scoped_refptr<BackendCleanupTracker> cleanup_tracker,
+    SimpleFileTracker* file_tracker,
     int max_bytes,
     net::CacheType cache_type,
     const scoped_refptr<base::SequencedTaskRunner>& cache_runner,
     net::NetLog* net_log)
     : cleanup_tracker_(std::move(cleanup_tracker)),
+      file_tracker_(file_tracker ? file_tracker
+                                 : g_simple_file_tracker.Pointer()),
       path_(path),
       cache_type_(cache_type),
       cache_runner_(FallbackToInternalIfNull(cache_runner)),
@@ -234,13 +241,11 @@ SimpleBackendImpl::SimpleBackendImpl(
                                  ? SimpleEntryImpl::OPTIMISTIC_OPERATIONS
                                  : SimpleEntryImpl::NON_OPTIMISTIC_OPERATIONS),
       net_log_(net_log) {
-  io_thread_checker_.DetachFromThread();
-
   // Treat negative passed-in sizes same as SetMaxSize would here and in other
   // backends, as default (if first call).
   if (orig_max_size_ < 0)
     orig_max_size_ = 0;
-  MaybeHistogramFdLimit(cache_type_);
+  MaybeHistogramFdLimit();
 }
 
 SimpleBackendImpl::~SimpleBackendImpl() {
@@ -283,26 +288,31 @@ int SimpleBackendImpl::GetMaxFileSize() const {
 }
 
 void SimpleBackendImpl::OnDoomStart(uint64_t entry_hash) {
-  CHECK_EQ(0u, entries_pending_doom_.count(entry_hash));
+  DCHECK_EQ(0u, entries_pending_doom_.count(entry_hash));
   entries_pending_doom_.insert(
-      std::make_pair(entry_hash, std::vector<Closure>()));
+      std::make_pair(entry_hash, std::vector<PostDoomWaiter>()));
 }
 
 void SimpleBackendImpl::OnDoomComplete(uint64_t entry_hash) {
-  CHECK_EQ(1u, entries_pending_doom_.count(entry_hash));
-  std::unordered_map<uint64_t, std::vector<Closure>>::iterator it =
+  DCHECK_EQ(1u, entries_pending_doom_.count(entry_hash));
+  std::unordered_map<uint64_t, std::vector<PostDoomWaiter>>::iterator it =
       entries_pending_doom_.find(entry_hash);
-  std::vector<Closure> to_run_closures;
-  to_run_closures.swap(it->second);
+  std::vector<PostDoomWaiter> to_handle_waiters;
+  to_handle_waiters.swap(it->second);
   entries_pending_doom_.erase(it);
 
-  for (auto& closure : to_run_closures)
-    closure.Run();
+  SIMPLE_CACHE_UMA(COUNTS_1000, "NumOpsBlockedByPendingDoom", cache_type_,
+                   to_handle_waiters.size());
+
+  for (const PostDoomWaiter& post_doom : to_handle_waiters) {
+    SIMPLE_CACHE_UMA(TIMES, "QueueLatency.PendingDoom", cache_type_,
+                     (base::TimeTicks::Now() - post_doom.time_queued));
+    post_doom.run_post_doom.Run();
+  }
 }
 
 void SimpleBackendImpl::DoomEntries(std::vector<uint64_t>* entry_hashes,
                                     const net::CompletionCallback& callback) {
-  CHECK(io_thread_checker_.CalledOnValidThread());
   std::unique_ptr<std::vector<uint64_t>> mass_doom_entry_hashes(
       new std::vector<uint64_t>());
   mass_doom_entry_hashes->swap(*entry_hashes);
@@ -310,14 +320,12 @@ void SimpleBackendImpl::DoomEntries(std::vector<uint64_t>* entry_hashes,
   std::vector<uint64_t> to_doom_individually_hashes;
 
   // For each of the entry hashes, there are two cases:
-  // 1. The entry is either open or pending doom, and so it should be doomed
-  //    individually to avoid flakes.
-  // 2. The entry is not in use at all, so we can call
+  // 1. There are corresponding entries in active set, pending doom, or both
+  //    sets, and so the hash should be doomed individually to avoid flakes.
+  // 2. The hash is not in active use at all, so we can call
   //    SimpleSynchronousEntry::DoomEntrySet and delete the files en masse.
   for (int i = mass_doom_entry_hashes->size() - 1; i >= 0; --i) {
     const uint64_t entry_hash = (*mass_doom_entry_hashes)[i];
-    CHECK(active_entries_.count(entry_hash) == 0 ||
-          entries_pending_doom_.count(entry_hash) == 0);
     if (!active_entries_.count(entry_hash) &&
         !entries_pending_doom_.count(entry_hash)) {
       continue;
@@ -378,14 +386,14 @@ int SimpleBackendImpl::OpenEntry(const std::string& key,
                                  const CompletionCallback& callback) {
   const uint64_t entry_hash = simple_util::GetEntryHashKey(key);
 
-  std::vector<Closure>* post_doom = nullptr;
+  std::vector<PostDoomWaiter>* post_doom = nullptr;
   scoped_refptr<SimpleEntryImpl> simple_entry =
       CreateOrFindActiveOrDoomedEntry(entry_hash, key, &post_doom);
   if (!simple_entry) {
     Callback<int(const net::CompletionCallback&)> operation =
         base::Bind(&SimpleBackendImpl::OpenEntry,
                    base::Unretained(this), key, entry);
-    post_doom->push_back(
+    post_doom->emplace_back(
         base::Bind(&RunOperationAndCallback, operation, callback));
     return net::ERR_IO_PENDING;
   }
@@ -398,17 +406,36 @@ int SimpleBackendImpl::CreateEntry(const std::string& key,
   DCHECK_LT(0u, key.size());
   const uint64_t entry_hash = simple_util::GetEntryHashKey(key);
 
-  std::vector<Closure>* post_doom = nullptr;
+  std::vector<PostDoomWaiter>* post_doom = nullptr;
   scoped_refptr<SimpleEntryImpl> simple_entry =
       CreateOrFindActiveOrDoomedEntry(entry_hash, key, &post_doom);
 
   if (!simple_entry) {
-    Callback<int(const net::CompletionCallback&)> operation =
-        base::Bind(&SimpleBackendImpl::CreateEntry,
-                   base::Unretained(this), key, entry);
-    post_doom->push_back(
-        base::Bind(&RunOperationAndCallback, operation, callback));
-    return net::ERR_IO_PENDING;
+    // We would like to optimistically have create go ahead, for benefit of
+    // HTTP cache use. This can only be sanely done if we are the only op
+    // serialized after doom's completion.
+    if (post_doom->empty() &&
+        entry_operations_mode_ == SimpleEntryImpl::OPTIMISTIC_OPERATIONS) {
+      simple_entry = new SimpleEntryImpl(
+          cache_type_, path_, cleanup_tracker_.get(), entry_hash,
+          entry_operations_mode_, this, file_tracker_, net_log_);
+      simple_entry->SetKey(key);
+      simple_entry->SetActiveEntryProxy(
+          ActiveEntryProxy::Create(entry_hash, this));
+      simple_entry->SetCreatePendingDoom();
+      std::pair<EntryMap::iterator, bool> insert_result =
+          active_entries_.insert(
+              EntryMap::value_type(entry_hash, simple_entry.get()));
+      post_doom->emplace_back(base::Bind(
+          &SimpleEntryImpl::NotifyDoomBeforeCreateComplete, simple_entry));
+      DCHECK(insert_result.second);
+    } else {
+      Callback<int(const net::CompletionCallback&)> operation = base::Bind(
+          &SimpleBackendImpl::CreateEntry, base::Unretained(this), key, entry);
+      post_doom->emplace_back(
+          base::Bind(&RunOperationAndCallback, operation, callback));
+      return net::ERR_IO_PENDING;
+    }
   }
 
   return simple_entry->CreateEntry(entry, callback);
@@ -418,7 +445,7 @@ int SimpleBackendImpl::DoomEntry(const std::string& key,
                                  const net::CompletionCallback& callback) {
   const uint64_t entry_hash = simple_util::GetEntryHashKey(key);
 
-  std::vector<Closure>* post_doom = nullptr;
+  std::vector<PostDoomWaiter>* post_doom = nullptr;
   scoped_refptr<SimpleEntryImpl> simple_entry =
       CreateOrFindActiveOrDoomedEntry(entry_hash, key, &post_doom);
   if (!simple_entry) {
@@ -428,7 +455,7 @@ int SimpleBackendImpl::DoomEntry(const std::string& key,
     // create for our key, in which case we still have work to do.
     Callback<int(const net::CompletionCallback&)> operation =
         base::Bind(&SimpleBackendImpl::DoomEntry, base::Unretained(this), key);
-    post_doom->push_back(
+    post_doom->emplace_back(
         base::Bind(&RunOperationAndCallback, operation, callback));
     return net::ERR_IO_PENDING;
   }
@@ -558,7 +585,6 @@ void SimpleBackendImpl::OnExternalCacheHit(const std::string& key) {
 size_t SimpleBackendImpl::DumpMemoryStats(
     base::trace_event::ProcessMemoryDump* pmd,
     const std::string& parent_absolute_name) const {
-  CHECK(io_thread_checker_.CalledOnValidThread());
   base::trace_event::MemoryAllocatorDump* dump =
       pmd->CreateAllocatorDump(parent_absolute_name + "/simple_backend");
 
@@ -581,6 +607,17 @@ void SimpleBackendImpl::SetEntryInMemoryData(const std::string& key,
   const uint64_t entry_hash = simple_util::GetEntryHashKey(key);
   index_->SetEntryInMemoryData(entry_hash, data);
 }
+
+SimpleBackendImpl::PostDoomWaiter::PostDoomWaiter() {}
+
+SimpleBackendImpl::PostDoomWaiter::PostDoomWaiter(
+    const base::Closure& to_run_post_doom)
+    : time_queued(base::TimeTicks::Now()), run_post_doom(to_run_post_doom) {}
+
+SimpleBackendImpl::PostDoomWaiter::PostDoomWaiter(const PostDoomWaiter& other)
+    : time_queued(other.time_queued), run_post_doom(other.run_post_doom) {}
+
+SimpleBackendImpl::PostDoomWaiter::~PostDoomWaiter() {}
 
 void SimpleBackendImpl::InitializeIndex(const CompletionCallback& callback,
                                         const DiskStatResult& result) {
@@ -661,12 +698,11 @@ scoped_refptr<SimpleEntryImpl>
 SimpleBackendImpl::CreateOrFindActiveOrDoomedEntry(
     const uint64_t entry_hash,
     const std::string& key,
-    std::vector<Closure>** post_doom) {
-  CHECK(io_thread_checker_.CalledOnValidThread());
+    std::vector<PostDoomWaiter>** post_doom) {
   DCHECK_EQ(entry_hash, simple_util::GetEntryHashKey(key));
 
   // If there is a doom pending, we would want to serialize after it.
-  std::unordered_map<uint64_t, std::vector<Closure>>::iterator doom_it =
+  std::unordered_map<uint64_t, std::vector<PostDoomWaiter>>::iterator doom_it =
       entries_pending_doom_.find(entry_hash);
   if (doom_it != entries_pending_doom_.end()) {
     *post_doom = &doom_it->second;
@@ -678,9 +714,9 @@ SimpleBackendImpl::CreateOrFindActiveOrDoomedEntry(
   EntryMap::iterator& it = insert_result.first;
   const bool did_insert = insert_result.second;
   if (did_insert) {
-    SimpleEntryImpl* entry = it->second =
-        new SimpleEntryImpl(cache_type_, path_, cleanup_tracker_.get(),
-                            entry_hash, entry_operations_mode_, this, net_log_);
+    SimpleEntryImpl* entry = it->second = new SimpleEntryImpl(
+        cache_type_, path_, cleanup_tracker_.get(), entry_hash,
+        entry_operations_mode_, this, file_tracker_, net_log_);
     entry->SetKey(key);
     entry->SetActiveEntryProxy(ActiveEntryProxy::Create(entry_hash, this));
   }
@@ -689,8 +725,8 @@ SimpleBackendImpl::CreateOrFindActiveOrDoomedEntry(
   // currently active entry.
   if (key != it->second->key()) {
     it->second->Doom();
-    CHECK_EQ(0U, active_entries_.count(entry_hash));
-    CHECK_EQ(1U, entries_pending_doom_.count(entry_hash));
+    DCHECK_EQ(0U, active_entries_.count(entry_hash));
+    DCHECK_EQ(1U, entries_pending_doom_.count(entry_hash));
     // Re-run ourselves to handle the now-pending doom.
     return CreateOrFindActiveOrDoomedEntry(entry_hash, key, post_doom);
   }
@@ -700,15 +736,14 @@ SimpleBackendImpl::CreateOrFindActiveOrDoomedEntry(
 int SimpleBackendImpl::OpenEntryFromHash(uint64_t entry_hash,
                                          Entry** entry,
                                          const CompletionCallback& callback) {
-  CHECK(io_thread_checker_.CalledOnValidThread());
-  std::unordered_map<uint64_t, std::vector<Closure>>::iterator it =
+  std::unordered_map<uint64_t, std::vector<PostDoomWaiter>>::iterator it =
       entries_pending_doom_.find(entry_hash);
   if (it != entries_pending_doom_.end()) {
     Callback<int(const net::CompletionCallback&)> operation =
         base::Bind(&SimpleBackendImpl::OpenEntryFromHash,
                    base::Unretained(this), entry_hash, entry);
-    it->second.push_back(base::Bind(&RunOperationAndCallback,
-                                    operation, callback));
+    it->second.emplace_back(
+        base::Bind(&RunOperationAndCallback, operation, callback));
     return net::ERR_IO_PENDING;
   }
 
@@ -717,9 +752,9 @@ int SimpleBackendImpl::OpenEntryFromHash(uint64_t entry_hash,
     return OpenEntry(has_active->second->key(), entry, callback);
   }
 
-  scoped_refptr<SimpleEntryImpl> simple_entry =
-      new SimpleEntryImpl(cache_type_, path_, cleanup_tracker_.get(),
-                          entry_hash, entry_operations_mode_, this, net_log_);
+  scoped_refptr<SimpleEntryImpl> simple_entry = new SimpleEntryImpl(
+      cache_type_, path_, cleanup_tracker_.get(), entry_hash,
+      entry_operations_mode_, this, file_tracker_, net_log_);
   CompletionCallback backend_callback =
       base::Bind(&SimpleBackendImpl::OnEntryOpenedFromHash,
                  AsWeakPtr(), entry_hash, entry, simple_entry, callback);
@@ -728,18 +763,17 @@ int SimpleBackendImpl::OpenEntryFromHash(uint64_t entry_hash,
 
 int SimpleBackendImpl::DoomEntryFromHash(uint64_t entry_hash,
                                          const CompletionCallback& callback) {
-  CHECK(io_thread_checker_.CalledOnValidThread());
   Entry** entry = new Entry*();
   std::unique_ptr<Entry*> scoped_entry(entry);
 
-  std::unordered_map<uint64_t, std::vector<Closure>>::iterator pending_it =
-      entries_pending_doom_.find(entry_hash);
+  std::unordered_map<uint64_t, std::vector<PostDoomWaiter>>::iterator
+      pending_it = entries_pending_doom_.find(entry_hash);
   if (pending_it != entries_pending_doom_.end()) {
     Callback<int(const net::CompletionCallback&)> operation =
         base::Bind(&SimpleBackendImpl::DoomEntryFromHash,
                    base::Unretained(this), entry_hash);
-    pending_it->second.push_back(base::Bind(&RunOperationAndCallback,
-                                    operation, callback));
+    pending_it->second.emplace_back(
+        base::Bind(&RunOperationAndCallback, operation, callback));
     return net::ERR_IO_PENDING;
   }
 
@@ -761,7 +795,6 @@ void SimpleBackendImpl::OnEntryOpenedFromHash(
     const scoped_refptr<SimpleEntryImpl>& simple_entry,
     const CompletionCallback& callback,
     int error_code) {
-  CHECK(io_thread_checker_.CalledOnValidThread());
   if (error_code != net::OK) {
     callback.Run(error_code);
     return;

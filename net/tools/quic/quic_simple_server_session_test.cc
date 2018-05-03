@@ -14,6 +14,7 @@
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_crypto_server_stream.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/core/tls_server_handshaker.h"
 #include "net/quic/platform/api/quic_containers.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_socket_address.h"
@@ -64,15 +65,6 @@ class QuicSimpleServerSessionPeer {
       QuicSimpleServerSession* s) {
     return s->CreateOutgoingDynamicStream();
   }
-
-  static QuicDeque<PromisedStreamInfo>* promised_streams(
-      QuicSimpleServerSession* s) {
-    return &(s->promised_streams_);
-  }
-
-  static QuicStreamId hightest_promised_stream_id(QuicSimpleServerSession* s) {
-    return s->highest_promised_stream_id_;
-  }
 };
 
 namespace {
@@ -89,10 +81,11 @@ class MockQuicCryptoServerStream : public QuicCryptoServerStream {
       : QuicCryptoServerStream(
             crypto_config,
             compressed_certs_cache,
-            FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support,
+            GetQuicReloadableFlag(
+                enable_quic_stateless_reject_support),  // NOLINT
             session,
             helper) {}
-  ~MockQuicCryptoServerStream() override {}
+  ~MockQuicCryptoServerStream() override = default;
 
   MOCK_METHOD1(SendServerConfigUpdate,
                void(const CachedNetworkParameters* cached_network_parameters));
@@ -118,7 +111,7 @@ class MockQuicConnectionWithSendStreamData : public MockQuicConnection {
       MockQuicConnectionHelper* helper,
       MockAlarmFactory* alarm_factory,
       Perspective perspective,
-      const QuicTransportVersionVector& supported_versions)
+      const ParsedQuicVersionVector& supported_versions)
       : MockQuicConnection(helper,
                            alarm_factory,
                            perspective,
@@ -126,7 +119,7 @@ class MockQuicConnectionWithSendStreamData : public MockQuicConnection {
 
   MOCK_METHOD4(SendStreamData,
                QuicConsumedData(QuicStreamId id,
-                                QuicIOVector iov,
+                                size_t write_length,
                                 QuicStreamOffset offset,
                                 StreamSendingState state));
 };
@@ -179,12 +172,13 @@ class MockQuicSimpleServerSession : public QuicSimpleServerSession {
 };
 
 class QuicSimpleServerSessionTest
-    : public QuicTestWithParam<QuicTransportVersion> {
+    : public QuicTestWithParam<ParsedQuicVersion> {
  protected:
   QuicSimpleServerSessionTest()
       : crypto_config_(QuicCryptoServerConfig::TESTING,
                        QuicRandom::GetInstance(),
-                       crypto_test_utils::ProofSourceForTesting()),
+                       crypto_test_utils::ProofSourceForTesting(),
+                       TlsServerHandshaker::CreateSslCtx()),
         compressed_certs_cache_(
             QuicCompressedCertsCache::kQuicCompressedCertsCacheSize) {
     config_.SetMaxStreamsPerConnection(kMaxStreamsForTest, kMaxStreamsForTest);
@@ -198,7 +192,7 @@ class QuicSimpleServerSessionTest
 
     connection_ = new StrictMock<MockQuicConnectionWithSendStreamData>(
         &helper_, &alarm_factory_, Perspective::IS_SERVER,
-        SupportedTransportVersions(GetParam()));
+        SupportedVersions(GetParam()));
     session_.reset(new MockQuicSimpleServerSession(
         config_, connection_, &owner_, &stream_helper_, &crypto_config_,
         &compressed_certs_cache_, &response_cache_));
@@ -236,7 +230,7 @@ class QuicSimpleServerSessionTest
 
 INSTANTIATE_TEST_CASE_P(Tests,
                         QuicSimpleServerSessionTest,
-                        ::testing::ValuesIn(AllSupportedTransportVersions()));
+                        ::testing::ValuesIn(AllSupportedVersions()));
 
 TEST_P(QuicSimpleServerSessionTest, CloseStreamDueToReset) {
   // Open a stream, then reset it.
@@ -247,7 +241,7 @@ TEST_P(QuicSimpleServerSessionTest, CloseStreamDueToReset) {
   EXPECT_EQ(1u, session_->GetNumOpenIncomingStreams());
 
   // Receive a reset (and send a RST in response).
-  QuicRstStreamFrame rst1(GetNthClientInitiatedId(0),
+  QuicRstStreamFrame rst1(kInvalidControlFrameId, GetNthClientInitiatedId(0),
                           QUIC_ERROR_PROCESSING_STREAM, 0);
   EXPECT_CALL(owner_, OnRstStreamReceived(_)).Times(1);
   EXPECT_CALL(*connection_, SendRstStream(GetNthClientInitiatedId(0),
@@ -265,7 +259,7 @@ TEST_P(QuicSimpleServerSessionTest, CloseStreamDueToReset) {
 
 TEST_P(QuicSimpleServerSessionTest, NeverOpenStreamDueToReset) {
   // Send a reset (and expect the peer to send a RST in response).
-  QuicRstStreamFrame rst1(GetNthClientInitiatedId(0),
+  QuicRstStreamFrame rst1(kInvalidControlFrameId, GetNthClientInitiatedId(0),
                           QUIC_ERROR_PROCESSING_STREAM, 0);
   EXPECT_CALL(owner_, OnRstStreamReceived(_)).Times(1);
   EXPECT_CALL(*connection_, SendRstStream(GetNthClientInitiatedId(0),
@@ -294,7 +288,7 @@ TEST_P(QuicSimpleServerSessionTest, AcceptClosedStream) {
   EXPECT_EQ(2u, session_->GetNumOpenIncomingStreams());
 
   // Send a reset (and expect the peer to send a RST in response).
-  QuicRstStreamFrame rst(GetNthClientInitiatedId(0),
+  QuicRstStreamFrame rst(kInvalidControlFrameId, GetNthClientInitiatedId(0),
                          QUIC_ERROR_PROCESSING_STREAM, 0);
   EXPECT_CALL(owner_, OnRstStreamReceived(_)).Times(1);
   EXPECT_CALL(*connection_, SendRstStream(GetNthClientInitiatedId(0),
@@ -453,7 +447,7 @@ class QuicSimpleServerSessionServerPushTest
 
     connection_ = new StrictMock<MockQuicConnectionWithSendStreamData>(
         &helper_, &alarm_factory_, Perspective::IS_SERVER,
-        SupportedTransportVersions(GetParam()));
+        SupportedVersions(GetParam()));
     session_.reset(new MockQuicSimpleServerSession(
         config_, connection_, &owner_, &stream_helper_, &crypto_config_,
         &compressed_certs_cache_, &response_cache_));
@@ -521,7 +515,7 @@ class QuicSimpleServerSessionServerPushTest
 
 INSTANTIATE_TEST_CASE_P(Tests,
                         QuicSimpleServerSessionServerPushTest,
-                        ::testing::ValuesIn(AllSupportedTransportVersions()));
+                        ::testing::ValuesIn(AllSupportedVersions()));
 
 TEST_P(QuicSimpleServerSessionServerPushTest, TestPromisePushResources) {
   // Tests that given more than kMaxOpenStreamForTest resources, all their
@@ -569,7 +563,8 @@ TEST_P(QuicSimpleServerSessionServerPushTest,
   // Reset the last stream in the queue. It should be marked cancelled.
   QuicStreamId stream_got_reset =
       GetNthServerInitiatedId(kMaxStreamsForTest + 1);
-  QuicRstStreamFrame rst(stream_got_reset, QUIC_STREAM_CANCELLED, 0);
+  QuicRstStreamFrame rst(kInvalidControlFrameId, stream_got_reset,
+                         QUIC_STREAM_CANCELLED, 0);
   EXPECT_CALL(owner_, OnRstStreamReceived(_)).Times(1);
   EXPECT_CALL(*connection_,
               SendRstStream(stream_got_reset, QUIC_RST_ACKNOWLEDGEMENT, 0));
@@ -613,7 +608,8 @@ TEST_P(QuicSimpleServerSessionServerPushTest,
 
   EXPECT_CALL(*connection_, SendBlocked(stream_to_open));
   EXPECT_CALL(owner_, OnRstStreamReceived(_)).Times(1);
-  QuicRstStreamFrame rst(stream_got_reset, QUIC_STREAM_CANCELLED, 0);
+  QuicRstStreamFrame rst(kInvalidControlFrameId, stream_got_reset,
+                         QUIC_STREAM_CANCELLED, 0);
   visitor_->OnRstStream(rst);
 }
 

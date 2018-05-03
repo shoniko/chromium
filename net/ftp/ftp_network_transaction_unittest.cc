@@ -16,6 +16,7 @@
 #include "net/ftp/ftp_request_info.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/gtest_util.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -63,7 +64,7 @@ class FtpSocketDataProvider : public SocketDataProvider {
         data_type_('I') {
     Init();
   }
-  ~FtpSocketDataProvider() override {}
+  ~FtpSocketDataProvider() override = default;
 
   // SocketDataProvider implementation.
   MockRead OnRead() override {
@@ -243,8 +244,8 @@ class FtpSocketDataProvider : public SocketDataProvider {
 
 class FtpSocketDataProviderDirectoryListing : public FtpSocketDataProvider {
  public:
-  FtpSocketDataProviderDirectoryListing() {}
-  ~FtpSocketDataProviderDirectoryListing() override {}
+  FtpSocketDataProviderDirectoryListing() = default;
+  ~FtpSocketDataProviderDirectoryListing() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -270,8 +271,8 @@ class FtpSocketDataProviderDirectoryListing : public FtpSocketDataProvider {
 class FtpSocketDataProviderDirectoryListingWithPasvFallback
     : public FtpSocketDataProviderDirectoryListing {
  public:
-  FtpSocketDataProviderDirectoryListingWithPasvFallback() {}
-  ~FtpSocketDataProviderDirectoryListingWithPasvFallback() override {}
+  FtpSocketDataProviderDirectoryListingWithPasvFallback() = default;
+  ~FtpSocketDataProviderDirectoryListingWithPasvFallback() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -295,8 +296,8 @@ class FtpSocketDataProviderDirectoryListingWithPasvFallback
 
 class FtpSocketDataProviderVMSDirectoryListing : public FtpSocketDataProvider {
  public:
-  FtpSocketDataProviderVMSDirectoryListing() {}
-  ~FtpSocketDataProviderVMSDirectoryListing() override {}
+  FtpSocketDataProviderVMSDirectoryListing() = default;
+  ~FtpSocketDataProviderVMSDirectoryListing() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -330,8 +331,8 @@ class FtpSocketDataProviderVMSDirectoryListing : public FtpSocketDataProvider {
 class FtpSocketDataProviderVMSDirectoryListingRootDirectory
     : public FtpSocketDataProvider {
  public:
-  FtpSocketDataProviderVMSDirectoryListingRootDirectory() {}
-  ~FtpSocketDataProviderVMSDirectoryListingRootDirectory() override {}
+  FtpSocketDataProviderVMSDirectoryListingRootDirectory() = default;
+  ~FtpSocketDataProviderVMSDirectoryListingRootDirectory() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -366,8 +367,8 @@ class FtpSocketDataProviderVMSDirectoryListingRootDirectory
 class FtpSocketDataProviderFileDownloadWithFileTypecode
     : public FtpSocketDataProvider {
  public:
-  FtpSocketDataProviderFileDownloadWithFileTypecode() {}
-  ~FtpSocketDataProviderFileDownloadWithFileTypecode() override {}
+  FtpSocketDataProviderFileDownloadWithFileTypecode() = default;
+  ~FtpSocketDataProviderFileDownloadWithFileTypecode() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -389,8 +390,8 @@ class FtpSocketDataProviderFileDownloadWithFileTypecode
 
 class FtpSocketDataProviderFileDownload : public FtpSocketDataProvider {
  public:
-  FtpSocketDataProviderFileDownload() {}
-  ~FtpSocketDataProviderFileDownload() override {}
+  FtpSocketDataProviderFileDownload() = default;
+  ~FtpSocketDataProviderFileDownload() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -416,8 +417,8 @@ class FtpSocketDataProviderFileDownload : public FtpSocketDataProvider {
 class FtpSocketDataProviderPathSeparatorsNotUnescaped
     : public FtpSocketDataProvider {
  public:
-  FtpSocketDataProviderPathSeparatorsNotUnescaped() {}
-  ~FtpSocketDataProviderPathSeparatorsNotUnescaped() override {}
+  FtpSocketDataProviderPathSeparatorsNotUnescaped() = default;
+  ~FtpSocketDataProviderPathSeparatorsNotUnescaped() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -444,8 +445,8 @@ class FtpSocketDataProviderPathSeparatorsNotUnescaped
 
 class FtpSocketDataProviderFileNotFound : public FtpSocketDataProvider {
  public:
-  FtpSocketDataProviderFileNotFound() {}
-  ~FtpSocketDataProviderFileNotFound() override {}
+  FtpSocketDataProviderFileNotFound() = default;
+  ~FtpSocketDataProviderFileNotFound() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -473,8 +474,8 @@ class FtpSocketDataProviderFileNotFound : public FtpSocketDataProvider {
 class FtpSocketDataProviderFileDownloadWithPasvFallback
     : public FtpSocketDataProviderFileDownload {
  public:
-  FtpSocketDataProviderFileDownloadWithPasvFallback() {}
-  ~FtpSocketDataProviderFileDownloadWithPasvFallback() override {}
+  FtpSocketDataProviderFileDownloadWithPasvFallback() = default;
+  ~FtpSocketDataProviderFileDownloadWithPasvFallback() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -498,8 +499,8 @@ class FtpSocketDataProviderFileDownloadWithPasvFallback
 class FtpSocketDataProviderFileDownloadZeroSize
     : public FtpSocketDataProviderFileDownload {
  public:
-  FtpSocketDataProviderFileDownloadZeroSize() {}
-  ~FtpSocketDataProviderFileDownloadZeroSize() override {}
+  FtpSocketDataProviderFileDownloadZeroSize() = default;
+  ~FtpSocketDataProviderFileDownloadZeroSize() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -524,8 +525,8 @@ class FtpSocketDataProviderFileDownloadZeroSize
 class FtpSocketDataProviderFileDownloadCWD451
     : public FtpSocketDataProviderFileDownload {
  public:
-  FtpSocketDataProviderFileDownloadCWD451() {}
-  ~FtpSocketDataProviderFileDownloadCWD451() override {}
+  FtpSocketDataProviderFileDownloadCWD451() = default;
+  ~FtpSocketDataProviderFileDownloadCWD451() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -546,8 +547,8 @@ class FtpSocketDataProviderFileDownloadCWD451
 
 class FtpSocketDataProviderVMSFileDownload : public FtpSocketDataProvider {
  public:
-  FtpSocketDataProviderVMSFileDownload() {}
-  ~FtpSocketDataProviderVMSFileDownload() override {}
+  FtpSocketDataProviderVMSFileDownload() = default;
+  ~FtpSocketDataProviderVMSFileDownload() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -582,8 +583,8 @@ class FtpSocketDataProviderVMSFileDownload : public FtpSocketDataProvider {
 
 class FtpSocketDataProviderEscaping : public FtpSocketDataProviderFileDownload {
  public:
-  FtpSocketDataProviderEscaping() {}
-  ~FtpSocketDataProviderEscaping() override {}
+  FtpSocketDataProviderEscaping() = default;
+  ~FtpSocketDataProviderEscaping() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -611,8 +612,8 @@ class FtpSocketDataProviderEscaping : public FtpSocketDataProviderFileDownload {
 class FtpSocketDataProviderFileDownloadInvalidResponse
     : public FtpSocketDataProviderFileDownload {
  public:
-  FtpSocketDataProviderFileDownloadInvalidResponse() {}
-  ~FtpSocketDataProviderFileDownloadInvalidResponse() override {}
+  FtpSocketDataProviderFileDownloadInvalidResponse() = default;
+  ~FtpSocketDataProviderFileDownloadInvalidResponse() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -648,7 +649,7 @@ class FtpSocketDataProviderEvilEpsv : public FtpSocketDataProviderFileDownload {
         epsv_response_length_(epsv_response_length),
         expected_state_(expected_state) {}
 
-  ~FtpSocketDataProviderEvilEpsv() override {}
+  ~FtpSocketDataProviderEvilEpsv() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -677,7 +678,7 @@ class FtpSocketDataProviderEvilPasv
       : pasv_response_(pasv_response),
         expected_state_(expected_state) {
   }
-  ~FtpSocketDataProviderEvilPasv() override {}
+  ~FtpSocketDataProviderEvilPasv() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -703,7 +704,7 @@ class FtpSocketDataProviderEvilSize : public FtpSocketDataProviderFileDownload {
       : size_response_(size_response),
         expected_state_(expected_state) {
   }
-  ~FtpSocketDataProviderEvilSize() override {}
+  ~FtpSocketDataProviderEvilSize() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -731,7 +732,7 @@ class FtpSocketDataProviderEvilLogin
       : expected_user_(expected_user),
         expected_password_(expected_password) {
   }
-  ~FtpSocketDataProviderEvilLogin() override {}
+  ~FtpSocketDataProviderEvilLogin() override = default;
 
   MockWriteResult OnWrite(const std::string& data) override {
     if (InjectFault())
@@ -773,7 +774,7 @@ class FtpNetworkTransactionTest
     }
     host_resolver_->set_rules(rules.get());
   }
-  ~FtpNetworkTransactionTest() override {}
+  ~FtpNetworkTransactionTest() override = default;
 
   // Sets up an FtpNetworkTransaction and MocketClientSocketFactory, replacing
   // the default one. Only needs to be called if a test runs multiple
@@ -819,9 +820,10 @@ class FtpNetworkTransactionTest
     mock_socket_factory_->AddSocketDataProvider(data_socket.get());
     FtpRequestInfo request_info = GetRequestInfo(request);
     EXPECT_EQ(LOAD_STATE_IDLE, transaction_->GetLoadState());
-    ASSERT_EQ(ERR_IO_PENDING,
-              transaction_->Start(&request_info, callback_.callback(),
-                                  NetLogWithSource()));
+    ASSERT_EQ(
+        ERR_IO_PENDING,
+        transaction_->Start(&request_info, callback_.callback(),
+                            NetLogWithSource(), TRAFFIC_ANNOTATION_FOR_TESTS));
     EXPECT_NE(LOAD_STATE_IDLE, transaction_->GetLoadState());
     ASSERT_EQ(expected_result, callback_.WaitForResult());
     if (expected_result == OK) {
@@ -870,9 +872,10 @@ TEST_P(FtpNetworkTransactionTest, FailedLookup) {
   host_resolver_->set_rules(rules.get());
 
   EXPECT_EQ(LOAD_STATE_IDLE, transaction_->GetLoadState());
-  ASSERT_EQ(ERR_IO_PENDING,
-            transaction_->Start(&request_info, callback_.callback(),
-                                NetLogWithSource()));
+  ASSERT_EQ(
+      ERR_IO_PENDING,
+      transaction_->Start(&request_info, callback_.callback(),
+                          NetLogWithSource(), TRAFFIC_ANNOTATION_FOR_TESTS));
   ASSERT_THAT(callback_.WaitForResult(), IsError(ERR_NAME_NOT_RESOLVED));
   EXPECT_EQ(LOAD_STATE_IDLE, transaction_->GetLoadState());
 }
@@ -1141,9 +1144,10 @@ TEST_P(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafeHost) {
   FtpRequestInfo request_info = GetRequestInfo("ftp://host/file");
 
   // Start the transaction.
-  ASSERT_EQ(ERR_IO_PENDING,
-            transaction_->Start(&request_info, callback_.callback(),
-                                NetLogWithSource()));
+  ASSERT_EQ(
+      ERR_IO_PENDING,
+      transaction_->Start(&request_info, callback_.callback(),
+                          NetLogWithSource(), TRAFFIC_ANNOTATION_FOR_TESTS));
   ASSERT_THAT(callback_.WaitForResult(), IsOk());
 
   // The transaction fires the callback when we can start reading data. That
@@ -1336,9 +1340,10 @@ TEST_P(FtpNetworkTransactionTest, EvilRestartUser) {
 
   FtpRequestInfo request_info = GetRequestInfo("ftp://host/file");
 
-  ASSERT_EQ(ERR_IO_PENDING,
-            transaction_->Start(&request_info, callback_.callback(),
-                                NetLogWithSource()));
+  ASSERT_EQ(
+      ERR_IO_PENDING,
+      transaction_->Start(&request_info, callback_.callback(),
+                          NetLogWithSource(), TRAFFIC_ANNOTATION_FOR_TESTS));
   ASSERT_THAT(callback_.WaitForResult(), IsError(ERR_FTP_FAILED));
 
   MockRead ctrl_reads[] = {
@@ -1369,9 +1374,10 @@ TEST_P(FtpNetworkTransactionTest, EvilRestartPassword) {
 
   FtpRequestInfo request_info = GetRequestInfo("ftp://host/file");
 
-  ASSERT_EQ(ERR_IO_PENDING,
-            transaction_->Start(&request_info, callback_.callback(),
-                                NetLogWithSource()));
+  ASSERT_EQ(
+      ERR_IO_PENDING,
+      transaction_->Start(&request_info, callback_.callback(),
+                          NetLogWithSource(), TRAFFIC_ANNOTATION_FOR_TESTS));
   ASSERT_THAT(callback_.WaitForResult(), IsError(ERR_FTP_FAILED));
 
   MockRead ctrl_reads[] = {

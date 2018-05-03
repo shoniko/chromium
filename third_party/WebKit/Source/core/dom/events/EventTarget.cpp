@@ -39,6 +39,7 @@
 #include "bindings/core/v8/event_listener_options_or_boolean.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/events/Event.h"
+#include "core/dom/events/EventTargetImpl.h"
 #include "core/editing/Editor.h"
 #include "core/events/EventUtil.h"
 #include "core/events/PointerEvent.h"
@@ -102,6 +103,11 @@ bool IsScrollBlockingEvent(const AtomicString& event_type) {
          event_type == EventTypeNames::wheel;
 }
 
+bool IsInstrumentedForAsyncStack(const AtomicString& event_type) {
+  return event_type == EventTypeNames::load ||
+         event_type == EventTypeNames::error;
+}
+
 double BlockedEventsWarningThreshold(ExecutionContext* context,
                                      const Event* event) {
   if (!event->cancelable())
@@ -147,9 +153,9 @@ bool CheckTypeThenUseCount(const Event* event,
 
 }  // namespace
 
-EventTargetData::EventTargetData() {}
+EventTargetData::EventTargetData() = default;
 
-EventTargetData::~EventTargetData() {}
+EventTargetData::~EventTargetData() = default;
 
 void EventTargetData::Trace(blink::Visitor* visitor) {
   visitor->Trace(event_listener_map);
@@ -160,9 +166,9 @@ void EventTargetData::TraceWrappers(
   visitor->TraceWrappers(event_listener_map);
 }
 
-EventTarget::EventTarget() {}
+EventTarget::EventTarget() = default;
 
-EventTarget::~EventTarget() {}
+EventTarget::~EventTarget() = default;
 
 Node* EventTarget::ToNode() {
   return nullptr;
@@ -186,6 +192,19 @@ MessagePort* EventTarget::ToMessagePort() {
 
 ServiceWorker* EventTarget::ToServiceWorker() {
   return nullptr;
+}
+
+// An instance of EventTargetImpl is returned because EventTarget
+// is an abstract class, and making it non-abstract is unfavorable
+// because it will increase the size of EventTarget and all of its
+// subclasses with code that are mostly unnecessary for them,
+// resulting in a performance decrease.
+// We also don't use ImplementedAs=EventTargetImpl in EventTarget.idl
+// because it will result in some complications with classes that are
+// currently derived from EventTarget.
+// Spec: https://dom.spec.whatwg.org/#dom-eventtarget-eventtarget
+EventTarget* EventTarget::Create(ScriptState* script_state) {
+  return EventTargetImpl::Create(script_state);
 }
 
 inline LocalDOMWindow* EventTarget::ExecutingWindow() {
@@ -247,6 +266,7 @@ void EventTarget::SetDefaultAddEventListenerOptions(
       if (function->IsFunction() &&
           strcmp("ssc_wheel",
                  *v8::String::Utf8Value(
+                     v8::Isolate::GetCurrent(),
                      v8::Local<v8::Function>::Cast(function)->GetName())) ==
               0) {
         options.setPassive(true);
@@ -353,6 +373,10 @@ bool EventTarget::AddEventListenerInternal(
       event_type, listener, options, &registered_listener);
   if (added) {
     AddedEventListener(event_type, registered_listener);
+    if (V8AbstractEventListener::Cast(listener) &&
+        IsInstrumentedForAsyncStack(event_type)) {
+      probe::AsyncTaskScheduled(GetExecutionContext(), event_type, listener);
+    }
   }
   return added;
 }
@@ -485,6 +509,10 @@ bool EventTarget::SetAttributeEventListener(const AtomicString& event_type,
     return false;
   }
   if (registered_listener) {
+    if (V8AbstractEventListener::Cast(listener) &&
+        IsInstrumentedForAsyncStack(event_type)) {
+      probe::AsyncTaskScheduled(GetExecutionContext(), event_type, listener);
+    }
     registered_listener->SetCallback(listener);
     return true;
   }
@@ -669,6 +697,12 @@ bool EventTarget::FireEventListeners(Event* event,
       } else if (CheckTypeThenUseCount(event, EventTypeNames::unload,
                                        WebFeature::kDocumentUnloadFired,
                                        document)) {
+      } else if (CheckTypeThenUseCount(event, EventTypeNames::pagehide,
+                                       WebFeature::kDocumentPageHideFired,
+                                       document)) {
+      } else if (CheckTypeThenUseCount(event, EventTypeNames::pageshow,
+                                       WebFeature::kDocumentPageShowFired,
+                                       document)) {
       } else if (CheckTypeThenUseCount(event, EventTypeNames::DOMFocusIn,
                                        WebFeature::kDOMFocusInOutEvent,
                                        document)) {
@@ -727,7 +761,7 @@ bool EventTarget::FireEventListeners(Event* event,
   TimeTicks now;
   bool should_report_blocked_event = false;
   if (blocked_event_threshold) {
-    now = TimeTicks::Now();
+    now = CurrentTimeTicks();
     should_report_blocked_event =
         (now - event->PlatformTimeStamp()).InSecondsF() >
         blocked_event_threshold;
@@ -766,6 +800,9 @@ bool EventTarget::FireEventListeners(Event* event,
     bool passive_forced = registered_listener.PassiveForcedForDocumentTarget();
 
     probe::UserCallback probe(context, nullptr, event->type(), false, this);
+    probe::AsyncTask async_task(
+        context, V8AbstractEventListener::Cast(listener), "event",
+        IsInstrumentedForAsyncStack(event->type()));
 
     // To match Mozilla, the AT_TARGET phase fires both capturing and bubbling
     // event listeners, even though that violates some versions of the DOM spec.

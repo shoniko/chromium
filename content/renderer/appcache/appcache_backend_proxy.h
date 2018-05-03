@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "content/common/appcache.mojom.h"
 #include "content/common/appcache_interfaces.h"
 #include "ipc/ipc_sender.h"
 
@@ -17,9 +18,9 @@ namespace content {
 // Sends appcache related messages to the main process.
 class AppCacheBackendProxy : public AppCacheBackend {
  public:
-  explicit AppCacheBackendProxy(IPC::Sender* sender) : sender_(sender) {}
+  AppCacheBackendProxy();
+  ~AppCacheBackendProxy() override;
 
-  IPC::Sender* sender() const { return sender_; }
 
   // AppCacheBackend methods
   void RegisterHost(int host_id) override;
@@ -29,9 +30,6 @@ class AppCacheBackendProxy : public AppCacheBackend {
                    const GURL& document_url,
                    const int64_t cache_document_was_loaded_from,
                    const GURL& manifest_url) override;
-  void SelectCacheForWorker(int host_id,
-                            int parent_process_id,
-                            int parent_host_id) override;
   void SelectCacheForSharedWorker(int host_id, int64_t appcache_id) override;
   void MarkAsForeignEntry(int host_id,
                           const GURL& document_url,
@@ -44,7 +42,9 @@ class AppCacheBackendProxy : public AppCacheBackend {
       std::vector<AppCacheResourceInfo>* resource_infos) override;
 
  private:
-  IPC::Sender* sender_;
+  mojom::AppCacheBackend* GetAppCacheBackendPtr();
+
+  mojom::AppCacheBackendPtr app_cache_backend_ptr_;
 };
 
 }  // namespace content

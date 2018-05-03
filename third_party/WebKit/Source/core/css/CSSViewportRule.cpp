@@ -30,9 +30,9 @@
 
 #include "core/css/CSSViewportRule.h"
 
-#include "core/css/PropertySetCSSStyleDeclaration.h"
-#include "core/css/StylePropertySet.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/StyleRule.h"
+#include "core/css/StyleRuleCSSStyleDeclaration.h"
 #include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
@@ -41,7 +41,7 @@ CSSViewportRule::CSSViewportRule(StyleRuleViewport* viewport_rule,
                                  CSSStyleSheet* sheet)
     : CSSRule(sheet), viewport_rule_(viewport_rule) {}
 
-CSSViewportRule::~CSSViewportRule() {}
+CSSViewportRule::~CSSViewportRule() = default;
 
 CSSStyleDeclaration* CSSViewportRule::style() const {
   if (!properties_cssom_wrapper_)

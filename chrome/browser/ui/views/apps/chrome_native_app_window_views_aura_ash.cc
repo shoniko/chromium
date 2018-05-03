@@ -21,6 +21,7 @@
 #include "ash/wm/window_state_delegate.h"
 #include "ash/wm/window_state_observer.h"
 #include "base/logging.h"
+#include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/browser/chromeos/note_taking_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profiles_state.h"
@@ -32,7 +33,6 @@
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/env.h"
 #include "ui/aura/mus/property_converter.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
 #include "ui/aura/window.h"
@@ -290,13 +290,11 @@ void ChromeNativeAppWindowViewsAuraAsh::ShowContextMenuForView(
   int hit_test =
       widget()->non_client_view()->NonClientHitTest(point_in_view_coords);
   if (hit_test == HTCAPTION) {
-    menu_model_adapter_.reset(new views::MenuModelAdapter(
+    menu_runner_ = std::make_unique<views::MenuRunner>(
         menu_model_.get(),
+        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU,
         base::Bind(&ChromeNativeAppWindowViewsAuraAsh::OnMenuClosed,
-                   base::Unretained(this))));
-    menu_runner_.reset(new views::MenuRunner(
-        menu_model_adapter_->CreateMenu(),
-        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU));
+                   base::Unretained(this)));
     menu_runner_->RunMenuAt(source->GetWidget(), NULL,
                             gfx::Rect(p, gfx::Size(0, 0)),
                             views::MENU_ANCHOR_TOPLEFT, source_type);
@@ -342,12 +340,9 @@ ChromeNativeAppWindowViewsAuraAsh::CreateNonClientFrameView(
 
   // Enter immersive mode if the app is opened in tablet mode with the hide
   // titlebars feature enabled.
-  if (!ash_util::IsRunningInMash()) {
-    DCHECK(ash::Shell::HasInstance());
-    if (CanAutohideTitlebarsInTabletMode()) {
-      immersive_fullscreen_controller_->SetEnabled(
-          ash::ImmersiveFullscreenController::WINDOW_TYPE_PACKAGED_APP, true);
-    }
+  if (CanAutohideTitlebarsInTabletMode()) {
+    immersive_fullscreen_controller_->SetEnabled(
+        ash::ImmersiveFullscreenController::WINDOW_TYPE_PACKAGED_APP, true);
   }
 
   if (HasFrameColor()) {
@@ -366,9 +361,7 @@ void ChromeNativeAppWindowViewsAuraAsh::SetFullscreen(int fullscreen_types) {
   if (immersive_fullscreen_controller_.get()) {
     // Immersive mode should not change if we set fullscreen on a maximizable
     // app in tablet mode when the hide titlebars feature is enabled.
-    bool autohide_titlebars_enabled = false;
-    if (!ash_util::IsRunningInMash())
-      autohide_titlebars_enabled = CanAutohideTitlebarsInTabletMode();
+    bool autohide_titlebars_enabled = CanAutohideTitlebarsInTabletMode();
 
     if (!autohide_titlebars_enabled) {
       // |immersive_fullscreen_controller_| should only be set if immersive
@@ -398,13 +391,8 @@ void ChromeNativeAppWindowViewsAuraAsh::SetFullscreen(int fullscreen_types) {
     // OS fullscreen or when in a public session.
     const bool should_hide_shelf = !profiles::IsPublicSession() &&
         fullscreen_types != AppWindow::FULLSCREEN_TYPE_OS;
-    ash::wm::WindowState* window_state =
-        ash::wm::GetWindowState(widget()->GetNativeWindow());
-    window_state->set_hide_shelf_when_fullscreen(should_hide_shelf);
-    if (!ash_util::IsRunningInMash()) {
-      DCHECK(ash::Shell::HasInstance());
-      ash::Shell::Get()->UpdateShelfVisibility();
-    }
+    widget()->GetNativeWindow()->SetProperty(ash::kHideShelfWhenFullscreenKey,
+                                             should_hide_shelf);
   }
 }
 
@@ -415,7 +403,7 @@ void ChromeNativeAppWindowViewsAuraAsh::UpdateDraggableRegions(
   SkRegion* draggable_region = GetDraggableRegion();
   // Set the NativeAppWindow's draggable region on the mus window.
   if (draggable_region && !draggable_region->isEmpty() && widget() &&
-      aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS) {
+      chromeos::GetAshConfig() == ash::Config::MASH) {
     // Supply client area insets that encompass all draggable regions.
     gfx::Insets insets(draggable_region->getBounds().bottom(), 0, 0, 0);
 
@@ -586,7 +574,6 @@ bool ChromeNativeAppWindowViewsAuraAsh::CanTriggerOnMouse() const {
 
 void ChromeNativeAppWindowViewsAuraAsh::OnMenuClosed() {
   menu_runner_.reset();
-  menu_model_adapter_.reset();
   menu_model_.reset();
 }
 

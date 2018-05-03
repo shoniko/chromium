@@ -141,7 +141,7 @@ media::ResolutionChangePolicy SelectResolutionPolicyFromCandidates(
       resolution_set.min_width() > kMinScreenCastDimension) {
     if (resolution_set.min_height() == resolution_set.max_height() &&
         resolution_set.min_width() == resolution_set.max_width()) {
-      return media::RESOLUTION_POLICY_FIXED_RESOLUTION;
+      return media::ResolutionChangePolicy::FIXED_RESOLUTION;
     }
 
     int approx_aspect_ratio_min_resolution =
@@ -150,10 +150,10 @@ media::ResolutionChangePolicy SelectResolutionPolicyFromCandidates(
         100 * resolution_set.max_width() / resolution_set.max_height();
     if (approx_aspect_ratio_min_resolution ==
         approx_aspect_ratio_max_resolution) {
-      return media::RESOLUTION_POLICY_FIXED_ASPECT_RATIO;
+      return media::ResolutionChangePolicy::FIXED_ASPECT_RATIO;
     }
 
-    return media::RESOLUTION_POLICY_ANY_WITHIN_LIMIT;
+    return media::ResolutionChangePolicy::ANY_WITHIN_LIMIT;
   }
 
   return default_policy;
@@ -249,7 +249,7 @@ base::Optional<bool> SelectNoiseReductionFromCandidates(
   return base::Optional<bool>(candidates.FirstElement());
 }
 
-int ClampToValidDimension(int value) {
+int ClampToValidScreenCastDimension(int value) {
   if (value > kMaxScreenCastDimension)
     return kMaxScreenCastDimension;
   else if (value < kMinScreenCastDimension)
@@ -286,8 +286,8 @@ VideoCaptureSettings SelectResultFromCandidates(
   // When the given maximum values are large, the computed values using default
   // aspect ratio may fall out of range. Ensure the defaults are in the valid
   // range.
-  default_height = ClampToValidDimension(default_height);
-  default_width = ClampToValidDimension(default_width);
+  default_height = ClampToValidScreenCastDimension(default_height);
+  default_width = ClampToValidScreenCastDimension(default_width);
 
   // If a maximum frame rate is explicitly given, use it as default for
   // better compatibility with the old constraints algorithm.
@@ -299,8 +299,8 @@ VideoCaptureSettings SelectResultFromCandidates(
   // This default comes from the old algorithm.
   media::ResolutionChangePolicy default_resolution_policy =
       stream_source == kMediaStreamSourceTab
-          ? media::RESOLUTION_POLICY_FIXED_RESOLUTION
-          : media::RESOLUTION_POLICY_ANY_WITHIN_LIMIT;
+          ? media::ResolutionChangePolicy::FIXED_RESOLUTION
+          : media::ResolutionChangePolicy::ANY_WITHIN_LIMIT;
 
   media::VideoCaptureParams capture_params =
       SelectVideoCaptureParamsFromCandidates(

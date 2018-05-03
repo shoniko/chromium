@@ -4,12 +4,13 @@
 
 #include "chrome/browser/chromeos/authpolicy/auth_policy_credentials_manager.h"
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/grit/generated_resources.h"
@@ -18,6 +19,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_auth_policy_client.h"
 #include "chromeos/network/network_handler.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,7 +44,7 @@ MATCHER_P(UserAccountDataEq, value, "Compares two UserAccountData") {
 class AuthPolicyCredentialsManagerTest : public testing::Test {
  public:
   AuthPolicyCredentialsManagerTest()
-      : user_manager_enabler_(new MockUserManager()) {}
+      : user_manager_enabler_(std::make_unique<MockUserManager>()) {}
   ~AuthPolicyCredentialsManagerTest() override = default;
 
   void SetUp() override {
@@ -51,7 +53,7 @@ class AuthPolicyCredentialsManagerTest : public testing::Test {
     fake_auth_policy_client()->DisableOperationDelayForTesting();
 
     TestingBrowserProcess::GetGlobal()->SetNotificationUIManager(
-        base::MakeUnique<StubNotificationUIManager>());
+        std::make_unique<StubNotificationUIManager>());
 
     TestingProfile::Builder profile_builder;
     profile_builder.SetProfileName("user@gmail.com");
@@ -128,7 +130,7 @@ class AuthPolicyCredentialsManagerTest : public testing::Test {
 
   // Owned by AuthPolicyCredentialsManagerFactory.
   AuthPolicyCredentialsManager* auth_policy_credentials_manager_;
-  chromeos::ScopedUserManagerEnabler user_manager_enabler_;
+  user_manager::ScopedUserManager user_manager_enabler_;
 
   DISALLOW_COPY_AND_ASSIGN(AuthPolicyCredentialsManagerTest);
 };

@@ -16,7 +16,6 @@ import org.junit.Test;
 import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.params.ParameterAnnotations.ClassParameter;
 import org.chromium.base.test.params.ParameterAnnotations.UseRunnerDelegate;
 import org.chromium.base.test.params.ParameterSet;
@@ -25,7 +24,7 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.vr_shell.mock.MockVrCoreVersionCheckerImpl;
+import org.chromium.chrome.browser.vr_shell.rules.VrActivityRestriction;
 import org.chromium.chrome.browser.vr_shell.util.VrInfoBarUtils;
 import org.chromium.chrome.browser.vr_shell.util.VrShellDelegateUtils;
 import org.chromium.chrome.browser.vr_shell.util.VrTestRuleUtils;
@@ -42,8 +41,7 @@ import java.util.concurrent.Callable;
  */
 @RunWith(ParameterizedRunner.class)
 @UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT) // WebVR is only supported on K+
 public class VrInstallUpdateInfoBarTest {
     @ClassParameter
@@ -72,17 +70,7 @@ public class VrInstallUpdateInfoBarTest {
      * @param checkerReturnCompatibility The compatibility to have the VrCoreVersionChecker return
      */
     private void infoBarTestHelper(final int checkerReturnCompatibility) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                MockVrCoreVersionCheckerImpl mockChecker = new MockVrCoreVersionCheckerImpl();
-                mockChecker.setMockReturnValue(new VrCoreInfo(null, checkerReturnCompatibility));
-                VrShellDelegateUtils.getDelegateInstance().overrideVrCoreVersionCheckerForTesting(
-                        mockChecker);
-                Assert.assertEquals(
-                        checkerReturnCompatibility, mockChecker.getLastReturnValue().compatibility);
-            }
-        });
+        VrShellDelegateUtils.setVrCoreCompatibility(checkerReturnCompatibility);
         View decorView = mVrTestRule.getActivity().getWindow().getDecorView();
         if (checkerReturnCompatibility == VrCoreCompatibility.VR_READY) {
             VrInfoBarUtils.expectInfoBarPresent(mVrTestFramework, false);
@@ -120,6 +108,7 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testInfoBarNotPresentWhenVrServicesCurrent() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_READY);
     }
@@ -129,6 +118,7 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testInfoBarPresentWhenVrServicesOutdated() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_OUT_OF_DATE);
     }
@@ -138,6 +128,7 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testInfoBarPresentWhenVrServicesMissing() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_NOT_AVAILABLE);
     }
@@ -148,6 +139,7 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testInfoBarNotPresentWhenVrServicesNotSupported() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_NOT_SUPPORTED);
     }

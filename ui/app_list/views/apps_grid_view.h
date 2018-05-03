@@ -11,14 +11,14 @@
 #include <string>
 #include <tuple>
 
+#include "ash/app_list/model/app_list_model.h"
+#include "ash/app_list/model/app_list_model_observer.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "ui/app_list/app_list_export.h"
-#include "ui/app_list/app_list_model.h"
-#include "ui/app_list/app_list_model_observer.h"
 #include "ui/app_list/pagination_model.h"
 #include "ui/app_list/pagination_model_observer.h"
 #include "ui/app_list/views/app_list_view.h"
@@ -30,6 +30,10 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/view.h"
 #include "ui/views/view_model.h"
+
+namespace ui {
+class AnimationMetricsReporter;
+}
 
 namespace views {
 class ButtonListener;
@@ -138,7 +142,6 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
-  bool OnKeyReleased(const ui::KeyEvent& event) override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
   bool GetDropFormats(
@@ -146,10 +149,11 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
       std::set<ui::Clipboard::FormatType>* format_types) override;
   bool CanDrop(const OSExchangeData& data) override;
   int OnDragUpdated(const ui::DropTargetEvent& event) override;
+  const char* GetClassName() const override;
 
   // Updates the visibility of app list items according to |app_list_state| and
   // |is_in_drag|.
-  void UpdateControlVisibility(AppListView::AppListState app_list_state,
+  void UpdateControlVisibility(AppListViewState app_list_state,
                                bool is_in_drag);
 
   // Overridden from ui::EventHandler:
@@ -424,8 +428,12 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void DeleteItemViewAtIndex(int index);
 
   // Returns true if |point| lies within the bounds of this grid view plus a
-  // buffer area surrounding it.
+  // buffer area surrounding it that can trigger drop target change.
   bool IsPointWithinDragBuffer(const gfx::Point& point) const;
+
+  // Returns true if |point| lies within the bounds of this grid view plus a
+  // buffer area surrounding it that can trigger page flip.
+  bool IsPointWithinPageFlipBuffer(const gfx::Point& point) const;
 
   // Overridden from views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -443,6 +451,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void SelectedPageChanged(int old_selected, int new_selected) override;
   void TransitionStarted() override;
   void TransitionChanged() override;
+  void TransitionEnded() override;
 
   // Overridden from AppListModelObserver:
   void OnAppListModelStatusChanged() override;
@@ -635,15 +644,18 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // True if the fullscreen app list feature is enabled.
   const bool is_fullscreen_app_list_enabled_;
 
-  // Whether the app list focus is enabled.
-  const bool is_app_list_focus_enabled_;
-
   // Delay in milliseconds of when |page_flip_timer_| should fire after user
   // drags an item near the edges.
   int page_flip_delay_in_ms_;
 
   // True if it is the end gesture from shelf dragging.
   bool is_end_gesture_ = false;
+
+  // To obtain metrics of pagination animation performance and keep track of
+  // sequential compositor frame number.
+  const std::unique_ptr<ui::AnimationMetricsReporter>
+      pagination_animation_metrics_reporter_;
+  int pagination_animation_start_frame_number_;
 
   DISALLOW_COPY_AND_ASSIGN(AppsGridView);
 };

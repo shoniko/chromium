@@ -15,10 +15,12 @@
 @class PKPass;
 @class PKAddPassesViewController;
 @class TabModel;
+@protocol Toolbar;
+@protocol ToolbarCommands;
 class ToolbarModelDelegateIOS;
 class ToolbarModelIOS;
+class WebStateList;
 @protocol UrlLoader;
-@class WebToolbarController;
 @protocol WebToolbarDelegate;
 
 namespace infobars {
@@ -35,7 +37,8 @@ class ChromeBrowserState;
 // Creates a new factory backed by |browserState|. This must be the same browser
 // state provided to BrowserViewController (and like BVC, this is a weak
 // reference).
-- (id)initWithBrowserState:(ios::ChromeBrowserState*)browserState;
+- (id)initWithBrowserState:(ios::ChromeBrowserState*)browserState
+              webStateList:(WebStateList*)webStateList;
 
 // Creates a new PassKit view controller to display |pass|.
 - (PKAddPassesViewController*)newPassKitViewControllerForPass:(PKPass*)pass;
@@ -47,11 +50,11 @@ class ChromeBrowserState;
 - (ToolbarModelIOS*)newToolbarModelIOSWithDelegate:
     (ToolbarModelDelegateIOS*)delegate;
 
-- (WebToolbarController*)
-newWebToolbarControllerWithDelegate:(id<WebToolbarDelegate>)delegate
-                          urlLoader:(id<UrlLoader>)urlLoader
-                         dispatcher:(id<ApplicationCommands, BrowserCommands>)
-                                        dispatcher;
+- (id<Toolbar>)newToolbarControllerWithDelegate:(id<WebToolbarDelegate>)delegate
+                                      urlLoader:(id<UrlLoader>)urlLoader
+                                     dispatcher:(id<ApplicationCommands,
+                                                    BrowserCommands,
+                                                    ToolbarCommands>)dispatcher;
 
 // Returns a new keyboard commands coordinator to handle keyboard commands.
 - (KeyCommandsProvider*)newKeyCommandsProvider;

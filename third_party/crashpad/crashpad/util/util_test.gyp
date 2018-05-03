@@ -40,12 +40,11 @@
         'file/file_io_test.cc',
         'file/file_reader_test.cc',
         'file/filesystem_test.cc',
-        'file/filesystem_test_util.cc',
-        'file/filesystem_test_util.h',
         'file/string_file_test.cc',
         'linux/auxiliary_vector_test.cc',
         'linux/memory_map_test.cc',
         'linux/proc_stat_reader_test.cc',
+        'linux/ptrace_broker_test.cc',
         'linux/ptracer_test.cc',
         'linux/scoped_ptrace_attach_test.cc',
         'mac/launchd_test.mm',
@@ -76,6 +75,7 @@
         'misc/scoped_forbid_return_test.cc',
         'misc/random_string_test.cc',
         'misc/reinterpret_bytes_test.cc',
+        'misc/time_test.cc',
         'misc/uuid_test.cc',
         'net/http_body_gzip_test.cc',
         'net/http_body_test.cc',
@@ -117,7 +117,6 @@
         'win/safe_terminate_process_test.cc',
         'win/scoped_process_suspend_test.cc',
         'win/session_end_watcher_test.cc',
-        'win/time_test.cc',
       ],
       'conditions': [
         ['OS=="mac"', {
@@ -171,18 +170,6 @@
           'sources': [
             'win/process_info_test_child.cc',
           ],
-          # Set an unusually high load address to make sure that the main
-          # executable still appears as the first element in
-          # ProcessInfo::Modules().
-          'msvs_settings': {
-            'VCLinkerTool': {
-              'AdditionalOptions': [
-                '/BASE:0x78000000',
-              ],
-              'RandomizedBaseAddress': '1',  # /DYNAMICBASE:NO.
-              'FixedBaseAddress': '2',  # /FIXED.
-            },
-          },
         },
         {
           'target_name': 'crashpad_util_test_safe_terminate_process_test_child',

@@ -7,7 +7,9 @@
 
 #include "core/layout/BackgroundBleedAvoidance.h"
 #include "core/layout/api/HitTestAction.h"
+#include "core/layout/ng/geometry/ng_border_edges.h"
 #include "core/paint/BoxPainterBase.h"
+#include "platform/geometry/LayoutPoint.h"
 #include "platform/geometry/LayoutSize.h"
 #include "platform/wtf/Allocator.h"
 
@@ -32,6 +34,9 @@ class NGBoxFragmentPainter : public BoxPainterBase {
   NGBoxFragmentPainter(const NGPaintFragment&);
 
   void Paint(const PaintInfo&, const LayoutPoint&);
+  void PaintInlineBox(const PaintInfo&,
+                      const LayoutPoint&,
+                      const LayoutPoint& block_paint_offset);
 
   // TODO(eae): Change to take a HitTestResult pointer instead as it mutates.
   bool NodeAtPoint(HitTestResult&,
@@ -60,18 +65,23 @@ class NGBoxFragmentPainter : public BoxPainterBase {
   bool IsPaintingBackgroundOfPaintContainerIntoScrollingContentsLayer(
       const NGPaintFragment&,
       const PaintInfo&);
-  LayoutRect BoundsForDrawingRecorder(const PaintInfo&,
-                                      const LayoutPoint& adjusted_paint_offset);
   bool IntersectsPaintRect(const PaintInfo&, const LayoutPoint&) const;
 
+  void PaintWithAdjustedOffset(PaintInfo&, const LayoutPoint&);
   void PaintBoxDecorationBackground(const PaintInfo&, const LayoutPoint&);
   void PaintBoxDecorationBackgroundWithRect(const PaintInfo&,
                                             const LayoutPoint&,
                                             const LayoutRect&);
   void PaintAllPhasesAtomically(const PaintInfo&, const LayoutPoint&);
-  void PaintChildren(const Vector<std::unique_ptr<const NGPaintFragment>>&,
+  void PaintChildren(const Vector<std::unique_ptr<NGPaintFragment>>&,
                      const PaintInfo&,
                      const LayoutPoint&);
+  void PaintInlineChildren(const Vector<std::unique_ptr<NGPaintFragment>>&,
+                           const PaintInfo&,
+                           const LayoutPoint&);
+  void PaintInlineChildBoxUsingLegacyFallback(const NGPhysicalFragment&,
+                                              const PaintInfo&,
+                                              const LayoutPoint&);
   void PaintText(const NGPaintFragment&,
                  const PaintInfo&,
                  const LayoutPoint& paint_offset);
@@ -93,7 +103,7 @@ class NGBoxFragmentPainter : public BoxPainterBase {
 
   bool VisibleToHitTestRequest(const HitTestRequest&) const;
   bool HitTestChildren(HitTestResult&,
-                       const Vector<std::unique_ptr<const NGPaintFragment>>&,
+                       const Vector<std::unique_ptr<NGPaintFragment>>&,
                        const HitTestLocation& location_in_container,
                        const LayoutPoint& accumulated_offset,
                        HitTestAction);
@@ -103,6 +113,14 @@ class NGBoxFragmentPainter : public BoxPainterBase {
                            const LayoutPoint& accumulated_offset);
 
   const NGPaintFragment& box_fragment_;
+
+  NGBorderEdges border_edges_;
+
+  // True when this is an inline box.
+  bool is_inline_;
+
+  // The paint offset of the container block when painting inline children.
+  LayoutPoint block_paint_offset_;
 };
 
 }  // namespace blink

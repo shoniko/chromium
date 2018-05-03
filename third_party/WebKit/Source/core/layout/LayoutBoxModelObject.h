@@ -145,6 +145,7 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   FloatRect ComputeStickyConstrainingRect() const;
   void UpdateStickyPositionConstraints() const;
   LayoutSize StickyPositionOffset() const;
+  bool IsSlowRepaintConstrainedObject() const;
 
   LayoutSize OffsetForInFlowPosition() const;
 
@@ -166,9 +167,7 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   virtual int PixelSnappedOffsetHeight(const Element*) const;
 
   bool HasSelfPaintingLayer() const;
-  PaintLayer* Layer() const {
-    return GetRarePaintData() ? GetRarePaintData()->Layer() : nullptr;
-  }
+  PaintLayer* Layer() const { return FirstFragment().Layer(); }
   // The type of PaintLayer to instantiate. Any value returned from this
   // function other than NoPaintLayer will lead to a PaintLayer being created.
   virtual PaintLayerType LayerTypeRequired() const = 0;
@@ -271,7 +270,7 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
                              BorderLeft());
   }
 
-  virtual LayoutRectOutsets PaddingOutsets() const {
+  LayoutRectOutsets PaddingOutsets() const {
     return LayoutRectOutsets(PaddingTop(), PaddingRight(), PaddingBottom(),
                              PaddingLeft());
   }
@@ -415,8 +414,6 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
       const LayoutBoxModelObject* ancestor_to_stop_at,
       LayoutGeometryMap&) const override;
 
-  void SetSelectionState(SelectionState) override;
-
   void ContentChanged(ContentChangeType);
   bool HasAcceleratedCompositing() const;
 
@@ -510,16 +507,16 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   void MoveChildTo(LayoutBoxModelObject* to_box_model_object,
                    LayoutObject* child,
                    bool full_remove_insert = false) {
-    MoveChildTo(to_box_model_object, child, 0, full_remove_insert);
+    MoveChildTo(to_box_model_object, child, nullptr, full_remove_insert);
   }
   void MoveAllChildrenTo(LayoutBoxModelObject* to_box_model_object,
                          bool full_remove_insert = false) {
-    MoveAllChildrenTo(to_box_model_object, 0, full_remove_insert);
+    MoveAllChildrenTo(to_box_model_object, nullptr, full_remove_insert);
   }
   void MoveAllChildrenTo(LayoutBoxModelObject* to_box_model_object,
                          LayoutObject* before_child,
                          bool full_remove_insert = false) {
-    MoveChildrenTo(to_box_model_object, SlowFirstChild(), 0, before_child,
+    MoveChildrenTo(to_box_model_object, SlowFirstChild(), nullptr, before_child,
                    full_remove_insert);
   }
   // Move all of the kids from |startChild| up to but excluding |endChild|. 0
@@ -529,7 +526,7 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
                       LayoutObject* start_child,
                       LayoutObject* end_child,
                       bool full_remove_insert = false) {
-    MoveChildrenTo(to_box_model_object, start_child, end_child, 0,
+    MoveChildrenTo(to_box_model_object, start_child, end_child, nullptr,
                    full_remove_insert);
   }
   virtual void MoveChildrenTo(LayoutBoxModelObject* to_box_model_object,

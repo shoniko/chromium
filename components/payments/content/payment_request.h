@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "components/payments/content/payment_request_display_manager.h"
 #include "components/payments/content/payment_request_spec.h"
 #include "components/payments/content/payment_request_state.h"
 #include "components/payments/core/journey_logger.h"
@@ -54,6 +55,7 @@ class PaymentRequest : public mojom::PaymentRequest,
                  content::WebContents* web_contents,
                  std::unique_ptr<ContentPaymentRequestDelegate> delegate,
                  PaymentRequestWebContentsManager* manager,
+                 PaymentRequestDisplayManager* display_manager,
                  mojo::InterfaceRequest<mojom::PaymentRequest> request,
                  ObserverForTest* observer_for_testing);
   ~PaymentRequest() override;
@@ -65,6 +67,7 @@ class PaymentRequest : public mojom::PaymentRequest,
             mojom::PaymentOptionsPtr options) override;
   void Show() override;
   void UpdateWith(mojom::PaymentDetailsPtr details) override;
+  void NoUpdatedPaymentDetails() override;
   void Abort() override;
   void Complete(mojom::PaymentComplete result) override;
   void CanMakePayment() override;
@@ -95,6 +98,9 @@ class PaymentRequest : public mojom::PaymentRequest,
   // Called when the user clicks on the "Pay" button.
   void Pay();
 
+  // Hide this Payment Request if it's already showing.
+  void HideIfNecessary();
+
   content::WebContents* web_contents() { return web_contents_; }
 
   PaymentRequestSpec* spec() { return spec_.get(); }
@@ -106,9 +112,12 @@ class PaymentRequest : public mojom::PaymentRequest,
   // the first one being the most precise.
   void RecordFirstAbortReason(JourneyLogger::AbortReason completion_status);
 
-  // The PaymentRequestState::CanMakePaymentCallback. Checks for query quota and
-  // may send QUERY_QUOTA_EXCEEDED.
+  // The callback for PaymentRequestState::CanMakePayment. Checks for query
+  // quota and may send QUERY_QUOTA_EXCEEDED.
   void CanMakePaymentCallback(bool can_make_payment);
+
+  // The callback for PaymentRequestState::AreRequestedMethodsSupported.
+  void AreRequestedMethodsSupportedCallback(bool methods_supported);
 
   // Sends either CAN_MAKE_PAYMENT or CANNOT_MAKE_PAYMENT to the renderer,
   // depending on |can_make_payment| value. Never sends QUERY_QUOTA_EXCEEDED.
@@ -122,6 +131,8 @@ class PaymentRequest : public mojom::PaymentRequest,
   std::unique_ptr<ContentPaymentRequestDelegate> delegate_;
   // |manager_| owns this PaymentRequest.
   PaymentRequestWebContentsManager* manager_;
+  PaymentRequestDisplayManager* display_manager_;
+  std::unique_ptr<PaymentRequestDisplayManager::DisplayHandle> display_handle_;
   mojo::Binding<mojom::PaymentRequest> binding_;
   mojom::PaymentRequestClientPtr client_;
 

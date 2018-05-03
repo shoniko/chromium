@@ -50,10 +50,10 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.AwSwitches;
 import org.chromium.android_webview.HttpAuthDatabase;
 import org.chromium.android_webview.ResourcesContextWrapperFactory;
+import org.chromium.android_webview.WebViewChromiumRunQueue;
 import org.chromium.android_webview.command_line.CommandLineUtil;
 import org.chromium.android_webview.variations.AwVariationsSeedHandler;
 import org.chromium.base.BuildConfig;
-import org.chromium.base.BuildInfo;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.MemoryPressureListener;
@@ -67,14 +67,12 @@ import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.NativeLibraries;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.components.autofill.AutofillProvider;
-import org.chromium.content.browser.input.LGEmailActionModeWorkaround;
+import org.chromium.content.browser.selection.LGEmailActionModeWorkaround;
 import org.chromium.net.NetworkChangeNotifier;
 
 import java.io.File;
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
@@ -90,39 +88,8 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     private static final String VERSION_CODE_PREF = "lastVersionCodeUsed";
     private static final String HTTP_AUTH_DATABASE_FILE = "http_auth.db";
 
-    private class WebViewChromiumRunQueue {
-        public WebViewChromiumRunQueue() {
-            mQueue = new ConcurrentLinkedQueue<Runnable>();
-        }
-
-        public void addTask(Runnable task) {
-            mQueue.add(task);
-            if (WebViewChromiumFactoryProvider.this.hasStarted()) {
-                ThreadUtils.runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        drainQueue();
-                    }
-                });
-            }
-        }
-
-        public void drainQueue() {
-            if (mQueue == null || mQueue.isEmpty()) {
-                return;
-            }
-
-            Runnable task = mQueue.poll();
-            while (task != null) {
-                task.run();
-                task = mQueue.poll();
-            }
-        }
-
-        private final Queue<Runnable> mQueue;
-    }
-
-    private final WebViewChromiumRunQueue mRunQueue = new WebViewChromiumRunQueue();
+    private final WebViewChromiumRunQueue mRunQueue = new WebViewChromiumRunQueue(
+            () -> { return WebViewChromiumFactoryProvider.this.hasStarted(); });
 
     private <T> T runBlockingFuture(FutureTask<T> task) {
         if (!hasStarted()) throw new RuntimeException("Must be started before we block!");
@@ -158,7 +125,9 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
     // Guards accees to the other members, and is notifyAll() signalled on the UI thread
     // when the chromium process has been started.
-    private final Object mLock = new Object();
+    // This member is not private only because the downstream subclass needs to access it,
+    // it shouldn't be accessed from anywhere else.
+    /* package */ final Object mLock = new Object();
 
     // Initialization guarded by mLock.
     private AwBrowserContext mBrowserContext;
@@ -228,7 +197,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         CommandLineUtil.initCommandLine();
 
         boolean multiProcess = false;
-        if (BuildInfo.isAtLeastO()) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // Ask the system if multiprocess should be enabled on O+.
             multiProcess = mWebViewDelegate.isMultiProcessEnabled();
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -244,7 +213,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
         ThreadUtils.setWillOverrideUiThread();
         // Load chromium library.
-        AwBrowserProcess.loadLibrary();
+        AwBrowserProcess.loadLibrary(mWebViewDelegate.getDataDirectorySuffix());
 
         final PackageInfo packageInfo = WebViewFactory.getLoadedPackageInfo();
 
@@ -345,10 +314,13 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                     new AwNetworkChangeNotifierRegistrationPolicy());
         }
 
-        AwContentsStatics.setCheckClearTextPermitted(BuildInfo.targetsAtLeastO(applicationContext));
+        AwContentsStatics.setCheckClearTextPermitted(
+                applicationContext.getApplicationInfo().targetSdkVersion >= Build.VERSION_CODES.O);
     }
 
-    private void ensureChromiumStartedLocked(boolean onMainThread) {
+    // This method is not private only because the downstream subclass needs to access it,
+    // it shouldn't be accessed from anywhere else.
+    /* package */ void ensureChromiumStartedLocked(boolean onMainThread) {
         assert Thread.holdsLock(mLock);
 
         if (mStarted) { // Early-out for the common case.
@@ -575,7 +547,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                      * @param callback will be called with the value true if initialization is
                      * successful. The callback will be run on the UI thread.
                      */
-                    // TODO(ntfschr): add @Override once next android SDK rolls
+                    @Override
                     public void initSafeBrowsing(Context context, ValueCallback<Boolean> callback) {
                         // clang-format off
                         ThreadUtils.runOnUiThread(() -> AwContentsStatics.initSafeBrowsing(context,
@@ -583,7 +555,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                         // clang-format on
                     }
 
-                    // TODO(ntfschr): add @Override once next android SDK rolls
+                    @Override
                     public void setSafeBrowsingWhitelist(
                             List<String> urls, ValueCallback<Boolean> callback) {
                         // clang-format off
@@ -598,7 +570,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                      * @return the url pointing to a privacy policy document which can be displayed
                      * to users.
                      */
-                    // TODO(ntfschr): add @Override once next android SDK rolls
+                    @Override
                     public Uri getSafeBrowsingPrivacyPolicyUrl() {
                         return AwContentsStatics.getSafeBrowsingPrivacyPolicyUrl();
                     }
@@ -687,6 +659,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         return (ServiceWorkerController) mServiceWorkerController;
     }
 
+    @Override
     public TokenBindingService getTokenBindingService() {
         synchronized (mLock) {
             if (mTokenBindingManager == null) {

@@ -12,6 +12,7 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
+#include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_scheduler/post_task.h"
@@ -43,7 +44,7 @@ namespace component_updater {
 
 // The SHA256 of the SubjectPublicKeyInfo used to sign the extension.
 // The extension id is: ojjgnpkioondelmggbekfhllhdaimnho
-const uint8_t kPublicKeySHA256[32] = {
+const uint8_t kSthSetPublicKeySHA256[32] = {
     0xe9, 0x96, 0xdf, 0xa8, 0xee, 0xd3, 0x4b, 0xc6, 0x61, 0x4a, 0x57,
     0xbb, 0x73, 0x08, 0xcd, 0x7e, 0x51, 0x9b, 0xcc, 0x69, 0x08, 0x41,
     0xe1, 0x96, 0x9f, 0x7c, 0xb1, 0x73, 0xef, 0x16, 0x80, 0x0a};
@@ -73,6 +74,8 @@ STHSetComponentInstallerPolicy::OnCustomInstall(
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
 
+void STHSetComponentInstallerPolicy::OnCustomUninstall() {}
+
 void STHSetComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
@@ -96,7 +99,8 @@ base::FilePath STHSetComponentInstallerPolicy::GetRelativeInstallDir() const {
 }
 
 void STHSetComponentInstallerPolicy::GetHash(std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kPublicKeySHA256), std::end(kPublicKeySHA256));
+  hash->assign(std::begin(kSthSetPublicKeySHA256),
+               std::end(kSthSetPublicKeySHA256));
 }
 
 std::string STHSetComponentInstallerPolicy::GetName() const {
@@ -201,10 +205,8 @@ void RegisterSTHSetComponent(ComponentUpdateService* cus,
   // The global STHDistributor should have been created by this point.
   DCHECK(distributor);
 
-  std::unique_ptr<ComponentInstallerPolicy> policy(
-      new STHSetComponentInstallerPolicy(distributor));
-  // |cus| will take ownership of |installer| during installer->Register(cus).
-  ComponentInstaller* installer = new ComponentInstaller(std::move(policy));
+  auto installer = base::MakeRefCounted<ComponentInstaller>(
+      std::make_unique<STHSetComponentInstallerPolicy>(distributor));
   installer->Register(cus, base::Closure());
 }
 

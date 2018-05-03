@@ -27,12 +27,12 @@
 #define InspectorStyleSheet_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSPropertySourceData.h"
 #include "core/css/CSSStyleDeclaration.h"
 #include "core/inspector/protocol/CSS.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -85,11 +85,11 @@ class InspectorStyleSheetBase
  public:
   class CORE_EXPORT Listener {
    public:
-    Listener() {}
-    virtual ~Listener() {}
+    Listener() = default;
+    virtual ~Listener() = default;
     virtual void StyleSheetChanged(InspectorStyleSheetBase*) = 0;
   };
-  virtual ~InspectorStyleSheetBase() {}
+  virtual ~InspectorStyleSheetBase() = default;
   virtual void Trace(blink::Visitor* visitor) {}
 
   String Id() { return id_; }

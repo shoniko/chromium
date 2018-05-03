@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -53,6 +52,9 @@ const char kUploadCardRequestPath[] =
 const char kUploadCardRequestFormat[] =
     "requestContentType=application/json; charset=utf-8&request=%s"
     "&s7e_1_pan=%s&s7e_13_cvc=%s";
+const char kUploadCardRequestFormatWithoutCvc[] =
+    "requestContentType=application/json; charset=utf-8&request=%s"
+    "&s7e_1_pan=%s";
 
 const char kTokenServiceConsumerId[] = "wallet_client";
 const char kPaymentsOAuth2Scope[] =
@@ -181,7 +183,7 @@ void SetActiveExperiments(const std::vector<const char*>& active_experiments,
     return;
 
   std::unique_ptr<base::ListValue> active_chrome_experiments(
-      base::MakeUnique<base::ListValue>());
+      std::make_unique<base::ListValue>());
   for (const char* it : active_experiments)
     active_chrome_experiments->AppendString(it);
 
@@ -210,15 +212,15 @@ class UnmaskCardRequest : public PaymentsRequest {
     base::DictionaryValue request_dict;
     request_dict.SetString("encrypted_cvc", "__param:s7e_13_cvc");
     request_dict.SetString("credit_card_id", request_details_.card.server_id());
-    request_dict.SetPath({"risk_data_encoded"},
-                         BuildRiskDictionary(request_details_.risk_data));
+    request_dict.SetKey("risk_data_encoded",
+                        BuildRiskDictionary(request_details_.risk_data));
     std::unique_ptr<base::DictionaryValue> context(new base::DictionaryValue());
     context->SetInteger("billable_service", kUnmaskCardBillableServiceNumber);
     if (IsAutofillSendBillingCustomerNumberExperimentEnabled() &&
         request_details_.billing_customer_number != 0) {
-      context->SetPath({"customer_context"},
-                       BuildCustomerContextDictionary(
-                           request_details_.billing_customer_number));
+      context->SetKey("customer_context",
+                      BuildCustomerContextDictionary(
+                          request_details_.billing_customer_number));
     }
     request_dict.Set("context", std::move(context));
 
@@ -259,10 +261,14 @@ class UnmaskCardRequest : public PaymentsRequest {
 class GetUploadDetailsRequest : public PaymentsRequest {
  public:
   GetUploadDetailsRequest(const std::vector<AutofillProfile>& addresses,
+                          const int detected_values,
+                          const std::string& pan_first_six,
                           const std::vector<const char*>& active_experiments,
                           const std::string& app_locale,
                           PaymentsClientSaveDelegate* delegate)
       : addresses_(addresses),
+        detected_values_(detected_values),
+        pan_first_six_(pan_first_six),
         active_experiments_(active_experiments),
         app_locale_(app_locale),
         delegate_(delegate) {}
@@ -292,6 +298,17 @@ class GetUploadDetailsRequest : public PaymentsRequest {
     }
     request_dict.Set("address", std::move(addresses));
 
+    // If the "send detected values" experiment is enabled, it's possible we may
+    // not have found name/address/CVC. The detected_values_ bitmask tells
+    // Payments what was found, and Payments will decide if the provided data is
+    // enough to offer upload save.
+    if (IsAutofillUpstreamSendDetectedValuesExperimentEnabled())
+      request_dict.SetInteger("detected_values", detected_values_);
+
+    if (IsAutofillUpstreamSendPanFirstSixExperimentEnabled() &&
+        !pan_first_six_.empty())
+      request_dict.SetString("pan_first6", pan_first_six_);
+
     SetActiveExperiments(active_experiments_, &request_dict);
 
     std::string request_content;
@@ -318,6 +335,8 @@ class GetUploadDetailsRequest : public PaymentsRequest {
 
  private:
   const std::vector<AutofillProfile> addresses_;
+  const int detected_values_;
+  const std::string pan_first_six_;
   const std::vector<const char*> active_experiments_;
   std::string app_locale_;
   PaymentsClientSaveDelegate* delegate_;
@@ -341,9 +360,10 @@ class UploadCardRequest : public PaymentsRequest {
   std::string GetRequestContent() override {
     base::DictionaryValue request_dict;
     request_dict.SetString("encrypted_pan", "__param:s7e_1_pan");
-    request_dict.SetString("encrypted_cvc", "__param:s7e_13_cvc");
-    request_dict.SetPath({"risk_data_encoded"},
-                         BuildRiskDictionary(request_details_.risk_data));
+    if (!request_details_.cvc.empty())
+      request_dict.SetString("encrypted_cvc", "__param:s7e_13_cvc");
+    request_dict.SetKey("risk_data_encoded",
+                        BuildRiskDictionary(request_details_.risk_data));
 
     const std::string& app_locale = request_details_.app_locale;
     std::unique_ptr<base::DictionaryValue> context(new base::DictionaryValue());
@@ -351,9 +371,9 @@ class UploadCardRequest : public PaymentsRequest {
     context->SetInteger("billable_service", kUploadCardBillableServiceNumber);
     if (IsAutofillSendBillingCustomerNumberExperimentEnabled() &&
         request_details_.billing_customer_number != 0) {
-      context->SetPath({"customer_context"},
-                       BuildCustomerContextDictionary(
-                           request_details_.billing_customer_number));
+      context->SetKey("customer_context",
+                      BuildCustomerContextDictionary(
+                          request_details_.billing_customer_number));
     }
     request_dict.Set("context", std::move(context));
 
@@ -384,13 +404,21 @@ class UploadCardRequest : public PaymentsRequest {
         AutofillType(CREDIT_CARD_NUMBER), app_locale);
     std::string json_request;
     base::JSONWriter::Write(request_dict, &json_request);
-    std::string request_content = base::StringPrintf(
-        kUploadCardRequestFormat,
-        net::EscapeUrlEncodedData(json_request, true).c_str(),
-        net::EscapeUrlEncodedData(base::UTF16ToASCII(pan), true).c_str(),
-        net::EscapeUrlEncodedData(base::UTF16ToASCII(request_details_.cvc),
-                                  true)
-            .c_str());
+    std::string request_content;
+    if (request_details_.cvc.empty()) {
+      request_content = base::StringPrintf(
+          kUploadCardRequestFormatWithoutCvc,
+          net::EscapeUrlEncodedData(json_request, true).c_str(),
+          net::EscapeUrlEncodedData(base::UTF16ToASCII(pan), true).c_str());
+    } else {
+      request_content = base::StringPrintf(
+          kUploadCardRequestFormat,
+          net::EscapeUrlEncodedData(json_request, true).c_str(),
+          net::EscapeUrlEncodedData(base::UTF16ToASCII(pan), true).c_str(),
+          net::EscapeUrlEncodedData(base::UTF16ToASCII(request_details_.cvc),
+                                    true)
+              .c_str());
+    }
     VLOG(3) << "savecard request body: " << request_content;
     return request_content;
   }
@@ -447,6 +475,11 @@ void PaymentsClient::Prepare() {
     StartTokenFetch(false);
 }
 
+void PaymentsClient::SetSaveDelegate(
+    PaymentsClientSaveDelegate* save_delegate) {
+  save_delegate_ = save_delegate;
+}
+
 PrefService* PaymentsClient::GetPrefService() const {
   return pref_service_;
 }
@@ -455,17 +488,20 @@ void PaymentsClient::UnmaskCard(
     const PaymentsClient::UnmaskRequestDetails& request_details) {
   DCHECK(unmask_delegate_);
   IssueRequest(
-      base::MakeUnique<UnmaskCardRequest>(request_details, unmask_delegate_),
+      std::make_unique<UnmaskCardRequest>(request_details, unmask_delegate_),
       true);
 }
 
 void PaymentsClient::GetUploadDetails(
     const std::vector<AutofillProfile>& addresses,
+    const int detected_values,
+    const std::string& pan_first_six,
     const std::vector<const char*>& active_experiments,
     const std::string& app_locale) {
   DCHECK(save_delegate_);
-  IssueRequest(base::MakeUnique<GetUploadDetailsRequest>(
-                   addresses, active_experiments, app_locale, save_delegate_),
+  IssueRequest(std::make_unique<GetUploadDetailsRequest>(
+                   addresses, detected_values, pan_first_six,
+                   active_experiments, app_locale, save_delegate_),
                false);
 }
 
@@ -473,7 +509,7 @@ void PaymentsClient::UploadCard(
     const PaymentsClient::UploadRequestDetails& request_details) {
   DCHECK(save_delegate_);
   IssueRequest(
-      base::MakeUnique<UploadCardRequest>(request_details, save_delegate_),
+      std::make_unique<UploadCardRequest>(request_details, save_delegate_),
       true);
 }
 
@@ -569,8 +605,7 @@ void PaymentsClient::OnURLFetchComplete(const net::URLFetcher* source) {
     case net::HTTP_OK: {
       std::string error_code;
       std::unique_ptr<base::Value> message_value = base::JSONReader::Read(data);
-      if (message_value.get() &&
-          message_value->IsType(base::Value::Type::DICTIONARY)) {
+      if (message_value.get() && message_value->is_dict()) {
         response_dict.reset(
             static_cast<base::DictionaryValue*>(message_value.release()));
         response_dict->GetString("error.code", &error_code);

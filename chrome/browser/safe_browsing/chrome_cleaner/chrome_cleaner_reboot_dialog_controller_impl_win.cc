@@ -4,13 +4,15 @@
 
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_reboot_dialog_controller_impl_win.h"
 
+#include <memory>
+
 #include "base/feature_list.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_navigation_util_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/srt_field_trial_win.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -35,6 +37,7 @@ class PromptDelegateImpl
       Browser* browser,
       ChromeCleanerRebootDialogControllerImpl* controller) override;
   void OpenSettingsPage(Browser* browser) override;
+  void OnSettingsPageIsActiveTab() override;
 };
 
 void PromptDelegateImpl::ShowChromeCleanerRebootPrompt(
@@ -49,9 +52,11 @@ void PromptDelegateImpl::ShowChromeCleanerRebootPrompt(
 void PromptDelegateImpl::OpenSettingsPage(Browser* browser) {
   DCHECK(browser);
 
-  chrome_cleaner_util::OpenSettingsPage(
+  chrome_cleaner_util::OpenCleanupPage(
       browser, WindowOpenDisposition::NEW_BACKGROUND_TAB);
 }
+
+void PromptDelegateImpl::OnSettingsPageIsActiveTab() {}
 
 void RecordSettingsPageActiveOnRebootRequired(
     SettingsPageActiveOnRebootRequiredHistogramValue value) {
@@ -69,7 +74,7 @@ ChromeCleanerRebootDialogControllerImpl::PromptDelegate::~PromptDelegate() =
 ChromeCleanerRebootDialogControllerImpl*
 ChromeCleanerRebootDialogControllerImpl::Create(
     ChromeCleanerController* cleaner_controller) {
-  return Create(cleaner_controller, base::MakeUnique<PromptDelegateImpl>());
+  return Create(cleaner_controller, std::make_unique<PromptDelegateImpl>());
 }
 
 // static
@@ -116,6 +121,17 @@ void ChromeCleanerRebootDialogControllerImpl::Close() {
   OnInteractionDone();
 }
 
+void ChromeCleanerRebootDialogControllerImpl::OnBrowserSetLastActive(
+    Browser* browser) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(waiting_for_browser_);
+  DCHECK(browser);
+
+  waiting_for_browser_ = false;
+  BrowserList::RemoveObserver(this);
+  StartRebootPromptForBrowser(browser);
+}
+
 ChromeCleanerRebootDialogControllerImpl::
     ChromeCleanerRebootDialogControllerImpl(
         ChromeCleanerController* cleaner_controller,
@@ -139,10 +155,9 @@ void ChromeCleanerRebootDialogControllerImpl::MaybeStartRebootPrompt() {
     RecordSettingsPageActiveOnRebootRequired(
         SETTINGS_PAGE_ON_REBOOT_REQUIRED_NO_BROWSER);
 
-    // TODO(crbug.com/770749) Register to decide if a prompt should be shown
-    //                        once a window becomes available.
+    waiting_for_browser_ = true;
+    BrowserList::AddObserver(this);
 
-    OnInteractionDone();
     return;
   }
 
@@ -152,10 +167,11 @@ void ChromeCleanerRebootDialogControllerImpl::MaybeStartRebootPrompt() {
 void ChromeCleanerRebootDialogControllerImpl::StartRebootPromptForBrowser(
     Browser* browser) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (chrome_cleaner_util::SettingsPageIsActiveTab(browser)) {
+  if (chrome_cleaner_util::CleanupPageIsActiveTab(browser)) {
     RecordSettingsPageActiveOnRebootRequired(
         SETTINGS_PAGE_ON_REBOOT_REQUIRED_ACTIVE_TAB);
 
+    prompt_delegate_->OnSettingsPageIsActiveTab();
     OnInteractionDone();
     return;
   }

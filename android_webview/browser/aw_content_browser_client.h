@@ -19,6 +19,10 @@ namespace content {
 class RenderFrameHost;
 }
 
+namespace net {
+class NetLog;
+}
+
 namespace safe_browsing {
 class UrlCheckerDelegate;
 }
@@ -64,7 +68,7 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
                       int render_frame_id) override;
   bool AllowSetCookie(const GURL& url,
                       const GURL& first_party,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       content::ResourceContext* context,
                       int render_process_id,
                       int render_frame_id,
@@ -143,11 +147,12 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       mojo::ScopedMessagePipeHandle interface_pipe) override;
   void ExposeInterfacesToRenderer(
       service_manager::BinderRegistry* registry,
-      content::AssociatedInterfaceRegistry* associated_registry,
+      blink::AssociatedInterfaceRegistry* associated_registry,
       content::RenderProcessHost* render_process_host) override;
   std::vector<std::unique_ptr<content::URLLoaderThrottle>>
   CreateURLLoaderThrottles(
-      const base::Callback<content::WebContents*()>& wc_getter) override;
+      const base::Callback<content::WebContents*()>& wc_getter,
+      content::NavigationUIData* navigation_ui_data) override;
   bool ShouldOverrideUrlLoading(int frame_tree_node_id,
                                 bool browser_initiated,
                                 const GURL& gurl,
@@ -156,9 +161,14 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
                                 bool is_redirect,
                                 bool is_main_frame,
                                 ui::PageTransition transition) override;
+  bool ShouldCreateTaskScheduler() override;
+
+  static void DisableCreatingTaskScheduler();
 
  private:
   safe_browsing::UrlCheckerDelegate* GetSafeBrowsingUrlCheckerDelegate();
+
+  std::unique_ptr<net::NetLog> net_log_;
 
   // Android WebView currently has a single global (non-off-the-record) browser
   // context.

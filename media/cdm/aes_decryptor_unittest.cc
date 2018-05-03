@@ -36,7 +36,6 @@
 #include "media/cdm/api/content_decryption_module.h"
 #include "media/cdm/cdm_adapter.h"
 #include "media/cdm/cdm_auxiliary_helper.h"
-#include "media/cdm/cdm_file_io.h"
 #include "media/cdm/external_clear_key_test_helper.h"
 #include "media/cdm/mock_helpers.h"
 #include "media/cdm/simple_cdm_allocator.h"
@@ -495,13 +494,6 @@ class AesDecryptorTest : public testing::TestWithParam<TestType> {
     }
   }
 
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-  std::unique_ptr<CdmFileIO> CreateCdmFileIO(cdm::FileIOClient* client) {
-    ADD_FAILURE() << "Should never be called";
-    return nullptr;
-  }
-#endif
-
   // Must be the first member to be initialized first and destroyed last.
   base::test::ScopedTaskEnvironment scoped_task_environment_;
 
@@ -599,18 +591,11 @@ TEST_P(AesDecryptorTest, CreateSessionWithCencInitData) {
       0x00, 0x00, 0x00, 0x00  // datasize
   };
 
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
   EXPECT_CALL(cdm_client_, OnSessionMessage(NotEmpty(), _, IsJSONDictionary()));
   cdm_->CreateSessionAndGenerateRequest(
       CdmSessionType::TEMPORARY_SESSION, EmeInitDataType::CENC,
       std::vector<uint8_t>(init_data, init_data + arraysize(init_data)),
       CreateSessionPromise(RESOLVED));
-#else
-  cdm_->CreateSessionAndGenerateRequest(
-      CdmSessionType::TEMPORARY_SESSION, EmeInitDataType::CENC,
-      std::vector<uint8_t>(init_data, init_data + arraysize(init_data)),
-      CreateSessionPromise(REJECTED));
-#endif
 }
 
 TEST_P(AesDecryptorTest, CreateSessionWithKeyIdsInitData) {

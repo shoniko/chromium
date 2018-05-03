@@ -15,7 +15,7 @@
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/local_interface_provider.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
@@ -39,11 +39,14 @@ static_assert(int(blink::kWebTextDecorationTypeGrammar) ==
                   int(SpellCheckResult::GRAMMAR),
               "mismatching enums");
 
-SpellCheckProvider::SpellCheckProvider(content::RenderFrame* render_frame,
-                                       SpellCheck* spellcheck)
+SpellCheckProvider::SpellCheckProvider(
+    content::RenderFrame* render_frame,
+    SpellCheck* spellcheck,
+    service_manager::LocalInterfaceProvider* embedder_provider)
     : content::RenderFrameObserver(render_frame),
       content::RenderFrameObserverTracker<SpellCheckProvider>(render_frame),
-      spellcheck_(spellcheck) {
+      spellcheck_(spellcheck),
+      embedder_provider_(embedder_provider) {
   DCHECK(spellcheck_);
   if (render_frame)  // NULL in unit tests.
     render_frame->GetWebFrame()->SetTextCheckClient(this);
@@ -56,9 +59,9 @@ spellcheck::mojom::SpellCheckHost& SpellCheckProvider::GetSpellCheckHost() {
   if (spell_check_host_)
     return *spell_check_host_;
 
-  DCHECK(content::RenderThread::Get());
-  content::RenderThread::Get()->GetConnector()->BindInterface(
-      content::mojom::kBrowserServiceName, &spell_check_host_);
+  // nullptr in tests.
+  if (embedder_provider_)
+    embedder_provider_->GetInterface(&spell_check_host_);
   return *spell_check_host_;
 }
 
@@ -92,8 +95,8 @@ void SpellCheckProvider::RequestTextChecking(
   if (!spell_check_host_ && !content::RenderThread::Get())
     return;  // NULL in tests that do not provide a spell_check_host_.
   GetSpellCheckHost().CallSpellingService(
-      text, base::Bind(&SpellCheckProvider::OnRespondSpellingService,
-                       base::Unretained(this), last_identifier_, text));
+      text, base::BindOnce(&SpellCheckProvider::OnRespondSpellingService,
+                           base::Unretained(this), last_identifier_, text));
 #endif  // !USE_BROWSER_SPELLCHECKER
 }
 
@@ -118,11 +121,15 @@ void SpellCheckProvider::FocusedNodeChanged(const blink::WebNode& unused) {
                            ? WebElement()
                            : frame->GetDocument().FocusedElement();
   bool enabled = !element.IsNull() && element.IsEditable();
-  bool checked = enabled && frame->IsSpellCheckingEnabled();
+  bool checked = enabled && IsSpellCheckingEnabled();
 
   // TODO(crbug.com/714480): convert the ToggleSpellCheck IPC to mojo.
   Send(new SpellCheckHostMsg_ToggleSpellCheck(routing_id(), enabled, checked));
 #endif  // USE_BROWSER_SPELLCHECKER
+}
+
+bool SpellCheckProvider::IsSpellCheckingEnabled() const {
+  return spellcheck_->IsSpellcheckEnabled();
 }
 
 void SpellCheckProvider::CheckSpelling(
@@ -242,13 +249,6 @@ void SpellCheckProvider::OnRespondTextCheck(
   last_results_.Swap(textcheck_results);
 }
 #endif
-
-void SpellCheckProvider::EnableSpellcheck(bool enable) {
-  WebLocalFrame* frame = render_frame()->GetWebFrame();
-  frame->EnableSpellChecking(enable);
-  if (!enable)
-    frame->RemoveSpellingMarkers();
-}
 
 bool SpellCheckProvider::SatisfyRequestFromCache(
     const base::string16& text,

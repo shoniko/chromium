@@ -103,7 +103,7 @@ action("make") {
 
     # environment variables
     "--envANDROID_HOME=${_abs_sdk_dir}",
-    "--envANDROID_NDK_HOME=${_abs_libadblockplus_dir}/third_party/android-ndk-r12b",
+    "--envANDROID_NDK_HOME=${_abs_libadblockplus_dir}/third_party/android-ndk-r16b",
     "--envGRADLE_BUILD_DIR=${_abs_build_dir}",
 
     # link with libadblockplus
@@ -137,7 +137,7 @@ exec_script("//third_party/libadblockplus_common/subproc.py", [
 
   # environment variables
   "--envANDROID_HOME=${_abs_sdk_dir}",
-  "--envANDROID_NDK_HOME=${_abs_libadblockplus_dir}/third_party/android-ndk-r12b",
+  "--envANDROID_NDK_HOME=${_abs_libadblockplus_dir}/third_party/android-ndk-r16b",
   "--envGRADLE_BUILD_DIR=${_abs_prebuild_dir}",
 ])
 

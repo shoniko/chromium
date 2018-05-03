@@ -67,9 +67,11 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
       views::View* anchor_view,
       content::WebContents* web_contents,
       const std::vector<AppInfo>& app_info,
+      bool disable_stay_in_chrome,
       const IntentPickerResponse& intent_picker_cb);
   static std::unique_ptr<IntentPickerBubbleView> CreateBubbleView(
       const std::vector<AppInfo>& app_info,
+      bool disable_stay_in_chrome,
       const IntentPickerResponse& intent_picker_cb,
       content::WebContents* web_contents);
   static IntentPickerBubbleView* intent_picker_bubble() {
@@ -87,6 +89,7 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
   // LocationBarBubbleDelegateView overrides:
   void Init() override;
   base::string16 GetWindowTitle() const override;
+  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   void CloseBubble() override;
 
@@ -99,9 +102,12 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
   FRIEND_TEST_ALL_PREFIXES(IntentPickerBubbleViewTest, InkDropStateTransition);
   FRIEND_TEST_ALL_PREFIXES(IntentPickerBubbleViewTest, PressButtonTwice);
   FRIEND_TEST_ALL_PREFIXES(IntentPickerBubbleViewTest, ChromeNotInCandidates);
+  FRIEND_TEST_ALL_PREFIXES(IntentPickerBubbleViewTest, StayInChromeTest);
+  FRIEND_TEST_ALL_PREFIXES(IntentPickerBubbleViewTest, WebContentsTiedToBubble);
   IntentPickerBubbleView(const std::vector<AppInfo>& app_info,
                          IntentPickerResponse intent_picker_cb,
-                         content::WebContents* web_contents);
+                         content::WebContents* web_contents,
+                         bool disable_display_in_chrome);
 
   // views::BubbleDialogDelegateView overrides:
   void OnWidgetDestroying(views::Widget* widget) override;
@@ -141,8 +147,6 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
   gfx::ImageSkia GetAppImageForTesting(size_t index);
   views::InkDropState GetInkDropStateForTesting(size_t);
   void PressButtonForTesting(size_t index, const ui::Event& event);
-  size_t GetScrollViewSizeForTesting() const;
-  std::string GetPackageNameForTesting(size_t index) const;
 
   static IntentPickerBubbleView* intent_picker_bubble_;
 
@@ -157,6 +161,9 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
   std::vector<AppInfo> app_info_;
 
   views::Checkbox* remember_selection_checkbox_;
+
+  // Tells whether or not 'Stay in Chrome' should be enabled as an option.
+  const bool disable_stay_in_chrome_;
 
   DISALLOW_COPY_AND_ASSIGN(IntentPickerBubbleView);
 };

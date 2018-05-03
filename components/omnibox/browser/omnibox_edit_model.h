@@ -85,7 +85,7 @@ class OmniboxEditModel {
                    std::unique_ptr<OmniboxClient> client);
   virtual ~OmniboxEditModel();
 
-  // TODO(beaudoin): Remove this accessor when the AutocompleteController has
+  // TODO(jdonnelly): Remove this accessor when the AutocompleteController has
   //     completely moved to OmniboxController.
   AutocompleteController* autocomplete_controller() const {
     return omnibox_controller_->autocomplete_controller();
@@ -95,8 +95,8 @@ class OmniboxEditModel {
     omnibox_controller_->set_popup_model(popup_model);
   }
 
-  // TODO: The edit and popup should be siblings owned by the LocationBarView,
-  // making this accessor unnecessary.
+  // TODO(jdonnelly): The edit and popup should be siblings owned by the
+  // LocationBarView, making this accessor unnecessary.
   // NOTE: popup_model() can be NULL for testing.
   OmniboxPopupModel* popup_model() const {
     return omnibox_controller_->popup_model();
@@ -110,15 +110,15 @@ class OmniboxEditModel {
   // the internal state appropriately.
   const State GetStateForTabSwitch();
 
-  // Resets the tab state, then restores local state from the saved |state|.
-  // |state| may be NULL if there is no saved state.
-  void RestoreState(const State* state);
+  // Resets the tab state, updates permanent_text_ to |url|, then restores local
+  // state from |state|. |state| may be NULL if there is no saved state.
+  void RestoreState(const base::string16& url, const State* state);
 
   // Returns the match for the current text. If the user has not edited the text
   // this is the match corresponding to the permanent text. Returns the
   // alternate nav URL, if |alternate_nav_url| is non-NULL and there is such a
-  // URL.
-  AutocompleteMatch CurrentMatch(GURL* alternate_nav_url) const;
+  // URL. Virtual for testing.
+  virtual AutocompleteMatch CurrentMatch(GURL* alternate_nav_url) const;
 
   // Called when the user wants to export the entire current text as a URL.
   // Sets the url, and if known, the title and favicon.
@@ -151,11 +151,10 @@ class OmniboxEditModel {
   // that state has changed.
   void SetInputInProgress(bool in_progress);
 
-  // Updates permanent_text_ to the current permanent text from the toolbar
-  // model.  Returns true if the permanent text changed and the change should be
-  // immediately user-visible, because either the user is not editing or the
-  // edit does not have focus.
-  bool UpdatePermanentText();
+  // Sets permanent_text_ to |text|. Returns true if the permanent text changed
+  // and the change should be immediately user-visible, because either the user
+  // is not editing or the edit does not have focus.
+  bool SetPermanentText(const base::string16& text);
 
   // Returns the URL corresponding to the permanent text.
   GURL PermanentURL() const;
@@ -303,7 +302,7 @@ class OmniboxEditModel {
   bool is_pasting() const { return paste_state_ == PASTING; }
 
   // Called when the user presses up or down.  |count| is a repeat count,
-  // negative for moving up, positive for moving down.
+  // negative for moving up, positive for moving down. Virtual for testing.
   virtual void OnUpOrDownKeyPressed(int count);
 
   // Called when any relevant data changes.  This rolls together several
@@ -378,7 +377,8 @@ class OmniboxEditModel {
 
   // Returns true if the popup exists and is open.  (This is a convenience
   // wrapper for the benefit of test code, which may not have a popup model.)
-  bool PopupIsOpen() const;
+  // Virtual for testing.
+  virtual bool PopupIsOpen() const;
 
   // Called whenever user_text_ should change.
   void InternalSetUserText(const base::string16& text);

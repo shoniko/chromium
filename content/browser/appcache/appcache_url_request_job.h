@@ -11,7 +11,6 @@
 
 #include "base/callback.h"
 #include "content/browser/appcache/appcache_entry.h"
-#include "content/browser/appcache/appcache_executable_handler.h"
 #include "content/browser/appcache/appcache_job.h"
 #include "content/browser/appcache/appcache_storage.h"
 #include "content/common/content_export.h"
@@ -24,7 +23,9 @@ class GrowableIOBuffer;
 namespace content {
 class AppCacheHost;
 class AppCacheRequestHandlerTest;
+namespace appcache_url_request_job_unittest {
 class AppCacheURLRequestJobTest;
+}
 
 // A net::URLRequestJob derivative that knows how to return a response stored
 // in the appcache.
@@ -60,7 +61,7 @@ class CONTENT_EXPORT AppCacheURLRequestJob : public AppCacheJob,
 
  private:
   friend class AppCacheRequestHandlerTest;
-  friend class AppCacheURLRequestJobTest;
+  friend class appcache_url_request_job_unittest::AppCacheURLRequestJobTest;
   // AppCacheRequestHandler::CreateJob() creates this instance.
   friend class AppCacheRequestHandler;
 
@@ -81,19 +82,11 @@ class CONTENT_EXPORT AppCacheURLRequestJob : public AppCacheJob,
 
   void MaybeBeginDelivery();
   void BeginDelivery();
-
-  // For executable response handling.
-  void BeginExecutableHandlerDelivery();
-  void OnExecutableSourceLoaded(int result);
-  void InvokeExecutableHandler(AppCacheExecutableHandler* handler);
-  void OnExecutableResponseCallback(
-      const AppCacheExecutableHandler::Response& response);
   void BeginErrorDelivery(const char* message);
 
   // AppCacheStorage::Delegate methods
   void OnResponseInfoLoaded(AppCacheResponseInfo* response_info,
                             int64_t response_id) override;
-  void OnCacheLoaded(AppCache* cache, int64_t cache_id) override;
 
   const net::HttpResponseInfo* http_info() const;
 

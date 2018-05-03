@@ -26,19 +26,19 @@
 
 #include "core/dom/events/DOMWindowEventQueue.h"
 
-#include "core/dom/TaskRunnerHelper.h"
+#include "base/macros.h"
 #include "core/dom/events/Event.h"
 #include "core/frame/LocalDOMWindow.h"
-#include "core/frame/SuspendableTimer.h"
+#include "core/frame/PausableTimer.h"
 #include "core/probe/CoreProbes.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
 class DOMWindowEventQueueTimer final
     : public GarbageCollectedFinalized<DOMWindowEventQueueTimer>,
-      public SuspendableTimer {
+      public PausableTimer {
   USING_GARBAGE_COLLECTED_MIXIN(DOMWindowEventQueueTimer);
-  WTF_MAKE_NONCOPYABLE(DOMWindowEventQueueTimer);
 
  public:
   DOMWindowEventQueueTimer(DOMWindowEventQueue* event_queue,
@@ -46,7 +46,7 @@ class DOMWindowEventQueueTimer final
       // This queue is unthrottled because throttling IndexedDB events may break
       // scenarios where several tabs, some of which are backgrounded, access
       // the same database concurrently.
-      : SuspendableTimer(context, TaskType::kUnthrottled),
+      : PausableTimer(context, TaskType::kUnthrottled),
         event_queue_(event_queue) {}
 
   // Eager finalization is needed to promptly stop this timer object.
@@ -54,13 +54,14 @@ class DOMWindowEventQueueTimer final
   EAGERLY_FINALIZE();
   virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(event_queue_);
-    SuspendableTimer::Trace(visitor);
+    PausableTimer::Trace(visitor);
   }
 
  private:
   virtual void Fired() { event_queue_->PendingEventTimerFired(); }
 
   Member<DOMWindowEventQueue> event_queue_;
+  DISALLOW_COPY_AND_ASSIGN(DOMWindowEventQueueTimer);
 };
 
 DOMWindowEventQueue* DOMWindowEventQueue::Create(ExecutionContext* context) {
@@ -70,10 +71,10 @@ DOMWindowEventQueue* DOMWindowEventQueue::Create(ExecutionContext* context) {
 DOMWindowEventQueue::DOMWindowEventQueue(ExecutionContext* context)
     : pending_event_timer_(new DOMWindowEventQueueTimer(this, context)),
       is_closed_(false) {
-  pending_event_timer_->SuspendIfNeeded();
+  pending_event_timer_->PauseIfNeeded();
 }
 
-DOMWindowEventQueue::~DOMWindowEventQueue() {}
+DOMWindowEventQueue::~DOMWindowEventQueue() = default;
 
 void DOMWindowEventQueue::Trace(blink::Visitor* visitor) {
   visitor->Trace(pending_event_timer_);
@@ -81,7 +82,7 @@ void DOMWindowEventQueue::Trace(blink::Visitor* visitor) {
   EventQueue::Trace(visitor);
 }
 
-bool DOMWindowEventQueue::EnqueueEvent(const WebTraceLocation& from_here,
+bool DOMWindowEventQueue::EnqueueEvent(const base::Location& from_here,
                                        Event* event) {
   if (is_closed_)
     return false;
@@ -94,13 +95,13 @@ bool DOMWindowEventQueue::EnqueueEvent(const WebTraceLocation& from_here,
   DCHECK(was_added);  // It should not have already been in the list.
 
   if (!pending_event_timer_->IsActive())
-    pending_event_timer_->StartOneShot(0, from_here);
+    pending_event_timer_->StartOneShot(TimeDelta(), from_here);
 
   return true;
 }
 
 bool DOMWindowEventQueue::CancelEvent(Event* event) {
-  HeapListHashSet<Member<Event>, 16>::iterator it = queued_events_.find(event);
+  auto it = queued_events_.find(event);
   bool found = it != queued_events_.end();
   if (found) {
     probe::AsyncTaskCanceled(event->target()->GetExecutionContext(), event);
@@ -133,9 +134,9 @@ void DOMWindowEventQueue::PendingEventTimerFired() {
   DCHECK(was_added);  // It should not have already been in the list.
 
   while (!queued_events_.IsEmpty()) {
-    HeapListHashSet<Member<Event>, 16>::iterator iter = queued_events_.begin();
-    Event* event = *iter;
-    queued_events_.erase(iter);
+    auto it = queued_events_.begin();
+    Event* event = *it;
+    queued_events_.erase(it);
     if (!event)
       break;
     DispatchEvent(event);

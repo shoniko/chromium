@@ -34,11 +34,10 @@
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/InlineBoxPosition.h"
+#include "core/editing/LocalCaretRect.h"
 #include "core/editing/Position.h"
 #include "core/editing/PositionIterator.h"
 #include "core/editing/PositionWithAffinity.h"
-#include "core/editing/RenderedPosition.h"
 #include "core/editing/TextAffinity.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleSelection.h"
@@ -58,9 +57,6 @@
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutTextFragment.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/api/LayoutItem.h"
-#include "core/layout/api/LayoutViewItem.h"
-#include "core/layout/api/LineLayoutAPIShim.h"
 #include "core/layout/api/LineLayoutItem.h"
 #include "core/layout/line/InlineIterator.h"
 #include "core/layout/line/InlineTextBox.h"
@@ -236,10 +232,10 @@ VisiblePositionInFlatTree HonorEditingBoundaryAtOrBefore(
 }
 
 template <typename Strategy>
-static VisiblePositionTemplate<Strategy> HonorEditingBoundaryAtOrAfterTemplate(
-    const VisiblePositionTemplate<Strategy>& pos,
+static PositionWithAffinityTemplate<Strategy>
+HonorEditingBoundaryAtOrAfterTemplate(
+    const PositionWithAffinityTemplate<Strategy>& pos,
     const PositionTemplate<Strategy>& anchor) {
-  DCHECK(pos.IsValid()) << pos;
   if (pos.IsNull())
     return pos;
 
@@ -247,39 +243,54 @@ static VisiblePositionTemplate<Strategy> HonorEditingBoundaryAtOrAfterTemplate(
 
   // Return empty position if |pos| is not somewhere inside the editable
   // region containing this position
-  if (highest_root &&
-      !pos.DeepEquivalent().AnchorNode()->IsDescendantOf(highest_root))
-    return VisiblePositionTemplate<Strategy>();
+  if (highest_root && !pos.AnchorNode()->IsDescendantOf(highest_root))
+    return PositionWithAffinityTemplate<Strategy>();
 
   // Return |pos| itself if the two are from the very same editable region, or
   // both are non-editable
   // TODO(yosin) In the non-editable case, just because the new position is
   // non-editable doesn't mean movement to it is allowed.
   // |VisibleSelection::adjustForEditableContent()| has this problem too.
-  if (HighestEditableRoot(pos.DeepEquivalent()) == highest_root)
+  if (HighestEditableRoot(pos.GetPosition()) == highest_root)
     return pos;
 
   // Return empty position if this position is non-editable, but |pos| is
   // editable.
   // TODO(yosin) Move to the next non-editable region.
   if (!highest_root)
-    return VisiblePositionTemplate<Strategy>();
+    return PositionWithAffinityTemplate<Strategy>();
 
   // Return the next position after |pos| that is in the same editable region
   // as this position
-  return FirstEditableVisiblePositionAfterPositionInRoot(pos.DeepEquivalent(),
-                                                         *highest_root);
+  return FirstEditablePositionAfterPositionInRoot(pos.GetPosition(),
+                                                  *highest_root);
+}
+
+PositionWithAffinity HonorEditingBoundaryAtOrAfter(
+    const PositionWithAffinity& pos,
+    const Position& anchor) {
+  return HonorEditingBoundaryAtOrAfterTemplate(pos, anchor);
+}
+
+PositionInFlatTreeWithAffinity HonorEditingBoundaryAtOrAfter(
+    const PositionInFlatTreeWithAffinity& pos,
+    const PositionInFlatTree& anchor) {
+  return HonorEditingBoundaryAtOrAfterTemplate(pos, anchor);
 }
 
 VisiblePosition HonorEditingBoundaryAtOrAfter(const VisiblePosition& pos,
                                               const Position& anchor) {
-  return HonorEditingBoundaryAtOrAfterTemplate(pos, anchor);
+  DCHECK(pos.IsValid()) << pos;
+  return CreateVisiblePosition(
+      HonorEditingBoundaryAtOrAfter(pos.ToPositionWithAffinity(), anchor));
 }
 
 VisiblePositionInFlatTree HonorEditingBoundaryAtOrAfter(
     const VisiblePositionInFlatTree& pos,
     const PositionInFlatTree& anchor) {
-  return HonorEditingBoundaryAtOrAfterTemplate(pos, anchor);
+  DCHECK(pos.IsValid()) << pos;
+  return CreateVisiblePosition(
+      HonorEditingBoundaryAtOrAfter(pos.ToPositionWithAffinity(), anchor));
 }
 
 template <typename Strategy>
@@ -345,30 +356,27 @@ static PositionTemplate<Strategy> PreviousBoundaryAlgorithm(
   BackwardsTextBuffer string;
   string.PushRange(suffix_string.Data(), suffix_string.Size());
 
+  // Treat bullets used in the text security mode as regular characters when
+  // looking for boundaries.
   SimplifiedBackwardsTextIteratorAlgorithm<Strategy> it(
-      EphemeralRangeTemplate<Strategy>(start, end));
+      EphemeralRangeTemplate<Strategy>(start, end),
+      TextIteratorBehavior::Builder()
+          .SetEmitsSmallXForTextSecurity(true)
+          .Build());
   unsigned next = 0;
   bool need_more_context = false;
   while (!it.AtEnd()) {
-    bool in_text_security_mode = it.IsInTextSecurityMode();
     // iterate to get chunks until the searchFunction returns a non-zero
     // value.
-    if (!in_text_security_mode) {
-      int run_offset = 0;
-      do {
-        run_offset += it.CopyTextTo(&string, run_offset, string.Capacity());
-        next = search_function(string.Data(), string.Size(),
-                               string.Size() - suffix_length,
-                               kMayHaveMoreContext, need_more_context);
-      } while (!next && run_offset < it.length());
-      if (next)
-        break;
-    } else {
-      // Treat bullets used in the text security mode as regular
-      // characters when looking for boundaries
-      string.PushCharacters('x', it.length());
-      next = 0;
-    }
+    int run_offset = 0;
+    do {
+      run_offset += it.CopyTextTo(&string, run_offset, string.Capacity());
+      next = search_function(string.Data(), string.Size(),
+                             string.Size() - suffix_length, kMayHaveMoreContext,
+                             need_more_context);
+    } while (!next && run_offset < it.length());
+    if (next)
+      break;
     it.Advance();
   }
   if (need_more_context) {
@@ -432,10 +440,13 @@ static PositionTemplate<Strategy> NextBoundaryAlgorithm(
           start.AnchorNode(), start.OffsetInContainerNode());
   const PositionTemplate<Strategy> search_end =
       PositionTemplate<Strategy>::LastPositionInNode(*boundary);
+  // Treat bullets used in the text security mode as regular characters when
+  // looking for boundaries
   TextIteratorAlgorithm<Strategy> it(
       search_start, search_end,
       TextIteratorBehavior::Builder()
           .SetEmitsCharactersBetweenAllVisiblePositions(true)
+          .SetEmitsSmallXForTextSecurity(true)
           .Build());
   const unsigned kInvalidOffset = static_cast<unsigned>(-1);
   unsigned next = kInvalidOffset;
@@ -445,28 +456,20 @@ static PositionTemplate<Strategy> NextBoundaryAlgorithm(
     // Keep asking the iterator for chunks until the search function
     // returns an end value not equal to the length of the string passed to
     // it.
-    bool in_text_security_mode = it.IsInTextSecurityMode();
-    if (!in_text_security_mode) {
-      int run_offset = 0;
-      do {
-        run_offset += it.CopyTextTo(&string, run_offset, string.Capacity());
-        next = search_function(string.Data(), string.Size(), offset,
-                               kMayHaveMoreContext, need_more_context);
-        if (!need_more_context) {
-          // When the search does not need more context, skip all examined
-          // characters except the last one, in case it is a boundary.
-          offset = string.Size();
-          U16_BACK_1(string.Data(), 0, offset);
-        }
-      } while (next == string.Size() && run_offset < it.length());
-      if (next != string.Size())
-        break;
-    } else {
-      // Treat bullets used in the text security mode as regular
-      // characters when looking for boundaries
-      string.PushCharacters('x', it.length());
-      next = string.Size();
-    }
+    int run_offset = 0;
+    do {
+      run_offset += it.CopyTextTo(&string, run_offset, string.Capacity());
+      next = search_function(string.Data(), string.Size(), offset,
+                             kMayHaveMoreContext, need_more_context);
+      if (!need_more_context) {
+        // When the search does not need more context, skip all examined
+        // characters except the last one, in case it is a boundary.
+        offset = string.Size();
+        U16_BACK_1(string.Data(), 0, offset);
+      }
+    } while (next == string.Size() && run_offset < it.length());
+    if (next != string.Size())
+      break;
     it.Advance();
   }
   if (need_more_context) {
@@ -670,94 +673,6 @@ bool IsEndOfEditableOrNonEditableContent(
   return IsTextControlElement(next_position.DeepEquivalent().AnchorNode());
 }
 
-static LocalCaretRect ComputeLocalCaretRect(
-    const LayoutObject* layout_object,
-    const InlineBoxPosition box_position) {
-  return LocalCaretRect(
-      layout_object, layout_object->LocalCaretRect(box_position.inline_box,
-                                                   box_position.offset_in_box));
-}
-
-template <typename Strategy>
-LocalCaretRect LocalCaretRectOfPositionTemplate(
-    const PositionWithAffinityTemplate<Strategy>& position) {
-  if (position.IsNull())
-    return LocalCaretRect();
-  Node* const node = position.AnchorNode();
-  LayoutObject* const layout_object = node->GetLayoutObject();
-  if (!layout_object)
-    return LocalCaretRect();
-
-  const InlineBoxPosition& box_position =
-      ComputeInlineBoxPosition(position.GetPosition(), position.Affinity());
-
-  if (box_position.inline_box) {
-    return ComputeLocalCaretRect(
-        LineLayoutAPIShim::LayoutObjectFrom(
-            box_position.inline_box->GetLineLayoutItem()),
-        box_position);
-  }
-  // DeleteSelectionCommandTest.deleteListFromTable goes here.
-  return LocalCaretRect(
-      layout_object,
-      layout_object->LocalCaretRect(
-          nullptr, position.GetPosition().ComputeEditingOffset()));
-}
-
-// This function was added because the caret rect that is calculated by
-// using the line top value instead of the selection top.
-template <typename Strategy>
-LocalCaretRect LocalSelectionRectOfPositionTemplate(
-    const PositionWithAffinityTemplate<Strategy>& position) {
-  if (position.IsNull())
-    return LocalCaretRect();
-  Node* const node = position.AnchorNode();
-  if (!node->GetLayoutObject())
-    return LocalCaretRect();
-
-  const InlineBoxPosition& box_position =
-      ComputeInlineBoxPosition(position.GetPosition(), position.Affinity());
-
-  if (!box_position.inline_box)
-    return LocalCaretRect();
-
-  LayoutObject* const layout_object = LineLayoutAPIShim::LayoutObjectFrom(
-      box_position.inline_box->GetLineLayoutItem());
-
-  const LayoutRect& rect = layout_object->LocalCaretRect(
-      box_position.inline_box, box_position.offset_in_box);
-
-  if (rect.IsEmpty())
-    return LocalCaretRect();
-
-  InlineBox* const box = box_position.inline_box;
-  if (layout_object->Style()->IsHorizontalWritingMode()) {
-    return LocalCaretRect(
-        layout_object,
-        LayoutRect(LayoutPoint(rect.X(), box->Root().SelectionTop()),
-                   LayoutSize(rect.Width(), box->Root().SelectionHeight())));
-  }
-
-  return LocalCaretRect(
-      layout_object,
-      LayoutRect(LayoutPoint(box->Root().SelectionTop(), rect.Y()),
-                 LayoutSize(box->Root().SelectionHeight(), rect.Height())));
-}
-
-LocalCaretRect LocalCaretRectOfPosition(const PositionWithAffinity& position) {
-  return LocalCaretRectOfPositionTemplate<EditingStrategy>(position);
-}
-
-static LocalCaretRect LocalSelectionRectOfPosition(
-    const PositionWithAffinity& position) {
-  return LocalSelectionRectOfPositionTemplate<EditingStrategy>(position);
-}
-
-LocalCaretRect LocalCaretRectOfPosition(
-    const PositionInFlatTreeWithAffinity& position) {
-  return LocalCaretRectOfPositionTemplate<EditingInFlatTreeStrategy>(position);
-}
-
 static LayoutUnit BoundingBoxLogicalHeight(LayoutObject* o,
                                            const LayoutRect& rect) {
   return o->Style()->IsHorizontalWritingMode() ? rect.Height() : rect.Width();
@@ -767,9 +682,9 @@ static LayoutUnit BoundingBoxLogicalHeight(LayoutObject* o,
 // with first-letter style, e.g., <div>F</div>, where the letter is laid-out in
 // an anonymous first-letter LayoutTextFragment instead of the LayoutObject of
 // the text node. It seems weird to return false in this case.
-// TODO(crbug.com/766448): Change parameter type to |const LayoutObject*|.
-bool HasRenderedNonAnonymousDescendantsWithHeight(LayoutObject* layout_object) {
-  LayoutObject* stop = layout_object->NextInPreOrderAfterChildren();
+bool HasRenderedNonAnonymousDescendantsWithHeight(
+    const LayoutObject* layout_object) {
+  const LayoutObject* stop = layout_object->NextInPreOrderAfterChildren();
   // TODO(editing-dev): Avoid single-character parameter names.
   for (LayoutObject* o = layout_object->SlowFirstChild(); o && o != stop;
        o = o->NextInPreOrder()) {
@@ -792,7 +707,7 @@ VisiblePosition VisiblePositionForContentsPoint(const IntPoint& contents_point,
                            HitTestRequest::kActive |
                            HitTestRequest::kIgnoreClipping;
   HitTestResult result(request, contents_point);
-  frame->GetDocument()->GetLayoutViewItem().HitTest(result);
+  frame->GetDocument()->GetLayoutView()->HitTest(result);
 
   if (Node* node = result.InnerNode()) {
     return CreateVisiblePosition(PositionRespectingEditingBoundary(

@@ -77,7 +77,7 @@ void DefaultBrowserInfoBarDelegate::InfoBarDismissed() {
   action_taken_ = true;
   // |profile_| may be null in tests.
   if (profile_)
-    chrome::DefaultBrowserPromptDeclined(profile_);
+    DefaultBrowserPromptDeclined(profile_);
   base::RecordAction(base::UserMetricsAction("DefaultBrowserInfoBar_Dismiss"));
   UMA_HISTOGRAM_ENUMERATION("DefaultBrowser.InfoBar.UserInteraction",
                             DISMISS_INFO_BAR,
@@ -85,7 +85,7 @@ void DefaultBrowserInfoBarDelegate::InfoBarDismissed() {
 }
 
 base::string16 DefaultBrowserInfoBarDelegate::GetMessageText() const {
-  return l10n_util::GetStringUTF16(IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT);
+  return l10n_util::GetStringUTF16(IDS_DEFAULT_BROWSER_INFOBAR_TEXT);
 }
 
 int DefaultBrowserInfoBarDelegate::GetButtons() const {

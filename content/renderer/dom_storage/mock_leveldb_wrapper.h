@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CONTENT_RENDERER_DOM_STORAGE_MOCK_LEVELDB_WRAPPER_H
+#define CONTENT_RENDERER_DOM_STORAGE_MOCK_LEVELDB_WRAPPER_H
+
 #include "content/common/leveldb_wrapper.mojom.h"
 #include "content/common/storage_partition_service.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
@@ -22,6 +25,9 @@ class MockLevelDBWrapper : public mojom::StoragePartitionService,
   // StoragePartitionService implementation:
   void OpenLocalStorage(const url::Origin& origin,
                         mojom::LevelDBWrapperRequest database) override;
+  void OpenSessionStorage(int64_t namespace_id,
+                          const url::Origin& origin,
+                          mojom::LevelDBWrapperRequest database) override;
 
   // LevelDBWrapper implementation:
   void AddObserver(mojom::LevelDBObserverAssociatedPtrInfo observer) override;
@@ -107,3 +113,5 @@ class MockLevelDBWrapper : public mojom::StoragePartitionService,
 };
 
 }  // namespace content
+
+#endif  // CONTENT_RENDERER_DOM_STORAGE_MOCK_LEVELDB_WRAPPER_H

@@ -8,7 +8,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/app_list/app_list_constants.h"
-#include "ui/app_list/app_list_features.h"
 #include "ui/app_list/vector_icons/vector_icons.h"
 #include "ui/app_list/views/app_list_view.h"
 #include "ui/app_list/views/contents_view.h"
@@ -68,8 +67,7 @@ ExpandArrowView::ExpandArrowView(ContentsView* contents_view,
       contents_view_(contents_view),
       app_list_view_(app_list_view),
       weak_ptr_factory_(this) {
-  if (features::IsAppListFocusEnabled())
-    SetFocusBehavior(FocusBehavior::ALWAYS);
+  SetFocusBehavior(FocusBehavior::ALWAYS);
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
 
@@ -267,7 +265,7 @@ void ExpandArrowView::TransitToFullscreenAllAppsState() {
   UMA_HISTOGRAM_ENUMERATION(kAppListPeekingToFullscreenHistogram, kExpandArrow,
                             kMaxPeekingToFullscreen);
   contents_view_->SetActiveState(AppListModel::STATE_APPS);
-  app_list_view_->SetState(AppListView::FULLSCREEN_ALL_APPS);
+  app_list_view_->SetState(AppListViewState::FULLSCREEN_ALL_APPS);
 }
 
 void ExpandArrowView::ScheduleHintingAnimation(bool is_first_time) {

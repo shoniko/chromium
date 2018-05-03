@@ -202,6 +202,13 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_DesktopFocusIframe) {
       << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopHitTestIframe) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(
+      RunExtensionSubtest("automation/tests/desktop", "hit_test_iframe.html"))
+      << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopFocusViews) {
   AutomationManagerAura::GetInstance()->Enable(browser()->profile());
   // Trigger the shelf subtree to be computed.
@@ -274,7 +281,7 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, Find) {
 }
 
 // TODO(crbug.com/725420) Flaky
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_Attributes) {
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, Attributes) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "attributes.html"))
       << message_;
@@ -319,6 +326,12 @@ class AutomationApiTestWithDeviceScaleFactor : public AutomationApiTest {
 IN_PROC_BROWSER_TEST_F(AutomationApiTestWithDeviceScaleFactor, LocationScaled) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunPlatformAppTest("automation/tests/location_scaled"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTestWithDeviceScaleFactor, HitTest) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "hit_test.html"))
       << message_;
 }
 

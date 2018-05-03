@@ -258,9 +258,14 @@ DevToolsHost.getSelectionBackgroundColor = function() {};
 DevToolsHost.getSelectionForegroundColor = function() {};
 
 /**
- * @return {boolean}
+ * @return {string}
  */
-DevToolsHost.isUnderTest = function() {};
+DevToolsHost.getInactiveSelectionBackgroundColor = function() {};
+
+/**
+ * @return {string}
+ */
+DevToolsHost.getInactiveSelectionForegroundColor = function() {};
 
 /**
  * @return {boolean}
@@ -281,12 +286,6 @@ DevToolsHost.upgradeDraggedFileSystemPermissions = function(fileSystem) {};
 
 /** Extensions API */
 
-/** @constructor */
-function AuditCategory() {
-}
-/** @constructor */
-function AuditResult() {
-}
 /** @constructor */
 function EventSink() {
 }
@@ -531,7 +530,7 @@ CodeMirror.prototype = {
   undo: function() {},
   unlinkDoc: function(other) {}
 };
-/** @type {!{cursorDiv: Element}} */
+/** @type {!{cursorDiv: Element, lineSpace: Element}} */
 CodeMirror.prototype.display;
 /** @type {!{mode: string}} */
 CodeMirror.prototype.options;
@@ -638,6 +637,15 @@ Element.prototype.animate = function(keyframes, timing) {};
  * @this {EventTarget}
  */
 Element.prototype.addEventListener = function(type, listener, options) {};
+
+/**
+ * @override
+ * @param {string} type
+ * @param {(!EventListener|!function (!Event): (boolean|undefined)|null)} listener
+ * @param {(boolean|!{capture: (boolean|undefined), once: (boolean|undefined), passive: (boolean|undefined)})=} options
+ * @this {EventTarget}
+ */
+Element.prototype.removeEventListener = function(type, listener, options) {};
 
 var acorn = {
   /**
@@ -765,42 +773,6 @@ ESTree.TemplateLiteralNode = function() {
   /** @type {!Array.<!ESTree.Node>} */
   this.expressions;
 };
-/** @type {!Object} */
-var Gonzales = {};
-var gonzales = {
-  /**
-   * @param {string} text
-   * @param {!Object=} options
-   * @return {!Gonzales.Node}
-   */
-  parse: function(text, options) {},
-};
-
-/**
- * @constructor
- */
-Gonzales.Location = function() {
-  /** @type {number} */
-  this.line;
-  /** @type {number} */
-  this.column;
-};
-
-/**
- * @constructor
- */
-Gonzales.Node = function() {
-  /** @type {string} */
-  this.type;
-  /** @type {string} */
-  this.syntax;
-  /** @type {!Gonzales.Location} */
-  this.start;
-  /** @type {!Gonzales.Location} */
-  this.end;
-  /** @type {(string|!Array<!Gonzales.Node>)} */
-  this.content;
-};
 
 /**
  * @type {string}
@@ -831,3 +803,17 @@ Terminal.prototype = {
  * @return {!Console}
  */
 Console.prototype.context = function(context) {};
+
+
+/**
+ * @param {!Array<string>|string} strings
+ * @param {...*} vararg
+ * @return {string}
+ */
+var ls = function(strings, vararg) {};
+
+/**
+ * @constructor
+ * @param {function(!Array<*>)} callback
+ */
+var ResizeObserver = function(callback) {};

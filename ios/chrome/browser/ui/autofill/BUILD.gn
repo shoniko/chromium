@@ -31,6 +31,7 @@ source_set("autofill") {
     "//ios/chrome/browser/autofill",
     "//ios/chrome/browser/browser_state",
     "//ios/chrome/browser/infobars",
+    "//ios/chrome/browser/ssl",
     "//ios/chrome/browser/ui",
     "//ios/chrome/browser/ui/autofill/cells",
     "//ios/chrome/browser/ui/collection_view/cells",
@@ -58,6 +59,7 @@ source_set("autofill_ui") {
     "//base",
     "//components/strings:components_strings_grit",
     "//ios/chrome/browser/ui",
+    "//ios/chrome/browser/ui/image_util",
     "//ui/base:base",
   ]
   libs = [ "UIKit.framework" ]

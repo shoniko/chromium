@@ -485,11 +485,6 @@ void WebMediaPlayerMS::Pause() {
   paused_ = true;
 }
 
-bool WebMediaPlayerMS::SupportsSave() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return false;
-}
-
 void WebMediaPlayerMS::Seek(double seconds) {
   DCHECK(thread_checker_.CalledOnValidThread());
 }
@@ -746,6 +741,14 @@ void WebMediaPlayerMS::OnPlay() {
 }
 
 void WebMediaPlayerMS::OnPause() {
+  // TODO(perkj, magjed): See TODO in OnPlay().
+}
+
+void WebMediaPlayerMS::OnSeekForward(double seconds) {
+  // TODO(perkj, magjed): See TODO in OnPlay().
+}
+
+void WebMediaPlayerMS::OnSeekBackward(double seconds) {
   // TODO(perkj, magjed): See TODO in OnPlay().
 }
 

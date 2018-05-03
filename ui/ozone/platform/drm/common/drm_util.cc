@@ -16,13 +16,7 @@
 #include "base/containers/flat_map.h"
 #include "base/memory/ptr_util.h"
 #include "ui/display/types/display_mode.h"
-#include "ui/display/types/display_snapshot.h"
 #include "ui/display/util/edid_parser.h"
-
-#if !defined(DRM_FORMAT_R16)
-// TODO(riju): crbug.com/733703
-#define DRM_FORMAT_R16 fourcc_code('R', '1', '6', ' ')
-#endif
 
 namespace ui {
 
@@ -263,21 +257,24 @@ GetAvailableDisplayControllerInfos(int fd) {
   DCHECK(resources) << "Failed to get DRM resources";
   std::vector<std::unique_ptr<HardwareDisplayControllerInfo>> displays;
 
-  std::vector<ScopedDrmConnectorPtr> available_connectors;
-  std::vector<ScopedDrmConnectorPtr::element_type*> connectors;
+  std::vector<ScopedDrmConnectorPtr> connectors;
+  std::vector<drmModeConnector*> available_connectors;
   for (int i = 0; i < resources->count_connectors; ++i) {
     ScopedDrmConnectorPtr connector(
         drmModeGetConnector(fd, resources->connectors[i]));
-    connectors.push_back(connector.get());
+    if (!connector)
+      continue;
 
-    if (connector && connector->connection == DRM_MODE_CONNECTED &&
+    if (connector->connection == DRM_MODE_CONNECTED &&
         connector->count_modes != 0) {
-      available_connectors.push_back(std::move(connector));
+      available_connectors.push_back(connector.get());
     }
+
+    connectors.emplace_back(std::move(connector));
   }
 
-  base::flat_map<ScopedDrmConnectorPtr::element_type*, int> connector_crtcs;
-  for (auto& c : available_connectors) {
+  base::flat_map<drmModeConnector*, int> connector_crtcs;
+  for (auto* c : available_connectors) {
     uint32_t possible_crtcs = 0;
     for (int i = 0; i < c->count_encoders; ++i) {
       ScopedDrmEncoderPtr encoder(drmModeGetEncoder(fd, c->encoders[i]));
@@ -285,32 +282,36 @@ GetAvailableDisplayControllerInfos(int fd) {
         continue;
       possible_crtcs |= encoder->possible_crtcs;
     }
-    connector_crtcs[c.get()] = possible_crtcs;
+    connector_crtcs[c] = possible_crtcs;
   }
   // Make sure to start assigning a crtc to the connector that supports the
   // fewest crtcs first.
   std::stable_sort(available_connectors.begin(), available_connectors.end(),
-                   [&connector_crtcs](const ScopedDrmConnectorPtr& c1,
-                                      const ScopedDrmConnectorPtr& c2) {
+                   [&connector_crtcs](drmModeConnector* const c1,
+                                      drmModeConnector* const c2) {
                      // When c1 supports a proper subset of the crtcs of c2, we
                      // should process c1 first (return true).
-                     int c1_crtcs = connector_crtcs[c1.get()];
-                     int c2_crtcs = connector_crtcs[c2.get()];
+                     int c1_crtcs = connector_crtcs[c1];
+                     int c2_crtcs = connector_crtcs[c2];
                      return (c1_crtcs & c2_crtcs) == c1_crtcs &&
                             c1_crtcs != c2_crtcs;
                    });
 
-  for (auto& c : available_connectors) {
-    uint32_t crtc_id = GetCrtc(fd, c.get(), resources.get(), displays);
+  for (auto* c : available_connectors) {
+    uint32_t crtc_id = GetCrtc(fd, c, resources.get(), displays);
     if (!crtc_id)
       continue;
 
     ScopedDrmCrtcPtr crtc(drmModeGetCrtc(fd, crtc_id));
-    size_t index = std::find(connectors.begin(), connectors.end(), c.get()) -
-                   connectors.begin();
+    auto iter = std::find_if(connectors.begin(), connectors.end(),
+                             [c](const ScopedDrmConnectorPtr& connector) {
+                               return connector.get() == c;
+                             });
+    DCHECK(iter != connectors.end());
+    const size_t index = iter - connectors.begin();
     DCHECK_LT(index, connectors.size());
     displays.push_back(std::make_unique<HardwareDisplayControllerInfo>(
-        std::move(c), std::move(crtc), index));
+        std::move(*iter), std::move(crtc), index));
   }
 
   return displays;
@@ -331,6 +332,47 @@ std::unique_ptr<display::DisplayMode> CreateDisplayMode(
   return std::make_unique<display::DisplayMode>(
       gfx::Size(mode.hdisplay, mode.vdisplay),
       mode.flags & DRM_MODE_FLAG_INTERLACE, GetRefreshRate(mode));
+}
+
+display::DisplaySnapshot::DisplayModeList ExtractDisplayModes(
+    HardwareDisplayControllerInfo* info,
+    const gfx::Size& active_pixel_size,
+    const display::DisplayMode** out_current_mode,
+    const display::DisplayMode** out_native_mode) {
+  DCHECK(out_current_mode);
+  DCHECK(out_native_mode);
+
+  *out_current_mode = nullptr;
+  *out_native_mode = nullptr;
+  display::DisplaySnapshot::DisplayModeList modes;
+  for (int i = 0; i < info->connector()->count_modes; ++i) {
+    const drmModeModeInfo& mode = info->connector()->modes[i];
+    modes.push_back(CreateDisplayMode(mode));
+
+    if (info->crtc()->mode_valid && SameMode(info->crtc()->mode, mode))
+      *out_current_mode = modes.back().get();
+
+    if (mode.type & DRM_MODE_TYPE_PREFERRED)
+      *out_native_mode = modes.back().get();
+  }
+
+  // If we couldn't find a preferred mode, then try to find a mode that has the
+  // same size as the first detailed timing descriptor in the EDID.
+  if (!*out_native_mode && !active_pixel_size.IsEmpty()) {
+    for (const auto& mode : modes) {
+      if (mode->size() == active_pixel_size) {
+        *out_native_mode = mode.get();
+        break;
+      }
+    }
+  }
+
+  // If we still have no preferred mode, then use the first one since it should
+  // be the best mode.
+  if (!*out_native_mode && !modes.empty())
+    *out_native_mode = modes.front().get();
+
+  return modes;
 }
 
 std::unique_ptr<display::DisplaySnapshot> CreateDisplaySnapshot(
@@ -355,6 +397,10 @@ std::unique_ptr<display::DisplaySnapshot> CreateDisplaySnapshot(
   bool has_overscan = false;
   gfx::ColorSpace display_color_space;
 
+  // This is the size of the active pixels from the first detailed timing
+  // descriptor in the EDID.
+  gfx::Size active_pixel_size;
+
   ScopedDrmPropertyBlobPtr edid_blob(
       GetDrmPropertyBlob(fd, info->connector(), "EDID"));
   if (edid_blob) {
@@ -364,7 +410,7 @@ std::unique_ptr<display::DisplaySnapshot> CreateDisplaySnapshot(
     display::GetDisplayIdFromEDID(edid, display_id, &display_id, &product_id);
 
     display::ParseOutputDeviceData(edid, nullptr, nullptr, &display_name,
-                                   nullptr, nullptr);
+                                   &active_pixel_size, nullptr);
     display::ParseOutputOverscanFlag(edid, &has_overscan);
 
     display_color_space = GetColorSpaceFromEdid(edid);
@@ -373,24 +419,10 @@ std::unique_ptr<display::DisplaySnapshot> CreateDisplaySnapshot(
             << info->connector()->connector_id;
   }
 
-  display::DisplaySnapshot::DisplayModeList modes;
   const display::DisplayMode* current_mode = nullptr;
   const display::DisplayMode* native_mode = nullptr;
-  for (int i = 0; i < info->connector()->count_modes; ++i) {
-    const drmModeModeInfo& mode = info->connector()->modes[i];
-    modes.push_back(CreateDisplayMode(mode));
-
-    if (info->crtc()->mode_valid && SameMode(info->crtc()->mode, mode))
-      current_mode = modes.back().get();
-
-    if (mode.type & DRM_MODE_TYPE_PREFERRED)
-      native_mode = modes.back().get();
-  }
-
-  // If no preferred mode is found then use the first one. Using the first one
-  // since it should be the best mode.
-  if (!native_mode && !modes.empty())
-    native_mode = modes.front().get();
+  display::DisplaySnapshot::DisplayModeList modes =
+      ExtractDisplayModes(info, active_pixel_size, &current_mode, &native_mode);
 
   return std::make_unique<display::DisplaySnapshot>(
       display_id, origin, physical_size, type, is_aspect_preserving_scaling,
@@ -477,6 +509,8 @@ int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format) {
       return DRM_FORMAT_ARGB8888;
     case gfx::BufferFormat::BGRX_8888:
       return DRM_FORMAT_XRGB8888;
+    case gfx::BufferFormat::BGRX_1010102:
+      return DRM_FORMAT_XRGB2101010;
     case gfx::BufferFormat::BGR_565:
       return DRM_FORMAT_RGB565;
     case gfx::BufferFormat::UYVY_422:
@@ -505,6 +539,8 @@ gfx::BufferFormat GetBufferFormatFromFourCCFormat(int format) {
       return gfx::BufferFormat::BGRA_8888;
     case DRM_FORMAT_XRGB8888:
       return gfx::BufferFormat::BGRX_8888;
+    case DRM_FORMAT_XRGB2101010:
+      return gfx::BufferFormat::BGRX_1010102;
     case DRM_FORMAT_RGB565:
       return gfx::BufferFormat::BGR_565;
     case DRM_FORMAT_UYVY:
@@ -530,6 +566,8 @@ int GetFourCCFormatForOpaqueFramebuffer(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
       return DRM_FORMAT_XRGB8888;
+    case gfx::BufferFormat::BGRX_1010102:
+      return DRM_FORMAT_XRGB2101010;
     case gfx::BufferFormat::BGR_565:
       return DRM_FORMAT_RGB565;
     case gfx::BufferFormat::UYVY_422:

@@ -27,7 +27,6 @@ import com.google.android.apps.chrome.appwidget.bookmarks.BookmarkThumbnailWidge
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -35,6 +34,7 @@ import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkItem;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkModelObserver;
 import org.chromium.chrome.browser.bookmarks.BookmarkModel;
 import org.chromium.chrome.browser.bookmarks.BookmarkUtils;
+import org.chromium.chrome.browser.favicon.IconType;
 import org.chromium.chrome.browser.favicon.LargeIconBridge;
 import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
@@ -243,8 +243,8 @@ public class BookmarkWidgetService extends RemoteViewsService {
             mRemainingTaskCount++;
             LargeIconCallback callback = new LargeIconCallback() {
                 @Override
-                public void onLargeIconAvailable(
-                        Bitmap icon, int fallbackColor, boolean isFallbackColorDefault) {
+                public void onLargeIconAvailable(Bitmap icon, int fallbackColor,
+                        boolean isFallbackColorDefault, @IconType int iconType) {
                     if (icon == null) {
                         mIconGenerator.setBackgroundColor(fallbackColor);
                         icon = mIconGenerator.generateIconForUrl(bookmark.url);
@@ -300,7 +300,6 @@ public class BookmarkWidgetService extends RemoteViewsService {
         }
 
         @UiThread
-        @SuppressFBWarnings("DM_EXIT")
         @Override
         public void onCreate() {
             // Required to be applied here redundantly to prevent crashes in the cases where the

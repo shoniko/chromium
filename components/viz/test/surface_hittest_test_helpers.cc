@@ -56,7 +56,8 @@ void CreateSurfaceDrawQuad(RenderPass* pass,
   SurfaceDrawQuad* surface_quad =
       pass->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
   surface_quad->SetNew(pass->shared_quad_state_list.back(), quad_rect,
-                       quad_rect, surface_id, SurfaceId(), SK_ColorWHITE);
+                       quad_rect, surface_id, SurfaceId(), SK_ColorWHITE,
+                       false);
 }
 
 void CreateRenderPass(int render_pass_id,
@@ -70,7 +71,7 @@ void CreateRenderPass(int render_pass_id,
 
 CompositorFrame CreateCompositorFrame(const gfx::Rect& root_rect,
                                       RenderPass** render_pass) {
-  CompositorFrame root_frame = MakeCompositorFrame();
+  CompositorFrame root_frame = MakeDefaultCompositorFrame();
   int root_id = 1;
   CreateRenderPass(root_id, root_rect, gfx::Transform(),
                    &root_frame.render_pass_list);

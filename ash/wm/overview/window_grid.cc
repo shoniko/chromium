@@ -11,18 +11,22 @@
 #include <utility>
 #include <vector>
 
-#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
+#include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_controller.h"
+#include "ash/wallpaper/wallpaper_widget_controller.h"
 #include "ash/wm/overview/cleanup_animation_observer.h"
+#include "ash/wm/overview/overview_utils.h"
+#include "ash/wm/overview/rounded_rect_view.h"
 #include "ash/wm/overview/scoped_overview_animation_settings.h"
 #include "ash/wm/overview/window_selector.h"
 #include "ash/wm/overview/window_selector_delegate.h"
 #include "ash/wm/overview/window_selector_item.h"
 #include "ash/wm/window_state.h"
-#include "base/command_line.h"
 #include "base/i18n/string_search.h"
 #include "base/strings/string_number_conversions.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -31,6 +35,8 @@
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_analysis.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/scoped_canvas.h"
@@ -50,68 +56,50 @@ namespace {
 // Time it takes for the selector widget to move to the next target. The same
 // time is used for fading out shield widget when the overview mode is opened
 // or closed.
-const int kOverviewSelectorTransitionMilliseconds = 250;
+constexpr int kOverviewSelectorTransitionMilliseconds = 250;
 
 // The color and opacity of the screen shield in overview.
-const SkColor kShieldColor = SkColorSetARGB(255, 0, 0, 0);
-const float kShieldOpacity = 0.7f;
+constexpr SkColor kShieldColor = SkColorSetARGB(255, 0, 0, 0);
+constexpr float kShieldOpacity = 0.6f;
 
 // The color and opacity of the overview selector.
-const SkColor kWindowSelectionColor = SkColorSetARGB(51, 255, 255, 255);
-const SkColor kWindowSelectionBorderColor = SkColorSetARGB(76, 255, 255, 255);
+constexpr SkColor kWindowSelectionColor = SkColorSetARGB(36, 255, 255, 255);
+constexpr SkColor kWindowSelectionBorderColor =
+    SkColorSetARGB(76, 255, 255, 255);
 
 // Border thickness of overview selector.
-const int kWindowSelectionBorderThickness = 1;
+constexpr int kWindowSelectionBorderThickness = 1;
 
 // Corner radius of the overview selector border.
-const int kWindowSelectionRadius = 4;
+constexpr int kWindowSelectionRadius = 9;
+
+// Values for the old overview ui.
+// TODO(crbug.com/782320): Delete these values when the old ui becomes obsolete.
+constexpr SkColor kOldWindowSelectionColor = SkColorSetARGB(51, 255, 255, 255);
+constexpr int kOldWindowSelectionRadius = 4;
+constexpr float kOldShieldOpacity = 0.7f;
+
+// The base color which is mixed with the dark muted color from wallpaper to
+// form the shield widgets color.
+constexpr SkColor kShieldBaseColor = SkColorSetARGB(179, 0, 0, 0);
+
+// Amount of blur to apply on the wallpaper when we enter or exit overview mode.
+constexpr float kWallpaperBlurSigma = 10.f;
+constexpr float kWallpaperClearBlurSigma = 0.f;
 
 // In the conceptual overview table, the window margin is the space reserved
 // around the window within the cell. This margin does not overlap so the
 // closest distance between adjacent windows will be twice this amount.
-const int kWindowMargin = 5;
+constexpr int kWindowMargin = 5;
 
 // Windows are not allowed to get taller than this.
-const int kMaxHeight = 512;
+constexpr int kMaxHeight = 512;
 
 // Margins reserved in the overview mode.
-const float kOverviewInsetRatio = 0.05f;
+constexpr float kOverviewInsetRatio = 0.05f;
 
 // Additional vertical inset reserved for windows in overview mode.
-const float kOverviewVerticalInset = 0.1f;
-
-// A View having rounded corners and a specified background color which is
-// only painted within the bounds defined by the rounded corners.
-// TODO(varkha): This duplicates code from RoundedImageView. Refactor these
-//               classes and move into ui/views.
-class RoundedRectView : public views::View {
- public:
-  RoundedRectView(int corner_radius, SkColor background)
-      : corner_radius_(corner_radius), background_(background) {}
-
-  ~RoundedRectView() override {}
-
-  void OnPaint(gfx::Canvas* canvas) override {
-    views::View::OnPaint(canvas);
-
-    SkScalar radius = SkIntToScalar(corner_radius_);
-    const SkScalar kRadius[8] = {radius, radius, radius, radius,
-                                 radius, radius, radius, radius};
-    SkPath path;
-    gfx::Rect bounds(size());
-    bounds.set_height(bounds.height() + radius);
-    path.addRoundRect(gfx::RectToSkRect(bounds), kRadius);
-
-    canvas->ClipPath(path, true);
-    canvas->DrawColor(background_);
-  }
-
- private:
-  int corner_radius_;
-  SkColor background_;
-
-  DISALLOW_COPY_AND_ASSIGN(RoundedRectView);
-};
+constexpr float kOverviewVerticalInset = 0.1f;
 
 // BackgroundWith1PxBorder renders a solid background color, with a one pixel
 // border with rounded corners. This accounts for the scaling of the canvas, so
@@ -279,9 +267,16 @@ WindowGrid::WindowGrid(aura::Window* root_window,
     window_list_.push_back(
         std::make_unique<WindowSelectorItem>(window, window_selector_, this));
   }
+
+  if (IsNewOverviewUi() &&
+      Shell::Get()->wallpaper_controller()->IsBlurEnabled()) {
+    RootWindowController::ForWindow(root_window_)
+        ->wallpaper_widget_controller()
+        ->SetWallpaperBlur(kWallpaperBlurSigma);
+  }
 }
 
-WindowGrid::~WindowGrid() {}
+WindowGrid::~WindowGrid() = default;
 
 void WindowGrid::Shutdown() {
   for (const auto& window : window_list_)
@@ -310,6 +305,13 @@ void WindowGrid::Shutdown() {
     window_selector_->delegate()->AddDelayedAnimationObserver(
         std::move(observer));
     shield_widget->SetOpacity(0.f);
+  }
+
+  if (IsNewOverviewUi() &&
+      Shell::Get()->wallpaper_controller()->IsBlurEnabled()) {
+    RootWindowController::ForWindow(root_window_)
+        ->wallpaper_widget_controller()
+        ->SetWallpaperBlur(kWallpaperClearBlurSigma);
   }
 }
 
@@ -528,6 +530,18 @@ bool WindowGrid::Contains(const aura::Window* window) const {
   return false;
 }
 
+void WindowGrid::AddItem(aura::Window* window) {
+  DCHECK(!Contains(window));
+
+  window_observer_.Add(window);
+  window_state_observer_.Add(wm::GetWindowState(window));
+  window_list_.push_back(
+      std::make_unique<WindowSelectorItem>(window, window_selector_, this));
+  window_list_.back()->PrepareForOverview();
+
+  PositionWindows(/*animate=*/true);
+}
+
 void WindowGrid::RemoveItem(WindowSelectorItem* selector_item) {
   auto iter =
       std::find_if(window_list_.begin(), window_list_.end(),
@@ -570,14 +584,29 @@ void WindowGrid::WindowClosing(WindowSelectorItem* window) {
 
 void WindowGrid::SetBoundsAndUpdatePositions(const gfx::Rect& bounds) {
   bounds_ = bounds;
-  PositionWindows(true /* animate */);
+  PositionWindows(/*animate=*/true);
 }
 
 void WindowGrid::SetBoundsAndUpdatePositionsIgnoringWindow(
     const gfx::Rect& bounds,
     WindowSelectorItem* ignored_item) {
   bounds_ = bounds;
-  PositionWindows(true /* animate */, ignored_item);
+  PositionWindows(/*animate=*/true, ignored_item);
+}
+
+void WindowGrid::SetSelectionWidgetVisibility(bool visible) {
+  if (!selection_widget_)
+    return;
+
+  if (visible)
+    selection_widget_->Show();
+  else
+    selection_widget_->Hide();
+}
+
+void WindowGrid::UpdateCannotSnapWarningVisibility() {
+  for (auto& window_selector_item : window_list_)
+    window_selector_item->UpdateCannotSnapWarningVisibility();
 }
 
 void WindowGrid::OnWindowDestroying(aura::Window* window) {
@@ -614,7 +643,8 @@ void WindowGrid::OnWindowDestroying(aura::Window* window) {
 
 void WindowGrid::OnWindowBoundsChanged(aura::Window* window,
                                        const gfx::Rect& old_bounds,
-                                       const gfx::Rect& new_bounds) {
+                                       const gfx::Rect& new_bounds,
+                                       ui::PropertyChangeReason reason) {
   // During preparation, window bounds can change. Ignore bounds
   // change notifications in this case; we'll reposition soon.
   if (!prepared_for_overview_)
@@ -663,8 +693,21 @@ void WindowGrid::InitShieldWidget() {
        SHELF_BACKGROUND_MAXIMIZED)
           ? 1.f
           : 0.f;
+  SkColor shield_color = kShieldColor;
+  if (IsNewOverviewUi()) {
+    // Extract the dark muted color from the wallpaper and mix it with
+    // |kShieldBaseColor|. Just use |kShieldBaseColor| if the dark muted color
+    // could not be extracted.
+    SkColor dark_muted_color =
+        Shell::Get()->wallpaper_controller()->GetProminentColor(
+            color_utils::ColorProfile());
+    if (dark_muted_color != ash::WallpaperController::kInvalidColor) {
+      shield_color = color_utils::GetResultingPaintColor(kShieldBaseColor,
+                                                         dark_muted_color);
+    }
+  }
   shield_widget_.reset(
-      CreateBackgroundWidget(root_window_, ui::LAYER_SOLID_COLOR, kShieldColor,
+      CreateBackgroundWidget(root_window_, ui::LAYER_SOLID_COLOR, shield_color,
                              0, 0, SK_ColorTRANSPARENT, initial_opacity));
   aura::Window* widget_window = shield_widget_->GetNativeWindow();
   const gfx::Rect bounds = widget_window->parent()->bounds();
@@ -678,14 +721,21 @@ void WindowGrid::InitShieldWidget() {
   animation_settings.SetTweenType(gfx::Tween::EASE_OUT);
   animation_settings.SetPreemptionStrategy(
       ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
-  shield_widget_->SetOpacity(kShieldOpacity);
+  shield_widget_->SetOpacity(IsNewOverviewUi() ? kShieldOpacity
+                                               : kOldShieldOpacity);
 }
 
 void WindowGrid::InitSelectionWidget(WindowSelector::Direction direction) {
-  selection_widget_.reset(CreateBackgroundWidget(
-      root_window_, ui::LAYER_TEXTURED, kWindowSelectionColor,
-      kWindowSelectionBorderThickness, kWindowSelectionRadius,
-      kWindowSelectionBorderColor, 0.f));
+  if (IsNewOverviewUi()) {
+    selection_widget_.reset(CreateBackgroundWidget(
+        root_window_, ui::LAYER_TEXTURED, kWindowSelectionColor, 0,
+        kWindowSelectionRadius, SK_ColorTRANSPARENT, 0.f));
+  } else {
+    selection_widget_.reset(CreateBackgroundWidget(
+        root_window_, ui::LAYER_TEXTURED, kOldWindowSelectionColor,
+        kWindowSelectionBorderThickness, kOldWindowSelectionRadius,
+        kWindowSelectionBorderColor, 0.f));
+  }
   aura::Window* widget_window = selection_widget_->GetNativeWindow();
   gfx::Rect target_bounds = SelectedWindow()->target_bounds();
   ::wm::ConvertRectFromScreen(root_window_, &target_bounds);

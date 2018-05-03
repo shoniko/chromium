@@ -80,6 +80,9 @@ class MetricsServicesManager {
   // Update the managed services when permissions for uploading metrics change.
   void UpdateUploadPermissions(bool may_upload);
 
+  // Gets the current state of metric reporting.
+  bool IsMetricsReportingEnabled() const;
+
  private:
   // Update the managed services when permissions for recording/uploading
   // metrics change.
@@ -104,7 +107,7 @@ class MetricsServicesManager {
                          bool current_may_upload);
 
   // The client passed in from the embedder.
-  std::unique_ptr<MetricsServicesManagerClient> client_;
+  const std::unique_ptr<MetricsServicesManagerClient> client_;
 
   // Ensures that all functions are called from the same thread.
   base::ThreadChecker thread_checker_;

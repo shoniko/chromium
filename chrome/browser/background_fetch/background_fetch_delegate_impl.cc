@@ -52,6 +52,7 @@ BackgroundFetchDelegateImpl::JobDetails::JobDetails(
       origin(origin),
       completed_parts(completed_parts),
       total_parts(total_parts),
+      cancelled(false),
       offline_item(offline_items_collection::ContentId("background_fetch",
                                                        job_unique_id)) {
   UpdateOfflineItem();
@@ -76,10 +77,14 @@ void BackgroundFetchDelegateImpl::JobDetails::UpdateOfflineItem() {
   }
   // TODO(delphick): Figure out what to put in offline_item.description.
   offline_item.is_transient = true;
-  offline_item.state =
-      (completed_parts == total_parts)
-          ? offline_items_collection::OfflineItemState::COMPLETE
-          : offline_items_collection::OfflineItemState::IN_PROGRESS;
+
+  using OfflineItemState = offline_items_collection::OfflineItemState;
+  if (cancelled)
+    offline_item.state = OfflineItemState::CANCELLED;
+  else if (completed_parts == total_parts)
+    offline_item.state = OfflineItemState::COMPLETE;
+  else
+    offline_item.state = OfflineItemState::IN_PROGRESS;
 }
 
 void BackgroundFetchDelegateImpl::CreateDownloadJob(
@@ -148,6 +153,8 @@ void BackgroundFetchDelegateImpl::Abort(const std::string& job_unique_id) {
     return;
 
   JobDetails& job_details = job_details_iter->second;
+  job_details.cancelled = true;
+  UpdateOfflineItemAndUpdateObservers(&job_details);
 
   for (const auto& download_guid : job_details.current_download_guids) {
     download_service_->CancelDownload(download_guid);
@@ -162,8 +169,19 @@ void BackgroundFetchDelegateImpl::OnDownloadStarted(
     std::unique_ptr<content::BackgroundFetchResponse> response) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  if (client())
-    client()->OnDownloadStarted(download_guid, std::move(response));
+  auto download_job_unique_id_iter =
+      download_job_unique_id_map_.find(download_guid);
+  // TODO(crbug.com/779012): When DownloadService fixes cancelled jobs calling
+  // OnDownload* methods, then this can be a DCHECK.
+  if (download_job_unique_id_iter == download_job_unique_id_map_.end())
+    return;
+
+  const std::string& job_unique_id = download_job_unique_id_iter->second;
+
+  if (client()) {
+    client()->OnDownloadStarted(job_unique_id, download_guid,
+                                std::move(response));
+  }
 }
 
 void BackgroundFetchDelegateImpl::OnDownloadUpdated(
@@ -171,8 +189,17 @@ void BackgroundFetchDelegateImpl::OnDownloadUpdated(
     uint64_t bytes_downloaded) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
+  auto download_job_unique_id_iter =
+      download_job_unique_id_map_.find(download_guid);
+  // TODO(crbug.com/779012): When DownloadService fixes cancelled jobs calling
+  // OnDownload* methods, then this can be a DCHECK.
+  if (download_job_unique_id_iter == download_job_unique_id_map_.end())
+    return;
+
+  const std::string& job_unique_id = download_job_unique_id_iter->second;
+
   if (client())
-    client()->OnDownloadUpdated(download_guid, bytes_downloaded);
+    client()->OnDownloadUpdated(job_unique_id, download_guid, bytes_downloaded);
 }
 
 void BackgroundFetchDelegateImpl::OnDownloadFailed(
@@ -185,14 +212,16 @@ void BackgroundFetchDelegateImpl::OnDownloadFailed(
 
   auto download_job_unique_id_iter =
       download_job_unique_id_map_.find(download_guid);
-  // Cancelled downloads will already have been deleted so just return.
+  // TODO(crbug.com/779012): When DownloadService fixes cancelled jobs
+  // potentially calling OnDownloadFailed with a reason other than
+  // CANCELLED/ABORTED, we should add a DCHECK here.
   if (download_job_unique_id_iter == download_job_unique_id_map_.end())
     return;
 
   const std::string& job_unique_id = download_job_unique_id_iter->second;
   JobDetails& job_details = job_details_map_.find(job_unique_id)->second;
   ++job_details.completed_parts;
-  job_details.UpdateOfflineItem();
+  UpdateOfflineItemAndUpdateObservers(&job_details);
 
   switch (reason) {
     case download::Client::FailureReason::NETWORK:
@@ -219,8 +248,9 @@ void BackgroundFetchDelegateImpl::OnDownloadFailed(
 
   if (client()) {
     client()->OnDownloadComplete(
-        download_guid, std::make_unique<content::BackgroundFetchResult>(
-                           base::Time::Now(), failure_reason));
+        job_unique_id, download_guid,
+        std::make_unique<content::BackgroundFetchResult>(base::Time::Now(),
+                                                         failure_reason));
   }
 
   job_details.current_download_guids.erase(
@@ -234,18 +264,23 @@ void BackgroundFetchDelegateImpl::OnDownloadSucceeded(
     uint64_t size) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  const std::string& job_unique_id = download_job_unique_id_map_[download_guid];
+  auto download_job_unique_id_iter =
+      download_job_unique_id_map_.find(download_guid);
+  // TODO(crbug.com/779012): When DownloadService fixes cancelled jobs calling
+  // OnDownload* methods, then this can be a DCHECK.
+  if (download_job_unique_id_iter == download_job_unique_id_map_.end())
+    return;
+
+  const std::string& job_unique_id = download_job_unique_id_iter->second;
   JobDetails& job_details = job_details_map_.find(job_unique_id)->second;
   ++job_details.completed_parts;
-  job_details.UpdateOfflineItem();
-
-  for (auto* observer : observers_)
-    observer->OnItemUpdated(job_details.offline_item);
+  UpdateOfflineItemAndUpdateObservers(&job_details);
 
   if (client()) {
     client()->OnDownloadComplete(
-        download_guid, std::make_unique<content::BackgroundFetchResult>(
-                           base::Time::Now(), path, size));
+        job_unique_id, download_guid,
+        std::make_unique<content::BackgroundFetchResult>(base::Time::Now(),
+                                                         path, size));
   }
 
   job_details.current_download_guids.erase(
@@ -265,8 +300,7 @@ void BackgroundFetchDelegateImpl::OnDownloadReceived(
       break;
     case StartResult::BACKOFF:
       // TODO(delphick): try again later?
-      // TODO(delphick): Due to a bug at the moment, this happens all the time
-      // because successful downloads are not removed, so don't NOTREACHED.
+      NOTREACHED();
       break;
     case StartResult::UNEXPECTED_CLIENT:
       // This really should never happen since we're supplying the
@@ -285,6 +319,16 @@ void BackgroundFetchDelegateImpl::OnDownloadReceived(
     case StartResult::COUNT:
       NOTREACHED();
   }
+}
+
+// Much of the code in offline_item_collection is not re-entrant, so this should
+// not be called from any of the OfflineContentProvider-inherited methods.
+void BackgroundFetchDelegateImpl::UpdateOfflineItemAndUpdateObservers(
+    JobDetails* job_details) {
+  job_details->UpdateOfflineItem();
+
+  for (auto* observer : observers_)
+    observer->OnItemUpdated(job_details->offline_item);
 }
 
 bool BackgroundFetchDelegateImpl::AreItemsAvailable() {
@@ -314,15 +358,11 @@ void BackgroundFetchDelegateImpl::CancelDownload(
 
   for (auto& download_guid : job_details.current_download_guids) {
     download_service_->CancelDownload(download_guid);
-    if (client()) {
-      client()->OnDownloadComplete(
-          download_guid,
-          std::make_unique<content::BackgroundFetchResult>(
-              base::Time::Now(),
-              content::BackgroundFetchResult::FailureReason::CANCELLED));
-    }
     download_job_unique_id_map_.erase(download_guid);
   }
+
+  if (client())
+    client()->OnJobCancelled(id.id);
 
   job_details_map_.erase(job_details_iter);
 }
@@ -356,19 +396,23 @@ void BackgroundFetchDelegateImpl::ResumeDownload(
   // TODO(delphick): Start new downloads that weren't started because of pause.
 }
 
-const offline_items_collection::OfflineItem*
-BackgroundFetchDelegateImpl::GetItemById(
-    const offline_items_collection::ContentId& id) {
+void BackgroundFetchDelegateImpl::GetItemById(
+    const offline_items_collection::ContentId& id,
+    SingleItemCallback callback) {
   auto it = job_details_map_.find(id.id);
-  return (it != job_details_map_.end()) ? &it->second.offline_item : nullptr;
+  base::Optional<offline_items_collection::OfflineItem> offline_item;
+  if (it != job_details_map_.end())
+    offline_item = it->second.offline_item;
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), offline_item));
 }
 
-BackgroundFetchDelegateImpl::OfflineItemList
-BackgroundFetchDelegateImpl::GetAllItems() {
+void BackgroundFetchDelegateImpl::GetAllItems(MultipleItemCallback callback) {
   OfflineItemList item_list;
   for (auto& entry : job_details_map_)
     item_list.push_back(entry.second.offline_item);
-  return item_list;
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), item_list));
 }
 
 void BackgroundFetchDelegateImpl::GetVisualsForItem(

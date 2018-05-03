@@ -184,7 +184,10 @@ class KeyboardControllerTest : public testing::Test,
   KeyboardControllerTest()
       : scoped_task_environment_(
             base::test::ScopedTaskEnvironment::MainThreadType::UI),
-        number_of_calls_(0),
+        visible_bounds_number_of_calls_(0),
+        occluding_bounds_number_of_calls_(0),
+        is_available_number_of_calls_(0),
+        is_available_(false),
         keyboard_closed_(false) {}
   ~KeyboardControllerTest() override {}
 
@@ -237,22 +240,42 @@ class KeyboardControllerTest : public testing::Test,
 
  protected:
   // KeyboardControllerObserver overrides
-  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override {
-    notified_bounds_ = new_bounds;
-    number_of_calls_++;
+  void OnKeyboardVisibleBoundsChanging(const gfx::Rect& new_bounds) override {
+    visible_bounds_ = new_bounds;
+    visible_bounds_number_of_calls_++;
+  }
+  void OnKeyboardWorkspaceOccludedBoundsChanging(
+      const gfx::Rect& new_bounds) override {
+    occluding_bounds_ = new_bounds;
+    occluding_bounds_number_of_calls_++;
+  }
+  void OnKeyboardAvailabilityChanging(bool is_available) override {
+    is_available_ = is_available;
+    is_available_number_of_calls_++;
   }
   void OnKeyboardClosed() override { keyboard_closed_ = true; }
 
-  int number_of_calls() const { return number_of_calls_; }
+  int visible_bounds_number_of_calls() const {
+    return visible_bounds_number_of_calls_;
+  }
+  int occluding_bounds_number_of_calls() const {
+    return occluding_bounds_number_of_calls_;
+  }
+  int is_available_number_of_calls() const {
+    return is_available_number_of_calls_;
+  }
 
-  const gfx::Rect& notified_bounds() { return notified_bounds_; }
+  const gfx::Rect& notified_visible_bounds() { return visible_bounds_; }
+  const gfx::Rect& notified_occluding_bounds() { return occluding_bounds_; }
+  bool notified_is_available() { return is_available_; }
 
   bool IsKeyboardClosed() { return keyboard_closed_; }
 
   void SetFocus(ui::TextInputClient* client) {
     ui::InputMethod* input_method = ui()->GetInputMethod();
     input_method->SetFocusedTextInputClient(client);
-    if (client && client->GetTextInputType() != ui::TEXT_INPUT_TYPE_NONE) {
+    if (client && client->GetTextInputType() != ui::TEXT_INPUT_TYPE_NONE &&
+        client->GetTextInputMode() != ui::TEXT_INPUT_MODE_NONE) {
       input_method->ShowImeIfNeeded();
       if (controller_->ui()->GetContentsWindow()->bounds().height() == 0) {
         // Set initial bounds for test keyboard window.
@@ -290,8 +313,13 @@ class KeyboardControllerTest : public testing::Test,
   std::unique_ptr<TestFocusController> focus_controller_;
 
  private:
-  int number_of_calls_;
-  gfx::Rect notified_bounds_;
+  int visible_bounds_number_of_calls_;
+  gfx::Rect visible_bounds_;
+  int occluding_bounds_number_of_calls_;
+  gfx::Rect occluding_bounds_;
+  int is_available_number_of_calls_;
+  bool is_available_;
+
   std::unique_ptr<KeyboardLayoutDelegate> layout_delegate_;
   std::unique_ptr<KeyboardController> controller_;
   std::unique_ptr<ui::TextInputClient> test_text_input_client_;
@@ -576,7 +604,6 @@ class KeyboardControllerAnimationTest : public KeyboardControllerTest {
 TEST_F(KeyboardControllerAnimationTest, ContainerAnimation) {
   ScopedAccessibilityKeyboardEnabler scoped_keyboard_enabler;
   ui::Layer* layer = keyboard_container()->layer();
-  EXPECT_EQ(gfx::Rect(), notified_bounds());
   ShowKeyboard();
 
   // Keyboard container and window should immediately become visible before
@@ -589,7 +616,9 @@ TEST_F(KeyboardControllerAnimationTest, ContainerAnimation) {
   EXPECT_EQ(transform, layer->transform());
   // animation occurs in a cloned layer, so the actual final bounds should
   // already be applied to the container.
-  EXPECT_EQ(keyboard_container()->bounds(), notified_bounds());
+  EXPECT_EQ(keyboard_container()->bounds(), notified_visible_bounds());
+  EXPECT_EQ(keyboard_container()->bounds(), notified_occluding_bounds());
+  EXPECT_TRUE(notified_is_available());
 
   RunAnimationForLayer(layer);
   EXPECT_TRUE(keyboard_container()->IsVisible());
@@ -599,7 +628,9 @@ TEST_F(KeyboardControllerAnimationTest, ContainerAnimation) {
   EXPECT_EQ(gfx::Transform(), layer->transform());
   // KeyboardController should notify the bounds of container window to its
   // observers after show animation finished.
-  EXPECT_EQ(keyboard_container()->bounds(), notified_bounds());
+  EXPECT_EQ(keyboard_container()->bounds(), notified_visible_bounds());
+  EXPECT_EQ(keyboard_container()->bounds(), notified_occluding_bounds());
+  EXPECT_TRUE(notified_is_available());
 
   // Directly hide keyboard without delay.
   float hide_start_opacity = layer->opacity();
@@ -610,7 +641,9 @@ TEST_F(KeyboardControllerAnimationTest, ContainerAnimation) {
   layer = keyboard_container()->layer();
   // KeyboardController should notify the bounds of keyboard window to its
   // observers before hide animation starts.
-  EXPECT_EQ(gfx::Rect(), notified_bounds());
+  EXPECT_EQ(gfx::Rect(), notified_visible_bounds());
+  EXPECT_EQ(gfx::Rect(), notified_occluding_bounds());
+  EXPECT_FALSE(notified_is_available());
 
   RunAnimationForLayer(layer);
   EXPECT_FALSE(keyboard_container()->IsVisible());
@@ -618,7 +651,17 @@ TEST_F(KeyboardControllerAnimationTest, ContainerAnimation) {
   EXPECT_FALSE(contents_window()->IsVisible());
   float hide_end_opacity = layer->opacity();
   EXPECT_GT(hide_start_opacity, hide_end_opacity);
-  EXPECT_EQ(gfx::Rect(), notified_bounds());
+  EXPECT_EQ(gfx::Rect(), notified_visible_bounds());
+  EXPECT_EQ(gfx::Rect(), notified_occluding_bounds());
+  EXPECT_FALSE(notified_is_available());
+
+  controller()->SetContainerType(ContainerType::FLOATING);
+  ShowKeyboard();
+  RunAnimationForLayer(layer);
+  // Visible bounds and occluding bounds are now different.
+  EXPECT_EQ(keyboard_container()->bounds(), notified_visible_bounds());
+  EXPECT_EQ(gfx::Rect(), notified_occluding_bounds());
+  EXPECT_TRUE(notified_is_available());
 }
 
 // Show keyboard during keyboard hide animation should abort the hide animation
@@ -671,11 +714,48 @@ TEST_F(KeyboardControllerTest, DisplayChangeShouldNotifyBoundsChange) {
   SetFocus(&input_client);
   gfx::Rect new_bounds(0, 0, 1280, 800);
   ASSERT_NE(new_bounds, root_window()->bounds());
-  EXPECT_EQ(1, number_of_calls());
+  EXPECT_EQ(1, visible_bounds_number_of_calls());
+  EXPECT_EQ(1, occluding_bounds_number_of_calls());
+  EXPECT_EQ(1, is_available_number_of_calls());
   root_window()->SetBounds(new_bounds);
-  EXPECT_EQ(2, number_of_calls());
+  EXPECT_EQ(2, visible_bounds_number_of_calls());
+  EXPECT_EQ(2, occluding_bounds_number_of_calls());
+  EXPECT_EQ(1, is_available_number_of_calls());
   MockRotateScreen();
-  EXPECT_EQ(3, number_of_calls());
+  EXPECT_EQ(3, visible_bounds_number_of_calls());
+  EXPECT_EQ(3, occluding_bounds_number_of_calls());
+  EXPECT_EQ(1, is_available_number_of_calls());
+}
+
+TEST_F(KeyboardControllerTest, TextInputMode) {
+  ScopedAccessibilityKeyboardEnabler scoped_keyboard_enabler;
+  ui::DummyTextInputClient input_client(ui::TEXT_INPUT_TYPE_TEXT,
+                                        ui::TEXT_INPUT_MODE_TEXT);
+  ui::DummyTextInputClient no_input_client(ui::TEXT_INPUT_TYPE_TEXT,
+                                           ui::TEXT_INPUT_MODE_NONE);
+
+  base::RunLoop run_loop;
+  aura::Window* keyboard_container(controller()->GetContainerWindow());
+  std::unique_ptr<KeyboardContainerObserver> keyboard_container_observer(
+      new KeyboardContainerObserver(keyboard_container, &run_loop));
+  root_window()->AddChild(keyboard_container);
+
+  SetFocus(&input_client);
+
+  EXPECT_TRUE(keyboard_container->IsVisible());
+
+  SetFocus(&no_input_client);
+  // Keyboard should not immediately hide itself. It is delayed to avoid layout
+  // flicker when the focus of input field quickly change.
+  EXPECT_TRUE(keyboard_container->IsVisible());
+  EXPECT_TRUE(WillHideKeyboard());
+  // Wait for hide keyboard to finish.
+
+  RunLoop(&run_loop);
+  EXPECT_FALSE(keyboard_container->IsVisible());
+
+  SetFocus(&input_client);
+  EXPECT_TRUE(keyboard_container->IsVisible());
 }
 
 }  // namespace keyboard

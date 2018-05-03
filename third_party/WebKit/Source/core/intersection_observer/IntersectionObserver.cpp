@@ -5,6 +5,7 @@
 #include "core/intersection_observer/IntersectionObserver.h"
 
 #include <algorithm>
+#include "base/macros.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8IntersectionObserverDelegate.h"
 #include "bindings/core/v8/v8_intersection_observer_callback.h"
@@ -35,7 +36,6 @@ namespace {
 // IntersectionObserver with an EventCallback.
 class IntersectionObserverDelegateImpl final
     : public IntersectionObserverDelegate {
-  WTF_MAKE_NONCOPYABLE(IntersectionObserverDelegateImpl);
 
  public:
   IntersectionObserverDelegateImpl(ExecutionContext* context,
@@ -44,7 +44,7 @@ class IntersectionObserverDelegateImpl final
 
   void Deliver(const HeapVector<Member<IntersectionObserverEntry>>& entries,
                IntersectionObserver&) override {
-    callback_(entries);
+    callback_.Run(entries);
   }
 
   ExecutionContext* GetExecutionContext() const override { return context_; }
@@ -57,6 +57,7 @@ class IntersectionObserverDelegateImpl final
  private:
   WeakMember<ExecutionContext> context_;
   IntersectionObserver::EventCallback callback_;
+  DISALLOW_COPY_AND_ASSIGN(IntersectionObserverDelegateImpl);
 };
 
 void ParseRootMargin(String root_margin_parameter,
@@ -214,8 +215,8 @@ IntersectionObserver::IntersectionObserver(
   }
   if (root)
     root->EnsureIntersectionObserverData().AddObserver(*this);
-  TrackingDocument().EnsureIntersectionObserverController().AddTrackedObserver(
-      *this);
+  if (Document* document = TrackingDocument())
+    document->EnsureIntersectionObserverController().AddTrackedObserver(*this);
 }
 
 void IntersectionObserver::ClearWeakMembers(Visitor* visitor) {
@@ -230,13 +231,14 @@ bool IntersectionObserver::RootIsValid() const {
   return RootIsImplicit() || root();
 }
 
-Document& IntersectionObserver::TrackingDocument() const {
+Document* IntersectionObserver::TrackingDocument() const {
   if (RootIsImplicit()) {
-    DCHECK(delegate_->GetExecutionContext());
-    return *ToDocument(delegate_->GetExecutionContext());
+    if (!delegate_->GetExecutionContext())
+      return nullptr;
+    return ToDocument(delegate_->GetExecutionContext());
   }
   DCHECK(root());
-  return root()->GetDocument();
+  return &root()->GetDocument();
 }
 
 void IntersectionObserver::observe(Element* target,
@@ -279,7 +281,7 @@ void IntersectionObserver::unobserve(Element* target,
 }
 
 void IntersectionObserver::ComputeIntersectionObservations() {
-  if (!RootIsValid())
+  if (!RootIsValid() || !delegate_->GetExecutionContext())
     return;
   Document* delegate_document = ToDocument(delegate_->GetExecutionContext());
   if (!delegate_document || delegate_document->IsStopped())
@@ -329,6 +331,7 @@ String IntersectionObserver::rootMargin() const {
 
 void IntersectionObserver::EnqueueIntersectionObserverEntry(
     IntersectionObserverEntry& entry) {
+  DCHECK(delegate_->GetExecutionContext());
   entries_.push_back(&entry);
   ToDocument(delegate_->GetExecutionContext())
       ->EnsureIntersectionObserverController()
@@ -363,6 +366,7 @@ void IntersectionObserver::Trace(blink::Visitor* visitor) {
 void IntersectionObserver::TraceWrappers(
     const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(delegate_);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

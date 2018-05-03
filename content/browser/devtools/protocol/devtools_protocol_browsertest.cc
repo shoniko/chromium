@@ -27,6 +27,7 @@
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/download_task_runner.h"
 #include "content/browser/frame_host/interstitial_page_impl.h"
+#include "content/browser/frame_host/navigator.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -153,6 +154,7 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager,
   };
 
   void RunBeforeUnloadDialog(WebContents* web_contents,
+                             RenderFrameHost* render_frame_host,
                              bool is_reload,
                              DialogClosedCallback callback) override {}
 
@@ -210,7 +212,8 @@ class DevToolsProtocolTest : public ContentBrowserTest,
       override {
     security_style_explanations->secure_explanations.push_back(
         SecurityStyleExplanation(
-            "an explanation", "an explanation description", cert_,
+            "an explanation title", "an explanation summary",
+            "an explanation description", cert_,
             blink::WebMixedContentContextType::kNotMixedContent));
     return blink::kWebSecurityStyleNeutral;
   }
@@ -252,7 +255,7 @@ class DevToolsProtocolTest : public ContentBrowserTest,
   }
 
   bool HasValue(const std::string& path) {
-    base::Value* value = 0;
+    base::Value* value = nullptr;
     return result_->Get(path, &value);
   }
 
@@ -282,12 +285,22 @@ class DevToolsProtocolTest : public ContentBrowserTest,
     shell()->web_contents()->SetDelegate(this);
   }
 
-  void TearDownOnMainThread() override {
+  void AttachToBrowserTarget() {
+    // Tethering domain is not used in tests.
+    agent_host_ = DevToolsAgentHost::CreateForBrowser(
+        nullptr, DevToolsAgentHost::CreateServerSocketCallback());
+    agent_host_->AttachClient(this);
+    shell()->web_contents()->SetDelegate(this);
+  }
+
+  void Detach() {
     if (agent_host_) {
       agent_host_->DetachClient(this);
       agent_host_ = nullptr;
     }
   }
+
+  void TearDownOnMainThread() override { Detach(); }
 
   std::unique_ptr<base::DictionaryValue> WaitForNotification(
       const std::string& notification) {
@@ -473,7 +486,7 @@ class DevToolsProtocolTest : public ContentBrowserTest,
     }
   }
 
-  void AgentHostClosed(DevToolsAgentHost* agent_host, bool replaced) override {
+  void AgentHostClosed(DevToolsAgentHost* agent_host) override {
     if (!agent_host_can_close_)
       NOTREACHED();
   }
@@ -513,11 +526,19 @@ class SyntheticKeyEventTest : public DevToolsProtocolTest {
 
 class SyntheticMouseEventTest : public DevToolsProtocolTest {
  protected:
-  void SendMouseEvent(const std::string& type, int x, int y, bool wait) {
+  void SendMouseEvent(const std::string& type,
+                      int x,
+                      int y,
+                      const std::string& button,
+                      bool wait) {
     std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
     params->SetString("type", type);
     params->SetInteger("x", x);
     params->SetInteger("y", y);
+    if (!button.empty()) {
+      params->SetString("button", button);
+      params->SetInteger("clickCount", 1);
+    }
     SendCommand("Input.dispatchMouseEvent", std::move(params), wait);
   }
 };
@@ -586,15 +607,15 @@ IN_PROC_BROWSER_TEST_F(SyntheticMouseEventTest, MouseEventAck) {
   Attach();
   ASSERT_TRUE(content::ExecuteScript(
       shell()->web_contents()->GetRenderViewHost(),
-      "document.body.addEventListener('mousemove', () => {debugger;});"));
+      "document.body.addEventListener('mousedown', () => {debugger;});"));
 
   auto filter = std::make_unique<InputMsgWatcher>(
       RenderWidgetHostImpl::From(
           shell()->web_contents()->GetRenderViewHost()->GetWidget()),
-      blink::WebInputEvent::kMouseMove);
+      blink::WebInputEvent::kMouseDown);
 
   SendCommand("Debugger.enable", nullptr);
-  SendMouseEvent("mouseMoved", 15, 15, false);
+  SendMouseEvent("mousePressed", 15, 15, "left", false);
 
   // We expect that the debugger message event arrives *before* the input
   // event ack, and the subsequent command response for
@@ -627,20 +648,17 @@ std::unique_ptr<SkBitmap> DecodeJPEG(std::string base64_data) {
       jpeg_data.size());
 }
 
-bool ColorsMatchWithinLimit(SkColor color1,
-                            SkColor color2,
-                            int32_t error_limit) {
-  auto a_distance = std::abs(static_cast<int32_t>(SkColorGetA(color1)) -
-                             static_cast<int32_t>(SkColorGetA(color2)));
-  auto r_distance = std::abs(static_cast<int32_t>(SkColorGetR(color1)) -
-                             static_cast<int32_t>(SkColorGetR(color2)));
-  auto g_distance = std::abs(static_cast<int32_t>(SkColorGetG(color1)) -
-                             static_cast<int32_t>(SkColorGetG(color2)));
-  auto b_distance = std::abs(static_cast<int32_t>(SkColorGetB(color1)) -
-                             static_cast<int32_t>(SkColorGetB(color2)));
-
-  return a_distance * a_distance + r_distance * r_distance +
-             g_distance * g_distance + b_distance * b_distance <=
+bool ColorsMatchWithinLimit(SkColor color1, SkColor color2, int error_limit) {
+  auto a_diff = static_cast<int>(SkColorGetA(color1)) -
+                static_cast<int>(SkColorGetA(color2));
+  auto r_diff = static_cast<int>(SkColorGetR(color1)) -
+                static_cast<int>(SkColorGetR(color2));
+  auto g_diff = static_cast<int>(SkColorGetG(color1)) -
+                static_cast<int>(SkColorGetG(color2));
+  auto b_diff = static_cast<int>(SkColorGetB(color1)) -
+                static_cast<int>(SkColorGetB(color2));
+  return a_diff * a_diff + r_diff * r_diff + g_diff * g_diff +
+             b_diff * b_diff <=
          error_limit * error_limit;
 }
 
@@ -675,7 +693,7 @@ bool MatchesBitmap(const SkBitmap& expected_bmp,
       SkColor expected_color = expected_bmp.getColor(x, y);
       if (!ColorsMatchWithinLimit(actual_color, expected_color, error_limit)) {
         if (error_pixels_count < 10) {
-          LOG(ERROR) << "Pixel (" << x << "," << y << "): expected "
+          LOG(ERROR) << "Pixel (" << x << "," << y << "): expected " << std::hex
                      << expected_color << " actual " << actual_color;
         }
         error_pixels_count++;
@@ -722,16 +740,11 @@ class CaptureScreenshotTest : public DevToolsProtocolTest {
     std::string base64;
     EXPECT_TRUE(result_->GetString("data", &base64));
     std::unique_ptr<SkBitmap> result_bitmap;
-    int error_limit = 0;
     if (encoding == ENCODING_PNG) {
       result_bitmap.reset(new SkBitmap());
       EXPECT_TRUE(DecodePNG(base64, result_bitmap.get()));
     } else {
       result_bitmap = DecodeJPEG(base64);
-      // Even with quality 100, jpeg isn't lossless. So, we allow some skew in
-      // pixel values. Not that this assumes that there is no skew in pixel
-      // positions, so will only work reliably if all pixels have equal values.
-      error_limit = 3;
     }
     EXPECT_TRUE(result_bitmap);
 
@@ -741,6 +754,14 @@ class CaptureScreenshotTest : public DevToolsProtocolTest {
     // rounded corners.
     matching_mask.Inset(4, 4, 4, 4);
 #endif
+
+    // A color profile can be installed on the host that could affect
+    // pixel colors. Also JPEG compression could further distort the color.
+    // Allow some error between actual and expected pixel values.
+    // That assumes there is no shift in pixel positions, so it only works
+    // reliably if all pixels have equal values.
+    int error_limit = 16;
+
     EXPECT_TRUE(MatchesBitmap(expected_bitmap, *result_bitmap, matching_mask,
                               device_scale_factor, error_limit));
   }
@@ -857,7 +878,8 @@ IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, CaptureScreenshotJpeg) {
 }
 
 // Setting frame size (through RWHV) is not supported on Android.
-#if defined(OS_ANDROID) || defined(OS_LINUX)
+// This test seems to be very flaky on windows: https://crbug.com/801173
+#if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_WIN)
 #define MAYBE_CaptureScreenshotArea DISABLED_CaptureScreenshotArea
 #else
 #define MAYBE_CaptureScreenshotArea CaptureScreenshotArea
@@ -881,6 +903,46 @@ IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest,
   PlaceAndCaptureBox(kFrameSize, gfx::Size(100, 200), 1.0, 2.);
   // Ensure not emulating device scale factor works.
   PlaceAndCaptureBox(kFrameSize, gfx::Size(100, 200), 1.0, 0.);
+}
+
+// Verifies that setDefaultBackgroundColorOverride changes the background color
+// of a page that does not specify one.
+IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest,
+                       SetDefaultBackgroundColorOverride) {
+  if (base::SysInfo::IsLowEndDevice())
+    return;
+
+  shell()->LoadURL(GURL("about:blank"));
+  WaitForLoadStop(shell()->web_contents());
+  Attach();
+
+  // Override background to blue.
+  std::unique_ptr<base::DictionaryValue> color(new base::DictionaryValue());
+  color->SetInteger("r", 0x00);
+  color->SetInteger("g", 0x00);
+  color->SetInteger("b", 0xff);
+  color->SetDouble("a", 1.0);
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  params->Set("color", std::move(color));
+  SendCommand("Emulation.setDefaultBackgroundColorOverride", std::move(params));
+
+  SkBitmap expected_bitmap;
+  // We compare against the actual physical backing size rather than the
+  // view size, because the view size is stored adjusted for DPI and only in
+  // integer precision.
+  gfx::Size view_size = static_cast<RenderWidgetHostViewBase*>(
+                            shell()->web_contents()->GetRenderWidgetHostView())
+                            ->GetPhysicalBackingSize();
+  expected_bitmap.allocN32Pixels(view_size.width(), view_size.height());
+  expected_bitmap.eraseColor(SkColorSetRGB(0x00, 0x00, 0xff));
+  CaptureScreenshotAndCompareTo(expected_bitmap, ENCODING_PNG, true);
+
+  // Tests that resetting Emulation.setDefaultBackgroundColorOverride
+  // clears the background color override.
+  SendCommand("Emulation.setDefaultBackgroundColorOverride",
+              std::make_unique<base::DictionaryValue>());
+  expected_bitmap.eraseColor(SK_ColorWHITE);
+  CaptureScreenshotAndCompareTo(expected_bitmap, ENCODING_PNG, true);
 }
 
 // Verifies that setDefaultBackgroundColor and captureScreenshot support a
@@ -1031,8 +1093,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, NavigationPreservesMessages) {
   bool enough_results = result_ids_.size() >= 2u;
   EXPECT_TRUE(enough_results);
   if (enough_results) {
-    EXPECT_EQ(2, result_ids_[0]);  // Page.navigate
-    EXPECT_EQ(1, result_ids_[1]);  // Page.enable
+    EXPECT_EQ(1, result_ids_[0]);  // Page.enable
+    EXPECT_EQ(2, result_ids_[1]);  // Page.navigate
   }
 
   enough_results = notifications_.size() >= 1u;
@@ -1743,6 +1805,63 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CertificateError) {
                           ->GetController()
                           .GetLastCommittedEntry()
                           ->GetURL());
+
+  // Reset override.
+  SendCommand("Security.disable", nullptr, true);
+
+  // Test ignoring all certificate errors.
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetBoolean("ignore", true);
+  SendCommand("Security.setIgnoreCertificateErrors", std::move(command_params),
+              true);
+
+  SendCommand("Network.clearBrowserCache", nullptr, true);
+  SendCommand("Network.clearBrowserCookies", nullptr, true);
+  TestNavigationObserver continue_observer2(shell()->web_contents(), 1);
+  shell()->LoadURL(test_url);
+  WaitForNotification("Network.loadingFinished", true);
+  continue_observer2.Wait();
+  EXPECT_EQ(test_url, shell()
+                          ->web_contents()
+                          ->GetController()
+                          .GetLastCommittedEntry()
+                          ->GetURL());
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CertificateErrorBrowserTarget) {
+  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server.SetSSLConfig(net::EmbeddedTestServer::CERT_EXPIRED);
+  https_server.ServeFilesFromSourceDirectory("content/test/data");
+  ASSERT_TRUE(https_server.Start());
+  GURL test_url = https_server.GetURL("/devtools/navigation.html");
+  std::unique_ptr<base::DictionaryValue> params;
+  std::unique_ptr<base::DictionaryValue> command_params;
+
+  shell()->LoadURL(GURL("about:blank"));
+  WaitForLoadStop(shell()->web_contents());
+
+  // Clear cookies and cache to avoid interference with cert error events.
+  Attach();
+  SendCommand("Network.enable", nullptr, true);
+  SendCommand("Network.clearBrowserCache", nullptr, true);
+  SendCommand("Network.clearBrowserCookies", nullptr, true);
+  Detach();
+
+  // Test that browser target can ignore cert errors.
+  AttachToBrowserTarget();
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetBoolean("ignore", true);
+  SendCommand("Security.setIgnoreCertificateErrors", std::move(command_params),
+              true);
+
+  TestNavigationObserver continue_observer(shell()->web_contents(), 1);
+  shell()->LoadURL(test_url);
+  continue_observer.Wait();
+  EXPECT_EQ(test_url, shell()
+                          ->web_contents()
+                          ->GetController()
+                          .GetLastCommittedEntry()
+                          ->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SubresourceWithCertificateError) {
@@ -1880,7 +1999,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, TargetDiscovery) {
   EXPECT_TRUE(notifications_.empty());
 
   WebContents::CreateParams create_params(
-      ShellContentBrowserClient::Get()->browser_context(), NULL);
+      ShellContentBrowserClient::Get()->browser_context(), nullptr);
   std::unique_ptr<content::WebContents> web_contents(
       content::WebContents::Create(create_params));
   EXPECT_TRUE(notifications_.empty());
@@ -1962,7 +2081,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsProtocolTest, TargetNoDiscovery) {
   Attach();
   command_params.reset(new base::DictionaryValue());
   command_params->SetBoolean("autoAttach", true);
-  command_params->SetBoolean("waitForDebuggerOnStart", true);
+  command_params->SetBoolean("waitForDebuggerOnStart", false);
   SendCommand("Target.setAutoAttach", std::move(command_params), true);
   EXPECT_TRUE(notifications_.empty());
   command_params.reset(new base::DictionaryValue());
@@ -2070,6 +2189,65 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SetAndGetCookies) {
   EXPECT_EQ(2u, found);
 }
 
+class DevToolsProtocolDeviceEmulationTest : public DevToolsProtocolTest {
+ public:
+  ~DevToolsProtocolDeviceEmulationTest() override {}
+
+  void EmulateDeviceSize(gfx::Size size) {
+    auto params = base::MakeUnique<base::DictionaryValue>();
+    params->SetInteger("width", size.width());
+    params->SetInteger("height", size.height());
+    params->SetDouble("deviceScaleFactor", 0);
+    params->SetBoolean("mobile", false);
+    SendCommand("Emulation.setDeviceMetricsOverride", std::move(params));
+  }
+
+  gfx::Size GetViewSize() {
+    return shell()
+        ->web_contents()
+        ->GetMainFrame()
+        ->GetView()
+        ->GetViewBounds()
+        .size();
+  }
+};
+
+// Setting frame size (through RWHV) is not supported on Android.
+#if defined(OS_ANDROID)
+#define MAYBE_DeviceSize DISABLED_DeviceSize
+#else
+#define MAYBE_DeviceSize DeviceSize
+#endif
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolDeviceEmulationTest, MAYBE_DeviceSize) {
+  content::SetupCrossSiteRedirector(embedded_test_server());
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  GURL test_url1 =
+      embedded_test_server()->GetURL("A.com", "/devtools/navigation.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url1, 1);
+  Attach();
+
+  const gfx::Size original_size = GetViewSize();
+  const gfx::Size emulated_size_1 =
+      gfx::Size(original_size.width() - 50, original_size.height() - 50);
+  const gfx::Size emulated_size_2 =
+      gfx::Size(original_size.width() - 100, original_size.height() - 100);
+
+  EmulateDeviceSize(emulated_size_1);
+  EXPECT_EQ(emulated_size_1, GetViewSize());
+
+  EmulateDeviceSize(emulated_size_2);
+  EXPECT_EQ(emulated_size_2, GetViewSize());
+
+  GURL test_url2 =
+      embedded_test_server()->GetURL("B.com", "/devtools/navigation.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url2, 1);
+  EXPECT_EQ(emulated_size_2, GetViewSize());
+
+  SendCommand("Emulation.clearDeviceMetricsOverride", nullptr);
+  EXPECT_EQ(original_size, GetViewSize());
+}
+
 class DevToolsProtocolTouchTest : public DevToolsProtocolTest {
  public:
   ~DevToolsProtocolTouchTest() override {}
@@ -2169,8 +2347,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CertificateExplanations) {
 
   // There should be one explanation containing the server's certificate chain.
   net::SHA256HashValue cert_chain_fingerprint =
-      net::X509Certificate::CalculateChainFingerprint256(
-          cert->os_cert_handle(), cert->GetIntermediateCertificates());
+      cert->CalculateChainFingerprint256();
 
   // Read the certificate out of the first explanation.
   const base::ListValue* certificate;
@@ -2190,9 +2367,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CertificateExplanations) {
       net::X509Certificate::CreateFromDERCertChain(cert_string_piece);
   ASSERT_TRUE(explanation_cert);
   EXPECT_EQ(cert_chain_fingerprint,
-            net::X509Certificate::CalculateChainFingerprint256(
-                explanation_cert->os_cert_handle(),
-                explanation_cert->GetIntermediateCertificates()));
+            explanation_cert->CalculateChainFingerprint256());
 }
 
 // Download tests are flaky on Android: https://crbug.com/7546
@@ -2220,12 +2395,12 @@ class CountingDownloadFile : public DownloadFileImpl {
   CountingDownloadFile(std::unique_ptr<DownloadSaveInfo> save_info,
                        const base::FilePath& default_downloads_directory,
                        std::unique_ptr<DownloadManager::InputStream> stream,
-                       const net::NetLogWithSource& net_log,
+                       uint32_t download_id,
                        base::WeakPtr<DownloadDestinationObserver> observer)
       : DownloadFileImpl(std::move(save_info),
                          default_downloads_directory,
                          std::move(stream),
-                         net_log,
+                         download_id,
                          observer) {}
 
   ~CountingDownloadFile() override {
@@ -2277,11 +2452,11 @@ class CountingDownloadFileFactory : public DownloadFileFactory {
       std::unique_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_downloads_directory,
       std::unique_ptr<DownloadManager::InputStream> stream,
-      const net::NetLogWithSource& net_log,
+      uint32_t download_id,
       base::WeakPtr<DownloadDestinationObserver> observer) override {
     return new CountingDownloadFile(std::move(save_info),
                                     default_downloads_directory,
-                                    std::move(stream), net_log, observer);
+                                    std::move(stream), download_id, observer);
   }
 };
 
@@ -2530,9 +2705,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsDownloadContentTest, DownloadCancelled) {
 
   // Cancel the download and wait for download system quiesce.
   download->Cancel(true);
-  scoped_refptr<DownloadTestFlushObserver> flush_observer(
-      new DownloadTestFlushObserver(DownloadManagerForShell(shell())));
-  flush_observer->WaitForFlush();
+  DownloadTestFlushObserver flush_observer(DownloadManagerForShell(shell()));
+  flush_observer.WaitForFlush();
 
   // Get the important info from other threads and check it.
   EXPECT_TRUE(EnsureNoPendingDownloads());
@@ -2570,9 +2744,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsDownloadContentTest, DefaultDownload) {
 
   // Cancel the download and wait for download system quiesce.
   download->Cancel(true);
-  scoped_refptr<DownloadTestFlushObserver> flush_observer(
-      new DownloadTestFlushObserver(DownloadManagerForShell(shell())));
-  flush_observer->WaitForFlush();
+  DownloadTestFlushObserver flush_observer(DownloadManagerForShell(shell()));
+  flush_observer.WaitForFlush();
 
   // Get the important info from other threads and check it.
   EXPECT_TRUE(EnsureNoPendingDownloads());

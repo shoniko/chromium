@@ -316,7 +316,7 @@ error::Error DoGetShaderPrecisionFormat(GLenum shadertype,
                                         GLint* precision,
                                         int32_t* success);
 error::Error DoGetShaderSource(GLuint shader, std::string* source);
-error::Error DoGetString(GLenum name, const char** result);
+error::Error DoGetString(GLenum name, uint32_t bucket_id);
 error::Error DoGetSynciv(GLuint sync,
                          GLenum pname,
                          GLsizei bufsize,
@@ -802,13 +802,9 @@ error::Error DoDrawElementsInstancedANGLE(GLenum mode,
                                           const void* indices,
                                           GLsizei primcount);
 error::Error DoVertexAttribDivisorANGLE(GLuint index, GLuint divisor);
-error::Error DoProduceTextureCHROMIUM(GLenum target,
-                                      const volatile GLbyte* mailbox);
 error::Error DoProduceTextureDirectCHROMIUM(GLuint texture_client_id,
-                                            GLenum target,
                                             const volatile GLbyte* mailbox);
-error::Error DoCreateAndConsumeTextureINTERNAL(GLenum target,
-                                               GLuint texture_client_id,
+error::Error DoCreateAndConsumeTextureINTERNAL(GLuint texture_client_id,
                                                const volatile GLbyte* mailbox);
 error::Error DoBindUniformLocationCHROMIUM(GLuint program,
                                            GLint location,
@@ -1011,4 +1007,22 @@ error::Error DoBeginRasterCHROMIUM(GLuint texture_id,
                                    GLboolean can_use_lcd_text,
                                    GLboolean use_distance_field_text,
                                    GLint pixel_config);
+error::Error DoRasterCHROMIUM(GLsizeiptr size, const void* list);
 error::Error DoEndRasterCHROMIUM();
+error::Error DoCreateTransferCacheEntryINTERNAL(GLuint entry_type,
+                                                GLuint entry_id,
+                                                GLuint handle_shm_id,
+                                                GLuint handle_shm_offset,
+                                                GLuint data_shm_id,
+                                                GLuint data_shm_offset,
+                                                GLuint data_size);
+error::Error DoUnlockTransferCacheEntryINTERNAL(GLuint entry_type,
+                                                GLuint entry_id);
+error::Error DoDeleteTransferCacheEntryINTERNAL(GLuint entry_type,
+                                                GLuint entry_id);
+error::Error DoWindowRectanglesEXT(GLenum mode,
+                                   GLsizei n,
+                                   const volatile GLint* box);
+error::Error DoCreateGpuFenceINTERNAL(GLuint gpu_fence_id);
+error::Error DoWaitGpuFenceCHROMIUM(GLuint gpu_fence_id);
+error::Error DoDestroyGpuFenceCHROMIUM(GLuint gpu_fence_id);

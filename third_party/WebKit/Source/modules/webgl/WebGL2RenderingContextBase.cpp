@@ -6,9 +6,9 @@
 
 #include <memory>
 #include "bindings/modules/v8/WebGLAny.h"
-#include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/ImageData.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
+#include "core/html/canvas/ImageData.h"
 #include "core/html/media/HTMLVideoElement.h"
 #include "core/imagebitmap/ImageBitmap.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -27,7 +27,6 @@
 #include "modules/webgl/WebGLUniformLocation.h"
 #include "modules/webgl/WebGLVertexArrayObject.h"
 #include "platform/wtf/CheckedNumeric.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
 
@@ -38,10 +37,6 @@ namespace blink {
 namespace {
 
 const GLuint64 kMaxClientWaitTimeout = 0u;
-
-GLsync SyncObjectOrZero(const WebGLSync* object) {
-  return object ? object->Object() : nullptr;
-}
 
 // TODO(kainino): Change outByteLength to GLuint and change the associated
 // range checking (and all uses) - overflow becomes possible in cases below
@@ -143,9 +138,11 @@ const GLenum kSupportedInternalFormatsStorage[] = {
 WebGL2RenderingContextBase::WebGL2RenderingContextBase(
     CanvasRenderingContextHost* host,
     std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
+    bool using_gpu_compositing,
     const CanvasContextCreationAttributes& requested_attributes)
     : WebGLRenderingContextBase(host,
                                 std::move(context_provider),
+                                using_gpu_compositing,
                                 requested_attributes,
                                 2) {
   supported_internal_formats_storage_.insert(
@@ -462,6 +459,12 @@ void WebGL2RenderingContextBase::framebufferTextureLayer(GLenum target,
                       "no framebuffer bound");
     return;
   }
+  // Don't allow modifications to opaque framebuffer attachements.
+  if (framebuffer_binding && framebuffer_binding->Opaque()) {
+    SynthesizeGLError(GL_INVALID_OPERATION, "framebufferTextureLayer",
+                      "opaque framebuffer bound");
+    return;
+  }
   framebuffer_binding->SetAttachmentForBoundFramebuffer(
       target, attachment, textarget, texture, level, layer);
   ApplyStencilTest();
@@ -546,14 +549,13 @@ ScriptValue WebGL2RenderingContextBase::getInternalformatParameter(
 
   switch (pname) {
     case GL_SAMPLES: {
-      std::unique_ptr<GLint[]> values;
       GLint length = -1;
       ContextGL()->GetInternalformativ(target, internalformat,
                                        GL_NUM_SAMPLE_COUNTS, 1, &length);
       if (length <= 0)
         return WebGLAny(script_state, DOMInt32Array::Create(0));
 
-      values = WrapArrayUnique(new GLint[length]);
+      auto values = std::make_unique<GLint[]>(length);
       for (GLint ii = 0; ii < length; ++ii)
         values[ii] = 0;
       ContextGL()->GetInternalformativ(target, internalformat, GL_SAMPLES,
@@ -1060,6 +1062,12 @@ void WebGL2RenderingContextBase::texImage2D(GLenum target,
                       "no bound PIXEL_UNPACK_BUFFER");
     return;
   }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texImage2D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed while uploading from PBO");
+    return;
+  }
   if (!ValidateTexFunc("texImage2D", kTexImage, kSourceUnpackBuffer, target,
                        level, internalformat, width, height, 1, border, format,
                        type, 0, 0, 0))
@@ -1088,6 +1096,12 @@ void WebGL2RenderingContextBase::texSubImage2D(GLenum target,
   if (!bound_pixel_unpack_buffer_) {
     SynthesizeGLError(GL_INVALID_OPERATION, "texSubImage2D",
                       "no bound PIXEL_UNPACK_BUFFER");
+    return;
+  }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texSubImage2D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed while uploading from PBO");
     return;
   }
   if (!ValidateTexFunc("texSubImage2D", kTexSubImage, kSourceUnpackBuffer,
@@ -1671,6 +1685,12 @@ void WebGL2RenderingContextBase::texImage3D(
     GLenum format,
     GLenum type,
     MaybeShared<DOMArrayBufferView> pixels) {
+  if ((unpack_flip_y_ || unpack_premultiply_alpha_) && pixels) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
+    return;
+  }
   TexImageHelperDOMArrayBufferView(kTexImage3D, target, level, internalformat,
                                    width, height, depth, border, format, type,
                                    0, 0, 0, pixels.View(), kNullAllowed, 0);
@@ -1695,6 +1715,13 @@ void WebGL2RenderingContextBase::texImage3D(
                       "a buffer is bound to PIXEL_UNPACK_BUFFER");
     return;
   }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    DCHECK(pixels);
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
+    return;
+  }
   TexImageHelperDOMArrayBufferView(
       kTexImage3D, target, level, internalformat, width, height, depth, border,
       format, type, 0, 0, 0, pixels.View(), kNullNotReachable, src_offset);
@@ -1717,6 +1744,12 @@ void WebGL2RenderingContextBase::texImage3D(GLenum target,
   if (!bound_pixel_unpack_buffer_) {
     SynthesizeGLError(GL_INVALID_OPERATION, "texImage3D",
                       "no bound PIXEL_UNPACK_BUFFER");
+    return;
+  }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
     return;
   }
   if (!ValidateTexFunc("texImage3D", kTexImage, kSourceUnpackBuffer, target,
@@ -1877,6 +1910,14 @@ void WebGL2RenderingContextBase::texSubImage3D(
                       "a buffer is bound to PIXEL_UNPACK_BUFFER");
     return;
   }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    DCHECK(pixels);
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texSubImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
+    return;
+  }
+
   TexImageHelperDOMArrayBufferView(
       kTexSubImage3D, target, level, 0, width, height, depth, 0, format, type,
       xoffset, yoffset, zoffset, pixels.View(), kNullNotReachable, src_offset);
@@ -1900,6 +1941,12 @@ void WebGL2RenderingContextBase::texSubImage3D(GLenum target,
   if (!bound_pixel_unpack_buffer_) {
     SynthesizeGLError(GL_INVALID_OPERATION, "texSubImage3D",
                       "no bound PIXEL_UNPACK_BUFFER");
+    return;
+  }
+  if (unpack_flip_y_ || unpack_premultiply_alpha_) {
+    SynthesizeGLError(
+        GL_INVALID_OPERATION, "texSubImage3D",
+        "FLIP_Y or PREMULTIPLY_ALPHA isn't allowed for uploading 3D textures");
     return;
   }
   if (!ValidateTexFunc("texSubImage3D", kTexSubImage, kSourceUnpackBuffer,
@@ -4114,7 +4161,25 @@ GLenum WebGL2RenderingContextBase::clientWaitSync(WebGLSync* sync,
     return GL_WAIT_FAILED;
   }
 
-  return ContextGL()->ClientWaitSync(SyncObjectOrZero(sync), flags, timeout);
+  // clientWaitSync must poll for updates no more than once per
+  // requestAnimationFrame, so all validation, and the implementation,
+  // must be done inline.
+  if (!(flags == 0 || flags == GL_SYNC_FLUSH_COMMANDS_BIT)) {
+    SynthesizeGLError(GL_INVALID_VALUE, "clientWaitSync", "invalid flags");
+    return GL_WAIT_FAILED;
+  }
+
+  if (sync->IsSignaled()) {
+    return GL_ALREADY_SIGNALED;
+  }
+
+  sync->UpdateCache(ContextGL());
+
+  if (sync->IsSignaled()) {
+    return GL_CONDITION_SATISFIED;
+  }
+
+  return GL_TIMEOUT_EXPIRED;
 }
 
 void WebGL2RenderingContextBase::waitSync(WebGLSync* sync,
@@ -4148,10 +4213,8 @@ ScriptValue WebGL2RenderingContextBase::getSyncParameter(
     case GL_SYNC_STATUS:
     case GL_SYNC_CONDITION:
     case GL_SYNC_FLAGS: {
-      GLint value = 0;
-      GLsizei length = -1;
-      ContextGL()->GetSynciv(SyncObjectOrZero(sync), pname, 1, &length, &value);
-      return WebGLAny(script_state, static_cast<unsigned>(value));
+      sync->UpdateCache(ContextGL());
+      return WebGLAny(script_state, sync->GetCachedResult(pname));
     }
     default:
       SynthesizeGLError(GL_INVALID_ENUM, "getSyncParameter",
@@ -4308,7 +4371,7 @@ WebGLActiveInfo* WebGL2RenderingContextBase::getTransformFeedbackVarying(
   if (max_name_length <= 0) {
     return nullptr;
   }
-  std::unique_ptr<GLchar[]> name = WrapArrayUnique(new GLchar[max_name_length]);
+  auto name = std::make_unique<GLchar[]>(max_name_length);
   GLsizei length = 0;
   GLsizei size = 0;
   GLenum type = 0;
@@ -4653,7 +4716,7 @@ String WebGL2RenderingContextBase::getActiveUniformBlockName(
                       "invalid uniform block index");
     return String();
   }
-  std::unique_ptr<GLchar[]> name = WrapArrayUnique(new GLchar[max_name_length]);
+  auto name = std::make_unique<GLchar[]>(max_name_length);
 
   GLsizei length = 0;
   ContextGL()->GetActiveUniformBlockName(ObjectOrZero(program),
@@ -4762,6 +4825,12 @@ void WebGL2RenderingContextBase::bindFramebuffer(GLenum target,
 
 void WebGL2RenderingContextBase::deleteFramebuffer(
     WebGLFramebuffer* framebuffer) {
+  // Don't allow the application to delete an opaque framebuffer.
+  if (framebuffer && framebuffer->Opaque()) {
+    SynthesizeGLError(GL_INVALID_OPERATION, "deleteFramebuffer",
+                      "cannot delete an opaque framebuffer");
+    return;
+  }
   if (!DeleteObject(framebuffer))
     return;
   GLenum target = 0;

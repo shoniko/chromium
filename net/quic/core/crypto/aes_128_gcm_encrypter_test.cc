@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_arraysize.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
@@ -175,7 +176,7 @@ QuicData* EncryptWithNonce(Aes128GcmEncrypter* encrypter,
 class Aes128GcmEncrypterTest : public QuicTest {};
 
 TEST_F(Aes128GcmEncrypterTest, Encrypt) {
-  for (size_t i = 0; i < arraysize(test_group_array); i++) {
+  for (size_t i = 0; i < QUIC_ARRAYSIZE(test_group_array); i++) {
     SCOPED_TRACE(i);
     const TestVector* test_vectors = test_group_array[i];
     const TestGroupInfo& test_info = test_group_info[i];
@@ -215,6 +216,28 @@ TEST_F(Aes128GcmEncrypterTest, Encrypt) {
           tag.data(), tag.length());
     }
   }
+}
+
+TEST_F(Aes128GcmEncrypterTest, EncryptPacket) {
+  string key = QuicTextUtils::HexDecode("d95a145250826c25a77b6a84fd4d34fc");
+  string iv = QuicTextUtils::HexDecode("50c4431ebb18283448e276e2");
+  QuicPacketNumber packet_num = 0x13278f44;
+  string aad = QuicTextUtils::HexDecode("875d49f64a70c9cbe713278f44ff000005");
+  string pt = QuicTextUtils::HexDecode("aa0003a250bd000000000001");
+  string ct = QuicTextUtils::HexDecode(
+      "7dd4708b989ee7d38a013e3656e9b37beefd05808fe1ab41e3b4f2c0");
+
+  std::vector<char> out(ct.size());
+  size_t out_size;
+
+  Aes128GcmEncrypter encrypter;
+  ASSERT_TRUE(encrypter.SetKey(key));
+  ASSERT_TRUE(encrypter.SetIV(iv));
+  ASSERT_TRUE(encrypter.EncryptPacket(QUIC_VERSION_43, packet_num, aad, pt,
+                                      out.data(), &out_size, out.size()));
+  EXPECT_EQ(out_size, out.size());
+  test::CompareCharArraysWithHexError("ciphertext", out.data(), out.size(),
+                                      ct.data(), ct.size());
 }
 
 TEST_F(Aes128GcmEncrypterTest, GetMaxPlaintextSize) {

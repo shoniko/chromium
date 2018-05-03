@@ -35,7 +35,6 @@
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_metrics.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "components/sync/base/bind_to_task_runner.h"
 #include "components/sync/base/cryptographer.h"
 #include "components/sync/base/passphrase_type.h"
@@ -191,6 +190,12 @@ ProfileSyncService::ProfileSyncService(InitParams init_params)
       current_version.substr(0, current_version.find('.'))) {
     passphrase_prompt_triggered_by_version_ = true;
   }
+
+  if (init_params.model_type_store_factory.is_null()) {
+    model_type_store_factory_ = GetModelTypeStoreFactory(base_directory_);
+  } else {
+    model_type_store_factory_ = init_params.model_type_store_factory;
+  }
 }
 
 ProfileSyncService::~ProfileSyncService() {
@@ -235,10 +240,8 @@ void ProfileSyncService::Initialize() {
                  sync_enabled_weak_factory_.GetWeakPtr(),
                  syncer::ModelTypeSet(syncer::SESSIONS)));
 
-  const syncer::ModelTypeStoreFactory& store_factory =
-      GetModelTypeStoreFactory(syncer::DEVICE_INFO, base_directory_);
   device_info_sync_bridge_ = std::make_unique<DeviceInfoSyncBridge>(
-      local_device_.get(), store_factory,
+      local_device_.get(), model_type_store_factory_,
       base::BindRepeating(
           &ModelTypeChangeProcessor::Create,
           base::BindRepeating(&syncer::ReportUnrecoverableError, channel_)));
@@ -1283,18 +1286,18 @@ void ProfileSyncService::OnConfigureStart() {
 ProfileSyncService::SyncStatusSummary
 ProfileSyncService::QuerySyncStatusSummary() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (HasUnrecoverableError()) {
+  if (HasUnrecoverableError())
     return UNRECOVERABLE_ERROR;
-  } else if (!engine_) {
+  if (!engine_)
     return NOT_ENABLED;
-  } else if (engine_ && !IsFirstSetupComplete()) {
+  if (engine_ && !IsFirstSetupComplete())
     return SETUP_INCOMPLETE;
-  } else if (engine_ && IsFirstSetupComplete() && data_type_manager_ &&
-             data_type_manager_->state() == DataTypeManager::STOPPED) {
+  if (engine_ && IsFirstSetupComplete() && data_type_manager_ &&
+      data_type_manager_->state() == DataTypeManager::STOPPED) {
     return DATATYPES_NOT_INITIALIZED;
-  } else if (IsSyncActive()) {
-    return INITIALIZED;
   }
+  if (IsSyncActive())
+    return INITIALIZED;
   return UNKNOWN_ERROR;
 }
 
@@ -1338,12 +1341,11 @@ bool ProfileSyncService::QueryDetailedSyncStatus(SyncEngine::Status* result) {
   if (engine_ && engine_initialized_) {
     *result = engine_->GetDetailedStatus();
     return true;
-  } else {
-    SyncEngine::Status status;
-    status.sync_protocol_error = last_actionable_error_;
-    *result = status;
-    return false;
   }
+  SyncEngine::Status status;
+  status.sync_protocol_error = last_actionable_error_;
+  *result = status;
+  return false;
 }
 
 const AuthError& ProfileSyncService::GetAuthError() const {
@@ -1622,13 +1624,12 @@ void ProfileSyncService::SetPlatformSyncAllowedProvider(
 
 // static
 syncer::ModelTypeStoreFactory ProfileSyncService::GetModelTypeStoreFactory(
-    ModelType type,
     const base::FilePath& base_path) {
   // TODO(skym): Verify using AsUTF8Unsafe is okay here. Should work as long
   // as the Local State file is guaranteed to be UTF-8.
   const std::string path =
       FormatSharedModelTypeStorePath(base_path).AsUTF8Unsafe();
-  return base::Bind(&ModelTypeStore::CreateStore, type, path);
+  return base::Bind(&ModelTypeStore::CreateStore, path);
 }
 
 void ProfileSyncService::ConfigureDataTypeManager() {
@@ -1832,11 +1833,10 @@ bool ProfileSyncService::SetDecryptionPassphrase(
     bool result = crypto_->SetDecryptionPassphrase(passphrase);
     UMA_HISTOGRAM_BOOLEAN("Sync.PassphraseDecryptionSucceeded", result);
     return result;
-  } else {
-    NOTREACHED() << "SetDecryptionPassphrase must not be called when "
-                    "IsPassphraseRequired() is false.";
-    return false;
   }
+  NOTREACHED() << "SetDecryptionPassphrase must not be called when "
+                  "IsPassphraseRequired() is false.";
+  return false;
 }
 
 bool ProfileSyncService::IsEncryptEverythingAllowed() const {
@@ -1890,13 +1890,8 @@ void ProfileSyncService::GoogleSigninSucceeded(const std::string& account_id,
     is_auth_in_progress_ = true;
   }
 
-  if (signin::IsDiceMigrationEnabled() &&
-      oauth2_token_service_->RefreshTokenIsAvailable(account_id)) {
-    // When Dice is enabled, the refresh token may be available before the user
-    // enables sync. Start sync if the refresh token is already available in the
-    // token service when the authenticated account is set.
+  if (oauth2_token_service_->RefreshTokenIsAvailable(account_id))
     OnRefreshTokenAvailable(account_id);
-  }
 }
 
 void ProfileSyncService::GoogleSignedOut(const std::string& account_id,
@@ -1912,34 +1907,33 @@ void ProfileSyncService::OnGaiaAccountsInCookieUpdated(
     const std::vector<gaia::ListedAccount>& accounts,
     const std::vector<gaia::ListedAccount>& signed_out_accounts,
     const GoogleServiceAuthError& error) {
-  OnGaiaAccountsInCookieUpdatedWithCallback(accounts, signed_out_accounts,
-                                            error, base::Closure());
+  OnGaiaAccountsInCookieUpdatedWithCallback(accounts, base::Closure());
 }
 
 void ProfileSyncService::OnGaiaAccountsInCookieUpdatedWithCallback(
     const std::vector<gaia::ListedAccount>& accounts,
-    const std::vector<gaia::ListedAccount>& signed_out_accounts,
-    const GoogleServiceAuthError& error,
     const base::Closure& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!IsEngineInitialized())
     return;
 
-  bool cookie_jar_mismatch = true;
+  bool cookie_jar_mismatch = HasCookieJarMismatch(accounts);
   bool cookie_jar_empty = accounts.size() == 0;
-  std::string account_id = signin_->GetAccountIdToUse();
-
-  // Iterate through list of accounts, looking for current sync account.
-  for (const auto& account : accounts) {
-    if (account.id == account_id) {
-      cookie_jar_mismatch = false;
-      break;
-    }
-  }
 
   DVLOG(1) << "Cookie jar mismatch: " << cookie_jar_mismatch;
   DVLOG(1) << "Cookie jar empty: " << cookie_jar_empty;
   engine_->OnCookieJarChanged(cookie_jar_mismatch, cookie_jar_empty, callback);
+}
+
+bool ProfileSyncService::HasCookieJarMismatch(
+    const std::vector<gaia::ListedAccount>& cookie_jar_accounts) {
+  std::string account_id = signin_->GetAccountIdToUse();
+  // Iterate through list of accounts, looking for current sync account.
+  for (const auto& account : cookie_jar_accounts) {
+    if (account.id == account_id)
+      return false;
+  }
+  return true;
 }
 
 void ProfileSyncService::AddProtocolEventObserver(
@@ -2268,22 +2262,12 @@ base::FilePath ProfileSyncService::GetDirectoryPathForTest() const {
 
 base::MessageLoop* ProfileSyncService::GetSyncLoopForTest() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (sync_thread_) {
-    return sync_thread_->message_loop();
-  } else {
-    return nullptr;
-  }
+  return sync_thread_ ? sync_thread_->message_loop() : nullptr;
 }
 
 syncer::SyncEncryptionHandler::Observer*
 ProfileSyncService::GetEncryptionObserverForTest() const {
   return crypto_.get();
-}
-
-void ProfileSyncService::RefreshTypesForTest(syncer::ModelTypeSet types) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (engine_initialized_)
-    engine_->RefreshTypesForTest(types);
 }
 
 void ProfileSyncService::RemoveClientFromServer() const {

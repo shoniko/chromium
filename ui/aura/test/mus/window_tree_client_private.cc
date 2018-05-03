@@ -38,7 +38,9 @@ WindowTreeHostMus* WindowTreeClientPrivate::CallWmNewDisplayAdded(
     const display::Display& display) {
   ui::mojom::WindowDataPtr root_data(ui::mojom::WindowData::New());
   root_data->parent_id = 0;
-  root_data->window_id = next_window_id_++;
+  // Windows representing displays are owned by mus, which is identified by
+  // non-zero high word.
+  root_data->window_id = next_window_id_++ | 0x00010000;
   root_data->visible = true;
   root_data->bounds = gfx::Rect(display.bounds().size());
   const bool parent_drawn = true;
@@ -51,21 +53,6 @@ WindowTreeHostMus* WindowTreeClientPrivate::CallWmNewDisplayAdded(
     bool parent_drawn) {
   return tree_client_impl_->WmNewDisplayAddedImpl(display, std::move(root_data),
                                                   parent_drawn, base::nullopt);
-}
-
-void WindowTreeClientPrivate::CallOnWindowInputEvent(
-    Window* window,
-    std::unique_ptr<ui::Event> event) {
-  const uint32_t event_id = 0u;
-  const uint32_t observer_id = 0u;
-  const int64_t display_id = 0;
-  gfx::PointF event_location_in_screen_pixel_layout;
-  if (event->IsLocatedEvent())
-    event_location_in_screen_pixel_layout =
-        event->AsLocatedEvent()->root_location_f();
-  tree_client_impl_->OnWindowInputEvent(
-      event_id, WindowPortMus::Get(window)->server_id(), display_id,
-      event_location_in_screen_pixel_layout, std::move(event), observer_id);
 }
 
 void WindowTreeClientPrivate::CallOnPointerEventObserved(

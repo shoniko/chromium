@@ -9,7 +9,7 @@
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/media/router/issue_manager.h"
-#include "chrome/browser/media/router/test_helper.h"
+#include "chrome/browser/media/router/test/test_helper.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -31,7 +31,7 @@ IssueInfo CreateTestIssue(IssueInfo::Severity severity) {
 class IssueManagerTest : public ::testing::Test {
  protected:
   IssueManagerTest()
-      : task_runner_(new base::TestMockTimeTaskRunner()),
+      : task_runner_(base::MakeRefCounted<base::TestMockTimeTaskRunner>()),
         runner_handler_(task_runner_) {
     manager_.set_task_runner_for_test(task_runner_);
   }

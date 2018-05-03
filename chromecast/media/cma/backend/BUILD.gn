@@ -16,7 +16,7 @@ declare_args() {
       use_alsa && !enable_assistant && chromecast_branding != "google"
 }
 
-source_set("backend") {
+cast_source_set("backend") {
   sources = [
     "audio_decoder_wrapper.cc",
     "audio_decoder_wrapper.h",
@@ -37,12 +37,13 @@ source_set("backend") {
   deps = [
     "//base",
     "//chromecast:chromecast_features",
+    "//chromecast/base/metrics:metrics",
     "//chromecast/media:libcast_media",
     "//chromecast/media/cma/base",
   ]
 }
 
-source_set("cast_media_android_dummy") {
+cast_source_set("cast_media_android_dummy") {
   sources = [
     "cast_media_android_dummy.cc",
   ]
@@ -71,7 +72,7 @@ cast_shared_library("libcast_media_1.0") {
 
 # Dummy implementation of media backend used on chromecast devices.
 # Must not depend on anything outside //chromecast/public.
-source_set("dummy") {
+cast_source_set("dummy") {
   sources = [
     "cast_media_dummy.cc",
   ]
@@ -92,7 +93,7 @@ buildflag_header("audio_features") {
 
 # Implementation of video decoder that discards decoder buffers.
 # Used on audio platforms for media streams containing video.
-source_set("null") {
+cast_source_set("null") {
   sources = [
     "video_decoder_null.cc",
     "video_decoder_null.h",
@@ -104,7 +105,7 @@ source_set("null") {
   ]
 }
 
-source_set("audio") {
+cast_source_set("audio") {
   sources = [
     "audio_decoder_for_mixer.cc",
     "audio_decoder_for_mixer.h",
@@ -140,6 +141,7 @@ source_set("audio") {
     "//base",
     "//chromecast/base",
     "//chromecast/media/base",
+    "//chromecast/media/cma/backend/post_processors:post_processor_wrapper",
     "//chromecast/media/cma/base",
     "//chromecast/media/cma/decoder",
     "//chromecast/public/media",
@@ -152,19 +154,14 @@ test("cast_audio_backend_unittests") {
   testonly = true
   sources = [
     "filter_group_unittest.cc",
-    "post_processors/governor_unittest.cc",
-    "post_processors/saturated_gain_unittest.cc",
   ]
 
   deps = [
     ":audio",
-    ":governor",
-    ":libcast_governor_1.0",
-    ":libcast_saturated_gain_1.0",
-    ":saturated_gain",
     "//base",
     "//base/test:run_all_unittests",
-    "//chromecast/media/cma/backend/post_processors:test_support",
+    "//chromecast/media/cma/backend/post_processors:unittests",
+    "//chromecast/public",
     "//chromecast/public/media",
     "//media:shared_memory_support",
     "//testing/gmock",
@@ -177,54 +174,4 @@ test("cast_audio_backend_unittests") {
   if (is_fuchsia) {
     deps += [ "fuchsia:unit_tests" ]
   }
-}
-
-# This is separate from ":governor" because the associated unittest needs
-# to create a Governor directly (to use test functions).
-cast_shared_library("libcast_governor_1.0") {
-  sources = [
-    "post_processors/governor_create.cc",
-  ]
-  deps = [
-    ":governor",
-    "//chromecast/public/media",
-  ]
-}
-
-source_set("governor") {
-  sources = [
-    "post_processors/governor.cc",
-    "post_processors/governor.h",
-  ]
-  deps = [
-    "//base",
-    "//chromecast/base",
-    "//chromecast/media/base",
-    "//chromecast/public/media",
-  ]
-  public_configs = [ "//chromecast/public:public_config" ]
-}
-
-cast_shared_library("libcast_saturated_gain_1.0") {
-  sources = [
-    "post_processors/saturated_gain_create.cc",
-  ]
-  deps = [
-    ":saturated_gain",
-    "//chromecast/public/media",
-  ]
-}
-
-source_set("saturated_gain") {
-  sources = [
-    "post_processors/saturated_gain.cc",
-    "post_processors/saturated_gain.h",
-  ]
-  deps = [
-    "//base",
-    "//chromecast/base",
-    "//chromecast/media/base",
-    "//chromecast/public/media",
-  ]
-  public_configs = [ "//chromecast/public:public_config" ]
 }

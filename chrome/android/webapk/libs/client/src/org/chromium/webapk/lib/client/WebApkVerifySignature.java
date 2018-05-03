@@ -27,6 +27,7 @@ public class WebApkVerifySignature {
     @IntDef({
             ERROR_OK, ERROR_BAD_APK, ERROR_EXTRA_FIELD_TOO_LARGE, ERROR_FILE_COMMENT_TOO_LARGE,
             ERROR_INCORRECT_SIGNATURE, ERROR_SIGNATURE_NOT_FOUND, ERROR_TOO_MANY_META_INF_FILES,
+            ERROR_BAD_BLANK_SPACE, ERROR_BAD_V2_SIGNING_BLOCK,
     })
     public @interface Error {}
     public static final int ERROR_OK = 0;
@@ -65,8 +66,8 @@ public class WebApkVerifySignature {
     /** The signature algorithm used (must also match with HASH). */
     private static final String SIGNING_ALGORITHM = "SHA256withECDSA";
 
-    /** Maximum expected V2 signing block size */
-    private static final int MAX_V2_SIGNING_BLOCK_SIZE = 8192;
+    /** Maximum expected V2 signing block size with 3 signatures */
+    private static final int MAX_V2_SIGNING_BLOCK_SIZE = 8192 * 3;
 
     /** The magic string for v2 signing. */
     private static final String V2_SIGNING_MAGIC = "APK Sig Block 42";

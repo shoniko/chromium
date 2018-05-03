@@ -62,7 +62,7 @@ TEST(SecurityPolicyTest, GenerateReferrerRespectsReferrerSchemesRegistry) {
 
 TEST(SecurityPolicyTest, ShouldHideReferrerRespectsReferrerSchemesRegistry) {
   const KURL example_http_url = KURL("http://example.com/");
-  const KURL foobar_url = KURL(NullURL(), "foobar://somepage/");
+  const KURL foobar_url = KURL("foobar://somepage/");
   const String foobar_scheme = String::FromUTF8("foobar");
 
   EXPECT_TRUE(SecurityPolicy::ShouldHideReferrer(example_http_url, foobar_url));
@@ -209,6 +209,40 @@ TEST(SecurityPolicyTest, GenerateReferrer) {
   }
 }
 
+TEST(SecurityPolicyTest, ReferrerPolicyFromHeaderValue) {
+  struct TestCase {
+    const char* header;
+    bool is_valid;
+    ReferrerPolicyLegacyKeywordsSupport keywords;
+    ReferrerPolicy expected_policy;
+  };
+
+  TestCase inputs[] = {
+      {"origin", true, kDoNotSupportReferrerPolicyLegacyKeywords,
+       kReferrerPolicyOrigin},
+      {"none", true, kSupportReferrerPolicyLegacyKeywords,
+       kReferrerPolicyNever},
+      {"none", false, kDoNotSupportReferrerPolicyLegacyKeywords,
+       kReferrerPolicyDefault},
+      {"foo", false, kDoNotSupportReferrerPolicyLegacyKeywords,
+       kReferrerPolicyDefault},
+      {"origin, foo", true, kDoNotSupportReferrerPolicyLegacyKeywords,
+       kReferrerPolicyOrigin},
+      {"origin, foo-bar", true, kDoNotSupportReferrerPolicyLegacyKeywords,
+       kReferrerPolicyOrigin},
+      {"origin, foo bar", false, kDoNotSupportReferrerPolicyLegacyKeywords,
+       kReferrerPolicyDefault},
+  };
+
+  for (TestCase test : inputs) {
+    ReferrerPolicy actual_policy = kReferrerPolicyDefault;
+    EXPECT_EQ(test.is_valid, SecurityPolicy::ReferrerPolicyFromHeaderValue(
+                                 test.header, test.keywords, &actual_policy));
+    if (test.is_valid)
+      EXPECT_EQ(test.expected_policy, actual_policy);
+  }
+}
+
 TEST(SecurityPolicyTest, TrustworthyWhiteList) {
   const char* insecure_urls[] = {
       "http://a.test/path/to/file.html", "http://b.test/path/to/file.html",
@@ -217,7 +251,8 @@ TEST(SecurityPolicyTest, TrustworthyWhiteList) {
   };
 
   for (const char* url : insecure_urls) {
-    RefPtr<SecurityOrigin> origin = SecurityOrigin::CreateFromString(url);
+    scoped_refptr<const SecurityOrigin> origin =
+        SecurityOrigin::CreateFromString(url);
     EXPECT_FALSE(origin->IsPotentiallyTrustworthy());
     SecurityPolicy::AddOriginTrustworthyWhiteList(*origin);
     EXPECT_TRUE(origin->IsPotentiallyTrustworthy());
@@ -239,8 +274,9 @@ TEST(SecurityPolicyTest, TrustworthyWhiteList) {
   };
   for (const TestCase& test : insecure_urls_with_inner_origin) {
     // Actually origins of both URLs should be same.
-    RefPtr<SecurityOrigin> origin1 = SecurityOrigin::CreateFromString(test.url);
-    RefPtr<SecurityOrigin> origin2 =
+    scoped_refptr<const SecurityOrigin> origin1 =
+        SecurityOrigin::CreateFromString(test.url);
+    scoped_refptr<const SecurityOrigin> origin2 =
         SecurityOrigin::CreateFromString(test.another_url_in_origin);
 
     EXPECT_FALSE(origin1->IsPotentiallyTrustworthy());

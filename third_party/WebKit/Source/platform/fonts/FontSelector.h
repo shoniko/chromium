@@ -26,11 +26,11 @@
 #ifndef FontSelector_h
 #define FontSelector_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/PlatformExport.h"
 #include "platform/fonts/FontCacheClient.h"
 #include "platform/fonts/SegmentedFontData.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
@@ -38,12 +38,13 @@ namespace blink {
 class ExecutionContext;
 class FontData;
 class FontDescription;
+class FontFaceCache;
 class FontSelectorClient;
 class GenericFontFamilySettings;
 
 class PLATFORM_EXPORT FontSelector : public FontCacheClient {
  public:
-  virtual ~FontSelector() {}
+  virtual ~FontSelector() = default;
   virtual scoped_refptr<FontData> GetFontData(const FontDescription&,
                                        const AtomicString& family_name) = 0;
 
@@ -66,6 +67,12 @@ class PLATFORM_EXPORT FontSelector : public FontCacheClient {
   virtual void FontFaceInvalidated(){};
 
   virtual ExecutionContext* GetExecutionContext() const = 0;
+
+  virtual FontFaceCache* GetFontFaceCache() = 0;
+
+  virtual bool IsPlatformFamilyMatchAvailable(
+      const FontDescription&,
+      const AtomicString& passed_family) = 0;
 
  protected:
   static AtomicString FamilyNameFromSettings(

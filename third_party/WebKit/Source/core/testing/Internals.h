@@ -164,6 +164,8 @@ class Internals final : public ScriptWrappable {
                             ExceptionState&) const;
   void clearHitTestCache(Document*, ExceptionState&) const;
 
+  Element* innerEditorElement(Element* container, ExceptionState&) const;
+
   String visiblePlaceholder(Element*);
   bool isValidationMessageVisible(Element*);
   void selectColorInColorChooser(Element*, const String& color_value);
@@ -189,6 +191,14 @@ class Internals final : public ScriptWrappable {
                                   const String& marker_type,
                                   unsigned index,
                                   ExceptionState&);
+  unsigned markerBackgroundColorForNode(Node*,
+                                        const String& marker_type,
+                                        unsigned index,
+                                        ExceptionState&);
+  unsigned markerUnderlineColorForNode(Node*,
+                                       const String& marker_type,
+                                       unsigned index,
+                                       ExceptionState&);
   void addTextMatchMarker(const Range*,
                           const String& match_status,
                           ExceptionState&);
@@ -225,6 +235,7 @@ class Internals final : public ScriptWrappable {
   bool elementShouldAutoComplete(Element* input_element, ExceptionState&);
   String suggestedValue(Element*, ExceptionState&);
   void setSuggestedValue(Element*, const String&, ExceptionState&);
+  void setAutofilledValue(Element*, const String&, ExceptionState&);
   void setEditingValue(Element* input_element, const String&, ExceptionState&);
   void setAutofilled(Element*, bool enabled, ExceptionState&);
 
@@ -259,12 +270,6 @@ class Internals final : public ScriptWrappable {
                                                long height,
                                                Document*,
                                                ExceptionState&);
-  DOMRectReadOnly* bestZoomableAreaForTouchPoint(long x,
-                                                 long y,
-                                                 long width,
-                                                 long height,
-                                                 Document*,
-                                                 ExceptionState&);
 
   int lastSpellCheckRequestSequence(Document*, ExceptionState&);
   int lastSpellCheckProcessedSequence(Document*, ExceptionState&);
@@ -277,7 +282,7 @@ class Internals final : public ScriptWrappable {
 
   unsigned mediaKeysCount();
   unsigned mediaKeySessionCount();
-  unsigned suspendableObjectCount(Document*);
+  unsigned pausableObjectCount(Document*);
   unsigned wheelEventHandlerCount(Document*) const;
   unsigned scrollEventHandlerCount(Document*) const;
   unsigned touchStartOrMoveEventHandlerCount(Document*) const;
@@ -311,7 +316,6 @@ class Internals final : public ScriptWrappable {
 
   bool hasSpellingMarker(Document*, int from, int length, ExceptionState&);
   bool hasGrammarMarker(Document*, int from, int length, ExceptionState&);
-  void setSpellCheckingEnabled(bool, ExceptionState&);
   void replaceMisspelled(Document*, const String&, ExceptionState&);
 
   bool canHyphenate(const AtomicString& locale);
@@ -485,8 +489,6 @@ class Internals final : public ScriptWrappable {
 
   void setValueForUser(HTMLInputElement*, const String&);
 
-  String textSurroundingNode(Node*, int x, int y, unsigned long max_length);
-
   void setFocused(bool);
   void setInitialFocus(bool);
 
@@ -500,6 +502,8 @@ class Internals final : public ScriptWrappable {
                                      unsigned long transport_rtt_msec,
                                      double downlink_throughput_mbps,
                                      ExceptionState&);
+  void setSaveDataEnabled(bool);
+
   void clearNetworkConnectionInfoOverride();
 
   unsigned countHitRegions(CanvasRenderingContext*);
@@ -575,6 +579,9 @@ class Internals final : public ScriptWrappable {
 
   // Intentional crash.
   void crash();
+
+  // Exposed for testing of inspector overlay.
+  String evaluateInInspectorOverlay(const String& script);
 
   // Overrides if the device is low-end (low on memory).
   void setIsLowEndDevice(bool);

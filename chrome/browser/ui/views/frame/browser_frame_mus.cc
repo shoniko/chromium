@@ -6,7 +6,8 @@
 
 #include <stdint.h>
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -19,6 +20,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/public/cpp/shelf_types.h"
+#include "ash/public/interfaces/window_properties.mojom.h"
 #include "ash/public/interfaces/window_style.mojom.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #endif
@@ -52,12 +54,18 @@ views::Widget::InitParams BrowserFrameMus::GetWidgetParams() {
   properties[ui::mojom::WindowManager::kShelfItemType_Property] =
       mojo::ConvertTo<std::vector<uint8_t>>(
           static_cast<int64_t>(ash::TYPE_BROWSER_SHORTCUT));
+  properties[ash::mojom::kWindowPositionManaged_Property] =
+      mojo::ConvertTo<std::vector<uint8_t>>(
+          static_cast<int64_t>(browser_view_->browser()->is_type_popup()));
+  properties[ash::mojom::kCanConsumeSystemKeys_Property] =
+      mojo::ConvertTo<std::vector<uint8_t>>(
+          static_cast<int64_t>(browser_view_->browser()->is_app()));
 #endif
   aura::WindowTreeHostMusInitParams window_tree_host_init_params =
       aura::CreateInitParamsForTopLevel(
           views::MusClient::Get()->window_tree_client(), std::move(properties));
   std::unique_ptr<views::DesktopWindowTreeHostMus> desktop_window_tree_host =
-      base::MakeUnique<views::DesktopWindowTreeHostMus>(
+      std::make_unique<views::DesktopWindowTreeHostMus>(
           std::move(window_tree_host_init_params), browser_frame_, this);
   // BrowserNonClientFrameViewMus::OnBoundsChanged() takes care of updating
   // the insets.

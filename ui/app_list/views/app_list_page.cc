@@ -6,12 +6,6 @@
 
 #include "ui/app_list/views/contents_view.h"
 
-namespace {
-
-// The default z height for the search box.
-const int kDefaultSearchBoxZHeight = 2;
-}  // namespace
-
 namespace app_list {
 
 AppListPage::AppListPage() : contents_view_(nullptr) {}
@@ -45,10 +39,6 @@ gfx::Rect AppListPage::GetPageBoundsDuringDragging(
   return GetPageBoundsForState(state);
 }
 
-int AppListPage::GetSearchBoxZHeight() const {
-  return kDefaultSearchBoxZHeight;
-}
-
 views::View* AppListPage::GetSelectedView() const {
   return nullptr;
 }
@@ -76,11 +66,6 @@ gfx::Rect AppListPage::GetFullContentsBounds() const {
 gfx::Rect AppListPage::GetDefaultContentsBounds() const {
   DCHECK(contents_view_);
   return contents_view_->GetDefaultContentsBounds();
-}
-
-bool AppListPage::IsCustomLauncherPageActive() const {
-  return contents_view_->IsStateActive(
-      AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
 }
 
 }  // namespace app_list

@@ -32,7 +32,6 @@ void CreateNewFileDone(
 
 }  // namespace
 
-namespace chrome {
 namespace android {
 
 ChromeDuplicateDownloadInfoBarDelegate::
@@ -73,7 +72,7 @@ ChromeDuplicateDownloadInfoBarDelegate::ChromeDuplicateDownloadInfoBarDelegate(
 
 infobars::InfoBarDelegate::InfoBarIdentifier
 ChromeDuplicateDownloadInfoBarDelegate::GetIdentifier() const {
-  return CHROME_DUPLICATE_DOWNLOAD_INFOBAR_DELEGATE;
+  return DUPLICATE_DOWNLOAD_INFOBAR_DELEGATE_ANDROID;
 }
 
 bool ChromeDuplicateDownloadInfoBarDelegate::Accept() {
@@ -130,4 +129,3 @@ void ChromeDuplicateDownloadInfoBarDelegate::RecordDuplicateInfobarType(
 }
 
 }  // namespace android
-}  // namespace chrome

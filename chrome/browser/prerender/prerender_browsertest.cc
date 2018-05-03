@@ -23,6 +23,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/bind_test_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/test_timeouts.h"
@@ -38,7 +39,9 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/net/prediction_options.h"
+#include "chrome/browser/page_load_metrics/metrics_web_contents_observer.h"
 #include "chrome/browser/page_load_metrics/observers/prerender_page_load_metrics_observer.h"
+#include "chrome/browser/page_load_metrics/page_load_tracker.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
@@ -97,19 +100,22 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/browser_side_navigation_policy.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/resource_request_body.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/browsing_data_remover_test_util.h"
 #include "content/public/test/ppapi_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
+#include "content/public/test/url_loader_interceptor.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest_handlers/mime_types_handler.h"
 #include "extensions/common/switches.h"
 #include "extensions/test/result_catcher.h"
+#include "media/base/media_switches.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/base/escape.h"
 #include "net/cert/x509_certificate.h"
 #include "net/dns/mock_host_resolver.h"
@@ -125,6 +131,7 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_job.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -144,7 +151,6 @@ using content::WebContentsObserver;
 using net::NetworkChangeNotifier;
 using prerender::test_utils::RequestCounter;
 using prerender::test_utils::CreateCountingInterceptorOnIO;
-using prerender::test_utils::CreateHangingFirstRequestInterceptor;
 using prerender::test_utils::CreateMockInterceptorOnIO;
 using prerender::test_utils::TestPrerender;
 using prerender::test_utils::TestPrerenderContents;
@@ -220,6 +226,61 @@ class MockNetworkChangeNotifier4G : public NetworkChangeNotifier {
   ConnectionType GetCurrentConnectionType() const override {
     return NetworkChangeNotifier::CONNECTION_4G;
   }
+};
+
+// Wait for PageLoadMetrics parse start metrics to be flushed out.
+class ParseStartMetricsWaiter
+    : public page_load_metrics::MetricsWebContentsObserver::TestingObserver {
+ public:
+  explicit ParseStartMetricsWaiter(content::WebContents* web_contents)
+      : TestingObserver(web_contents), weak_factory_(this) {}
+
+  ~ParseStartMetricsWaiter() override { CHECK_EQ(nullptr, run_loop_.get()); }
+
+  // MetricsWebContentsObserver::TestingObserver implementation.
+  void OnTrackerCreated(page_load_metrics::PageLoadTracker* tracker) override {
+    tracker->AddObserver(
+        base::MakeUnique<WaiterObserver>(weak_factory_.GetWeakPtr()));
+  }
+
+  void Wait() {
+    if (saw_metrics_)
+      return;
+
+    run_loop_ = base::MakeUnique<base::RunLoop>();
+    run_loop_->Run();
+    run_loop_ = nullptr;
+    EXPECT_TRUE(saw_metrics_);
+  }
+
+  void MarkMetricsSeen() {
+    saw_metrics_ = true;
+    if (run_loop_)
+      run_loop_->Quit();
+  }
+
+ private:
+  class WaiterObserver : public page_load_metrics::PageLoadMetricsObserver {
+   public:
+    explicit WaiterObserver(base::WeakPtr<ParseStartMetricsWaiter> waiter)
+        : waiter_(waiter) {}
+
+    void OnTimingUpdate(
+        bool is_subframe,
+        const page_load_metrics::mojom::PageLoadTiming& timing,
+        const page_load_metrics::PageLoadExtraInfo& extra_info) override {
+      if (timing.parse_timing->parse_start && waiter_) {
+        waiter_->MarkMetricsSeen();
+      }
+    }
+
+   private:
+    const base::WeakPtr<ParseStartMetricsWaiter> waiter_;
+  };
+
+  bool saw_metrics_ = false;
+  std::unique_ptr<base::RunLoop> run_loop_;
+  base::WeakPtrFactory<ParseStartMetricsWaiter> weak_factory_;
 };
 
 // Constants used in the test HTML files.
@@ -488,7 +549,7 @@ class FakeDevToolsClient : public content::DevToolsAgentHostClient {
   ~FakeDevToolsClient() override {}
   void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
                                const std::string& message) override {}
-  void AgentHostClosed(DevToolsAgentHost* agent_host, bool replaced) override {}
+  void AgentHostClosed(DevToolsAgentHost* agent_host) override {}
 };
 
 // A ContentBrowserClient that cancels all prerenderers on OpenURL.
@@ -509,24 +570,6 @@ class TestContentBrowserClient : public ChromeContentBrowserClient {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestContentBrowserClient);
-};
-
-// A ContentBrowserClient that forces cross-process navigations.
-class SwapProcessesContentBrowserClient : public ChromeContentBrowserClient {
- public:
-  SwapProcessesContentBrowserClient() {}
-  ~SwapProcessesContentBrowserClient() override {}
-
-  // ChromeContentBrowserClient:
-  bool ShouldSwapProcessesForRedirect(
-      content::BrowserContext* browser_context,
-      const GURL& current_url,
-      const GURL& new_url) override {
-    return true;
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SwapProcessesContentBrowserClient);
 };
 
 base::FilePath GetTestPath(const std::string& file_name) {
@@ -563,6 +606,14 @@ class PrerenderBrowserTest : public test_utils::PrerenderInProcessBrowserTest {
 
   ~PrerenderBrowserTest() override {}
 
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitchASCII(
+        switches::kAutoplayPolicy,
+        switches::autoplay::kNoUserGestureRequiredPolicy);
+
+    test_utils::PrerenderInProcessBrowserTest::SetUpCommandLine(command_line);
+  }
+
   std::unique_ptr<TestPrerender> PrerenderTestURL(
       const std::string& html_file,
       FinalStatus expected_final_status,
@@ -597,8 +648,6 @@ class PrerenderBrowserTest : public test_utils::PrerenderInProcessBrowserTest {
     test_utils::PrerenderInProcessBrowserTest::SetUpOnMainThread();
     prerender::PrerenderManager::SetMode(
         prerender::PrerenderManager::PRERENDER_MODE_ENABLED);
-    prerender::PrerenderManager::SetInstantMode(
-        prerender::PrerenderManager::PRERENDER_MODE_ENABLED);
     prerender::PrerenderManager::SetOmniboxMode(
         prerender::PrerenderManager::PRERENDER_MODE_ENABLED);
     const testing::TestInfo* const test_info =
@@ -608,9 +657,9 @@ class PrerenderBrowserTest : public test_utils::PrerenderInProcessBrowserTest {
       host_resolver()->AddRule("*", "127.0.0.1");
   }
 
-  void SetUpInProcessBrowserTestFixture() override {
-    test_utils::PrerenderInProcessBrowserTest::
-        SetUpInProcessBrowserTestFixture();
+  void TearDownOnMainThread() override {
+    test_utils::PrerenderInProcessBrowserTest::TearDownOnMainThread();
+    interceptor_.reset();
   }
 
   void NavigateToDestURL() const {
@@ -918,6 +967,39 @@ class PrerenderBrowserTest : public test_utils::PrerenderInProcessBrowserTest {
     mid_load_clock_ = nullptr;
   }
 
+  // Makes |url| never respond on the first load, and then with the contents of
+  // |file| afterwards. When the first load has been scheduled, runs
+  // |callback_io| on the IO thread.
+  void CreateHangingFirstRequestInterceptor(const GURL& url,
+                                            const base::FilePath& file,
+                                            base::Closure closure) {
+    // TODO(jam): use the URLLoaderInterceptor for the non-network service path
+    // once http://crbug.com/740130 is fixed.
+    if (base::FeatureList::IsEnabled(features::kNetworkService)) {
+      DCHECK(!interceptor_);
+      interceptor_ = std::make_unique<content::URLLoaderInterceptor>(
+          base::BindLambdaForTesting(
+              [=](content::URLLoaderInterceptor::RequestParams* params) {
+                if (params->url_request.url == url) {
+                  static bool first = true;
+                  if (first) {
+                    first = false;
+                    // Need to leak the client pipe, or else the renderer will
+                    // get a disconnect error and load the error page.
+                    auto* leak_client = new network::mojom::URLLoaderClientPtr;
+                    *leak_client = std::move(params->client);
+                    closure.Run();
+                    return true;
+                  }
+                }
+                return false;
+              }));
+    } else {
+      test_utils::CreateHangingFirstRequestInterceptor(
+          url, file, GetIOCallbackFromUIClosure(closure));
+    }
+  }
+
  private:
   // TODO(davidben): Remove this altogether so the tests don't globally assume
   // only one prerender.
@@ -1041,6 +1123,7 @@ class PrerenderBrowserTest : public test_utils::PrerenderInProcessBrowserTest {
   base::test::ScopedFeatureList feature_list_;
   base::TimeDelta mid_load_clock_tick_advance_;
   base::SimpleTestTickClock* mid_load_clock_;
+  std::unique_ptr<content::URLLoaderInterceptor> interceptor_;
 };
 
 // Checks that a page is correctly prerendered in the case of a
@@ -1098,14 +1181,18 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PageLoadMetricsPrerender) {
   test_utils::FirstContentfulPaintManagerWaiter* prerender_fcp_waiter =
       test_utils::FirstContentfulPaintManagerWaiter::Create(
           GetPrerenderManager());
+  std::unique_ptr<ParseStartMetricsWaiter> metrics_waiter =
+      std::make_unique<ParseStartMetricsWaiter>(
+          browser()->tab_strip_model()->GetActiveWebContents());
   PrerenderTestURL("/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
   NavigateToDestURL();
   prerender_fcp_waiter->Wait();
+  metrics_waiter->Wait();
 
   histogram_tester().ExpectTotalCount(
       "Prerender.websame_PrefetchTTFCP.Warm.Cacheable.Visible", 1);
 
-  // Histogram logged during the prefetch_loader.html load, but not during the
+  // Histogram logged during the prerender_loader.html load, but not during the
   // prerender.
   histogram_tester().ExpectTotalCount(
       "PageLoad.ParseTiming.NavigationToParseStart", 1);
@@ -1318,9 +1405,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderNoCommitNoSwap) {
   base::FilePath file(GetTestPath("prerender_page.html"));
 
   base::RunLoop prerender_start_loop;
-  CreateHangingFirstRequestInterceptor(
-      kNoCommitUrl, file,
-      GetIOCallbackFromUIClosure(prerender_start_loop.QuitClosure()));
+  CreateHangingFirstRequestInterceptor(kNoCommitUrl, file,
+                                       prerender_start_loop.QuitClosure());
   DisableJavascriptCalls();
   PrerenderTestURL(kNoCommitUrl,
                    FINAL_STATUS_NAVIGATION_UNCOMMITTED,
@@ -1345,9 +1431,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderNoCommitNoSwap2) {
   base::FilePath file(GetTestPath("prerender_page.html"));
 
   base::RunLoop prerender_start_loop;
-  CreateHangingFirstRequestInterceptor(
-      kNoCommitUrl, file,
-      GetIOCallbackFromUIClosure(prerender_start_loop.QuitClosure()));
+  CreateHangingFirstRequestInterceptor(kNoCommitUrl, file,
+                                       prerender_start_loop.QuitClosure());
   DisableJavascriptCalls();
   PrerenderTestURL(CreateClientRedirect(kNoCommitUrl.spec()),
                    FINAL_STATUS_APP_TERMINATING, 1);
@@ -1526,56 +1611,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   PrerenderTestURL("/prerender/prerender_location_replace.html",
                    FINAL_STATUS_USED, 2);
   NavigateToURL("/prerender/prerender_page.html");
-}
-
-// Checks that the PrefetchTTFCP histogram is recorded across the client
-// redirect when the referring page is Google.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       PrerenderLocationReplaceGWSHistograms) {
-  DisableJavascriptCalls();
-
-  // The loader page should look like Google.
-  static const char kGoogleDotCom[] = "www.google.com";
-  SetLoaderHostOverride(kGoogleDotCom);
-  set_loader_path("/prerender/prerender_loader_with_replace_state.html");
-
-  GURL dest_url =
-      GetCrossDomainTestUrl("prerender/prerender_deferred_image.html");
-
-  GURL prerender_url = embedded_test_server()->GetURL(
-      "/prerender/prerender_location_replace.html?" +
-      net::EscapeQueryParamValue(dest_url.spec(), false) + "#prerender");
-  GURL::Replacements replacements;
-  replacements.SetHostStr(kGoogleDotCom);
-  prerender_url = prerender_url.ReplaceComponents(replacements);
-
-  // The prerender will not completely load until after the swap, so wait for a
-  // title change before calling DidPrerenderPass.
-  std::unique_ptr<TestPrerender> prerender =
-      PrerenderTestURL(prerender_url, FINAL_STATUS_USED, 1);
-  WaitForASCIITitle(prerender->contents()->prerender_contents(), kReadyTitle);
-  EXPECT_TRUE(DidPrerenderPass(prerender->contents()->prerender_contents()));
-  EXPECT_EQ(1, prerender->number_of_loads());
-
-  GURL navigate_url = embedded_test_server()->GetURL(
-      "/prerender/prerender_location_replace.html?" +
-      net::EscapeQueryParamValue(dest_url.spec(), false) + "#navigate");
-  navigate_url = navigate_url.ReplaceComponents(replacements);
-
-  // Open the URL and wait for the FCP.
-  test_utils::FirstContentfulPaintManagerWaiter* fcp_waiter =
-      test_utils::FirstContentfulPaintManagerWaiter::Create(
-          GetPrerenderManager());
-  current_browser()->OpenURL(OpenURLParams(navigate_url, Referrer(),
-                                           WindowOpenDisposition::CURRENT_TAB,
-                                           ui::PAGE_TRANSITION_TYPED, false));
-  fcp_waiter->Wait();
-
-  // The client redirect changes the PageLoadExtraInfo.start_url and hence the
-  // past navigation cannot be found for the histogram to be recorded as
-  // PrefetchTTFCP.Warm.
-  histogram_tester().ExpectTotalCount(
-      "Prerender.gws_PrefetchTTFCP.Reference.Cacheable.Visible", 1);
 }
 
 // Checks that client-issued redirects work with prerendering.
@@ -1866,8 +1901,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderAbortPendingOnCancel) {
   EXPECT_TRUE(IsEmptyPrerenderLinkManager());
 }
 
-#if !defined(OS_ANDROID)
-
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, OpenTaskManagerBeforePrerender) {
   const base::string16 any_prerender = MatchTaskManagerPrerender("*");
   const base::string16 any_tab = MatchTaskManagerTab("*");
@@ -1956,8 +1989,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, OpenTaskManagerAfterSwapIn) {
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, any_tab));
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(0, any_prerender));
 }
-
-#endif  // !defined(OS_ANDROID)
 
 // Checks that audio loads are deferred on prerendering.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderHTML5Audio) {
@@ -2476,21 +2507,12 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderOldWebContentsDeleted) {
 // unload handlers on the referring page are executed and its WebContents is
 // destroyed.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderUnload) {
-  // Matches URL in prerender_loader_with_unload.html.
-  const GURL unload_url("http://unload-url.test");
-  base::FilePath empty_file = ui_test_utils::GetTestFilePath(
-      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("empty.html")));
-  RequestCounter unload_counter;
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&CreateCountingInterceptorOnIO, unload_url, empty_file,
-                     unload_counter.AsWeakPtr()));
-
   set_loader_path("/prerender/prerender_loader_with_unload.html");
   PrerenderTestURL("/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
   WebContentsDestructionObserver destruction_observer(GetActiveWebContents());
   NavigateToDestURL();
-  unload_counter.WaitForCount(1);
+  // Matches URL in prerender_loader_with_unload.html.
+  WaitForRequestCount(src_server()->GetURL("/unload-url"), 1);
   destruction_observer.Wait();
 }
 
@@ -2498,39 +2520,22 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderUnload) {
 // prerendered page is swapped in. Also checks that the WebContents of the
 // referring page is destroyed.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderBeforeUnload) {
-  // This URL is requested from prerender_loader_with_beforeunload.html.
-  const GURL beforeunload_url("http://unload-url.test");
-  base::FilePath empty_file = ui_test_utils::GetTestFilePath(
-      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("empty.html")));
-  RequestCounter request_counter;
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&CreateCountingInterceptorOnIO, beforeunload_url,
-                     empty_file, request_counter.AsWeakPtr()));
-
   set_loader_path("/prerender/prerender_loader_with_beforeunload.html");
   PrerenderTestURL("/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
   WebContentsDestructionObserver destruction_observer(GetActiveWebContents());
   NavigateToDestURL();
-  request_counter.WaitForCount(1);
+  // This URL is requested from prerender_loader_with_beforeunload.html.
+  WaitForRequestCount(src_server()->GetURL("/unload-url"), 1);
   destruction_observer.Wait();
 }
 
 // Checks that a hanging unload on the referring page of a prerender swap does
 // not crash the browser on exit.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderHangingUnload) {
-  // Matches URL in prerender_loader_with_unload.html.
-  const GURL hang_url("http://unload-url.test");
-  base::FilePath empty_file = ui_test_utils::GetTestFilePath(
-      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("empty.html")));
-  CreateHangingFirstRequestInterceptor(
-      hang_url, empty_file, base::Callback<void(net::URLRequest*)>());
-
-  set_loader_path("/prerender/prerender_loader_with_unload.html");
+  set_loader_path("/prerender/prerender_loader_with_hanging_unload.html");
   PrerenderTestURL("/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
   NavigateToDestURL();
 }
-
 
 // Checks that when the history is cleared, prerendering is cancelled and
 // prerendering history is cleared.
@@ -2839,6 +2844,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   net::test_server::GetFilePathWithReplacements(
       "/prerender/prerender_with_image.html", replacement_text,
       &replacement_path);
+  // Disable load event checks because they race with cancellation.
+  DisableLoadEventCheck();
   PrerenderTestURL(replacement_path, FINAL_STATUS_UNSUPPORTED_SCHEME, 0);
 }
 
@@ -2870,6 +2877,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   net::test_server::GetFilePathWithReplacements(
       "/prerender/prerender_with_image.html", replacement_text,
       &replacement_path);
+  // Disable load event checks because they race with cancellation.
+  DisableLoadEventCheck();
   PrerenderTestURL(replacement_path, FINAL_STATUS_UNSUPPORTED_SCHEME, 0);
 }
 
@@ -2908,6 +2917,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 // Checks that non-http/https main page redirects cancel the prerender.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
                        PrerenderCancelMainFrameRedirectUnsupportedScheme) {
+  // Disable load event checks because they race with cancellation.
+  DisableLoadEventCheck();
   GURL url = embedded_test_server()->GetURL(
       CreateServerRedirect("invalidscheme://www.google.com/test.html"));
   PrerenderTestURL(url, FINAL_STATUS_UNSUPPORTED_SCHEME, 0);
@@ -2937,51 +2948,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderCapturedWebContents) {
   web_contents->IncrementCapturerCount(gfx::Size());
   NavigateToDestURLWithDisposition(WindowOpenDisposition::CURRENT_TAB, false);
   web_contents->DecrementCapturerCount();
-}
-
-// Checks that prerenders are aborted on cross-process navigation from
-// a server redirect.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       PrerenderCrossProcessServerRedirect) {
-  // Cross-process navigations don't happen for prerendering with PlzNavigate,
-  // since we decide on a process after redirects are followed.
-  if (content::IsBrowserSideNavigationEnabled())
-    return;
-
-  // Force everything to be a process swap.
-  SwapProcessesContentBrowserClient test_browser_client;
-  content::ContentBrowserClient* original_browser_client =
-      content::SetBrowserClientForTesting(&test_browser_client);
-
-  PrerenderTestURL(CreateServerRedirect("/prerender/prerender_page.html"),
-                   FINAL_STATUS_OPEN_URL, 0);
-
-  content::SetBrowserClientForTesting(original_browser_client);
-}
-
-// Checks that URLRequests for prerenders being aborted on cross-process
-// navigation from a server redirect are cleaned up, so they don't keep cache
-// entries locked.
-// See http://crbug.com/341134
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       PrerenderCrossProcessServerRedirectNoHang) {
-  // Cross-process navigations don't happen for prerendering with PlzNavigate,
-  // since we decide on a process after redirects are followed.
-  if (content::IsBrowserSideNavigationEnabled())
-    return;
-
-  const char kDestPath[] = "/prerender/prerender_page.html";
-  // Force everything to be a process swap.
-  SwapProcessesContentBrowserClient test_browser_client;
-  content::ContentBrowserClient* original_browser_client =
-      content::SetBrowserClientForTesting(&test_browser_client);
-
-  PrerenderTestURL(CreateServerRedirect(kDestPath), FINAL_STATUS_OPEN_URL, 0);
-
-  ui_test_utils::NavigateToURL(browser(),
-                               embedded_test_server()->GetURL(kDestPath));
-
-  content::SetBrowserClientForTesting(original_browser_client);
 }
 
 // Checks that prerenders are aborted on cross-process navigation from
@@ -3081,6 +3047,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 
 // Checks that deferred redirects in a synchronous XHR abort the prerender.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderDeferredSynchronousXHR) {
+  // Disable load event checks because they race with cancellation.
+  DisableLoadEventCheck();
   PrerenderTestURL("/prerender/prerender_deferred_sync_xhr.html",
                    FINAL_STATUS_BAD_DEFERRED_REDIRECT, 0);
   ui_test_utils::NavigateToURL(current_browser(), dest_url());
@@ -3110,7 +3078,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
                                 WindowOpenDisposition::CURRENT_TAB,
                                 ui::PAGE_TRANSITION_TYPED, false);
   params.uses_post = true;
-  params.post_data = content::ResourceRequestBody::CreateFromBytes(
+  params.post_data = network::ResourceRequestBody::CreateFromBytes(
       post_data.data(), post_data.size());
   NavigateToURLWithParams(params, false);
 }
@@ -3160,19 +3128,11 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderReplaceCurrentEntry) {
 // Checks that <a ping> requests are not dropped in prerender.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPing) {
   // Count hits to a certain URL.
-  const GURL kPingURL("http://prerender.test/ping");
-  base::FilePath empty_file = ui_test_utils::GetTestFilePath(
-      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("empty.html")));
-  RequestCounter ping_counter;
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&CreateCountingInterceptorOnIO, kPingURL, empty_file,
-                     ping_counter.AsWeakPtr()));
-
+  const GURL kPingURL(src_server()->GetURL("/echo"));
   PrerenderTestURL("/prerender/prerender_page.html", FINAL_STATUS_USED, 1);
   OpenDestURLViaClickPing(kPingURL);
 
-  ping_counter.WaitForCount(1);
+  WaitForRequestCount(kPingURL, 1);
 }
 
 // Checks that a prerender which calls window.close() on itself is aborted.
@@ -3280,28 +3240,25 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, ResourcePriority) {
   GURL main_page_url =
       GetURLWithReplacement("/prerender/prerender_with_image.html",
                             "REPLACE_WITH_IMAGE_URL", kPrefetchJpeg);
-
-  // Setup request interceptors for subresources.
-  auto get_priority_lambda = [](net::RequestPriority* out_priority,
-                                net::URLRequest* request) {
-    *out_priority = request->priority();
-  };
-  RequestCounter before_swap_counter;
   net::RequestPriority before_swap_priority = net::THROTTLED;
-  InterceptRequestAndCount(
-      before_swap_url, &before_swap_counter,
-      base::Bind(get_priority_lambda, base::Unretained(&before_swap_priority)));
-  RequestCounter after_swap_counter;
   net::RequestPriority after_swap_priority = net::THROTTLED;
-  InterceptRequestAndCount(
-      after_swap_url, &after_swap_counter,
-      base::Bind(get_priority_lambda, base::Unretained(&after_swap_priority)));
+
+  content::URLLoaderInterceptor interceptor(
+      base::BindLambdaForTesting(
+          [&](content::URLLoaderInterceptor::RequestParams* params) {
+            if (params->url_request.url == before_swap_url)
+              before_swap_priority = params->url_request.priority;
+            else if (params->url_request.url == after_swap_url)
+              after_swap_priority = params->url_request.priority;
+            return false;
+          }),
+      false, true);
 
   // Start the prerender.
   PrerenderTestURL(main_page_url, FINAL_STATUS_USED, 1);
 
   // Check priority before swap.
-  before_swap_counter.WaitForCount(1);
+  WaitForRequestCount(before_swap_url, 1);
 #if defined(OS_ANDROID)
   EXPECT_GT(before_swap_priority, net::IDLE);
 #else
@@ -3315,9 +3272,39 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, ResourcePriority) {
   GetActiveWebContents()->GetMainFrame()->ExecuteJavaScriptForTests(
       base::ASCIIToUTF16(
           "var img=new Image(); img.src='/prerender/image.png'"));
-  after_swap_counter.WaitForCount(1);
+  WaitForRequestCount(after_swap_url, 1);
   EXPECT_NE(net::IDLE, after_swap_priority);
 }
+
+namespace {
+
+class HangingURLLoader : public network::mojom::URLLoader {
+ public:
+  explicit HangingURLLoader(network::mojom::URLLoaderClientPtr client)
+      : client_(std::move(client)) {}
+  ~HangingURLLoader() override {}
+  // mojom::URLLoader implementation:
+  void FollowRedirect() override {}
+  void ProceedWithResponse() override {}
+  void SetPriority(net::RequestPriority priority,
+                   int32_t intra_priority_value) override {
+    if (set_priority_callback_)
+      std::move(set_priority_callback_).Run(priority);
+  }
+  void PauseReadingBodyFromNet() override {}
+  void ResumeReadingBodyFromNet() override {}
+
+  using SetPriorityCallback = base::OnceCallback<void(net::RequestPriority)>;
+  void set_set_priority_callback(SetPriorityCallback callback) {
+    set_priority_callback_ = std::move(callback);
+  }
+
+ private:
+  network::mojom::URLLoaderClientPtr client_;
+  SetPriorityCallback set_priority_callback_;
+};
+
+}  // namespace
 
 // Checks that a request started before the swap gets its original priority back
 // after the swap.
@@ -3327,30 +3314,30 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, ResourcePriorityOverlappingSwap) {
       GetURLWithReplacement("/prerender/prerender_with_image.html",
                             "REPLACE_WITH_IMAGE_URL", kPrefetchJpeg);
 
-  // Setup request interceptors for subresources.
-  net::URLRequest* url_request = nullptr;
   net::RequestPriority priority = net::THROTTLED;
-  base::RunLoop wait_loop;
-  auto io_lambda = [](net::URLRequest** out_request,
-                      net::RequestPriority* out_priority, base::Closure closure,
-                      net::URLRequest* request) {
-    if (out_request)
-      *out_request = request;
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI, FROM_HERE,
-        base::BindOnce(
-            [](net::RequestPriority priority,
-               net::RequestPriority* out_priority, base::Closure closure) {
-              *out_priority = priority;
-              closure.Run();
-            },
-            request->priority(), base::Unretained(out_priority), closure));
-  };
+  base::RunLoop load_image_run_loop, set_priority_run_loop;
+  content::URLLoaderInterceptor interceptor(
+      base::BindLambdaForTesting(
+          [&](content::URLLoaderInterceptor::RequestParams* params) {
+            if (params->url_request.url == image_url) {
+              // Check priority before swap.
+              priority = params->url_request.priority;
+              load_image_run_loop.QuitClosure().Run();
 
-  CreateHangingFirstRequestInterceptor(
-      image_url, base::FilePath(),
-      base::Bind(io_lambda, base::Unretained(&url_request),
-                 base::Unretained(&priority), wait_loop.QuitClosure()));
+              auto loader =
+                  std::make_unique<HangingURLLoader>(std::move(params->client));
+              loader->set_set_priority_callback(base::BindLambdaForTesting(
+                  [&](net::RequestPriority request_priority) {
+                    priority = request_priority;
+                    set_priority_run_loop.QuitClosure().Run();
+                  }));
+              mojo::MakeStrongBinding(std::move(loader),
+                                      std::move(params->request));
+              return true;
+            }
+            return false;
+          }),
+      false, true);
 
   // The prerender will hang on the image resource, can't run the usual checks.
   DisableLoadEventCheck();
@@ -3358,14 +3345,11 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, ResourcePriorityOverlappingSwap) {
   // Start the prerender.
   PrerenderTestURL(main_page_url, FINAL_STATUS_USED, 0);
 
-// Check priority before swap.
+  // Check priority before swap.
+  load_image_run_loop.Run();
 #if defined(OS_ANDROID)
-  if (priority <= net::IDLE)
-    wait_loop.Run();
   EXPECT_GT(priority, net::IDLE);
 #else
-  if (priority != net::IDLE)
-    wait_loop.Run();
   EXPECT_EQ(net::IDLE, priority);
 #endif
 
@@ -3376,15 +3360,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, ResourcePriorityOverlappingSwap) {
       ui::PAGE_TRANSITION_TYPED, false));
 
   // Check priority after swap. The test may timeout in case of failure.
-  priority = net::THROTTLED;
-  do {
-    base::RunLoop loop;
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
-        base::BindOnce(io_lambda, nullptr, base::Unretained(&priority),
-                       loop.QuitClosure(), base::Unretained(url_request)));
-    loop.Run();
-  } while (priority <= net::IDLE);
+  set_priority_run_loop.Run();
   EXPECT_GT(priority, net::IDLE);
 }
 
@@ -3422,9 +3398,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, FirstContentfulPaintTimingReuse) {
 
   GURL url = embedded_test_server()->GetURL("/prerender/prerender_page.html");
   base::RunLoop hanging_request_waiter;
-  CreateHangingFirstRequestInterceptor(
-      url, GetTestPath("prerender_page.html"),
-      GetIOCallbackFromUIClosure(hanging_request_waiter.QuitClosure()));
+  CreateHangingFirstRequestInterceptor(url, GetTestPath("prerender_page.html"),
+                                       hanging_request_waiter.QuitClosure());
   // As this load will be canceled, it is not waited for, and hence no
   // javascript is executed.
   DisableJavascriptCalls();
@@ -3513,9 +3488,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
       base::FilePath(FILE_PATH_LITERAL("prerender/prerender_page.html")));
 
   base::RunLoop prerender_start_loop;
-  CreateHangingFirstRequestInterceptor(
-      url, url_file,
-      GetIOCallbackFromUIClosure(prerender_start_loop.QuitClosure()));
+  CreateHangingFirstRequestInterceptor(url, url_file,
+                                       prerender_start_loop.QuitClosure());
   // As this load is uncommitted, it is not waited for, and hence no
   // javascript is executed.
   DisableJavascriptCalls();
@@ -3638,9 +3612,9 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
       base::FilePath(FILE_PATH_LITERAL("prerender/prerender_page.html")));
 
   base::RunLoop prerender_start_loop;
-  CreateHangingFirstRequestInterceptor(
-      url, url_file,
-      GetIOCallbackFromUIClosure(prerender_start_loop.QuitClosure()));
+  CreateHangingFirstRequestInterceptor(url, url_file,
+                                       prerender_start_loop.QuitClosure());
+
   // As this load is uncommitted, it is not waited for, and hence no
   // javascript is executed.
   DisableJavascriptCalls();

@@ -4,10 +4,11 @@
 
 #include "headless/test/headless_browser_test.h"
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -147,10 +148,12 @@ void HeadlessBrowserTest::SetUp() {
 }
 
 void HeadlessBrowserTest::SetUpWithoutGPU() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  SetUpCommandLine(command_line);
   BrowserTestBase::SetUp();
 }
 
-HeadlessBrowserTest::~HeadlessBrowserTest() {}
+HeadlessBrowserTest::~HeadlessBrowserTest() = default;
 
 void HeadlessBrowserTest::PreRunTestOnMainThread() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
@@ -197,8 +200,10 @@ void HeadlessBrowserTest::RunAsynchronousTest() {
   base::MessageLoop::ScopedNestableTaskAllower nestable_allower(
       base::MessageLoop::current());
   EXPECT_FALSE(run_loop_);
-  run_loop_ = base::MakeUnique<base::RunLoop>();
+  run_loop_ = std::make_unique<base::RunLoop>();
+  PreRunAsynchronousTest();
   run_loop_->Run();
+  PostRunAsynchronousTest();
   run_loop_ = nullptr;
 }
 
@@ -213,7 +218,8 @@ HeadlessAsyncDevTooledBrowserTest::HeadlessAsyncDevTooledBrowserTest()
       browser_devtools_client_(HeadlessDevToolsClient::Create()),
       render_process_exited_(false) {}
 
-HeadlessAsyncDevTooledBrowserTest::~HeadlessAsyncDevTooledBrowserTest() {}
+HeadlessAsyncDevTooledBrowserTest::~HeadlessAsyncDevTooledBrowserTest() =
+    default;
 
 void HeadlessAsyncDevTooledBrowserTest::DevToolsTargetReady() {
   EXPECT_TRUE(web_contents_->GetDevToolsTarget());
@@ -248,6 +254,7 @@ void HeadlessAsyncDevTooledBrowserTest::RunTest() {
 
   web_contents_ = browser_context_->CreateWebContentsBuilder()
                       .SetAllowTabSockets(GetAllowTabSockets())
+                      .SetEnableBeginFrameControl(GetEnableBeginFrameControl())
                       .Build();
   web_contents_->AddObserver(this);
 
@@ -268,6 +275,10 @@ ProtocolHandlerMap HeadlessAsyncDevTooledBrowserTest::GetProtocolHandlers() {
 }
 
 bool HeadlessAsyncDevTooledBrowserTest::GetAllowTabSockets() {
+  return false;
+}
+
+bool HeadlessAsyncDevTooledBrowserTest::GetEnableBeginFrameControl() {
   return false;
 }
 

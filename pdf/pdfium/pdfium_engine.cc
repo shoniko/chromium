@@ -138,6 +138,10 @@ constexpr base::TimeDelta kMaxProgressivePaintTime =
 constexpr base::TimeDelta kMaxInitialProgressivePaintTime =
     base::TimeDelta::FromMilliseconds(250);
 
+// Flag to turn edit mode tracking on.
+// Do not flip until form saving is completely functional.
+constexpr bool kIsEditModeTracked = false;
+
 PDFiumEngine* g_engine_for_fontmapper = nullptr;
 
 std::vector<uint32_t> GetPageNumbersFromPrintPageNumberRange(
@@ -476,6 +480,12 @@ bool IsAboveOrDirectlyLeftOf(const S& lhs, const S& rhs) {
   return lhs.y() < rhs.y() || (lhs.y() == rhs.y() && lhs.x() < rhs.x());
 }
 
+int CalculateCenterForZoom(int center, int length, double zoom) {
+  int adjusted_center =
+      static_cast<int>(center * zoom) - static_cast<int>(length * zoom / 2);
+  return std::max(adjusted_center, 0);
+}
+
 // This formats a string with special 0xfffe end-of-line hyphens the same way
 // as Adobe Reader. When a hyphen is encountered, the next non-CR/LF whitespace
 // becomes CR+LF and the hyphen is erased. If there is no whitespace between
@@ -726,7 +736,8 @@ PDFiumEngine::PDFiumEngine(PDFEngine::Client* client)
       most_visible_page_(-1),
       called_do_document_action_(false),
       render_grayscale_(false),
-      render_annots_(true) {
+      render_annots_(true),
+      edit_mode_(false) {
   find_factory_.Initialize(this);
   password_factory_.Initialize(this);
 
@@ -896,7 +907,7 @@ int PDFiumEngine::Form_GetPlatform(FPDF_FORMFILLINFO* param,
 #endif
 
   std::string javascript =
-      "alert(\"Platform:" + base::DoubleToString(platform_flag) + "\")";
+      "alert(\"Platform:" + base::NumberToString(platform_flag) + "\")";
 
   return platform_flag;
 }
@@ -1031,7 +1042,6 @@ void PDFiumEngine::ScrolledToXPosition(int position) {
   position_.set_x(position);
   CalculateVisiblePages();
   client_->Scroll(pp::Point(old_x - position, 0));
-  OnSelectionChanged();
 }
 
 void PDFiumEngine::ScrolledToYPosition(int position) {
@@ -1041,7 +1051,6 @@ void PDFiumEngine::ScrolledToYPosition(int position) {
   position_.set_y(position);
   CalculateVisiblePages();
   client_->Scroll(pp::Point(0, old_y - position));
-  OnSelectionChanged();
 }
 
 void PDFiumEngine::PrePaint() {
@@ -1219,8 +1228,11 @@ void PDFiumEngine::OnPendingRequestComplete() {
   for (int pending_page : pending_pages_) {
     if (CheckPageAvailable(pending_page, &still_pending)) {
       update_pages = true;
-      if (IsPageVisible(pending_page))
+      if (IsPageVisible(pending_page)) {
+        client_->NotifyPageBecameVisible(
+            pages_[pending_page]->GetPageFeatures());
         client_->Invalidate(GetPageScreenRect(pending_page));
+      }
     }
   }
   pending_pages_.swap(still_pending);
@@ -1399,9 +1411,15 @@ bool PDFiumEngine::HandleEvent(const pp::InputEvent& event) {
 
   DCHECK(defer_page_unload_);
   defer_page_unload_ = false;
-  for (int page_index : deferred_page_unloads_)
+
+  // Store the pages to unload away because the act of unloading pages can cause
+  // there to be more pages to unload. We leave those extra pages to be unloaded
+  // on the next go around.
+  std::vector<int> pages_to_unload;
+  std::swap(pages_to_unload, deferred_page_unloads_);
+  for (int page_index : pages_to_unload)
     pages_[page_index]->Unload();
-  deferred_page_unloads_.clear();
+
   return rv;
 }
 
@@ -1525,7 +1543,7 @@ pp::Buffer_Dev PDFiumEngine::PrintPagesAsRasterPDF(
   if (!output_doc)
     return pp::Buffer_Dev();
 
-  SaveSelectedFormForPrint();
+  KillFormFocus();
 
   std::vector<PDFiumPage> pages_to_print;
   // width and height of source PDF pages.
@@ -1625,7 +1643,7 @@ pp::Buffer_Dev PDFiumEngine::PrintPagesAsPDF(
   if (!output_doc)
     return pp::Buffer_Dev();
 
-  SaveSelectedFormForPrint();
+  KillFormFocus();
 
   std::string page_number_str;
   for (uint32_t index = 0; index < page_range_count; ++index) {
@@ -1679,7 +1697,7 @@ void PDFiumEngine::FitContentsToPrintableAreaIfRequired(
   }
 }
 
-void PDFiumEngine::SaveSelectedFormForPrint() {
+void PDFiumEngine::KillFormFocus() {
   FORM_ForceToKillFocus(form_);
   SetInFormTextArea(false);
 }
@@ -2328,16 +2346,14 @@ void PDFiumEngine::SearchUsingICU(const base::string16& term,
   if (text_length <= 0)
     return;
 
-  // Adding +1 to text_length to account for the string terminator that is
-  // included.
   base::string16 page_text;
   PDFiumAPIStringBufferAdapter<base::string16> api_string_adapter(
-      &page_text, text_length + 1, false);
+      &page_text, text_length, false);
   unsigned short* data =
       reinterpret_cast<unsigned short*>(api_string_adapter.GetData());
-  int written = FPDFText_GetText(pages_[current_page]->GetTextPage(),
-                                 character_to_start_searching_from,
-                                 text_length + 1, data);
+  int written =
+      FPDFText_GetText(pages_[current_page]->GetTextPage(),
+                       character_to_start_searching_from, text_length, data);
   api_string_adapter.Close(written);
 
   std::vector<PDFEngine::Client::SearchStringResult> results =
@@ -2345,7 +2361,9 @@ void PDFiumEngine::SearchUsingICU(const base::string16& term,
   for (const auto& result : results) {
     // Need to map the indexes from the page text, which may have generated
     // characters like space etc, to character indices from the page.
-    int temp_start = result.start_index + character_to_start_searching_from;
+    int text_to_start_searching_from = FPDFText_GetTextIndexFromCharIndex(
+        pages_[current_page]->GetTextPage(), character_to_start_searching_from);
+    int temp_start = result.start_index + text_to_start_searching_from;
     int start = FPDFText_GetCharIndexFromTextIndex(
         pages_[current_page]->GetTextPage(), temp_start);
     int end = FPDFText_GetCharIndexFromTextIndex(
@@ -2421,8 +2439,8 @@ bool PDFiumEngine::SelectFindResult(bool forward) {
   // If the result is not in view, scroll to it.
   pp::Rect bounding_rect;
   pp::Rect visible_rect = GetVisibleRect();
-  // Use zoom of 1.0 since visible_rect is without zoom.
-  std::vector<pp::Rect> rects =
+  // Use zoom of 1.0 since |visible_rect| is without zoom.
+  const std::vector<pp::Rect>& rects =
       find_results_[current_find_index_.GetIndex()].GetScreenRects(
           pp::Point(), 1.0, current_rotation_);
   for (const auto& rect : rects)
@@ -2430,18 +2448,14 @@ bool PDFiumEngine::SelectFindResult(bool forward) {
   if (!visible_rect.Contains(bounding_rect)) {
     pp::Point center = bounding_rect.CenterPoint();
     // Make the page centered.
-    int new_y = static_cast<int>(center.y() * current_zoom_) -
-                static_cast<int>(visible_rect.height() * current_zoom_ / 2);
-    if (new_y < 0)
-      new_y = 0;
+    int new_y = CalculateCenterForZoom(center.y(), visible_rect.height(),
+                                       current_zoom_);
     client_->ScrollToY(new_y, /*compensate_for_toolbar=*/false);
 
     // Only move horizontally if it's not visible.
     if (center.x() < visible_rect.x() || center.x() > visible_rect.right()) {
-      int new_x = static_cast<int>(center.x() * current_zoom_) -
-                  static_cast<int>(visible_rect.width() * current_zoom_ / 2);
-      if (new_x < 0)
-        new_x = 0;
+      int new_x = CalculateCenterForZoom(center.x(), visible_rect.width(),
+                                         current_zoom_);
       client_->ScrollToX(new_x);
     }
   }
@@ -2471,7 +2485,7 @@ void PDFiumEngine::GetAllScreenRectsUnion(std::vector<PDFiumRange>* rect_range,
                                           std::vector<pp::Rect>* rect_vector) {
   for (auto& range : *rect_range) {
     pp::Rect result_rect;
-    std::vector<pp::Rect> rects =
+    const std::vector<pp::Rect>& rects =
         range.GetScreenRects(offset_point, current_zoom_, current_rotation_);
     for (const auto& rect : rects)
       result_rect = result_rect.Union(rect);
@@ -2636,10 +2650,11 @@ pp::VarDictionary PDFiumEngine::TraverseBookmarks(FPDF_BOOKMARK bookmark,
     if (page_index < pages_.size() &&
         base::IsValueInRangeForNumericType<int32_t>(page_index)) {
       dict.Set(pp::Var("page"), pp::Var(static_cast<int32_t>(page_index)));
-      PDFiumPage::LinkTarget target;
-      pages_[page_index]->GetPageYTarget(dest, &target);
-      if (target.y_in_pixels)
-        dict.Set(pp::Var("y"), pp::Var(target.y_in_pixels.value()));
+
+      base::Optional<std::pair<float, float>> xy =
+          pages_[page_index]->GetPageXYTarget(dest);
+      if (xy)
+        dict.Set(pp::Var("y"), pp::Var(static_cast<int>(xy.value().second)));
     }
   } else {
     // Extract URI for bookmarks linking to an external page.
@@ -2691,6 +2706,12 @@ int PDFiumEngine::GetNamedDestinationPage(const std::string& destination) {
       dest = FPDFBookmark_GetDest(doc_, bookmark);
   }
   return dest ? FPDFDest_GetPageIndex(doc_, dest) : -1;
+}
+
+std::pair<int, int> PDFiumEngine::TransformPagePoint(
+    int page_index,
+    std::pair<int, int> page_xy) {
+  return pages_[page_index]->TransformPageToScreenXY(page_xy);
 }
 
 int PDFiumEngine::GetMostVisiblePage() {
@@ -3084,7 +3105,8 @@ void PDFiumEngine::LoadForm() {
     FPDF_LoadXFA(doc_);
 #endif
 
-    FPDF_SetFormFieldHighlightColor(form_, 0, kFormHighlightColor);
+    FPDF_SetFormFieldHighlightColor(form_, FPDF_FORMFIELD_UNKNOWN,
+                                    kFormHighlightColor);
     FPDF_SetFormFieldHighlightAlpha(form_, kFormHighlightAlpha);
   }
 }  // namespace chrome_pdf
@@ -3097,16 +3119,23 @@ void PDFiumEngine::CalculateVisiblePages() {
   pending_pages_.clear();
   doc_loader_->ClearPendingRequests();
 
-  visible_pages_.clear();
+  std::vector<int> formerly_visible_pages;
+  std::swap(visible_pages_, formerly_visible_pages);
+
   pp::Rect visible_rect(plugin_size_);
-  for (size_t i = 0; i < pages_.size(); ++i) {
+  for (int i = 0; i < static_cast<int>(pages_.size()); ++i) {
     // Check an entire PageScreenRect, since we might need to repaint side
     // borders and shadows even if the page itself is not visible.
     // For example, when user use pdf with different page sizes and zoomed in
     // outside page area.
     if (visible_rect.Intersects(GetPageScreenRect(i))) {
       visible_pages_.push_back(i);
-      CheckPageAvailable(i, &pending_pages_);
+      if (CheckPageAvailable(i, &pending_pages_)) {
+        auto it = std::find(formerly_visible_pages.begin(),
+                            formerly_visible_pages.end(), i);
+        if (it == formerly_visible_pages.end())
+          client_->NotifyPageBecameVisible(pages_[i]->GetPageFeatures());
+      }
     } else {
       // Need to unload pages when we're not using them, since some PDFs use a
       // lot of memory.  See http://crbug.com/48791
@@ -3373,7 +3402,7 @@ void PDFiumEngine::DrawSelections(int progressive_index,
     if (range.page_index() != page_index)
       continue;
 
-    std::vector<pp::Rect> rects = range.GetScreenRects(
+    const std::vector<pp::Rect>& rects = range.GetScreenRects(
         visible_rect.point(), current_zoom_, current_rotation_);
     for (const auto& rect : rects) {
       pp::Rect visible_selection = rect.Intersect(dirty_in_screen);
@@ -3590,7 +3619,7 @@ PDFiumEngine::SelectionChangeInvalidator::GetVisibleSelections() const {
     if (!engine_->IsPageVisible(range.page_index()))
       continue;
 
-    std::vector<pp::Rect> selection_rects = range.GetScreenRects(
+    const std::vector<pp::Rect>& selection_rects = range.GetScreenRects(
         visible_point, engine_->current_zoom_, engine_->current_rotation_);
     rects.insert(rects.end(), selection_rects.begin(), selection_rects.end());
   }
@@ -3609,7 +3638,7 @@ PDFiumEngine::MouseDownState::MouseDownState(
     const PDFiumPage::LinkTarget& target)
     : area_(area), target_(target) {}
 
-PDFiumEngine::MouseDownState::~MouseDownState() {}
+PDFiumEngine::MouseDownState::~MouseDownState() = default;
 
 void PDFiumEngine::MouseDownState::Set(const PDFiumPage::Area& area,
                                        const PDFiumPage::LinkTarget& target) {
@@ -3639,7 +3668,7 @@ bool PDFiumEngine::MouseDownState::Matches(
 
 PDFiumEngine::FindTextIndex::FindTextIndex() : valid_(false), index_(0) {}
 
-PDFiumEngine::FindTextIndex::~FindTextIndex() {}
+PDFiumEngine::FindTextIndex::~FindTextIndex() = default;
 
 void PDFiumEngine::FindTextIndex::Invalidate() {
   valid_ = false;
@@ -3861,7 +3890,7 @@ void PDFiumEngine::OnSelectionChanged() {
                 std::numeric_limits<int32_t>::max(), 0, 0);
   pp::Rect right;
   for (auto& sel : selection_) {
-    std::vector<pp::Rect> screen_rects = sel.GetScreenRects(
+    const std::vector<pp::Rect>& screen_rects = sel.GetScreenRects(
         GetVisibleRect().point(), current_zoom_, current_rotation_);
     for (const auto& rect : screen_rects) {
       if (IsAboveOrDirectlyLeftOf(rect, left))
@@ -3912,6 +3941,14 @@ void PDFiumEngine::SetSelecting(bool selecting) {
     client_->IsSelectingChanged(selecting);
 }
 
+void PDFiumEngine::SetEditMode(bool edit_mode) {
+  if (!kIsEditModeTracked || edit_mode_ == edit_mode)
+    return;
+
+  edit_mode_ = edit_mode;
+  client_->IsEditModeChanged(edit_mode_);
+}
+
 void PDFiumEngine::SetInFormTextArea(bool in_form_text_area) {
   // If focus was previously in form text area, clear form text selection.
   // Clearing needs to be done before changing focus to ensure the correct
@@ -3936,9 +3973,16 @@ bool PDFiumEngine::IsPointInEditableFormTextArea(FPDF_PAGE page,
                                                  double page_x,
                                                  double page_y,
                                                  int form_type) {
+#if defined(PDF_ENABLE_XFA)
+  if (IS_XFA_FORMFIELD(form_type))
+    return form_type == FPDF_FORMFIELD_XFA_TEXTFIELD ||
+           form_type == FPDF_FORMFIELD_XFA_COMBOBOX;
+#endif  // defined(PDF_ENABLE_XFA)
+
   FPDF_ANNOTATION annot =
       FPDFAnnot_GetFormFieldAtPoint(form_, page, page_x, page_y);
-  DCHECK(annot);
+  if (!annot)
+    return false;
 
   int flags = FPDFAnnot_GetFormFieldFlags(page, annot);
   bool is_editable_form_text_area =
@@ -3996,6 +4040,9 @@ void PDFiumEngine::Form_OutputSelectedRect(FPDF_FORMFILLINFO* param,
   pp::Rect rect = engine->pages_[page_index]->PageToScreen(
       engine->GetVisibleRect().point(), engine->current_zoom_, left, top, right,
       bottom, engine->current_rotation_);
+  if (rect.IsEmpty())
+    return;
+
   engine->form_highlights_.push_back(rect);
 }
 
@@ -4041,7 +4088,8 @@ FPDF_SYSTEMTIME PDFiumEngine::Form_GetLocalTime(FPDF_FORMFILLINFO* param) {
 }
 
 void PDFiumEngine::Form_OnChange(FPDF_FORMFILLINFO* param) {
-  // Don't care about.
+  PDFiumEngine* engine = static_cast<PDFiumEngine*>(param);
+  engine->SetEditMode(true);
 }
 
 FPDF_PAGE PDFiumEngine::Form_GetPage(FPDF_FORMFILLINFO* param,

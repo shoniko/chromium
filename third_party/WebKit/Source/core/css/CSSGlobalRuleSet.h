@@ -5,6 +5,7 @@
 #ifndef CSSGlobalRuleSet_h
 #define CSSGlobalRuleSet_h
 
+#include "base/macros.h"
 #include "core/css/RuleFeatureSet.h"
 
 namespace blink {
@@ -17,13 +18,11 @@ class RuleSet;
 // in the whole Document as well as UA stylesheets and watched selectors which
 // apply to elements in all TreeScopes.
 //
-// TODO(rune@opera.com): We would like to move as much of this data as possible
-// to the ScopedStyleResolver as possible to avoid full reconstruction of these
-// rulesets on shadow tree changes. See https://crbug.com/401359
+// TODO(futhark@chromium.org): We would like to move as much of this data as
+// possible to the ScopedStyleResolver as possible to avoid full reconstruction
+// of these rulesets on shadow tree changes. See https://crbug.com/401359
 
 class CSSGlobalRuleSet : public GarbageCollectedFinalized<CSSGlobalRuleSet> {
-  WTF_MAKE_NONCOPYABLE(CSSGlobalRuleSet);
-
  public:
   static CSSGlobalRuleSet* Create() { return new CSSGlobalRuleSet(); }
 
@@ -45,7 +44,7 @@ class CSSGlobalRuleSet : public GarbageCollectedFinalized<CSSGlobalRuleSet> {
   void Trace(blink::Visitor*);
 
  private:
-  CSSGlobalRuleSet() {}
+  CSSGlobalRuleSet() = default;
   // Constructed from rules in all TreeScopes including UA style and style
   // injected from extensions.
   RuleFeatureSet features_;
@@ -55,6 +54,7 @@ class CSSGlobalRuleSet : public GarbageCollectedFinalized<CSSGlobalRuleSet> {
 
   bool has_fullscreen_ua_style_ = false;
   bool is_dirty_ = true;
+  DISALLOW_COPY_AND_ASSIGN(CSSGlobalRuleSet);
 };
 
 }  // namespace blink

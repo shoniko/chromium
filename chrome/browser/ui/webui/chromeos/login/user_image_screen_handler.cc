@@ -15,7 +15,7 @@
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/screens/user_image_screen.h"
-#include "chrome/browser/chromeos/login/ui/webui_login_display.h"
+#include "chrome/browser/chromeos/login/ui/login_display_webui.h"
 #include "chrome/browser/chromeos/login/users/default_user_image/default_user_images.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -27,7 +27,6 @@
 #include "components/user_manager/user.h"
 #include "media/audio/sounds/sounds_manager.h"
 #include "net/base/data_url.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 
@@ -94,8 +93,12 @@ void UserImageScreenHandler::DeclareLocalizedValues(
   builder->Add("userImageScreenDescription",
                IDS_USER_IMAGE_SCREEN_DESCRIPTION);
   builder->Add("takePhoto", IDS_OPTIONS_CHANGE_PICTURE_TAKE_PHOTO);
+  builder->Add("captureVideo", IDS_OPTIONS_CHANGE_PICTURE_CAPTURE_VIDEO);
   builder->Add("discardPhoto", IDS_OPTIONS_CHANGE_PICTURE_DISCARD_PHOTO);
-  builder->Add("switchMode", IDS_OPTIONS_CHANGE_PICTURE_SWITCH_MODE);
+  builder->Add("switchModeToCamera",
+               IDS_OPTIONS_CHANGE_PICTURE_SWITCH_MODE_TO_CAMERA);
+  builder->Add("switchModeToVideo",
+               IDS_OPTIONS_CHANGE_PICTURE_SWITCH_MODE_TO_VIDEO);
   builder->Add("profilePhoto", IDS_IMAGE_SCREEN_PROFILE_PHOTO);
   builder->Add("profilePhotoLoading",
                IDS_IMAGE_SCREEN_PROFILE_LOADING_PHOTO);
@@ -134,7 +137,7 @@ void UserImageScreenHandler::HandleScreenReady() {
 
 void UserImageScreenHandler::HandlePhotoTaken(const std::string& image_url) {
   AccessibilityManager::Get()->PlayEarcon(
-      SOUND_CAMERA_SNAP, PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
+      SOUND_CAMERA_SNAP, PlaySoundOption::ONLY_IF_SPOKEN_FEEDBACK_ENABLED);
 
   std::string raw_data;
   base::StringPiece url(image_url);
@@ -152,7 +155,7 @@ void UserImageScreenHandler::HandlePhotoTaken(const std::string& image_url) {
 
 void UserImageScreenHandler::HandleDiscardPhoto() {
   AccessibilityManager::Get()->PlayEarcon(
-      SOUND_OBJECT_DELETE, PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
+      SOUND_OBJECT_DELETE, PlaySoundOption::ONLY_IF_SPOKEN_FEEDBACK_ENABLED);
 }
 
 void UserImageScreenHandler::HandleSelectImage(const std::string& image_type,

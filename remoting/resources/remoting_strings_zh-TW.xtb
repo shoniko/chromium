@@ -102,6 +102,7 @@
 <translation id="3106379468611574572">遠端電腦未回應你的連線要求。請確認遠端電腦已在線上，然後再試一次。</translation>
 <translation id="310979712355504754">全部刪除</translation>
 <translation id="3150823315463303127">主機無法讀取政策。</translation>
+<translation id="3171922709365450819">由於需要第三方驗證，因此這個用戶端不支援這部裝置。</translation>
 <translation id="3194245623920924351">Chrome 遠端桌面</translation>
 <translation id="3197730452537982411">遠端桌面</translation>
 <translation id="324272851072175193">寄送說明電子郵件</translation>
@@ -337,6 +338,7 @@ PC</translation>
 <translation id="8998327464021325874">Chrome 遠端桌面主機控制器</translation>
 <translation id="9016232822027372900">繼續連線</translation>
 <translation id="906458777597946297">將視窗放到最大</translation>
+<translation id="9111855907838866522">你已連上遠端裝置，使用四指輕觸螢幕即可開啟選單。</translation>
 <translation id="9126115402994542723">此裝置連線至這個主機時，不必再次詢問 PIN。</translation>
 <translation id="9149580767411232853">一律顯示整個遠端桌面</translation>
 <translation id="9149992051684092333">如要開始共用你的電腦，請將下方的存取碼告知要協助你的人員。</translation>

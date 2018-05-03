@@ -44,7 +44,8 @@ PasswordReuseModalWarningDialog::PasswordReuseModalWarningDialog(
     content::WebContents* web_contents,
     ChromePasswordProtectionService* service,
     OnWarningDone done_callback)
-    : show_softer_warning_(
+    : content::WebContentsObserver(web_contents),
+      show_softer_warning_(
           PasswordProtectionService::ShouldShowSofterWarning()),
       done_callback_(std::move(done_callback)),
       service_(service),
@@ -56,7 +57,7 @@ PasswordReuseModalWarningDialog::PasswordReuseModalWarningDialog(
   const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
   set_margins(
       provider->GetDialogInsetsForContentType(views::TEXT, views::TEXT));
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
   views::Label* message_body_label = new views::Label(
       l10n_util::GetStringUTF16(IDS_PAGE_INFO_CHANGE_PASSWORD_DETAILS));
@@ -182,6 +183,10 @@ void PasswordReuseModalWarningDialog::InvokeActionForTesting(
 ChromePasswordProtectionService::WarningUIType
 PasswordReuseModalWarningDialog::GetObserverType() {
   return ChromePasswordProtectionService::MODAL_DIALOG;
+}
+
+void PasswordReuseModalWarningDialog::WebContentsDestroyed() {
+  GetWidget()->Close();
 }
 
 }  // namespace safe_browsing

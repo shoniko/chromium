@@ -97,7 +97,9 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   // (when there'd be no point).
   void DisableAccessibility();
 
-  void HandleAXEvent(const blink::WebAXObject& obj, ui::AXEvent event);
+  void HandleAXEvent(const blink::WebAXObject& obj,
+                     ui::AXEvent event,
+                     int action_request_id = -1);
 
  protected:
   // Returns the main top-level document for this page, or NULL if there's
@@ -112,9 +114,6 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   // versions. If any have moved, send an IPC with the new locations.
   void SendLocationChanges();
 
-  // The RenderFrameImpl that owns us.
-  RenderFrameImpl* render_frame_;
-
  private:
   // RenderFrameObserver implementation.
   void OnDestruct() override;
@@ -125,11 +124,16 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   void OnFatalError();
   void OnReset(int reset_token);
 
-  void OnHitTest(const gfx::Point& point, ui::AXEvent event_to_fire);
+  void OnHitTest(const gfx::Point& point,
+                 ui::AXEvent event_to_fire,
+                 int action_request_id);
   void OnLoadInlineTextBoxes(const blink::WebAXObject& obj);
   void OnGetImageData(const blink::WebAXObject& obj, const gfx::Size& max_size);
   void AddPluginTreeToUpdate(AXContentTreeUpdate* update);
   void ScrollPlugin(int id_to_make_visible);
+
+  // The RenderFrameImpl that owns us.
+  RenderFrameImpl* render_frame_;
 
   // Events from Blink are collected until they are ready to be
   // sent to the browser.

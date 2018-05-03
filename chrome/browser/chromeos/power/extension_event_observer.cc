@@ -133,7 +133,7 @@ void ExtensionEventObserver::OnBackgroundHostCreated(
     return;
 
   auto result = keepalive_sources_.insert(
-      std::make_pair(host, base::MakeUnique<KeepaliveSources>()));
+      std::make_pair(host, std::make_unique<KeepaliveSources>()));
 
   if (result.second)
     host->AddObserver(this);
@@ -205,7 +205,8 @@ void ExtensionEventObserver::OnNetworkRequestDone(
   }
 }
 
-void ExtensionEventObserver::SuspendImminent() {
+void ExtensionEventObserver::SuspendImminent(
+    power_manager::SuspendImminent::Reason reason) {
   if (should_delay_suspend_)
     OnSuspendImminent(false);
 }

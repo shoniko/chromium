@@ -59,8 +59,8 @@ class WebGLRenderingContext final : public WebGLRenderingContextBase {
     WTF_MAKE_NONCOPYABLE(Factory);
 
    public:
-    Factory() {}
-    ~Factory() override {}
+    Factory() = default;
+    ~Factory() override = default;
 
     CanvasRenderingContext* Create(
         CanvasRenderingContextHost*,
@@ -88,6 +88,7 @@ class WebGLRenderingContext final : public WebGLRenderingContextBase {
  private:
   WebGLRenderingContext(CanvasRenderingContextHost*,
                         std::unique_ptr<WebGraphicsContext3DProvider>,
+                        bool using_gpu_compositing,
                         const CanvasContextCreationAttributes&);
 
   // Enabled extension objects.

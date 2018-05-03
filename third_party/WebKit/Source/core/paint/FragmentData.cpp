@@ -3,91 +3,93 @@
 // found in the LICENSE file.
 
 #include "core/paint/FragmentData.h"
-#include "core/paint/ObjectPaintProperties.h"
+#include "core/paint/PaintLayer.h"
 
 namespace blink {
 
-ObjectPaintProperties& FragmentData::EnsurePaintProperties() {
-  if (!paint_properties_)
-    paint_properties_ = ObjectPaintProperties::Create();
-  return *paint_properties_.get();
-}
+// These are defined here because of PaintLayer dependency.
 
-void FragmentData::ClearPaintProperties() {
-  paint_properties_.reset(nullptr);
-}
+FragmentData::RareData::RareData(const LayoutPoint& location_in_backing)
+    : unique_id(NewUniqueObjectId()),
+      location_in_backing(location_in_backing) {}
 
-void FragmentData::ClearLocalBorderBoxProperties() {
-  local_border_box_properties_ = nullptr;
-}
-
-void FragmentData::SetLocalBorderBoxProperties(PropertyTreeState& state) {
-  if (!local_border_box_properties_)
-    local_border_box_properties_ = WTF::MakeUnique<PropertyTreeState>(state);
-  else
-    *local_border_box_properties_ = state;
-}
+FragmentData::RareData::~RareData() = default;
 
 FragmentData& FragmentData::EnsureNextFragment() {
   if (!next_fragment_)
-    next_fragment_ = FragmentData::Create();
+    next_fragment_ = std::make_unique<FragmentData>();
   return *next_fragment_.get();
 }
 
-const TransformPaintPropertyNode* FragmentData::GetPreTransform() const {
-  if (!paint_properties_)
-    return local_border_box_properties_->Transform();
-  if (paint_properties_->Transform())
-    return paint_properties_->Transform()->Parent();
-  return local_border_box_properties_->Transform();
+FragmentData::RareData& FragmentData::EnsureRareData() {
+  if (!rare_data_)
+    rare_data_ = std::make_unique<RareData>(visual_rect_.Location());
+  return *rare_data_;
 }
 
-const TransformPaintPropertyNode* FragmentData::GetPostScrollTranslation()
-    const {
-  if (!paint_properties_)
-    return local_border_box_properties_->Transform();
-  if (paint_properties_->ScrollTranslation())
-    return paint_properties_->ScrollTranslation();
-  if (paint_properties_->Perspective())
-    return paint_properties_->Perspective();
-  return local_border_box_properties_->Transform();
+void FragmentData::SetLayer(std::unique_ptr<PaintLayer> layer) {
+  if (rare_data_ || layer)
+    EnsureRareData().layer = std::move(layer);
 }
 
-const ClipPaintPropertyNode* FragmentData::GetPreCssClip() const {
-  if (!paint_properties_)
-    return local_border_box_properties_->Clip();
-  if (paint_properties_->CssClip())
-    return paint_properties_->CssClip()->Parent();
-  return local_border_box_properties_->Clip();
+const TransformPaintPropertyNode* FragmentData::PreTransform() const {
+  if (const auto* properties = PaintProperties()) {
+    if (properties->Transform())
+      return properties->Transform()->Parent();
+  }
+  DCHECK(LocalBorderBoxProperties());
+  return LocalBorderBoxProperties()->Transform();
 }
 
-const ClipPaintPropertyNode* FragmentData::GetPostOverflowClip() const {
-  if (!paint_properties_)
-    return local_border_box_properties_->Clip();
-  if (paint_properties_->OverflowClip())
-    return paint_properties_->OverflowClip();
-  return local_border_box_properties_->Clip();
+const TransformPaintPropertyNode* FragmentData::PostScrollTranslation() const {
+  if (const auto* properties = PaintProperties()) {
+    if (properties->ScrollTranslation())
+      return properties->ScrollTranslation();
+    if (properties->Perspective())
+      return properties->Perspective();
+  }
+  DCHECK(LocalBorderBoxProperties());
+  return LocalBorderBoxProperties()->Transform();
 }
 
-const EffectPaintPropertyNode* FragmentData::GetPreEffect() const {
-  if (!paint_properties_)
-    return local_border_box_properties_->Effect();
-  if (paint_properties_->Effect())
-    return paint_properties_->Effect()->Parent();
-  if (paint_properties_->Filter())
-    return paint_properties_->Filter()->Parent();
-  return local_border_box_properties_->Effect();
+const ClipPaintPropertyNode* FragmentData::PreCssClip() const {
+  if (const auto* properties = PaintProperties()) {
+    if (properties->CssClip())
+      return properties->CssClip()->Parent();
+  }
+  DCHECK(LocalBorderBoxProperties());
+  return LocalBorderBoxProperties()->Clip();
 }
 
-PropertyTreeState FragmentData::PreEffectProperties() const {
-  DCHECK(local_border_box_properties_);
-  return PropertyTreeState(GetPreTransform(), GetPreCssClip(), GetPreEffect());
+const ClipPaintPropertyNode* FragmentData::PostOverflowClip() const {
+  if (const auto* properties = PaintProperties()) {
+    if (properties->OverflowClip())
+      return properties->OverflowClip();
+    if (properties->InnerBorderRadiusClip())
+      return properties->InnerBorderRadiusClip();
+  }
+  DCHECK(LocalBorderBoxProperties());
+  return LocalBorderBoxProperties()->Clip();
 }
 
-PropertyTreeState FragmentData::ContentsProperties() const {
-  DCHECK(local_border_box_properties_);
-  return PropertyTreeState(GetPostScrollTranslation(), GetPostOverflowClip(),
-                           local_border_box_properties_->Effect());
+const EffectPaintPropertyNode* FragmentData::PreEffect() const {
+  if (const auto* properties = PaintProperties()) {
+    if (properties->Effect())
+      return properties->Effect()->Parent();
+    if (properties->Filter())
+      return properties->Filter()->Parent();
+  }
+  DCHECK(LocalBorderBoxProperties());
+  return LocalBorderBoxProperties()->Effect();
+}
+
+const EffectPaintPropertyNode* FragmentData::PreFilter() const {
+  if (const auto* properties = PaintProperties()) {
+    if (properties->Filter())
+      return properties->Filter()->Parent();
+  }
+  DCHECK(LocalBorderBoxProperties());
+  return LocalBorderBoxProperties()->Effect();
 }
 
 }  // namespace blink

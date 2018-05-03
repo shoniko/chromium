@@ -34,9 +34,9 @@
 #include "platform/Histogram.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/TextPosition.h"
 #include "public/platform/Platform.h"
 
@@ -86,12 +86,12 @@ static void CheckThatXSSInfosAreSafeToSendToAnotherThread(
 
 #endif
 
-WeakPtr<BackgroundHTMLParser> BackgroundHTMLParser::Create(
+base::WeakPtr<BackgroundHTMLParser> BackgroundHTMLParser::Create(
     std::unique_ptr<Configuration> config,
     scoped_refptr<WebTaskRunner> loading_task_runner) {
   auto* background_parser = new BackgroundHTMLParser(
       std::move(config), std::move(loading_task_runner));
-  return background_parser->weak_factory_.CreateWeakPtr();
+  return background_parser->weak_factory_.GetWeakPtr();
 }
 
 void BackgroundHTMLParser::Init(
@@ -134,7 +134,7 @@ BackgroundHTMLParser::BackgroundHTMLParser(
   DCHECK_GE(outstanding_token_limit_, pending_token_limit_);
 }
 
-BackgroundHTMLParser::~BackgroundHTMLParser() {}
+BackgroundHTMLParser::~BackgroundHTMLParser() = default;
 
 void BackgroundHTMLParser::AppendRawBytesFromMainThread(
     std::unique_ptr<Vector<char>> buffer) {
@@ -351,10 +351,10 @@ template <typename FunctionType, typename... Ps>
 void BackgroundHTMLParser::RunOnMainThread(FunctionType function,
                                            Ps&&... parameters) {
   if (IsMainThread()) {
-    WTF::Bind(std::move(function), std::forward<Ps>(parameters)...)();
+    WTF::Bind(std::move(function), std::forward<Ps>(parameters)...).Run();
   } else {
-    loading_task_runner_->PostTask(
-        BLINK_FROM_HERE,
+    PostCrossThreadTask(
+        *loading_task_runner_, FROM_HERE,
         CrossThreadBind(std::move(function), std::forward<Ps>(parameters)...));
   }
 }

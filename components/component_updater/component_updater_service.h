@@ -132,7 +132,7 @@ class ComponentUpdateService {
   // where the on-demand functionality is invoked too often. If this function
   // is called while still on cooldown, |callback| will be called immediately.
   virtual void MaybeThrottle(const std::string& id,
-                             const base::Closure& callback) = 0;
+                             base::OnceClosure callback) = 0;
 
   virtual ~ComponentUpdateService() {}
 
@@ -156,11 +156,14 @@ class OnDemandUpdater {
   friend class OnDemandTester;
   friend class policy::ComponentUpdaterPolicyTest;
   friend class SupervisedUserWhitelistInstaller;
+  friend class DownloadableStringsComponentInstallerPolicy;
   friend class ::ComponentsUI;
   friend class ::PluginObserver;
+  friend class SwReporterOnDemandFetcher;
 #if defined(OS_CHROMEOS)
-  friend class CrOSComponent;
+  friend class CrOSComponentManager;
 #endif  // defined(OS_CHROMEOS)
+  friend class VrAssetsComponentInstallerPolicy;
 
   // Triggers an update check for a component. |id| is a value
   // returned by GetCrxComponentID(). If an update for this component is already

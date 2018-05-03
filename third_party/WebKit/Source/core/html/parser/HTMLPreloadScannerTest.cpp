@@ -12,7 +12,7 @@
 #include "core/html/parser/HTMLResourcePreloader.h"
 #include "core/html/parser/PreloadRequest.h"
 #include "core/media_type_names.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/loader/fetch/ClientHintsPreferences.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -56,8 +56,8 @@ struct ReferrerPolicyTestCase {
 struct CORSTestCase {
   const char* base_url;
   const char* input_html;
-  WebURLRequest::FetchRequestMode request_mode;
-  WebURLRequest::FetchCredentialsMode credentials_mode;
+  network::mojom::FetchRequestMode request_mode;
+  network::mojom::FetchCredentialsMode credentials_mode;
 };
 
 struct NonceTestCase {
@@ -124,7 +124,7 @@ class HTMLMockHTMLResourcePreloader : public ResourcePreloader {
                                   Document* document,
                                   const char* expected_referrer) {
     PreloadRequestVerification(type, url, base_url, width, referrer_policy);
-    Resource* resource = preload_request_->Start(document);
+    Resource* resource = preload_request_->Start(document, nullptr);
     ASSERT_TRUE(resource);
     EXPECT_EQ(expected_referrer, resource->GetResourceRequest().HttpReferrer());
   }
@@ -141,10 +141,10 @@ class HTMLMockHTMLResourcePreloader : public ResourcePreloader {
 
   void CORSRequestVerification(
       Document* document,
-      WebURLRequest::FetchRequestMode request_mode,
-      WebURLRequest::FetchCredentialsMode credentials_mode) {
+      network::mojom::FetchRequestMode request_mode,
+      network::mojom::FetchCredentialsMode credentials_mode) {
     ASSERT_TRUE(preload_request_.get());
-    Resource* resource = preload_request_->Start(document);
+    Resource* resource = preload_request_->Start(document, nullptr);
     ASSERT_TRUE(resource);
     EXPECT_EQ(request_mode,
               resource->GetResourceRequest().GetFetchRequestMode());
@@ -175,7 +175,7 @@ class HTMLMockHTMLResourcePreloader : public ResourcePreloader {
   std::unique_ptr<PreloadRequest> preload_request_;
 };
 
-class HTMLPreloadScannerTest : public ::testing::Test {
+class HTMLPreloadScannerTest : public PageTestBase {
  protected:
   enum ViewportState {
     kViewportEnabled,
@@ -186,8 +186,6 @@ class HTMLPreloadScannerTest : public ::testing::Test {
     kPreloadEnabled,
     kPreloadDisabled,
   };
-
-  HTMLPreloadScannerTest() : dummy_page_holder_(DummyPageHolder::Create()) {}
 
   MediaValuesCached::MediaValuesCachedData CreateMediaValuesData() {
     MediaValuesCached::MediaValuesCachedData data;
@@ -211,27 +209,27 @@ class HTMLPreloadScannerTest : public ::testing::Test {
       ViewportState viewport_state,
       PreloadState preload_state = kPreloadEnabled,
       ReferrerPolicy document_referrer_policy = kReferrerPolicyDefault) {
-    HTMLParserOptions options(&dummy_page_holder_->GetDocument());
+    HTMLParserOptions options(&GetDocument());
     KURL document_url("http://whatever.test/");
-    dummy_page_holder_->GetDocument().SetURL(document_url);
-    dummy_page_holder_->GetDocument().SetSecurityOrigin(
-        SecurityOrigin::Create(document_url));
-    dummy_page_holder_->GetDocument().GetSettings()->SetViewportEnabled(
-        viewport_state == kViewportEnabled);
-    dummy_page_holder_->GetDocument().GetSettings()->SetViewportMetaEnabled(
-        viewport_state == kViewportEnabled);
-    dummy_page_holder_->GetDocument().GetSettings()->SetDoHtmlPreloadScanning(
-        preload_state == kPreloadEnabled);
-    dummy_page_holder_->GetDocument().SetReferrerPolicy(
-        document_referrer_policy);
+    GetDocument().SetURL(document_url);
+    GetDocument().SetSecurityOrigin(SecurityOrigin::Create(document_url));
+    GetDocument().GetSettings()->SetViewportEnabled(viewport_state ==
+                                                    kViewportEnabled);
+    GetDocument().GetSettings()->SetViewportMetaEnabled(viewport_state ==
+                                                        kViewportEnabled);
+    GetDocument().GetSettings()->SetDoHtmlPreloadScanning(preload_state ==
+                                                          kPreloadEnabled);
+    GetDocument().SetReferrerPolicy(document_referrer_policy);
     scanner_ = HTMLPreloadScanner::Create(
-        options, document_url,
-        CachedDocumentParameters::Create(&dummy_page_holder_->GetDocument()),
+        options, document_url, CachedDocumentParameters::Create(&GetDocument()),
         CreateMediaValuesData(),
         TokenPreloadScanner::ScannerType::kMainDocument);
   }
 
-  void SetUp() override { RunSetUp(kViewportEnabled); }
+  void SetUp() override {
+    PageTestBase::SetUp(IntSize());
+    RunSetUp(kViewportEnabled);
+  }
 
   void Test(PreloadScannerTestCase test_case) {
     HTMLMockHTMLResourcePreloader preloader;
@@ -265,8 +263,8 @@ class HTMLPreloadScannerTest : public ::testing::Test {
     if (test_case.expected_referrer) {
       preloader.PreloadRequestVerification(
           test_case.type, test_case.preloaded_url, test_case.output_base_url,
-          test_case.resource_width, test_case.referrer_policy,
-          &dummy_page_holder_->GetDocument(), test_case.expected_referrer);
+          test_case.resource_width, test_case.referrer_policy, &GetDocument(),
+          test_case.expected_referrer);
     } else {
       preloader.PreloadRequestVerification(
           test_case.type, test_case.preloaded_url, test_case.output_base_url,
@@ -281,8 +279,7 @@ class HTMLPreloadScannerTest : public ::testing::Test {
     PreloadRequestStream requests = scanner_->Scan(base_url, nullptr);
     preloader.TakeAndPreload(requests);
 
-    preloader.CORSRequestVerification(&dummy_page_holder_->GetDocument(),
-                                      test_case.request_mode,
+    preloader.CORSRequestVerification(&GetDocument(), test_case.request_mode,
                                       test_case.credentials_mode);
   }
 
@@ -307,7 +304,6 @@ class HTMLPreloadScannerTest : public ::testing::Test {
   }
 
  private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
   std::unique_ptr<HTMLPreloadScanner> scanner_;
 };
 
@@ -795,27 +791,27 @@ TEST_F(HTMLPreloadScannerTest, testReferrerPolicy) {
 TEST_F(HTMLPreloadScannerTest, testCORS) {
   CORSTestCase test_cases[] = {
       {"http://example.test", "<script src='/script'></script>",
-       WebURLRequest::kFetchRequestModeNoCORS,
-       WebURLRequest::kFetchCredentialsModeInclude},
+       network::mojom::FetchRequestMode::kNoCORS,
+       network::mojom::FetchCredentialsMode::kInclude},
       {"http://example.test", "<script crossorigin src='/script'></script>",
-       WebURLRequest::kFetchRequestModeCORS,
-       WebURLRequest::kFetchCredentialsModeSameOrigin},
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kSameOrigin},
       {"http://example.test",
        "<script crossorigin=use-credentials src='/script'></script>",
-       WebURLRequest::kFetchRequestModeCORS,
-       WebURLRequest::kFetchCredentialsModeInclude},
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kInclude},
       {"http://example.test", "<script type='module' src='/script'></script>",
-       WebURLRequest::kFetchRequestModeCORS,
-       WebURLRequest::kFetchCredentialsModeOmit},
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kOmit},
       {"http://example.test",
        "<script type='module' crossorigin='anonymous' src='/script'></script>",
-       WebURLRequest::kFetchRequestModeCORS,
-       WebURLRequest::kFetchCredentialsModeSameOrigin},
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kSameOrigin},
       {"http://example.test",
        "<script type='module' crossorigin='use-credentials' "
        "src='/script'></script>",
-       WebURLRequest::kFetchRequestModeCORS,
-       WebURLRequest::kFetchCredentialsModeInclude},
+       network::mojom::FetchRequestMode::kCORS,
+       network::mojom::FetchCredentialsMode::kInclude},
   };
 
   for (const auto& test_case : test_cases) {
@@ -917,7 +913,7 @@ TEST_F(HTMLPreloadScannerTest, testLinkRelPreload) {
        "<link rel=preload href=bla as=font type='font/bla'>", nullptr,
        "http://example.test/", Resource::kFont, 0},
       {"http://example.test", "<link rel=preload href=bla as=video>", "bla",
-       "http://example.test/", Resource::kMedia, 0},
+       "http://example.test/", Resource::kVideo, 0},
       {"http://example.test", "<link rel=preload href=bla as=track>", "bla",
        "http://example.test/", Resource::kTextTrack, 0},
       {"http://example.test",

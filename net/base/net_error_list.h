@@ -404,6 +404,13 @@ NET_ERROR(READ_IF_READY_NOT_IMPLEMENTED, -174)
 //    is unlikely.
 NET_ERROR(SSL_VERSION_INTERFERENCE, -175)
 
+// No socket buffer space is available.
+NET_ERROR(NO_BUFFER_SPACE, -176)
+
+// There were no common signature algorithms between our client certificate
+// private key and the server's preferences.
+NET_ERROR(SSL_CLIENT_AUTH_NO_COMMON_ALGORITHMS, -1478)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -722,6 +729,13 @@ NET_ERROR(CONTENT_DECODING_INIT_FAILED, -371)
 // SpdyStream layer.
 NET_ERROR(SPDY_RST_STREAM_NO_ERROR_RECEIVED, -372)
 
+// The pushed stream claimed by the request is no longer available.
+NET_ERROR(SPDY_PUSHED_STREAM_NOT_AVAILABLE, -373)
+
+// A pushed stream was claimed and later reset by the server. When this happens,
+// the request should be retried.
+NET_ERROR(SPDY_CLAIMED_PUSHED_STREAM_RESET_BY_SERVER, -374)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -763,6 +777,11 @@ NET_ERROR(CACHE_LOCK_TIMEOUT, -409)
 // Received a challenge after the transaction has read some data, and the
 // credentials aren't available.  There isn't a way to get them at that point.
 NET_ERROR(CACHE_AUTH_FAILURE_AFTER_READ, -410)
+
+// Internal not-quite error code for the HTTP cache. In-memory hints suggest
+// that the cache entry would not have been useable with the transaction's
+// current configuration (e.g. load flags, mode, etc.)
+NET_ERROR(CACHE_ENTRY_NOT_SUITABLE, -411)
 
 // The server's response was insecure (e.g. there was a cert error).
 NET_ERROR(INSECURE_RESPONSE, -501)

@@ -38,19 +38,33 @@ void NGLineInfo::SetLineStyle(const NGInlineNode& node,
     // space that we cannot compute percent for text-indent.
     const Length& length = line_style_->TextIndent();
     LayoutUnit maximum_value;
-    if (length.IsPercentOrCalc() &&
-        constraint_space.ParentPercentageResolutionInlineSize().has_value())
-      maximum_value = *constraint_space.ParentPercentageResolutionInlineSize();
+    if (length.IsPercentOrCalc())
+      maximum_value = constraint_space.ParentPercentageResolutionInlineSize();
     text_indent_ = MinimumValueForLength(length, maximum_value);
   } else {
     text_indent_ = LayoutUnit();
   }
 }
 
-void NGLineInfo::SetLineOffset(NGLogicalOffset line_offset,
-                               LayoutUnit available_width) {
-  line_offset_ = line_offset;
+#if DCHECK_IS_ON()
+void NGInlineItemResult::CheckConsistency() const {
+  DCHECK(item);
+  if (item->Type() == NGInlineItem::kText) {
+    DCHECK(shape_result);
+    DCHECK_LT(start_offset, end_offset);
+    DCHECK_EQ(end_offset - start_offset, shape_result->NumCharacters());
+    DCHECK_EQ(start_offset, shape_result->StartIndexForResult());
+    DCHECK_EQ(end_offset, shape_result->EndIndexForResult());
+  }
+}
+#endif
+
+void NGLineInfo::SetLineBfcOffset(NGBfcOffset line_bfc_offset,
+                                  LayoutUnit available_width,
+                                  LayoutUnit width) {
+  line_bfc_offset_ = line_bfc_offset;
   available_width_ = available_width;
+  width_ = width;
 }
 
 void NGLineInfo::SetLineEndShapeResult(

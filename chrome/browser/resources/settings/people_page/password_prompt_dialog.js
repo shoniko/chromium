@@ -27,7 +27,7 @@
 (function() {
 'use strict';
 
-/** @const */ var PASSWORD_ACTIVE_DURATION_MS = 10 * 60 * 1000;  // Ten minutes.
+const PASSWORD_ACTIVE_DURATION_MS = 10 * 60 * 1000;  // Ten minutes.
 
 Polymer({
   is: 'settings-password-prompt-dialog',
@@ -137,10 +137,19 @@ Polymer({
       // getActiveModes call.
       this.passwordInvalid_ = !valid && !!this.password_;
 
+      // Select the whole password if user entered an incorrect password.
+      // Return focus to the password input if it lost focus while being checked
+      // (user pressed confirm button).
+      if (this.passwordInvalid_) {
+        this.$.passwordInput.inputElement.select();
+        if (!this.$.passwordInput.focused)
+          this.$.passwordInput.focus();
+      }
+
       if (valid) {
         // Create the |this.setModes| closure and automatically clear it after
         // |this.passwordActiveDurationMs_|.
-        var password = this.password_;
+        let password = this.password_;
         this.password_ = '';
 
         this.setModes = (modes, credentials, onComplete) => {
@@ -188,7 +197,7 @@ Polymer({
     // We check the account password by trying to update the active set of quick
     // unlock modes without changing any credentials.
     this.quickUnlockPrivate_.getActiveModes(modes => {
-      var credentials =
+      const credentials =
           /** @type {!Array<string>} */ (Array(modes.length).fill(''));
       this.quickUnlockPrivate_.setModes(
           this.password_, modes, credentials, onCheck);

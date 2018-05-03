@@ -31,7 +31,7 @@ class CORE_EXPORT NGLayoutAlgorithm {
       : node_(node),
         constraint_space_(space),
         break_token_(break_token),
-        container_builder_(node, style, space.WritingMode(), direction) {}
+        container_builder_(node, style, space.GetWritingMode(), direction) {}
 
   NGLayoutAlgorithm(NGInputNodeType node,
                     const NGConstraintSpace& space,
@@ -42,7 +42,7 @@ class CORE_EXPORT NGLayoutAlgorithm {
                           space.Direction(),
                           break_token) {}
 
-  virtual ~NGLayoutAlgorithm() {}
+  virtual ~NGLayoutAlgorithm() = default;
 
   // Actual layout function. Lays out the children and descendants within the
   // constraints given by the NGConstraintSpace. Returns a layout result with

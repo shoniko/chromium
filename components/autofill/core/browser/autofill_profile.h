@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/address.h"
@@ -27,15 +28,14 @@ namespace autofill {
 // implements the FormGroup interface so that owners of this object can request
 // form information from the profile, and the profile will delegate the request
 // to the requested form group type.
-class AutofillProfile : public AutofillDataModel {
+class AutofillProfile : public AutofillDataModel,
+                        public base::SupportsWeakPtr<AutofillProfile> {
  public:
   enum RecordType {
     // A profile stored and editable locally.
     LOCAL_PROFILE,
     // A profile synced down from the server. These are read-only locally.
     SERVER_PROFILE,
-    // An auxiliary profile, such as a Mac address book entry.
-    AUXILIARY_PROFILE,
   };
 
   enum ValidityState {
@@ -164,10 +164,10 @@ class AutofillProfile : public AutofillDataModel {
   // Builds inferred label from the first |num_fields_to_include| non-empty
   // fields in |label_fields|. Uses as many fields as possible if there are not
   // enough non-empty fields.
-  base::string16 ConstructInferredLabel(
-      const std::vector<ServerFieldType>& label_fields,
-      size_t num_fields_to_include,
-      const std::string& app_locale) const;
+  base::string16 ConstructInferredLabel(const ServerFieldType* label_fields,
+                                        const size_t label_fields_size,
+                                        size_t num_fields_to_include,
+                                        const std::string& app_locale) const;
 
   const std::string& language_code() const { return language_code_; }
   void set_language_code(const std::string& language_code) {

@@ -52,7 +52,7 @@ def _Divide(a, b):
 
 
 def _IncludeInTotals(section_name):
-  return section_name != '.bss' and '(' not in section_name
+  return section_name != models.SECTION_BSS and '(' not in section_name
 
 
 def _GetSectionSizeInfo(section_sizes):
@@ -169,7 +169,7 @@ class Describer(object):
       return self._DescribeSymbol(obj)
     if hasattr(obj, '__iter__'):
       return self._DescribeIterable(obj)
-    return (repr(obj),)
+    return iter((repr(obj),))
 
 
 class DescriberText(Describer):
@@ -318,15 +318,16 @@ class DescriberText(Describer):
           unique_paths.add(s.object_path)
 
       if group.IsDelta():
-        unique_part = 'aliases not grouped for diffs'
+        before_unique, after_unique = group.CountUniqueSymbols()
+        unique_part = '{:,} -> {:,} unique'.format(before_unique, after_unique)
       else:
         unique_part = '{:,} unique'.format(group.CountUniqueSymbols())
 
       relevant_sections = [
           s for s in models.SECTION_TO_SECTION_NAME.itervalues()
           if s in section_sizes]
-      if models.SECTION_NAME_MULTIPLE in relevant_sections:
-        relevant_sections.remove(models.SECTION_NAME_MULTIPLE)
+      if models.SECTION_MULTIPLE in relevant_sections:
+        relevant_sections.remove(models.SECTION_MULTIPLE)
 
       size_summary = ' '.join(
           '{}={:<10}'.format(k, _PrettySize(int(section_sizes[k])))
@@ -431,11 +432,11 @@ class DescriberText(Describer):
     return itertools.chain(diff_summary_desc, path_delta_desc, group_desc)
 
   def _DescribeDeltaSizeInfo(self, diff):
-    common_metadata = {k: v for k, v in diff.before_metadata.iteritems()
-                       if diff.after_metadata[k] == v}
-    before_metadata = {k: v for k, v in diff.before_metadata.iteritems()
+    common_metadata = {k: v for k, v in diff.before.metadata.iteritems()
+                       if diff.after.metadata[k] == v}
+    before_metadata = {k: v for k, v in diff.before.metadata.iteritems()
                        if k not in common_metadata}
-    after_metadata = {k: v for k, v in diff.after_metadata.iteritems()
+    after_metadata = {k: v for k, v in diff.after.metadata.iteritems()
                       if k not in common_metadata}
     metadata_desc = itertools.chain(
         ('Common Metadata:',),
@@ -464,6 +465,8 @@ class DescriberText(Describer):
 def DescribeSizeInfoCoverage(size_info):
   """Yields lines describing how accurate |size_info| is."""
   for section, section_name in models.SECTION_TO_SECTION_NAME.iteritems():
+    if section_name not in size_info.section_sizes:
+      continue
     expected_size = size_info.section_sizes[section_name]
 
     in_section = size_info.raw_symbols.WhereInSection(section_name)
@@ -497,9 +500,11 @@ def DescribeSizeInfoCoverage(size_info):
     aliased_symbols = in_section.Filter(lambda s: s.aliases)
     if len(aliased_symbols):
       uniques = sum(1 for s in aliased_symbols.IterUniqueSymbols())
+      saved = sum(s.size_without_padding * (s.num_aliases - 1)
+                  for s in aliased_symbols.IterUniqueSymbols())
       yield ('* Contains {} aliases, mapped to {} unique addresses '
-             '({} bytes)').format(
-                 len(aliased_symbols), uniques, aliased_symbols.size)
+             '({} bytes saved)').format(
+                 len(aliased_symbols), uniques, saved)
     else:
       yield '* Contains 0 aliases'
 

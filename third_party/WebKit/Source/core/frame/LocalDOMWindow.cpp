@@ -30,7 +30,9 @@
 #include <string>
 #include <utility>
 
+#include "bindings/core/v8/BindingSecurity.h"
 #include "bindings/core/v8/ScriptController.h"
+#include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/SourceLocation.h"
 #include "bindings/core/v8/WindowProxy.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
@@ -40,13 +42,12 @@
 #include "core/css/MediaQueryMatcher.h"
 #include "core/css/StyleMedia.h"
 #include "core/css/resolver/StyleResolver.h"
+#include "core/dom/ComputedAccessibleNode.h"
 #include "core/dom/DOMImplementation.h"
 #include "core/dom/FrameRequestCallbackCollection.h"
-#include "core/dom/Modulator.h"
 #include "core/dom/SandboxFlags.h"
 #include "core/dom/ScriptedIdleTaskController.h"
 #include "core/dom/SinkDocument.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/UserGestureIndicator.h"
 #include "core/dom/events/DOMWindowEventQueue.h"
 #include "core/dom/events/ScopedEventQueue.h"
@@ -66,10 +67,10 @@
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Navigator.h"
+#include "core/frame/PausableTimer.h"
 #include "core/frame/Screen.h"
 #include "core/frame/ScrollToOptions.h"
 #include "core/frame/Settings.h"
-#include "core/frame/SuspendableTimer.h"
 #include "core/frame/VisualViewport.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLFrameOwnerElement.h"
@@ -77,6 +78,7 @@
 #include "core/input/EventHandler.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorTraceEvents.h"
+#include "core/layout/AdjustForAbsoluteZoom.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/appcache/ApplicationCache.h"
 #include "core/page/ChromeClient.h"
@@ -84,17 +86,17 @@
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "core/probe/CoreProbes.h"
-#include "core/style/ComputedStyle.h"
+#include "core/script/Modulator.h"
 #include "core/timing/DOMWindowPerformance.h"
 #include "core/timing/Performance.h"
 #include "platform/EventDispatchForbiddenScope.h"
-#include "platform/Histogram.h"
 #include "platform/WebFrameScheduler.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/Suborigin.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebScreenInfo.h"
 #include "public/platform/site_engagement.mojom-blink.h"
 
@@ -105,27 +107,26 @@ static const int kUnusedPreloadTimeoutInSeconds = 3;
 
 class PostMessageTimer final
     : public GarbageCollectedFinalized<PostMessageTimer>,
-      public SuspendableTimer {
+      public PausableTimer {
   USING_GARBAGE_COLLECTED_MIXIN(PostMessageTimer);
 
  public:
   PostMessageTimer(LocalDOMWindow& window,
                    MessageEvent* event,
-                   scoped_refptr<SecurityOrigin> target_origin,
+                   scoped_refptr<const SecurityOrigin> target_origin,
                    std::unique_ptr<SourceLocation> location,
                    UserGestureToken* user_gesture_token)
-      : SuspendableTimer(window.document(), TaskType::kPostedMessage),
+      : PausableTimer(window.document(), TaskType::kPostedMessage),
         event_(event),
         window_(&window),
         target_origin_(std::move(target_origin)),
         location_(std::move(location)),
         user_gesture_token_(user_gesture_token),
         disposal_allowed_(true) {
-    probe::AsyncTaskScheduled(window.document(), "postMessage", this);
   }
 
   MessageEvent* Event() const { return event_; }
-  SecurityOrigin* TargetOrigin() const { return target_origin_.get(); }
+  const SecurityOrigin* TargetOrigin() const { return target_origin_.get(); }
   std::unique_ptr<SourceLocation> TakeLocation() {
     return std::move(location_);
   }
@@ -133,7 +134,7 @@ class PostMessageTimer final
     return user_gesture_token_.get();
   }
   void ContextDestroyed(ExecutionContext* destroyed_context) override {
-    SuspendableTimer::ContextDestroyed(destroyed_context);
+    PausableTimer::ContextDestroyed(destroyed_context);
 
     if (disposal_allowed_)
       Dispose();
@@ -145,7 +146,7 @@ class PostMessageTimer final
   virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(event_);
     visitor->Trace(window_);
-    SuspendableTimer::Trace(visitor);
+    PausableTimer::Trace(visitor);
   }
 
   // TODO(alexclarke): Override timerTaskRunner() to pass in a document specific
@@ -165,7 +166,7 @@ class PostMessageTimer final
 
   Member<MessageEvent> event_;
   Member<LocalDOMWindow> window_;
-  scoped_refptr<SecurityOrigin> target_origin_;
+  scoped_refptr<const SecurityOrigin> target_origin_;
   std::unique_ptr<SourceLocation> location_;
   scoped_refptr<UserGestureToken> user_gesture_token_;
   bool disposal_allowed_;
@@ -253,10 +254,9 @@ static void UntrackAllBeforeUnloadEventListeners(LocalDOMWindow* dom_window) {
 LocalDOMWindow::LocalDOMWindow(LocalFrame& frame)
     : DOMWindow(frame),
       visualViewport_(DOMVisualViewport::Create(this)),
-      unused_preloads_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &frame),
-          this,
-          &LocalDOMWindow::WarnUnusedPreloads),
+      unused_preloads_timer_(frame.GetTaskRunner(TaskType::kUnspecedTimer),
+                             this,
+                             &LocalDOMWindow::WarnUnusedPreloads),
       should_print_when_finished_loading_(false) {}
 
 void LocalDOMWindow::ClearDocument() {
@@ -265,7 +265,7 @@ void LocalDOMWindow::ClearDocument() {
 
   DCHECK(!document_->IsActive());
 
-  // FIXME: This should be part of SuspendableObject shutdown
+  // FIXME: This should be part of PausableObject shutdown
   ClearEventQueue();
 
   unused_preloads_timer_.Stop();
@@ -358,14 +358,14 @@ void LocalDOMWindow::EnqueueWindowEvent(Event* event) {
   if (!event_queue_)
     return;
   event->SetTarget(this);
-  event_queue_->EnqueueEvent(BLINK_FROM_HERE, event);
+  event_queue_->EnqueueEvent(FROM_HERE, event);
 }
 
 void LocalDOMWindow::EnqueueDocumentEvent(Event* event) {
   if (!event_queue_)
     return;
   event->SetTarget(document_.Get());
-  event_queue_->EnqueueEvent(BLINK_FROM_HERE, event);
+  event_queue_->EnqueueEvent(FROM_HERE, event);
 }
 
 void LocalDOMWindow::DispatchWindowLoadEvent() {
@@ -376,10 +376,9 @@ void LocalDOMWindow::DispatchWindowLoadEvent() {
   // workaround to avoid Editing code crashes.  We should always dispatch
   // 'load' event asynchronously.  crbug.com/569511.
   if (ScopedEventQueue::Instance()->ShouldQueueEvents() && document_) {
-    TaskRunnerHelper::Get(TaskType::kNetworking, document_)
-        ->PostTask(BLINK_FROM_HERE,
-                   WTF::Bind(&LocalDOMWindow::DispatchLoadEvent,
-                             WrapPersistent(this)));
+    document_->GetTaskRunner(TaskType::kNetworking)
+        ->PostTask(FROM_HERE, WTF::Bind(&LocalDOMWindow::DispatchLoadEvent,
+                                        WrapPersistent(this)));
     return;
   }
   DispatchLoadEvent();
@@ -608,9 +607,10 @@ Navigator* LocalDOMWindow::navigator() const {
   return navigator_.Get();
 }
 
-void LocalDOMWindow::SchedulePostMessage(MessageEvent* event,
-                                         scoped_refptr<SecurityOrigin> target,
-                                         Document* source) {
+void LocalDOMWindow::SchedulePostMessage(
+    MessageEvent* event,
+    scoped_refptr<const SecurityOrigin> target,
+    Document* source) {
   // Allowing unbounded amounts of messages to build up for a suspended context
   // is problematic; consider imposing a limit or other restriction if this
   // surfaces often as a problem (see crbug.com/587012).
@@ -618,8 +618,9 @@ void LocalDOMWindow::SchedulePostMessage(MessageEvent* event,
   PostMessageTimer* timer =
       new PostMessageTimer(*this, event, std::move(target), std::move(location),
                            UserGestureIndicator::CurrentToken());
-  timer->StartOneShot(0, BLINK_FROM_HERE);
-  timer->SuspendIfNeeded();
+  timer->StartOneShot(TimeDelta(), FROM_HERE);
+  timer->PauseIfNeeded();
+  probe::AsyncTaskScheduled(document(), "postMessage", timer);
   post_message_timers_.insert(timer);
 }
 
@@ -630,9 +631,10 @@ void LocalDOMWindow::PostMessageTimerFired(PostMessageTimer* timer) {
   MessageEvent* event = timer->Event();
 
   UserGestureToken* token = timer->GetUserGestureToken();
-  UserGestureIndicator gesture_indicator(token);
-  if (token && token->HasGestures() && document() && document()->GetFrame())
-    document()->GetFrame()->NotifyUserActivation();
+  std::unique_ptr<UserGestureIndicator> gesture_indicator;
+  if (!RuntimeEnabledFeatures::UserActivationV2Enabled() && token &&
+      token->HasGestures() && document())
+    gesture_indicator = Frame::NotifyUserActivation(document()->GetFrame());
 
   event->EntangleMessagePorts(document());
 
@@ -645,13 +647,13 @@ void LocalDOMWindow::RemovePostMessageTimer(PostMessageTimer* timer) {
 }
 
 void LocalDOMWindow::DispatchMessageEventWithOriginCheck(
-    SecurityOrigin* intended_target_origin,
+    const SecurityOrigin* intended_target_origin,
     Event* event,
     std::unique_ptr<SourceLocation> location) {
   if (intended_target_origin) {
     // Check target origin now since the target document may have changed since
     // the timer was scheduled.
-    SecurityOrigin* security_origin = document()->GetSecurityOrigin();
+    const SecurityOrigin* security_origin = document()->GetSecurityOrigin();
     bool valid_target =
         intended_target_origin->IsSameSchemeHostPortAndSuborigin(
             security_origin);
@@ -946,30 +948,20 @@ int LocalDOMWindow::outerWidth() const {
   return chrome_client.RootWindowRect().Width();
 }
 
-FloatSize LocalDOMWindow::GetViewportSize(
-    IncludeScrollbarsInRect scrollbar_inclusion) const {
-  if (!GetFrame())
-    return FloatSize();
-
+IntSize LocalDOMWindow::GetViewportSize() const {
   LocalFrameView* view = GetFrame()->View();
   if (!view)
-    return FloatSize();
+    return IntSize();
 
   Page* page = GetFrame()->GetPage();
   if (!page)
-    return FloatSize();
+    return IntSize();
 
   // The main frame's viewport size depends on the page scale. If viewport is
   // enabled, the initial page scale depends on the content width and is set
   // after a layout, perform one now so queries during page load will use the
   // up to date viewport.
-  bool affectedByScale =
-      page->GetSettings().GetViewportEnabled() && GetFrame()->IsMainFrame();
-  bool affectedByScrollbars =
-      scrollbar_inclusion == kExcludeScrollbars &&
-      !page->GetScrollbarTheme().UsesOverlayScrollbars();
-
-  if (affectedByScale || affectedByScrollbars)
+  if (page->GetSettings().GetViewportEnabled() && GetFrame()->IsMainFrame())
     document()->UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   // FIXME: This is potentially too much work. We really only need to know the
@@ -981,25 +973,23 @@ FloatSize LocalDOMWindow::GetViewportSize(
           ->UpdateStyleAndLayoutIgnorePendingStylesheets();
   }
 
-  return FloatSize(view->VisibleContentRect(scrollbar_inclusion).Size());
+  return document()->View()->Size();
 }
 
 int LocalDOMWindow::innerHeight() const {
   if (!GetFrame())
     return 0;
 
-  FloatSize viewport_size = GetViewportSize(kIncludeScrollbars);
-  return AdjustForAbsoluteZoom(ExpandedIntSize(viewport_size).Height(),
-                               GetFrame()->PageZoomFactor());
+  return AdjustForAbsoluteZoom::AdjustInt(GetViewportSize().Height(),
+                                          GetFrame()->PageZoomFactor());
 }
 
 int LocalDOMWindow::innerWidth() const {
   if (!GetFrame())
     return 0;
 
-  FloatSize viewport_size = GetViewportSize(kIncludeScrollbars);
-  return AdjustForAbsoluteZoom(ExpandedIntSize(viewport_size).Width(),
-                               GetFrame()->PageZoomFactor());
+  return AdjustForAbsoluteZoom::AdjustInt(GetViewportSize().Width(),
+                                          GetFrame()->PageZoomFactor());
 }
 
 int LocalDOMWindow::screenX() const {
@@ -1046,7 +1036,8 @@ double LocalDOMWindow::scrollX() const {
   // crbug.com/505516.
   double viewport_x =
       view->LayoutViewportScrollableArea()->GetScrollOffset().Width();
-  return AdjustScrollForAbsoluteZoom(viewport_x, GetFrame()->PageZoomFactor());
+  return AdjustForAbsoluteZoom::AdjustScroll(viewport_x,
+                                             GetFrame()->PageZoomFactor());
 }
 
 double LocalDOMWindow::scrollY() const {
@@ -1063,7 +1054,8 @@ double LocalDOMWindow::scrollY() const {
   // crbug.com/505516.
   double viewport_y =
       view->LayoutViewportScrollableArea()->GetScrollOffset().Height();
-  return AdjustScrollForAbsoluteZoom(viewport_y, GetFrame()->PageZoomFactor());
+  return AdjustForAbsoluteZoom::AdjustScroll(viewport_y,
+                                             GetFrame()->PageZoomFactor());
 }
 
 DOMVisualViewport* LocalDOMWindow::visualViewport() {
@@ -1111,6 +1103,15 @@ CSSStyleDeclaration* LocalDOMWindow::getComputedStyle(
     const String& pseudo_elt) const {
   DCHECK(elt);
   return CSSComputedStyleDeclaration::Create(elt, false, pseudo_elt);
+}
+
+ScriptPromise LocalDOMWindow::getComputedAccessibleNode(
+    ScriptState* script_state,
+    Element* element) {
+  DCHECK(element);
+  ComputedAccessibleNode* computed_accessible_node =
+      element->GetComputedAccessibleNode();
+  return computed_accessible_node->ComputePromiseProperty(script_state);
 }
 
 CSSRuleList* LocalDOMWindow::getMatchedCSSRules(
@@ -1412,6 +1413,10 @@ void LocalDOMWindow::AddedEventListener(
       UseCounter::Count(document(),
                         WebFeature::kSubFrameBeforeUnloadRegistered);
     }
+  } else if (event_type == EventTypeNames::pagehide) {
+    UseCounter::Count(document(), WebFeature::kDocumentPageHideRegistered);
+  } else if (event_type == EventTypeNames::pageshow) {
+    UseCounter::Count(document(), WebFeature::kDocumentPageShowRegistered);
   }
 }
 
@@ -1458,9 +1463,10 @@ void LocalDOMWindow::DispatchLoadEvent() {
     // preloads, as speculatove preloads were cleared at DCL.
     if (GetFrame() &&
         document_loader == GetFrame()->Loader().GetDocumentLoader() &&
-        document_loader->Fetcher()->CountPreloads())
+        document_loader->Fetcher()->CountPreloads()) {
       unused_preloads_timer_.StartOneShot(kUnusedPreloadTimeoutInSeconds,
-                                          BLINK_FROM_HERE);
+                                          FROM_HERE);
+    }
   } else {
     DispatchEvent(load_event, document());
   }
@@ -1497,17 +1503,7 @@ DispatchEventResult LocalDOMWindow::DispatchEvent(Event* event,
 
   TRACE_EVENT1("devtools.timeline", "EventDispatch", "data",
                InspectorEventDispatchEvent::Data(*event));
-  DispatchEventResult result;
-
-  if (GetFrame() && GetFrame()->IsMainFrame() &&
-      event->type() == EventTypeNames::resize) {
-    SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.EventListenerDuration.Resize");
-    result = FireEventListeners(event);
-  } else {
-    result = FireEventListeners(event);
-  }
-
-  return result;
+  return FireEventListeners(event);
 }
 
 void LocalDOMWindow::RemoveAllEventListeners() {
@@ -1543,6 +1539,27 @@ void LocalDOMWindow::PrintErrorMessage(const String& message) const {
       ConsoleMessage::Create(kJSMessageSource, kErrorMessageLevel, message));
 }
 
+DOMWindow* LocalDOMWindow::open(ExecutionContext* executionContext,
+                                LocalDOMWindow* current_window,
+                                LocalDOMWindow* entered_window,
+                                const String& url,
+                                const AtomicString& target,
+                                const String& features,
+                                ExceptionState& exception_state) {
+  // If the bindings implementation is 100% correct, the current realm and the
+  // entered realm should be same origin-domain. However, to be on the safe
+  // side and add some defense in depth, we'll check against the entered realm
+  // as well here.
+  if (!BindingSecurity::ShouldAllowAccessTo(entered_window, this,
+                                            exception_state)) {
+    UseCounter::Count(executionContext, WebFeature::kWindowOpenRealmMismatch);
+    return nullptr;
+  }
+  DCHECK(!target.IsNull());
+  return open(url, target, features, current_window, entered_window,
+              exception_state);
+}
+
 DOMWindow* LocalDOMWindow::open(const String& url_string,
                                 const AtomicString& frame_name,
                                 const String& window_features_string,
@@ -1563,9 +1580,6 @@ DOMWindow* LocalDOMWindow::open(const String& url_string,
   UseCounter::Count(*active_document, WebFeature::kDOMWindowOpen);
   if (!window_features_string.IsEmpty())
     UseCounter::Count(*active_document, WebFeature::kDOMWindowOpenFeatures);
-  probe::windowOpen(first_frame->GetDocument(), url_string, frame_name,
-                    window_features_string,
-                    UserGestureIndicator::ProcessingUserGesture());
 
   // Get the target frame for the special cases of _top and _parent.
   // In those cases, we schedule a location change right now and return early.
@@ -1636,6 +1650,7 @@ void LocalDOMWindow::TraceWrappers(
   visitor->TraceWrappers(modulator_);
   visitor->TraceWrappers(navigator_);
   DOMWindow::TraceWrappers(visitor);
+  Supplementable<LocalDOMWindow>::TraceWrappers(visitor);
 }
 
 }  // namespace blink

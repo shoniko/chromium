@@ -516,8 +516,11 @@ void NetworkingPrivateChromeOS::GetNetworks(
     int limit,
     const NetworkListCallback& success_callback,
     const FailureCallback& failure_callback) {
+  // When requesting configured Ethernet networks, include EthernetEAP.
   NetworkTypePattern pattern =
-      chromeos::onc::NetworkTypePatternFromOncType(network_type);
+      (!visible_only && network_type == ::onc::network_type::kEthernet)
+          ? NetworkTypePattern::EthernetOrEthernetEAP()
+          : chromeos::onc::NetworkTypePatternFromOncType(network_type);
   std::unique_ptr<base::ListValue> network_properties_list =
       chromeos::network_util::TranslateNetworkListToONC(
           pattern, configured_only, visible_only, limit);
@@ -543,11 +546,10 @@ void NetworkingPrivateChromeOS::StartConnect(
     return;
   }
 
-  const bool check_error_state = false;
   NetworkHandler::Get()->network_connection_handler()->ConnectToNetwork(
       service_path, success_callback,
       base::Bind(&NetworkHandlerFailureCallback, failure_callback),
-      check_error_state);
+      true /* check_error_state */, chromeos::ConnectCallbackMode::ON_STARTED);
 }
 
 void NetworkingPrivateChromeOS::StartDisconnect(

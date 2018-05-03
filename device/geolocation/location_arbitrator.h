@@ -15,9 +15,9 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "device/geolocation/geolocation_export.h"
-#include "device/geolocation/geolocation_provider.h"
-#include "device/geolocation/geoposition.h"
-#include "device/geolocation/location_provider.h"
+#include "device/geolocation/geolocation_provider_impl.h"
+#include "device/geolocation/public/cpp/location_provider.h"
+#include "device/geolocation/public/interfaces/geoposition.mojom.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
 
@@ -26,23 +26,24 @@ class URLRequestContextGetter;
 }
 
 namespace device {
-class GeolocationDelegate;
-class LocationProvider;
 
 // This class is responsible for handling updates from multiple underlying
 // providers and resolving them to a single 'best' location fix at any given
 // moment.
 class DEVICE_GEOLOCATION_EXPORT LocationArbitrator : public LocationProvider {
  public:
-  // Number of milliseconds newer a location provider has to be that it's worth
+  // The TimeDelta newer a location provider has to be that it's worth
   // switching to this location provider on the basis of it being fresher
   // (regardles of relative accuracy). Public for tests.
-  static const int64_t kFixStaleTimeoutMilliseconds;
+  static const base::TimeDelta kFixStaleTimeoutTimeDelta;
 
-  LocationArbitrator(std::unique_ptr<GeolocationDelegate> delegate,
-                     const GeolocationProvider::RequestContextProducer
-                         request_context_producer,
-                     const std::string& api_key);
+  // If the |custom_location_provider_getter| callback returns nullptr, then
+  // LocationArbitrator uses the default system location provider.
+  LocationArbitrator(
+      const CustomLocationProviderCallback& custom_location_provider_getter,
+      const GeolocationProvider::RequestContextProducer
+          request_context_producer,
+      const std::string& api_key);
   ~LocationArbitrator() override;
 
   static GURL DefaultNetworkProviderURL();
@@ -53,7 +54,7 @@ class DEVICE_GEOLOCATION_EXPORT LocationArbitrator : public LocationProvider {
       const LocationProviderUpdateCallback& callback) override;
   void StartProvider(bool enable_high_accuracy) override;
   void StopProvider() override;
-  const Geoposition& GetPosition() override;
+  const mojom::Geoposition& GetPosition() override;
   void OnPermissionGranted() override;
 
  protected:
@@ -85,16 +86,16 @@ class DEVICE_GEOLOCATION_EXPORT LocationArbitrator : public LocationProvider {
 
   // Gets called when a provider has a new position.
   void OnLocationUpdate(const LocationProvider* provider,
-                        const Geoposition& new_position);
+                        const mojom::Geoposition& new_position);
 
   // Returns true if |new_position| is an improvement over |old_position|.
   // Set |from_same_provider| to true if both the positions came from the same
   // provider.
-  bool IsNewPositionBetter(const Geoposition& old_position,
-                           const Geoposition& new_position,
+  bool IsNewPositionBetter(const mojom::Geoposition& old_position,
+                           const mojom::Geoposition& new_position,
                            bool from_same_provider) const;
 
-  const std::unique_ptr<GeolocationDelegate> delegate_;
+  const CustomLocationProviderCallback custom_location_provider_getter_;
   const GeolocationProvider::RequestContextProducer request_context_producer_;
   const std::string api_key_;
 
@@ -111,7 +112,7 @@ class DEVICE_GEOLOCATION_EXPORT LocationArbitrator : public LocationProvider {
   const LocationProvider* position_provider_;
   bool is_permission_granted_;
   // The current best estimate of our position.
-  Geoposition position_;
+  mojom::Geoposition position_;
 
   // Tracks whether providers should be running.
   bool is_running_;

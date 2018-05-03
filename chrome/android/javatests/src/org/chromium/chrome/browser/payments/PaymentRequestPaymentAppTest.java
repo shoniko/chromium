@@ -22,7 +22,6 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.payments.PaymentRequestTestCommon.TestPay;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.ExecutionException;
@@ -32,10 +31,7 @@ import java.util.concurrent.TimeoutException;
  * A payment integration test for a merchant that requests payment via Bob Pay.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestPaymentAppTest {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -49,7 +45,7 @@ public class PaymentRequestPaymentAppTest {
             throws InterruptedException, ExecutionException, TimeoutException {
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(mPaymentRequestTestRule.getShowFailed());
         mPaymentRequestTestRule.expectResultContains(
-                new String[] {"show() rejected", "The payment method is not supported"});
+                new String[] {"show() rejected", "The payment method", "not supported"});
     }
 
     /**
@@ -64,7 +60,7 @@ public class PaymentRequestPaymentAppTest {
         mPaymentRequestTestRule.installPaymentApp(NO_INSTRUMENTS, IMMEDIATE_RESPONSE);
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(mPaymentRequestTestRule.getShowFailed());
         mPaymentRequestTestRule.expectResultContains(
-                new String[] {"show() rejected", "The payment method is not supported"});
+                new String[] {"show() rejected", "The payment method", "not supported"});
     }
 
     /**
@@ -79,7 +75,7 @@ public class PaymentRequestPaymentAppTest {
         mPaymentRequestTestRule.installPaymentApp(NO_INSTRUMENTS, DELAYED_RESPONSE);
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(mPaymentRequestTestRule.getShowFailed());
         mPaymentRequestTestRule.expectResultContains(
-                new String[] {"show() rejected", "The payment method is not supported"});
+                new String[] {"show() rejected", "The payment method", "not supported"});
     }
 
     /**
@@ -122,7 +118,7 @@ public class PaymentRequestPaymentAppTest {
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(mPaymentRequestTestRule.getShowFailed());
         ThreadUtils.runOnUiThreadBlocking(() -> app.respond());
         mPaymentRequestTestRule.expectResultContains(
-                new String[] {"show() rejected", "The payment method is not supported"});
+                new String[] {"show() rejected", "The payment method", "not supported"});
     }
 
     /**

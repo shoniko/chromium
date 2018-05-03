@@ -36,8 +36,8 @@ const TimeTicks kInitialTickTime = TicksFromSecondsF(1.0);
 
 class ElementAnimationsTest : public AnimationTimelinesTest {
  public:
-  ElementAnimationsTest() {}
-  ~ElementAnimationsTest() override {}
+  ElementAnimationsTest() = default;
+  ~ElementAnimationsTest() override = default;
 
   void SetUp() override {
     AnimationTimelinesTest::SetUp();
@@ -290,7 +290,7 @@ TEST_F(ElementAnimationsTest,
 
 class TestAnimationDelegateThatDestroysPlayer : public TestAnimationDelegate {
  public:
-  TestAnimationDelegateThatDestroysPlayer() {}
+  TestAnimationDelegateThatDestroysPlayer() = default;
 
   void NotifyAnimationStarted(base::TimeTicks monotonic_time,
                               int target_property,
@@ -3502,6 +3502,25 @@ TEST_F(ElementAnimationsTest, RemoveAndReAddPlayerToTicking) {
       std::unique_ptr<AnimationCurve>(new FakeFloatTransition(1.0, 1.f, 0.5f)),
       2, TargetProperty::OPACITY));
   EXPECT_EQ(1u, host_->ticking_players_for_testing().size());
+}
+
+TEST_F(ElementAnimationsTest, TickingAnimationsCount) {
+  CreateTestLayer(false, false);
+  AttachTimelinePlayerLayer();
+
+  // Add an animation and ensure the player is in the host's ticking players.
+  player_->AddAnimation(CreateAnimation(
+      std::unique_ptr<AnimationCurve>(new FakeFloatTransition(1.0, 1.f, 0.5f)),
+      2, TargetProperty::OPACITY));
+  EXPECT_EQ(1u, player_->TickingAnimationsCount());
+  EXPECT_EQ(1u, host_->CompositedAnimationsCount());
+  player_->AddAnimation(CreateAnimation(
+      std::unique_ptr<AnimationCurve>(new FakeTransformTransition(1)), 1,
+      TargetProperty::TRANSFORM));
+  EXPECT_EQ(2u, player_->TickingAnimationsCount());
+  EXPECT_EQ(2u, host_->CompositedAnimationsCount());
+  ticker_->RemoveFromTicking();
+  EXPECT_EQ(0u, host_->CompositedAnimationsCount());
 }
 
 }  // namespace

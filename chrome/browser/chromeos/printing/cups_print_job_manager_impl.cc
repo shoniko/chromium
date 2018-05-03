@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
@@ -40,7 +39,9 @@ namespace {
 const int kPollRate = 1000;
 
 // How long we'll wait to connect to a printer before declaring an error.
-const int kConnectingTimeout = 20;
+// TODO(crbug.com/786182): Increase to 120s to give pipeline more time to
+// complete.
+const int kConnectingTimeout = 120;
 
 // Threshold for giving up on communicating with CUPS.
 const int kRetryMax = 6;
@@ -372,7 +373,7 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
                                20);
 
     // Create a new print job.
-    auto cpj = base::MakeUnique<CupsPrintJob>(*printer, job_id, title,
+    auto cpj = std::make_unique<CupsPrintJob>(*printer, job_id, title,
                                               total_page_number);
     std::string key = cpj->GetUniqueId();
     jobs_[key] = std::move(cpj);
@@ -414,7 +415,7 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
     }
     std::vector<std::string> ids{printer_ids.begin(), printer_ids.end()};
 
-    auto result = base::MakeUnique<QueryResult>();
+    auto result = std::make_unique<QueryResult>();
     QueryResult* result_ptr = result.get();
     // Runs a query on |query_runner_| which will rejoin this sequnece on
     // completion.

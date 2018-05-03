@@ -7,10 +7,12 @@
 
 #include <memory>
 #include "core/CoreExport.h"
+#include "core/loader/resource/ImageResourceObserver.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/ImageObserver.h"
 #include "platform/graphics/ImageOrientation.h"
+#include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceLoadPriority.h"
 #include "platform/loader/fetch/ResourceStatus.h"
 #include "platform/weborigin/KURL.h"
@@ -55,17 +57,10 @@ class CORE_EXPORT ImageResourceContent final
 
   static ImageResourceContent* Fetch(FetchParameters&, ResourceFetcher*);
 
-  // Returns the nullImage() if the image is not available yet.
+  // Returns the NullImage() if the image is not available yet.
   blink::Image* GetImage();
   bool HasImage() const { return image_.get(); }
 
-  static std::pair<blink::Image*, float> BrokenImage(
-      float
-          device_scale_factor);  // Returns an image and the image's resolution
-                                 // scale factor.
-
-  bool UsesImageContainerSize() const;
-  bool ImageHasRelativeSize() const;
   // The device pixel ratio we got from the server for this image, or 1.0.
   float DevicePixelRatioHeaderValue() const;
   bool HasDevicePixelRatioHeaderValue() const;
@@ -111,9 +106,9 @@ class CORE_EXPORT ImageResourceContent final
 
   // Redirecting methods to Resource.
   const KURL& Url() const;
-  bool IsAccessAllowed(SecurityOrigin*);
+  bool IsAccessAllowed(const SecurityOrigin*);
   const ResourceResponse& GetResponse() const;
-  const ResourceError& GetResourceError() const;
+  Optional<ResourceError> GetResourceError() const;
   // DEPRECATED: ImageResourceContents consumers shouldn't need to worry about
   // whether the underlying Resource is being revalidated.
   bool IsCacheValidator() const;
@@ -131,12 +126,12 @@ class CORE_EXPORT ImageResourceContent final
 
   // The following public methods should be called from ImageResource only.
 
-  // updateImage() is the single control point of image content modification
+  // UpdateImage() is the single control point of image content modification
   // from ImageResource that all image updates should call.
   // We clear and/or update images in this single method
   // (controlled by UpdateImageOption) rather than providing separate methods,
   // in order to centralize state changes and
-  // not to expose the state inbetween to ImageResource.
+  // not to expose the state in between to ImageResource.
   enum UpdateImageOption {
     // Updates the image (including placeholder and decode error handling
     // and notifying observers) if needed.
@@ -178,6 +173,8 @@ class CORE_EXPORT ImageResourceContent final
   }
 
  private:
+  using CanDeferInvalidation = ImageResourceObserver::CanDeferInvalidation;
+
   explicit ImageResourceContent(scoped_refptr<blink::Image> = nullptr);
 
   // ImageObserver
@@ -194,6 +191,7 @@ class CORE_EXPORT ImageResourceContent final
 
   // If not null, changeRect is the changed part of the image.
   void NotifyObservers(NotifyFinishOption,
+                       CanDeferInvalidation,
                        const IntRect* change_rect = nullptr);
   void MarkObserverFinished(ImageResourceObserver*);
   void UpdateToLoadedContentStatus(ResourceStatus);

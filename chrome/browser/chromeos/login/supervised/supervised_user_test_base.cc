@@ -19,7 +19,7 @@
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_authentication.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
@@ -39,6 +39,8 @@
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/cryptohome/mock_homedir_methods.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/fake_cryptohome_client.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -238,6 +240,9 @@ SupervisedUserTestBase::~SupervisedUserTestBase() {}
 
 void SupervisedUserTestBase::SetUpInProcessBrowserTestFixture() {
   LoginManagerTest::SetUpInProcessBrowserTestFixture();
+
+  chromeos::DBusThreadManager::GetSetterForTesting()->SetCryptohomeClient(
+      std::make_unique<FakeCryptohomeClient>());
   mock_async_method_caller_ = new cryptohome::MockAsyncMethodCaller;
   mock_async_method_caller_->SetUp(true, cryptohome::MOUNT_ERROR_NONE);
   cryptohome::AsyncMethodCaller::InitializeForTesting(
@@ -305,8 +310,10 @@ void SupervisedUserTestBase::JSSetTextField(const std::string& element_selector,
 }
 
 void SupervisedUserTestBase::PrepareUsers() {
-  RegisterUser(kTestManager);
-  RegisterUser(kTestOtherUser);
+  RegisterUser(
+      AccountId::FromUserEmailGaiaId(kTestManager, kTestManagerGaiaId));
+  RegisterUser(
+      AccountId::FromUserEmailGaiaId(kTestOtherUser, kTestOtherUserGaiaId));
   chromeos::StartupUtils::MarkOobeCompleted();
 }
 
@@ -351,8 +358,8 @@ void SupervisedUserTestBase::StartFlowLoginAsManager() {
 
   // Next button is now enabled.
   JSExpect("!$('supervised-user-creation-next-button').disabled");
-  UserContext user_context(AccountId::FromUserEmailGaiaId(
-      kTestManager, GetGaiaIDForUserID(kTestManager)));
+  UserContext user_context(
+      AccountId::FromUserEmailGaiaId(kTestManager, kTestManagerGaiaId));
   user_context.SetKey(Key(kTestManagerPassword));
   SetExpectedCredentials(user_context);
 
@@ -385,18 +392,14 @@ void SupervisedUserTestBase::FillNewUserData(const std::string& display_name) {
 void SupervisedUserTestBase::StartUserCreation(
     const std::string& button_id,
     const std::string& expected_display_name) {
-  base::RunLoop mount_wait_loop, add_key_wait_loop;
-  mock_homedir_methods_->set_mount_callback(mount_wait_loop.QuitClosure());
+  base::RunLoop add_key_wait_loop;
   mock_homedir_methods_->set_add_key_callback(add_key_wait_loop.QuitClosure());
-  EXPECT_CALL(*mock_homedir_methods_, MountEx(_, _, _, _)).Times(1);
-  EXPECT_CALL(*mock_homedir_methods_, AddKeyEx(_, _, _, _, _)).Times(1);
+  EXPECT_CALL(*mock_homedir_methods_, AddKeyEx(_, _, _, _)).Times(1);
 
   JSEval(std::string("$('").append(button_id).append("').click()"));
 
-  mount_wait_loop.Run();
   add_key_wait_loop.Run();
   ::testing::Mock::VerifyAndClearExpectations(mock_homedir_methods_);
-  mock_homedir_methods_->set_mount_callback(base::Closure());
   mock_homedir_methods_->set_add_key_callback(base::Closure());
 
   EXPECT_TRUE(registration_utility_stub_->register_was_called());
@@ -416,12 +419,8 @@ void SupervisedUserTestBase::StartUserCreation(
 }
 
 void SupervisedUserTestBase::SigninAsSupervisedUser(
-    bool check_homedir_calls,
     int user_index,
     const std::string& expected_display_name) {
-  if (check_homedir_calls)
-    EXPECT_CALL(*mock_homedir_methods_, MountEx(_, _, _, _)).Times(1);
-
   // Log in as supervised user, make sure that everything works.
   ASSERT_EQ(3UL, user_manager::UserManager::Get()->GetUsers().size());
 
@@ -435,9 +434,7 @@ void SupervisedUserTestBase::SigninAsSupervisedUser(
       ChromeUserManager::Get()->GetSupervisedUserManager())
       ->CheckForFirstRun(user->GetAccountId().GetUserEmail());
 
-  LoginUser(user->GetAccountId().GetUserEmail());
-  if (check_homedir_calls)
-    ::testing::Mock::VerifyAndClearExpectations(mock_homedir_methods_);
+  LoginUser(user->GetAccountId());
   Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
   shared_settings_adapter_.reset(
       new SupervisedUsersSharedSettingsSyncTestAdapter(profile));
@@ -453,7 +450,7 @@ void SupervisedUserTestBase::SigninAsManager(int user_index) {
   // Created supervised user have to be first in a list.
   const user_manager::User* user =
       user_manager::UserManager::Get()->GetUsers().at(user_index);
-  LoginUser(user->GetAccountId().GetUserEmail());
+  LoginUser(user->GetAccountId());
   Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
   shared_settings_adapter_.reset(
       new SupervisedUsersSharedSettingsSyncTestAdapter(profile));

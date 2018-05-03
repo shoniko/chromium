@@ -9,10 +9,12 @@
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/notifications/notification_common.h"
+#include "chrome/browser/notifications/stub_notification_display_service.h"
 
 class Profile;
-class StubNotificationDisplayService;
 
 namespace message_center {
 class Notification;
@@ -22,34 +24,59 @@ class Notification;
 // Profile* passed when constructing an instance must outlive this class, as
 // the service (or internals of the service) may be overridden.
 //
-// This class must only be used for testing purposes.
+// This class must only be used for testing purposes. Unlike most production
+// NotificationDisplayService implementations, all operations on this tester are
+// synchronous.
 class NotificationDisplayServiceTester {
  public:
   explicit NotificationDisplayServiceTester(Profile* profile);
   ~NotificationDisplayServiceTester();
+
+  // Returns the currently active tester, if any.
+  static NotificationDisplayServiceTester* Get();
 
   // Sets |closure| to be invoked when any notification has been added.
   void SetNotificationAddedClosure(base::RepeatingClosure closure);
 
   // Synchronously gets a vector of the displayed Notifications for the |type|.
   std::vector<message_center::Notification> GetDisplayedNotificationsForType(
-      NotificationCommon::Type type);
+      NotificationHandler::Type type);
 
   const NotificationCommon::Metadata* GetMetadataForNotification(
       const message_center::Notification& notification);
+
+  base::Optional<message_center::Notification> GetNotification(
+      const std::string& notification_id) const;
+
+  // Simulates the notification identified by |notification_id| being clicked
+  // on, optionally with the given |action_index| and |reply|.
+  void SimulateClick(NotificationHandler::Type notification_type,
+                     const std::string& notification_id,
+                     base::Optional<int> action_index,
+                     base::Optional<base::string16> reply);
+
+  // Simulates a click on the settings button of the notification identified by
+  // |notification_id|.
+  void SimulateSettingsClick(NotificationHandler::Type notification_type,
+                             const std::string& notification_id);
 
   // Simulates the notification identified by |notification_id| being closed due
   // to external events, such as the user dismissing it when |by_user| is set.
   // When |silent| is set, the notification handlers won't be informed of the
   // change to immitate behaviour of operating systems that don't inform apps
   // about removed notifications.
-  void RemoveNotification(NotificationCommon::Type type,
+  void RemoveNotification(NotificationHandler::Type type,
                           const std::string& notification_id,
                           bool by_user,
                           bool silent = false);
 
   // Removes all notifications of the given |type|.
-  void RemoveAllNotifications(NotificationCommon::Type type, bool by_user);
+  void RemoveAllNotifications(NotificationHandler::Type type, bool by_user);
+
+  // Sets a |delegate| to notify when ProcessNotificationOperation is called.
+  void SetProcessNotificationOperationDelegate(
+      const StubNotificationDisplayService::
+          ProcessNotificationOperationCallback& delegate);
 
  private:
   Profile* profile_;

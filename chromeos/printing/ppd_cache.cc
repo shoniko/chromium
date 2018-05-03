@@ -132,10 +132,10 @@ class PpdCacheImpl : public PpdCache {
              base::TaskShutdownBehavior::BLOCK_SHUTDOWN})) {}
 
   // Public API functions.
-  void Find(const std::string& key, const FindCallback& cb) override {
+  void Find(const std::string& key, FindCallback cb) override {
     base::PostTaskAndReplyWithResult(
         fetch_task_runner_.get(), FROM_HERE,
-        base::Bind(&FindImpl, cache_base_dir_, key), cb);
+        base::BindOnce(&FindImpl, cache_base_dir_, key), std::move(cb));
   }
 
   // Store the given contents at the given key.  If cb is non-null, it will
@@ -148,7 +148,7 @@ class PpdCacheImpl : public PpdCache {
   }
 
  private:
-  ~PpdCacheImpl() override {}
+  ~PpdCacheImpl() override = default;
 
   base::FilePath cache_base_dir_;
   scoped_refptr<base::SequencedTaskRunner> fetch_task_runner_;

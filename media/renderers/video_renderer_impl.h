@@ -73,7 +73,7 @@ class MEDIA_EXPORT VideoRendererImpl
   void OnTimeProgressing() override;
   void OnTimeStopped() override;
 
-  void SetTickClockForTesting(std::unique_ptr<base::TickClock> tick_clock);
+  void SetTickClockForTesting(base::TickClock* tick_clock);
   void SetGpuMemoryBufferVideoForTesting(
       std::unique_ptr<GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool);
   size_t frames_queued_for_testing() const {
@@ -139,12 +139,7 @@ class MEDIA_EXPORT VideoRendererImpl
 
   // Returns true if the renderer has enough data for playback purposes.
   // Note that having enough data may be due to reaching end of stream.
-  //
-  // |low_latency_frames_required| indicates the required number of frame for
-  // have enough with a low latency playback. By default it's one frame, but
-  // during resume after a Flush() we may wait for 2 frames to ensure we have
-  // effective frames.
-  bool HaveEnoughData_Locked(size_t low_latency_frames_required = 1u) const;
+  bool HaveEnoughData_Locked() const;
   void TransitionToHaveEnough_Locked();
   void TransitionToHaveNothing();
   void TransitionToHaveNothing_Locked();
@@ -298,10 +293,9 @@ class MEDIA_EXPORT VideoRendererImpl
 
   // Keeps track of the number of frames decoded and dropped since the
   // last call to |statistics_cb_|. These must be accessed under lock.
-  int frames_decoded_;
-  int frames_dropped_;
+  PipelineStatistics stats_;
 
-  std::unique_ptr<base::TickClock> tick_clock_;
+  base::TickClock* tick_clock_;
 
   // Algorithm for selecting which frame to render; manages frames and all
   // timing related information. Ensure this is destructed before
@@ -317,10 +311,6 @@ class MEDIA_EXPORT VideoRendererImpl
   // Indicates whether or not media time is currently progressing or not.  Must
   // only be accessed from |task_runner_|.
   bool time_progressing_;
-
-  // Memory usage of |algorithm_| recorded during the last UpdateStats_Locked()
-  // call.
-  int64_t last_video_memory_usage_;
 
   // Indicates if a frame has been processed by CheckForMetadataChanges().
   bool have_renderered_frames_;
@@ -346,6 +336,11 @@ class MEDIA_EXPORT VideoRendererImpl
   size_t min_buffered_frames_;
   size_t max_buffered_frames_;
   MovingAverage read_durations_;
+
+  // Last Render() and last FrameReady() times respectively. Used to avoid
+  // triggering underflow when background rendering.
+  base::TimeTicks last_render_time_;
+  base::TimeTicks last_frame_ready_time_;
 
   // Indicates that the playback has been ongoing for at least
   // limits::kMinimumElapsedWatchTimeSecs.

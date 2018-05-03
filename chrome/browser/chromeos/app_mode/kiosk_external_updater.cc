@@ -105,10 +105,13 @@ KioskExternalUpdater::~KioskExternalUpdater() {
     disks::DiskMountManager::GetInstance()->RemoveObserver(this);
 }
 
-void KioskExternalUpdater::OnDiskEvent(
+void KioskExternalUpdater::OnAutoMountableDiskEvent(
     disks::DiskMountManager::DiskEvent event,
-    const disks::DiskMountManager::Disk* disk) {
-}
+    const disks::DiskMountManager::Disk& disk) {}
+
+void KioskExternalUpdater::OnBootDeviceDiskEvent(
+    disks::DiskMountManager::DiskEvent event,
+    const disks::DiskMountManager::Disk& disk) {}
 
 void KioskExternalUpdater::OnDeviceEvent(
     disks::DiskMountManager::DeviceEvent event,
@@ -255,7 +258,7 @@ void KioskExternalUpdater::ProcessParsedManifest(
 
     const base::DictionaryValue* extension = nullptr;
     if (!it.value().GetAsDictionary(&extension)) {
-      LOG(ERROR) << "Found bad entry in manifest type " << it.value().GetType();
+      LOG(ERROR) << "Found bad entry in manifest type " << it.value().type();
       continue;
     }
 
@@ -395,8 +398,8 @@ void KioskExternalUpdater::PutValidatedExtension(const std::string& app_id,
 
   KioskAppManager::Get()->PutValidatedExternalExtension(
       app_id, crx_file, version,
-      base::Bind(&KioskExternalUpdater::OnPutValidatedExtension,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&KioskExternalUpdater::OnPutValidatedExtension,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void KioskExternalUpdater::OnPutValidatedExtension(const std::string& app_id,

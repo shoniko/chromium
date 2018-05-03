@@ -6,11 +6,7 @@ cr.define('extensions', function() {
     is: 'extensions-sidebar',
 
     properties: {
-      /** @private {number} */
-      selected_: {
-        type: Number,
-        value: -1,
-      },
+      isSupervised: Boolean,
     },
 
     hostAttributes: {
@@ -19,18 +15,25 @@ cr.define('extensions', function() {
 
     /** @override */
     attached: function() {
-      this.selected_ =
-          extensions.navigation.getCurrentPage().page == Page.SHORTCUTS ? 1 : 0;
+      this.$.sectionMenu.select(
+          extensions.navigation.getCurrentPage().page == Page.SHORTCUTS ? 1 :
+                                                                          0);
+    },
+
+    /**
+     * @param {!Event} e
+     * @private
+     */
+    onLinkTap_: function(e) {
+      e.preventDefault();
+      extensions.navigation.navigateTo({page: e.target.dataset.path});
+      this.fire('close-drawer');
     },
 
     /** @private */
-    onExtensionsTap_: function() {
-      extensions.navigation.navigateTo({page: Page.LIST});
-    },
-
-    /** @private */
-    onKeyboardShortcutsTap_: function() {
-      extensions.navigation.navigateTo({page: Page.SHORTCUTS});
+    onMoreExtensionsTap_: function() {
+      assert(!this.isSupervised);
+      chrome.metricsPrivate.recordUserAction('Options_GetMoreExtensions');
     },
   });
 

@@ -213,7 +213,7 @@ class InputEventFilterTest : public testing::Test,
         base::Bind(base::IgnoreResult(&IPCMessageRecorder::OnMessageReceived),
                    base::Unretained(&message_recorder_)),
         main_task_runner_, main_task_runner_);
-    event_recorder_ = base::MakeUnique<InputEventRecorder>(filter_.get());
+    event_recorder_ = std::make_unique<InputEventRecorder>(filter_.get());
     filter_->SetInputHandlerManager(event_recorder_.get());
     filter_->OnFilterAdded(&ipc_sink_);
   }
@@ -312,7 +312,8 @@ TEST_F(InputEventFilterTest, Basic) {
   for (size_t i = 0; i < arraysize(kEvents); ++i) {
     const IPC::Message* message = ipc_sink_.GetMessageAt(i);
     EXPECT_EQ(kTestRoutingID, message->routing_id());
-    EXPECT_EQ(InputHostMsg_HandleInputEvent_ACK::ID, message->type());
+    EXPECT_EQ(static_cast<uint32_t>(InputHostMsg_HandleInputEvent_ACK::ID),
+              message->type());
 
     InputHostMsg_HandleInputEvent_ACK::Param params;
     EXPECT_TRUE(InputHostMsg_HandleInputEvent_ACK::Read(message, &params));
@@ -358,7 +359,8 @@ TEST_F(InputEventFilterTest, Basic) {
   for (size_t i = 0; i < arraysize(kEvents); ++i) {
     const IPC::Message* message = ipc_sink_.GetMessageAt(i);
     EXPECT_EQ(kTestRoutingID, message->routing_id());
-    EXPECT_EQ(InputHostMsg_HandleInputEvent_ACK::ID, message->type());
+    EXPECT_EQ(static_cast<uint32_t>(InputHostMsg_HandleInputEvent_ACK::ID),
+              message->type());
 
     InputHostMsg_HandleInputEvent_ACK::Param params;
     EXPECT_TRUE(InputHostMsg_HandleInputEvent_ACK::Read(message, &params));

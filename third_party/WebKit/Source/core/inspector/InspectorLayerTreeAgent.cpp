@@ -40,7 +40,7 @@
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectedFrames.h"
 #include "core/layout/LayoutEmbeddedContent.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
@@ -238,7 +238,7 @@ InspectorLayerTreeAgent::InspectorLayerTreeAgent(
       client_(client),
       suppress_layer_paint_events_(false) {}
 
-InspectorLayerTreeAgent::~InspectorLayerTreeAgent() {}
+InspectorLayerTreeAgent::~InspectorLayerTreeAgent() = default;
 
 void InspectorLayerTreeAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(inspected_frames_);
@@ -299,12 +299,12 @@ InspectorLayerTreeAgent::BuildLayerTree() {
   std::unique_ptr<Array<protocol::LayerTree::Layer>> layers =
       Array<protocol::LayerTree::Layer>::create();
   BuildLayerIdToNodeIdMap(compositor->RootLayer(), layer_id_to_node_id_map);
-  int scrolling_layer_id = inspected_frames_->Root()
-                               ->View()
-                               ->LayoutViewportScrollableArea()
-                               ->LayerForScrolling()
-                               ->PlatformLayer()
-                               ->Id();
+  auto* layer_for_scrolling = inspected_frames_->Root()
+                                  ->View()
+                                  ->LayoutViewportScrollableArea()
+                                  ->LayerForScrolling();
+  int scrolling_layer_id =
+      layer_for_scrolling ? layer_for_scrolling->PlatformLayer()->Id() : 0;
   bool have_blocking_wheel_event_handlers =
       inspected_frames_->Root()->GetChromeClient().EventListenerProperties(
           inspected_frames_->Root(), WebEventListenerClass::kMouseWheel) ==
@@ -333,13 +333,16 @@ void InspectorLayerTreeAgent::BuildLayerIdToNodeIdMap(
     return;
   LocalFrameView* child_frame_view =
       ToLayoutEmbeddedContent(root->GetLayoutObject()).ChildFrameView();
-  LayoutViewItem child_layout_view_item = child_frame_view->GetLayoutViewItem();
-  if (!child_layout_view_item.IsNull()) {
-    if (PaintLayerCompositor* child_compositor =
-            child_layout_view_item.Compositor())
-      BuildLayerIdToNodeIdMap(child_compositor->RootLayer(),
-                              layer_id_to_node_id_map);
-  }
+  if (!child_frame_view)
+    return;
+  LayoutView* child_layout_view = child_frame_view->GetLayoutView();
+  if (!child_layout_view)
+    return;
+  PaintLayerCompositor* child_compositor = child_layout_view->Compositor();
+  if (!child_compositor)
+    return;
+  BuildLayerIdToNodeIdMap(child_compositor->RootLayer(),
+                          layer_id_to_node_id_map);
 }
 
 void InspectorLayerTreeAgent::GatherGraphicsLayers(
@@ -364,9 +367,9 @@ int InspectorLayerTreeAgent::IdForNode(Node* node) {
 }
 
 PaintLayerCompositor* InspectorLayerTreeAgent::GetPaintLayerCompositor() {
-  LayoutViewItem layout_view = inspected_frames_->Root()->ContentLayoutItem();
+  auto* layout_view = inspected_frames_->Root()->ContentLayoutObject();
   PaintLayerCompositor* compositor =
-      layout_view.IsNull() ? nullptr : layout_view.Compositor();
+      layout_view ? layout_view->Compositor() : nullptr;
   return compositor;
 }
 
@@ -412,15 +415,8 @@ Response InspectorLayerTreeAgent::compositingReasons(
     return response;
   CompositingReasons reasons_bitmask = graphics_layer->GetCompositingReasons();
   *reason_strings = Array<String>::create();
-  for (size_t i = 0; i < kNumberOfCompositingReasons; ++i) {
-    if (!(reasons_bitmask & kCompositingReasonStringMap[i].reason))
-      continue;
-    (*reason_strings)->addItem(kCompositingReasonStringMap[i].short_name);
-#ifndef _NDEBUG
-    reasons_bitmask &= ~kCompositingReasonStringMap[i].reason;
-#endif
-  }
-  DCHECK(!reasons_bitmask);
+  for (const char* name : CompositingReason::ShortNames(reasons_bitmask))
+    (*reason_strings)->addItem(name);
   return Response::OK();
 }
 
@@ -434,7 +430,6 @@ Response InspectorLayerTreeAgent::makeSnapshot(const String& layer_id,
     return Response::Error("Layer does not draw content");
 
   IntSize size = ExpandedIntSize(layer->Size());
-
   IntRect interest_rect(IntPoint(0, 0), size);
   suppress_layer_paint_events_ = true;
 
@@ -451,11 +446,8 @@ Response InspectorLayerTreeAgent::makeSnapshot(const String& layer_id,
 
   suppress_layer_paint_events_ = false;
 
-  GraphicsContext context(layer->GetPaintController());
-  context.BeginRecording(interest_rect);
-  layer->GetPaintController().GetPaintArtifact().Replay(context);
-  scoped_refptr<PictureSnapshot> snapshot = WTF::AdoptRef(
-      new PictureSnapshot(ToSkPicture(context.EndRecording(), interest_rect)));
+  auto snapshot = base::AdoptRef(new PictureSnapshot(
+      ToSkPicture(layer->CapturePaintRecord(), interest_rect)));
 
   *snapshot_id = String::Number(++last_snapshot_id_);
   bool new_entry = snapshot_by_id_.insert(*snapshot_id, snapshot).is_new_entry;
@@ -472,7 +464,7 @@ Response InspectorLayerTreeAgent::loadSnapshot(
   decoded_tiles.Grow(tiles->length());
   for (size_t i = 0; i < tiles->length(); ++i) {
     protocol::LayerTree::PictureTile* tile = tiles->get(i);
-    decoded_tiles[i] = WTF::AdoptRef(new PictureSnapshot::TilePictureStream());
+    decoded_tiles[i] = base::AdoptRef(new PictureSnapshot::TilePictureStream());
     decoded_tiles[i]->layer_offset.Set(tile->getX(), tile->getY());
     if (!Base64Decode(tile->getPicture(), decoded_tiles[i]->data))
       return Response::Error("Invalid base64 encoding");

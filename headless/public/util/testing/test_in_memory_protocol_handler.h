@@ -42,6 +42,7 @@ class TestInMemoryProtocolHandler
 
   struct Response {
     Response() {}
+    Response(const std::string& data) : data(data) {}
     Response(const std::string& body, const std::string& mime_type)
         : data("HTTP/1.1 200 OK\r\nContent-Type: " + mime_type + "\r\n\r\n" +
                body) {}
@@ -62,6 +63,10 @@ class TestInMemoryProtocolHandler
 
   const std::vector<std::string>& urls_requested() const {
     return urls_requested_;
+  }
+
+  const std::vector<std::string>& methods_requested() const {
+    return methods_requested_;
   }
 
  private:
@@ -85,6 +90,7 @@ class TestInMemoryProtocolHandler
   HeadlessBrowserContext* headless_browser_context_;
   std::map<std::string, std::string> url_to_devtools_frame_id_;
   std::vector<std::string> urls_requested_;
+  std::vector<std::string> methods_requested_;
   RequestDeferrer* request_deferrer_;  // NOT OWNED.
   scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;
 

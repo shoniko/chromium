@@ -4,16 +4,10 @@
 
 #include "ui/base/ime/input_method_chromeos.h"
 
-#include <X11/Xlib.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include <memory>
-#undef Bool
-#undef FocusIn
-#undef FocusOut
-#undef None
-
 #include <cstring>
 
 #include "base/i18n/char_iterator.h"
@@ -34,6 +28,7 @@
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/test/events_test_utils_x11.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/x/x11.h"
 
 using base::UTF8ToUTF16;
 using base::UTF16ToUTF8;
@@ -454,7 +449,7 @@ TEST_F(InputMethodChromeOSTest, Focus_Scenario) {
             mock_ime_engine_handler_->last_text_input_context().mode);
 
   input_type_ = TEXT_INPUT_TYPE_TEXT;
-  input_mode_ = TEXT_INPUT_MODE_LATIN;
+  input_mode_ = TEXT_INPUT_MODE_TEXT;
   ime_->OnTextInputTypeChanged(this);
   // Confirm that only FocusIn is called, the TextInputType is TEXT and the
   // TextInputMode is LATIN..
@@ -462,17 +457,17 @@ TEST_F(InputMethodChromeOSTest, Focus_Scenario) {
   EXPECT_EQ(0, mock_ime_engine_handler_->focus_out_call_count());
   EXPECT_EQ(TEXT_INPUT_TYPE_TEXT,
             mock_ime_engine_handler_->last_text_input_context().type);
-  EXPECT_EQ(TEXT_INPUT_MODE_LATIN,
+  EXPECT_EQ(TEXT_INPUT_MODE_TEXT,
             mock_ime_engine_handler_->last_text_input_context().mode);
 
-  input_mode_ = TEXT_INPUT_MODE_KANA;
+  input_mode_ = TEXT_INPUT_MODE_SEARCH;
   ime_->OnTextInputTypeChanged(this);
   // Confirm that both FocusIn and FocusOut are called for mode change.
   EXPECT_EQ(2, mock_ime_engine_handler_->focus_in_call_count());
   EXPECT_EQ(1, mock_ime_engine_handler_->focus_out_call_count());
   EXPECT_EQ(TEXT_INPUT_TYPE_TEXT,
             mock_ime_engine_handler_->last_text_input_context().type);
-  EXPECT_EQ(TEXT_INPUT_MODE_KANA,
+  EXPECT_EQ(TEXT_INPUT_MODE_SEARCH,
             mock_ime_engine_handler_->last_text_input_context().mode);
 
   input_type_ = TEXT_INPUT_TYPE_URL;
@@ -483,7 +478,7 @@ TEST_F(InputMethodChromeOSTest, Focus_Scenario) {
   EXPECT_EQ(2, mock_ime_engine_handler_->focus_out_call_count());
   EXPECT_EQ(TEXT_INPUT_TYPE_URL,
             mock_ime_engine_handler_->last_text_input_context().type);
-  EXPECT_EQ(TEXT_INPUT_MODE_KANA,
+  EXPECT_EQ(TEXT_INPUT_MODE_SEARCH,
             mock_ime_engine_handler_->last_text_input_context().mode);
 
   // Confirm that FocusOut is called when set focus to NULL client.

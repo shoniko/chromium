@@ -6,9 +6,9 @@
 #define EXTENSIONS_BROWSER_API_MANAGEMENT_MANAGEMENT_API_DELEGATE_H_
 
 #include "base/callback.h"
+#include "extensions/browser/disable_reason.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/constants.h"
-#include "extensions/common/disable_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
 #include "url/gurl.h"
@@ -103,7 +103,6 @@ class ManagementAPIDelegate {
   virtual bool UninstallExtension(content::BrowserContext* context,
                                   const std::string& transient_extension_id,
                                   UninstallReason reason,
-                                  const base::Closure& deletion_done_callback,
                                   base::string16* error) const = 0;
 
   // Creates an app shortcut.

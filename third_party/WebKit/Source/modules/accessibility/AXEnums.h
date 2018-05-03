@@ -20,7 +20,7 @@ enum AccessibilityRole {
   kArticleRole,
   kAudioRole,  // No mapping to ARIA role.
   kBannerRole,
-  kBlockquoteRole,     // No mapping to ARIA role.
+  kBlockquoteRole,  // No mapping to ARIA role.
   kButtonRole,
   kCanvasRole,   // No mapping to ARIA role.
   kCaptionRole,  // No mapping to ARIA role.
@@ -29,7 +29,8 @@ enum AccessibilityRole {
   kColorWellRole,  // No mapping to ARIA role.
   kColumnHeaderRole,
   kColumnRole,  // No mapping to ARIA role.
-  kComboBoxRole,
+  kComboBoxGroupingRole,
+  kComboBoxMenuButtonRole,
   kComplementaryRole,
   kContentInfoRole,
   kDateRole,      // No mapping to ARIA role.
@@ -96,8 +97,8 @@ enum AccessibilityRole {
   kRegionRole,
   kRowHeaderRole,
   kRowRole,
-  kRubyRole,        // No mapping to ARIA role.
-  kSVGRootRole,     // No mapping to ARIA role.
+  kRubyRole,     // No mapping to ARIA role.
+  kSVGRootRole,  // No mapping to ARIA role.
   kScrollBarRole,
   kSearchRole,
   kSearchBoxRole,
@@ -116,6 +117,7 @@ enum AccessibilityRole {
   kTableRole,
   kTermRole,
   kTextFieldRole,
+  kTextFieldWithComboBoxRole,
   kTimeRole,  // No mapping to ARIA role.
   kTimerRole,
   kToggleButtonRole,
@@ -265,6 +267,59 @@ enum AXDescriptionFrom {
   kAXDescriptionFromAttribute = 0,
   kAXDescriptionFromContents,
   kAXDescriptionFromRelatedElement,
+};
+
+enum AXObjectInclusion {
+  kIncludeObject,
+  kIgnoreObject,
+  kDefaultBehavior,
+};
+
+enum AccessibilityCheckedState {
+  kCheckedStateUndefined = 0,
+  kCheckedStateFalse,
+  kCheckedStateTrue,
+  kCheckedStateMixed
+};
+
+enum AccessibilityOptionalBool {
+  kOptionalBoolUndefined = 0,
+  kOptionalBoolTrue,
+  kOptionalBoolFalse
+};
+
+// The potential native HTML-based text (name, description or placeholder)
+// sources for an element.  See
+// http://rawgit.com/w3c/aria/master/html-aam/html-aam.html#accessible-name-and-description-calculation
+enum AXTextFromNativeHTML {
+  kAXTextFromNativeHTMLUninitialized = -1,
+  kAXTextFromNativeHTMLFigcaption,
+  kAXTextFromNativeHTMLLabel,
+  kAXTextFromNativeHTMLLabelFor,
+  kAXTextFromNativeHTMLLabelWrapped,
+  kAXTextFromNativeHTMLLegend,
+  kAXTextFromNativeHTMLTableCaption,
+  kAXTextFromNativeHTMLTitleElement,
+};
+
+enum AXIgnoredReason {
+  kAXActiveModalDialog,
+  kAXAncestorIsLeafNode,
+  kAXAriaHiddenElement,
+  kAXAriaHiddenSubtree,
+  kAXEmptyAlt,
+  kAXEmptyText,
+  kAXInertElement,
+  kAXInertSubtree,
+  kAXInheritsPresentation,
+  kAXLabelContainer,
+  kAXLabelFor,
+  kAXNotRendered,
+  kAXNotVisible,
+  kAXPresentationalRole,
+  kAXProbablyPresentational,
+  kAXStaticTextUsedAsNameFor,
+  kAXUninteresting
 };
 
 }  // namespace blink

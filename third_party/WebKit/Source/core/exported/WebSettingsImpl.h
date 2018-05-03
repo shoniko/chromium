@@ -44,7 +44,7 @@ class Settings;
 class CORE_EXPORT WebSettingsImpl final : public WebSettings {
  public:
   WebSettingsImpl(Settings*, DevToolsEmulator*);
-  virtual ~WebSettingsImpl() {}
+  virtual ~WebSettingsImpl() = default;
 
   void SetFromStrings(const WebString& name, const WebString& value) override;
 
@@ -73,7 +73,6 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetCursiveFontFamily(const WebString&,
                             UScriptCode = USCRIPT_COMMON) override;
   void SetDNSPrefetchingEnabled(bool) override;
-  void SetDataSaverEnabled(bool) override;
   void SetDOMPasteAllowed(bool) override;
   void SetDefaultFixedFontSize(int) override;
   void SetDefaultFontSize(int) override;
@@ -134,7 +133,6 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetPictographFontFamily(const WebString&,
                                UScriptCode = USCRIPT_COMMON) override;
   void SetPluginsEnabled(bool) override;
-  void SetEncryptedMediaEnabled(bool) override;
   void SetAvailablePointerTypes(int) override;
   void SetPrimaryPointerType(PointerType) override;
   void SetAvailableHoverTypes(int) override;
@@ -189,8 +187,6 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetUseSolidColorScrollbars(bool) override;
   void SetUseWideViewport(bool) override;
   void SetV8CacheOptions(V8CacheOptions) override;
-  void SetV8CacheStrategiesForCacheStorage(
-      V8CacheStrategiesForCacheStorage) override;
   void SetValidationMessageTimerMagnification(int) override;
   void SetViewportEnabled(bool) override;
   void SetViewportMetaEnabled(bool) override;
@@ -205,6 +201,7 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetMediaControlsEnabled(bool) override;
   void SetDoNotUpdateSelectionOnMutatingSelectionRange(bool) override;
   void SetMediaDownloadInProductHelpEnabled(bool) override;
+  void SetLowPriorityIframesThreshold(WebEffectiveConnectionType) override;
 
   bool ShowFPSCounter() const { return show_fps_counter_; }
   bool ShowPaintRects() const { return show_paint_rects_; }

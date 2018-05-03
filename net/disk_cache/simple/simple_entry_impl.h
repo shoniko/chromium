@@ -37,8 +37,9 @@ namespace disk_cache {
 
 class BackendCleanupTracker;
 class SimpleBackendImpl;
-class SimpleSynchronousEntry;
 class SimpleEntryStat;
+class SimpleFileTracker;
+class SimpleSynchronousEntry;
 struct SimpleEntryCreationResults;
 
 // SimpleEntryImpl is the IO thread interface to an entry in the very simple
@@ -67,6 +68,7 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
                   uint64_t entry_hash,
                   OperationsMode operations_mode,
                   SimpleBackendImpl* backend,
+                  SimpleFileTracker* file_tracker,
                   net::NetLog* net_log);
 
   void SetActiveEntryProxy(
@@ -90,6 +92,12 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
   // alone. In that case, the SimpleSynchronousEntry will read the key from disk
   // and it will be set.
   void SetKey(const std::string& key);
+
+  // SetCreatePendingDoom() should be called before CreateEntry() if the
+  // creation should suceed optimistically but not do any I/O until
+  // NotifyDoomBeforeCreateComplete() is called.
+  void SetCreatePendingDoom();
+  void NotifyDoomBeforeCreateComplete();
 
   // From Entry:
   void Doom() override;
@@ -134,8 +142,8 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
 
   enum State {
     // The state immediately after construction, but before |synchronous_entry_|
-    // has been assigned. This is the state at construction, and is the only
-    // legal state to destruct an entry in.
+    // has been assigned. This is the state at construction, and is one of the
+    // two states (along with failure) one can destruct an entry in.
     STATE_UNINITIALIZED,
 
     // This entry is available for regular IO.
@@ -167,8 +175,11 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
   // not expect).
   void PostClientCallback(const CompletionCallback& callback, int result);
 
-  // Sets entry to STATE_UNINITIALIZED.
-  void MakeUninitialized();
+  // Clears entry state enough to prepare it for re-use. This will generally
+  // put it back into STATE_UNINITIALIZED, except if the entry is doomed and
+  // therefore disconnected from ownership of corresponding filename, in which
+  // case it will be put into STATE_FAILURE.
+  void ResetEntry();
 
   // Return this entry to a user of the API in |out_entry|. Increments the user
   // count.
@@ -335,9 +346,10 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
 
   // All nonstatic SimpleEntryImpl methods should always be called on the IO
   // thread, in all cases. |io_thread_checker_| documents and enforces this.
-  base::ThreadCheckerImpl io_thread_checker_;
+  base::ThreadChecker io_thread_checker_;
 
   const base::WeakPtr<SimpleBackendImpl> backend_;
+  SimpleFileTracker* const file_tracker_;
   const net::CacheType cache_type_;
   const scoped_refptr<base::TaskRunner> worker_pool_;
   const base::FilePath path_;
@@ -360,6 +372,12 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
   int open_count_;
 
   bool doomed_;
+
+  enum {
+    CREATE_NORMAL,
+    CREATE_OPTIMISTIC_PENDING_DOOM,
+    CREATE_OPTIMISTIC_PENDING_DOOM_FOLLOWED_BY_DOOM,
+  } optimistic_create_pending_doom_state_;
 
   State state_;
 

@@ -184,6 +184,7 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
   recentTabsMenuModelDelegate_.reset();
   [self setModel:nullptr];
   appMenuModel_.reset();
+  bookmarkMenuBridge_ = nullptr;
   buttonViewController_.reset();
 
   // The observers should most likely already be destroyed (since they're reset
@@ -270,7 +271,7 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
 
   // The section headers in the recent tabs submenu should be bold and black if
   // a font list is specified for the items (bold is already applied in the
-  // |MenuController| as the font list returned by |GetLabelFontListAt| is
+  // |MenuControllerCocoa| as the font list returned by |GetLabelFontListAt| is
   // bold).
   if (model && model == [self recentTabsMenuModel]) {
     if (model->GetLabelFontListAt([item tag])) {
@@ -305,10 +306,23 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
 
 - (void)updateBookmarkSubMenu {
   NSMenu* bookmarkMenu = [self bookmarkSubMenu];
-  DCHECK(bookmarkMenu);
+  if (!bookmarkMenu)
+    return;  // Guest profiles have no bookmarks menu.
 
-  bookmarkMenuBridge_.reset(new BookmarkMenuBridge(
-      [self appMenuModel]->browser()->profile(), bookmarkMenu));
+  // TODO(tapted): This should be cached and shared between browser windows in
+  // the same profile at least. Better would be to key it to the profile and
+  // share it with the main menu and the bookmarks toolbar as well. Sadly, it
+  // can't even be easily cached on |self|. This is because the first 5 items in
+  // the submenu are tied to a MenuControllerCocoa target via a raw pointer,
+  // which can't be reused across menu invocations.
+  bookmarkMenuBridge_ = std::make_unique<BookmarkMenuBridge>(
+      [self appMenuModel]->browser()->profile(), bookmarkMenu);
+
+  // Note |bookmarkMenuBridge_| is useless after the menu closes, but it must
+  // exist when (and if) the menu action is sent. Unfortunately, AppKit sends
+  // menu actions after menuDidClose: and NSMenuDidEndTrackingNotification so
+  // |bookmarkMenuBridge_| is going to hang around until updateBookmarkSubMenu
+  // is called again.
 }
 
 - (void)updateBrowserActionsSubmenu {
@@ -381,11 +395,12 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
 
   AppToolbarButton* appMenuButton =
       static_cast<AppToolbarButton*>([[bwc toolbarController] appMenuButton]);
-  [appMenuButton animateIfPossible];
+  [appMenuButton animateIfPossibleWithDelay:NO];
 }
 
 - (void)menuDidClose:(NSMenu*)menu {
   [super menuDidClose:menu];
+
   // We don't need to observe changes to zoom or toolbar size when the menu is
   // closed, since we instantiate it with the proper value and recreate the menu
   // on each show. (We do this in -menuNeedsUpdate:, which is called when the
@@ -481,6 +496,7 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
   DCHECK(browser_);
   recentTabsMenuModelDelegate_.reset();
   appMenuModel_.reset(new AppMenuModel(acceleratorDelegate_.get(), browser_));
+  appMenuModel_->Init();
   [self setModel:appMenuModel_.get()];
 
   buttonViewController_.reset(

@@ -5,6 +5,7 @@
 #include "ui/app_list/views/search_result_answer_card_view.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -37,7 +38,8 @@ class SearchResultAnswerCardViewTest : public views::ViewsTestBase {
 
     result_container_view_ = new SearchResultAnswerCardView(&view_delegate_);
     search_card_view_->AddChildView(result_container_view_);
-    result_container_view_->SetResults(view_delegate_.GetModel()->results());
+    result_container_view_->SetResults(
+        view_delegate_.GetSearchModel()->results());
 
     result_view_ = std::make_unique<views::View>();
     result_view_->set_owned_by_client();
@@ -47,7 +49,7 @@ class SearchResultAnswerCardViewTest : public views::ViewsTestBase {
 
  protected:
   void SetUpSearchResult() {
-    AppListModel::SearchResults* results = GetResults();
+    SearchModel::SearchResults* results = GetResults();
     std::unique_ptr<TestSearchResult> result =
         std::make_unique<TestSearchResult>();
     result->set_display_type(SearchResult::DISPLAY_CARD);
@@ -80,8 +82,8 @@ class SearchResultAnswerCardViewTest : public views::ViewsTestBase {
     return result_container_view_->OnKeyPressed(event);
   }
 
-  AppListModel::SearchResults* GetResults() {
-    return view_delegate_.GetModel()->results();
+  SearchModel::SearchResults* GetResults() {
+    return view_delegate_.GetSearchModel()->results();
   }
 
   views::View* search_card_view() const { return search_card_view_.get(); }
@@ -131,14 +133,6 @@ TEST_F(SearchResultAnswerCardViewTest, Basic) {
   EXPECT_EQ(1, GetYSize());
 }
 
-TEST_F(SearchResultAnswerCardViewTest, ButtonBackground) {
-  views::View* button = result_view()->parent();
-  EXPECT_EQ(kAnswerCardSelectedColor, button->background()->get_color());
-
-  ClearSelectedIndex();
-  EXPECT_EQ(nullptr, button->background());
-}
-
 TEST_F(SearchResultAnswerCardViewTest, KeyboardEvents) {
   EXPECT_TRUE(KeyPress(ui::VKEY_RETURN));
   EXPECT_EQ(1, GetOpenResultCountAndReset(0));
@@ -158,7 +152,7 @@ TEST_F(SearchResultAnswerCardViewTest, KeyboardEvents) {
 TEST_F(SearchResultAnswerCardViewTest, SpokenFeedback) {
   ui::AXNodeData node_data;
   GetAccessibleNodeData(&node_data);
-  EXPECT_EQ(ui::AX_ROLE_BUTTON, node_data.role);
+  EXPECT_EQ(ui::AX_ROLE_GENERIC_CONTAINER, node_data.role);
   EXPECT_EQ(kResultTitle, node_data.GetStringAttribute(ui::AX_ATTR_NAME));
 }
 

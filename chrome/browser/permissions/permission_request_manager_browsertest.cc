@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
+#include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
@@ -109,7 +110,7 @@ class PermissionDialogTest
   PermissionRequest* MakePermissionRequest(ContentSettingsType permission);
 
   // TestBrowserDialog:
-  void ShowDialog(const std::string& name) override;
+  void ShowUi(const std::string& name) override;
 
   // Holds requests that do not delete themselves.
   std::vector<std::unique_ptr<PermissionRequest>> owned_requests_;
@@ -134,7 +135,7 @@ PermissionRequest* PermissionDialogTest::MakeRegisterProtocolHandlerRequest() {
 PermissionRequest* PermissionDialogTest::MakePermissionRequest(
     ContentSettingsType permission) {
   bool user_gesture = true;
-  auto decided = [](bool, ContentSetting) {};
+  auto decided = [](ContentSetting) {};
   auto cleanup = [] {};  // Leave cleanup to test harness destructor.
   owned_requests_.push_back(base::MakeUnique<PermissionRequestImpl>(
       GetUrl(), permission, user_gesture, base::Bind(decided),
@@ -142,7 +143,7 @@ PermissionRequest* PermissionDialogTest::MakePermissionRequest(
   return owned_requests_.back().get();
 }
 
-void PermissionDialogTest::ShowDialog(const std::string& name) {
+void PermissionDialogTest::ShowUi(const std::string& name) {
   constexpr const char* kMultipleName = "multiple";
   constexpr struct {
     const char* name;
@@ -180,7 +181,6 @@ void PermissionDialogTest::ShowDialog(const std::string& name) {
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:  // Same as notifications.
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:  // ChromeOS only.
@@ -470,7 +470,7 @@ IN_PROC_BROWSER_TEST_F(PermissionRequestManagerBrowserTest,
 // that could result in permission bubbles not being dismissed, and a problem
 // referencing a temporary drag window. See http://crbug.com/754552.
 IN_PROC_BROWSER_TEST_F(PermissionDialogTest, SwitchBrowserWindow) {
-  ShowDialog("geolocation");
+  ShowUi("geolocation");
   TabStripModel* strip = browser()->tab_strip_model();
 
   // Drag out into a dragging window. E.g. see steps in [BrowserWindowController
@@ -494,54 +494,53 @@ IN_PROC_BROWSER_TEST_F(PermissionDialogTest, SwitchBrowserWindow) {
 }
 
 // Host wants to run flash.
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeDialog_flash) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeUi_flash) {
+  ShowAndVerifyUi();
 }
 
 // Host wants to know your location.
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeDialog_geolocation) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeUi_geolocation) {
+  ShowAndVerifyUi();
 }
 
 // Host wants to show notifications.
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeDialog_notifications) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeUi_notifications) {
+  ShowAndVerifyUi();
 }
 
 // Host wants to use your microphone.
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeDialog_mic) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeUi_mic) {
+  ShowAndVerifyUi();
 }
 
 // Host wants to use your camera.
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeDialog_camera) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeUi_camera) {
+  ShowAndVerifyUi();
 }
 
 // Host wants to open email links.
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeDialog_protocol_handlers) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeUi_protocol_handlers) {
+  ShowAndVerifyUi();
 }
 
 // Host wants to use your MIDI devices.
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeDialog_midi) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeUi_midi) {
+  ShowAndVerifyUi();
 }
 
 // Shows a permissions bubble with multiple requests.
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeDialog_multiple) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, InvokeUi_multiple) {
+  ShowAndVerifyUi();
 }
 
 // CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER is ChromeOS only.
 #if defined(OS_CHROMEOS)
-#define MAYBE_InvokeDialog_protected_media InvokeDialog_protected_media
+#define MAYBE_InvokeUi_protected_media InvokeUi_protected_media
 #else
-#define MAYBE_InvokeDialog_protected_media DISABLED_InvokeDialog_protected_media
+#define MAYBE_InvokeUi_protected_media DISABLED_InvokeUi_protected_media
 #endif
-IN_PROC_BROWSER_TEST_F(PermissionDialogTest,
-                       MAYBE_InvokeDialog_protected_media) {
-  RunDialog();
+IN_PROC_BROWSER_TEST_F(PermissionDialogTest, MAYBE_InvokeUi_protected_media) {
+  ShowAndVerifyUi();
 }
 
 }  // anonymous namespace

@@ -100,7 +100,7 @@ void WebUIExtension::Send(gin::Arguments* args) {
 
   if (base::EndsWith(message, "RequiringGesture",
                      base::CompareCase::SENSITIVE) &&
-      !blink::WebUserGestureIndicator::IsProcessingUserGesture()) {
+      !blink::WebUserGestureIndicator::IsProcessingUserGesture(frame)) {
     NOTREACHED();
     return;
   }
@@ -120,6 +120,13 @@ void WebUIExtension::Send(gin::Arguments* args) {
     content = base::ListValue::From(V8ValueConverter::Create()->FromV8Value(
         obj, frame->MainWorldScriptContext()));
     DCHECK(content);
+    // The conversion of |obj| could have triggered arbitrary JavaScript code,
+    // so check that the frame is still valid to avoid dereferencing a stale
+    // pointer.
+    if (frame != blink::WebLocalFrame::FrameForCurrentContext()) {
+      NOTREACHED();
+      return;
+    }
   }
 
   // Send the message up to the browser.

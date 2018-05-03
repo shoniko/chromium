@@ -36,9 +36,11 @@ const char* const kDumpProviderWhitelist[] = {
     "MemoryCache",
     "MojoHandleTable",
     "MojoLevelDB",
+    "OutOfProcessHeapProfilingDumpProvider",
     "PartitionAlloc",
     "ProcessMemoryMetrics",
     "Skia",
+    "SharedMemoryTracker",
     "Sql",
     "URLRequestContext",
     "V8Isolate",
@@ -57,6 +59,7 @@ const char* const kDumpProviderSummaryWhitelist[] = {
     "Malloc",
     "PartitionAlloc",
     "ProcessMemoryMetrics",
+    "SharedMemoryTracker",
     "V8Isolate",
     nullptr  // End of list marker.
 };
@@ -174,6 +177,8 @@ const char* const kAllocatorDumpNameWhitelist[] = {
     "skia/sk_resource_cache",
     "sqlite",
     "ui/resource_manager_0x?",
+    "v8/isolate_0x?/contexts/detached_context",
+    "v8/isolate_0x?/contexts/native_context",
     "v8/isolate_0x?/heap_spaces",
     "v8/isolate_0x?/heap_spaces/code_space",
     "v8/isolate_0x?/heap_spaces/large_object_space",
@@ -265,7 +270,14 @@ bool IsMemoryDumpProviderWhitelistedForSummary(const char* mdp_name) {
 bool IsMemoryAllocatorDumpNameWhitelisted(const std::string& name) {
   // Global dumps are explicitly whitelisted for background use.
   if (base::StartsWith(name, "global/", CompareCase::SENSITIVE)) {
-    for (size_t i = sizeof("global/"); i < name.size(); i++)
+    for (size_t i = strlen("global/"); i < name.size(); i++)
+      if (!base::IsHexDigit(name[i]))
+        return false;
+    return true;
+  }
+
+  if (base::StartsWith(name, "shared_memory/", CompareCase::SENSITIVE)) {
+    for (size_t i = strlen("shared_memory/"); i < name.size(); i++)
       if (!base::IsHexDigit(name[i]))
         return false;
     return true;

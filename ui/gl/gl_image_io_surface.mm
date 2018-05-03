@@ -14,7 +14,8 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
-#include "ui/gfx/color_space.h"
+#include "ui/gfx/buffer_format_util.h"
+#include "ui/gfx/mac/io_surface.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/scoped_binders.h"
@@ -53,6 +54,7 @@ bool ValidFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
     case gfx::BufferFormat::RGBA_F16:
+    case gfx::BufferFormat::BGRX_1010102:
     case gfx::BufferFormat::UYVY_422:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       return true;
@@ -88,9 +90,12 @@ GLenum TextureFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::RGBA_F16:
       return GL_RGBA;
     case gfx::BufferFormat::UYVY_422:
-      return GL_RGB;
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       return GL_RGB_YCBCR_420V_CHROMIUM;
+    case gfx::BufferFormat::BGRX_1010102:
+      // CGLTexImageIOSurface2D() (and OpenGL ES 3.0, for the case) support only
+      // GL_RGBA despite the hardware ignoring it.
+      return GL_RGBA;
     case gfx::BufferFormat::ATC:
     case gfx::BufferFormat::ATCIA:
     case gfx::BufferFormat::DXT1:
@@ -119,6 +124,7 @@ GLenum DataFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRX_1010102:
       return GL_BGRA;
     case gfx::BufferFormat::RGBA_F16:
       return GL_RGBA;
@@ -153,11 +159,12 @@ GLenum DataType(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
       return GL_UNSIGNED_INT_8_8_8_8_REV;
+    case gfx::BufferFormat::BGRX_1010102:
+      return GL_UNSIGNED_INT_2_10_10_10_REV;
     case gfx::BufferFormat::RGBA_F16:
       return GL_HALF_APPLE;
     case gfx::BufferFormat::UYVY_422:
       return GL_UNSIGNED_SHORT_8_8_APPLE;
-      break;
     case gfx::BufferFormat::ATC:
     case gfx::BufferFormat::ATCIA:
     case gfx::BufferFormat::DXT1:
@@ -217,7 +224,7 @@ bool GLImageIOSurface::Initialize(IOSurfaceRef io_surface,
   }
 
   if (!ValidFormat(format)) {
-    LOG(ERROR) << "Invalid format: " << static_cast<int>(format);
+    LOG(ERROR) << "Invalid format: " << gfx::BufferFormatToString(format);
     return false;
   }
 
@@ -430,6 +437,13 @@ base::ScopedCFTypeRef<CVPixelBufferRef> GLImageIOSurface::cv_pixel_buffer() {
 
 GLImage::Type GLImageIOSurface::GetType() const {
   return Type::IOSURFACE;
+}
+
+void GLImageIOSurface::SetColorSpace(const gfx::ColorSpace& color_space) {
+  if (color_space_ == color_space)
+    return;
+  color_space_ = color_space;
+  IOSurfaceSetColorSpace(io_surface_, color_space);
 }
 
 // static

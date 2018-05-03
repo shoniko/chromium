@@ -22,7 +22,8 @@ namespace {
 // - If |jlist| is specified (an ArrayList<OfflineItem>), the item is added to
 //   that list.  |jlist| can also be null, in which case the item isn't added to
 //   anything.
-ScopedJavaLocalRef<jobject> createOfflineItemAndMaybeAddToList(
+ScopedJavaLocalRef<jobject>
+JNI_OfflineItemBridge_createOfflineItemAndMaybeAddToList(
     JNIEnv* env,
     ScopedJavaLocalRef<jobject> jlist,
     const OfflineItem& item) {
@@ -49,9 +50,9 @@ ScopedJavaLocalRef<jobject> createOfflineItemAndMaybeAddToList(
 // static
 ScopedJavaLocalRef<jobject> OfflineItemBridge::CreateOfflineItem(
     JNIEnv* env,
-    const OfflineItem* const item) {
-  return item ? createOfflineItemAndMaybeAddToList(env, nullptr, *item)
-              : nullptr;
+    const OfflineItem& item) {
+  return JNI_OfflineItemBridge_createOfflineItemAndMaybeAddToList(env, nullptr,
+                                                                  item);
 }
 
 // static
@@ -62,7 +63,7 @@ ScopedJavaLocalRef<jobject> OfflineItemBridge::CreateOfflineItemList(
       Java_OfflineItemBridge_createArrayList(env);
 
   for (const auto& item : items)
-    createOfflineItemAndMaybeAddToList(env, jlist, item);
+    JNI_OfflineItemBridge_createOfflineItemAndMaybeAddToList(env, jlist, item);
 
   return jlist;
 }

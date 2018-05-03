@@ -114,6 +114,7 @@ chrome.system.display.DisplayLayout;
  *   id: string,
  *   name: string,
  *   mirroringSourceId: string,
+ *   mirroringDestinationIds: !Array<string>,
  *   isPrimary: boolean,
  *   isInternal: boolean,
  *   isEnabled: boolean,
@@ -127,7 +128,8 @@ chrome.system.display.DisplayLayout;
  *   workArea: !chrome.system.display.Bounds,
  *   modes: !Array<!chrome.system.display.DisplayMode>,
  *   hasTouchSupport: boolean,
- *   hasAccelerometerSupport: boolean
+ *   hasAccelerometerSupport: boolean,
+ *   displayZoomFactor: number
  * }}
  * @see https://developer.chrome.com/extensions/system.display#type-DisplayUnitInfo
  */
@@ -142,7 +144,8 @@ chrome.system.display.DisplayUnitInfo;
  *   rotation: (number|undefined),
  *   boundsOriginX: (number|undefined),
  *   boundsOriginY: (number|undefined),
- *   displayMode: (!chrome.system.display.DisplayMode|undefined)
+ *   displayMode: (!chrome.system.display.DisplayMode|undefined),
+ *   displayZoomFactor: (number|undefined)
  * }}
  * @see https://developer.chrome.com/extensions/system.display#type-DisplayProperties
  */

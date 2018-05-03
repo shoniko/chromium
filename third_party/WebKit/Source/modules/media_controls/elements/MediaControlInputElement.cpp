@@ -9,9 +9,18 @@
 #include "core/html/forms/HTMLLabelElement.h"
 #include "core/html/media/HTMLMediaElement.h"
 #include "modules/media_controls/MediaControlsImpl.h"
+#include "modules/media_controls/elements/MediaControlElementsHelper.h"
 #include "platform/Histogram.h"
 #include "platform/runtime_enabled_features.h"
 #include "platform/text/PlatformLocale.h"
+#include "public/platform/WebSize.h"
+
+namespace {
+
+// The default size of an overflow button in pixels.
+constexpr int kDefaultButtonSize = 36;
+
+}  // namespace
 
 namespace blink {
 
@@ -103,7 +112,10 @@ MediaControlInputElement::MediaControlInputElement(
     MediaControlsImpl& media_controls,
     MediaControlElementType display_type)
     : HTMLInputElement(media_controls.GetDocument(), false),
-      MediaControlElementBase(media_controls, display_type, this) {}
+      MediaControlElementBase(media_controls, display_type, this) {
+  CreateUserAgentShadowRootV1();
+  CreateShadowSubtree();
+}
 
 WebLocalizedString::Name MediaControlInputElement::GetOverflowStringName()
     const {
@@ -191,6 +203,16 @@ void MediaControlInputElement::SetClass(const AtomicString& class_name,
 void MediaControlInputElement::UpdateDisplayType() {
   if (overflow_element_)
     overflow_element_->UpdateDisplayType();
+}
+
+WebSize MediaControlInputElement::GetSizeOrDefault() const {
+  if (HasOverflowButton()) {
+    // If this has an overflow button then it is a button control and therefore
+    // has a default size of kDefaultButtonSize.
+    return MediaControlElementsHelper::GetSizeOrDefault(
+        *this, WebSize(kDefaultButtonSize, kDefaultButtonSize));
+  }
+  return MediaControlElementsHelper::GetSizeOrDefault(*this, WebSize(0, 0));
 }
 
 void MediaControlInputElement::Trace(blink::Visitor* visitor) {

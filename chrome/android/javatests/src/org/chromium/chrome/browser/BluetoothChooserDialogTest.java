@@ -10,7 +10,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.LocationManager;
 import android.support.test.filters.LargeTest;
-import android.test.MoreAsserts;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ListView;
@@ -44,8 +43,7 @@ import org.chromium.ui.widget.TextViewWithClickableSpans;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class BluetoothChooserDialogTest {
     /**
      * Works like the BluetoothChooserDialog class, but records calls to native methods instead of
@@ -304,7 +302,7 @@ public class BluetoothChooserDialogTest {
                 () -> errorView.getClickableSpans()[0].onClick(errorView));
 
         // Permission was requested.
-        MoreAsserts.assertEquals(permissionDelegate.mPermissionsRequested,
+        Assert.assertArrayEquals(permissionDelegate.mPermissionsRequested,
                 new String[] {Manifest.permission.ACCESS_COARSE_LOCATION});
         Assert.assertNotNull(permissionDelegate.mCallback);
         // Grant permission.

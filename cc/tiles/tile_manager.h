@@ -191,12 +191,12 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
   void InitializeTilesWithResourcesForTesting(const std::vector<Tile*>& tiles) {
     for (size_t i = 0; i < tiles.size(); ++i) {
       TileDrawInfo& draw_info = tiles[i]->draw_info();
-      draw_info.set_resource(
+      draw_info.SetResource(
           resource_pool_->AcquireResource(
               tiles[i]->desired_texture_size(),
               raster_buffer_provider_->GetResourceFormat(false),
               client_->GetRasterColorSpace()),
-          false);
+          false, false);
       draw_info.set_resource_ready_for_draw();
     }
   }
@@ -248,9 +248,8 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
     return has_scheduled_tile_tasks_;
   }
 
-  void OnRasterTaskCompleted(std::unique_ptr<RasterBuffer> raster_buffer,
-                             Tile::Id tile_id,
-                             Resource* resource,
+  void OnRasterTaskCompleted(Tile::Id tile_id,
+                             ResourcePool::InUsePoolResource resource,
                              bool was_canceled);
 
   void SetDecodedImageTracker(DecodedImageTracker* decoded_image_tracker);
@@ -270,6 +269,10 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
 
   CheckerImageTracker& checker_image_tracker() {
     return checker_image_tracker_;
+  }
+
+  const std::vector<DrawImage>& decode_tasks_for_testing(Tile::Id id) {
+    return scheduled_draw_images_[id];
   }
 
  protected:
@@ -320,6 +323,9 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
 
     std::vector<PrioritizedTile> tiles_to_raster;
     std::vector<PrioritizedTile> tiles_to_process_for_images;
+    // A vector of additional images to be decoded for prepaint, but that
+    // are not necessarily associated with any tile.
+    std::vector<DrawImage> extra_prepaint_images;
     CheckerImageTracker::ImageDecodeQueue checker_image_decode_queue;
   };
 
@@ -328,7 +334,7 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
   scoped_refptr<TileTask> CreateRasterTask(
       const PrioritizedTile& prioritized_tile,
       const gfx::ColorSpace& color_space,
-      CheckerImageTracker::ImageDecodeQueue* checker_image_decode_queue);
+      PrioritizedWorkToSchedule* work_to_schedule);
 
   std::unique_ptr<EvictionTilePriorityQueue>
   FreeTileResourcesUntilUsageIsWithinLimit(
@@ -349,7 +355,6 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
       std::unique_ptr<RasterTilePriorityQueue> queue) const;
 
   viz::ResourceFormat DetermineResourceFormat(const Tile* tile) const;
-  bool DetermineResourceRequiresSwizzle(const Tile* tile) const;
 
   void DidFinishRunningTileTasksRequiredForActivation();
   void DidFinishRunningTileTasksRequiredForDraw();
@@ -365,6 +370,7 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
       const gfx::ColorSpace& raster_color_space,
       std::vector<DrawImage>* sync_decoded_images,
       std::vector<PaintImage>* checkered_images,
+      const gfx::Rect* invalidated_rect,
       base::flat_map<PaintImage::Id, size_t>* image_to_frame_index = nullptr);
   void AddCheckeredImagesToDecodeQueue(
       const PrioritizedTile& prioritized_tile,

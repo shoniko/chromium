@@ -52,7 +52,7 @@ class OfflinePageStorageManager;
 
 // Implementation of service for saving pages offline, storing the offline
 // copy and metadata, and retrieving them upon request.
-class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
+class OfflinePageModelImpl : public OfflinePageModel {
  public:
   // All blocking calls/disk access will happen on the provided |task_runner|.
   OfflinePageModelImpl(
@@ -86,9 +86,6 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
   void DeleteCachedPagesByURLPredicate(
       const UrlPredicate& predicate,
       const DeletePageCallback& callback) override;
-  void CheckPagesExistOffline(
-      const std::set<GURL>& urls,
-      const CheckPagesExistOfflineCallback& callback) override;
   void GetAllPages(const MultipleOfflinePageItemCallback& callback) override;
   void GetOfflineIdsForClientId(
       const ClientId& client_id,
@@ -107,8 +104,9 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
       const MultipleOfflinePageItemCallback& callback) override;
   void GetPagesSupportedByDownloads(
       const MultipleOfflinePageItemCallback& callback) override;
-  const base::FilePath& GetArchiveDirectory(
+  const base::FilePath& GetInternalArchiveDirectory(
       const std::string& name_space) const override;
+  bool IsArchiveInInternalDir(const base::FilePath& file_path) const override;
 
   ClientPolicyController* GetPolicyController() override;
 
@@ -117,8 +115,6 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
   void set_testing_clock(base::Clock* clock) { testing_clock_ = clock; }
 
   OfflinePageStorageManager* GetStorageManager();
-
-  bool is_loaded() const override;
 
   OfflineEventLogger* GetLogger() override;
 
@@ -133,6 +129,7 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(OfflinePageModelImplTest, MarkPageForDeletion);
+  FRIEND_TEST_ALL_PREFIXES(OfflinePageModelImplTest, StoreLoadFailurePersists);
 
   typedef std::vector<std::unique_ptr<OfflinePageArchiver>> PendingArchivers;
 
@@ -180,7 +177,8 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
                            const GURL& saved_url,
                            const base::FilePath& file_path,
                            const base::string16& title,
-                           int64_t file_size);
+                           int64_t file_size,
+                           const std::string& file_hash);
   void OnAddSavedPageDone(const OfflinePageItem& offline_page,
                           const SavePageCallback& callback,
                           AddPageResult add_result,

@@ -119,10 +119,8 @@ void SVGElement::BuildPendingResourcesIfNeeded() {
 }
 
 SVGElementRareData* SVGElement::EnsureSVGRareData() {
-  if (HasSVGRareData())
-    return SvgRareData();
-
-  svg_rare_data_ = new SVGElementRareData(this);
+  if (!svg_rare_data_)
+    svg_rare_data_ = new SVGElementRareData();
   return svg_rare_data_.Get();
 }
 
@@ -167,9 +165,9 @@ void SVGElement::ReportAttributeParsingError(SVGParsingError error,
 
 String SVGElement::title() const {
   // According to spec, we should not return titles when hovering over root
-  // <svg> elements (those <title> elements are the title of the document, not a
-  // tooltip) so we instantly return.
-  if (IsOutermostSVGSVGElement())
+  // <svg> elements imported as a standalone document(those <title> elements
+  // are the title of the document, not a tooltip) so we instantly return.
+  if (IsSVGSVGElement(*this) && this == GetDocument().documentElement())
     return String();
 
   if (InUseShadowTree()) {
@@ -302,12 +300,9 @@ bool SVGElement::HasTransform(
           HasSVGRareData());
 }
 
-static inline bool TransformUsesBoxSize(
-    const ComputedStyle& style,
-    ComputedStyle::ApplyTransformOrigin apply_transform_origin) {
-  if (apply_transform_origin == ComputedStyle::kIncludeTransformOrigin &&
-      (style.TransformOriginX().GetType() == kPercent ||
-       style.TransformOriginY().GetType() == kPercent) &&
+static inline bool TransformUsesBoxSize(const ComputedStyle& style) {
+  if ((style.TransformOriginX().IsPercent() ||
+       style.TransformOriginY().IsPercent()) &&
       style.RequireTransformOrigin(ComputedStyle::kIncludeTransformOrigin,
                                    ComputedStyle::kExcludeMotionPath))
     return true;
@@ -353,16 +348,7 @@ AffineTransform SVGElement::CalculateTransform(
   AffineTransform matrix;
   if (style && style->HasTransform()) {
     FloatRect reference_box = ComputeTransformReferenceBox(*this);
-    ComputedStyle::ApplyTransformOrigin apply_transform_origin =
-        ComputedStyle::kIncludeTransformOrigin;
-    // SVGTextElements need special handling for the text positioning code.
-    if (IsSVGTextElement(this)) {
-      // Do not take into account transform-origin, or percentage values.
-      reference_box = FloatRect();
-      apply_transform_origin = ComputedStyle::kExcludeTransformOrigin;
-    }
-
-    if (TransformUsesBoxSize(*style, apply_transform_origin))
+    if (TransformUsesBoxSize(*style))
       UseCounter::Count(GetDocument(), WebFeature::kTransformUsesBoxSizeOnSVG);
 
     // CSS transforms operate with pre-scaled lengths. To make this work with
@@ -382,13 +368,13 @@ AffineTransform SVGElement::CalculateTransform(
       reference_box.Scale(zoom);
       transform.Scale(1 / zoom);
       style->ApplyTransform(
-          transform, reference_box, apply_transform_origin,
+          transform, reference_box, ComputedStyle::kIncludeTransformOrigin,
           ComputedStyle::kIncludeMotionPath,
           ComputedStyle::kIncludeIndependentTransformProperties);
       transform.Scale(zoom);
     } else {
       style->ApplyTransform(
-          transform, reference_box, apply_transform_origin,
+          transform, reference_box, ComputedStyle::kIncludeTransformOrigin,
           ComputedStyle::kIncludeMotionPath,
           ComputedStyle::kIncludeIndependentTransformProperties);
     }
@@ -456,8 +442,7 @@ void SVGElement::ChildrenChanged(const ChildrenChange& change) {
   Element::ChildrenChanged(change);
 
   // Invalidate all instances associated with us.
-  if (!change.by_parser)
-    InvalidateInstances();
+  InvalidateInstances();
 }
 
 CSSPropertyID SVGElement::CssPropertyIdForSVGAttributeName(
@@ -858,7 +843,7 @@ bool SVGElement::IsPresentationAttributeWithSVGDOM(
 void SVGElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   CSSPropertyID property_id = CssPropertyIdForSVGAttributeName(name);
   if (property_id > 0)
     AddPropertyToPresentationAttributeStyle(style, property_id, value);
@@ -1092,13 +1077,13 @@ bool SVGElement::HasSVGParent() const {
          ParentOrShadowHostElement()->IsSVGElement();
 }
 
-MutableStylePropertySet* SVGElement::AnimatedSMILStyleProperties() const {
+MutableCSSPropertyValueSet* SVGElement::AnimatedSMILStyleProperties() const {
   if (HasSVGRareData())
     return SvgRareData()->AnimatedSMILStyleProperties();
   return nullptr;
 }
 
-MutableStylePropertySet* SVGElement::EnsureAnimatedSMILStyleProperties() {
+MutableCSSPropertyValueSet* SVGElement::EnsureAnimatedSMILStyleProperties() {
   return EnsureSVGRareData()->EnsureAnimatedSMILStyleProperties();
 }
 

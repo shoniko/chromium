@@ -326,7 +326,7 @@ Polymer({
    */
   onDefaultNetworkChanged_: function(event) {
     var state = event.detail;
-    this.defaultNetworkGuid_ = state.GUID;
+    this.defaultNetworkGuid_ = (state ? state.GUID : '');
     this.isConnected_ =
         !!state && state.ConnectionState == CrOnc.ConnectionState.CONNECTED;
     if (!state || state.GUID != this.networkLastSelectedGuid_)
@@ -346,6 +346,7 @@ Polymer({
    */
   onNetworkListNetworkItemSelected_: function(event) {
     var state = event.detail;
+    assert(state);
     // If the user has not previously made a selection and the default network
     // is selected and connected, continue to the next screen.
     if (this.networkLastSelectedGuid_ == '' &&
@@ -359,27 +360,45 @@ Polymer({
     // is pending connection attempt. So even if new selection is currently
     // connected, it may get disconnected at any time.
     // So just send one more connection request to cancel current attempts.
-    this.networkLastSelectedGuid_ = state.GUID;
+    this.networkLastSelectedGuid_ = (state ? state.GUID : '');
+
+    if (!state)
+      return;
 
     var self = this;
     var networkStateCopy = Object.assign({}, state);
 
-    // TODO(stevenjb): Do this when state.Connectable == false once network
-    // configuration is integrated into the Settings UI / details dialog.
+    // Cellular should normally auto connect. If it is selected, show the
+    // details UI since there is no configuration UI for Cellular.
     if (state.Type == chrome.networkingPrivate.NetworkType.CELLULAR) {
       chrome.send('showNetworkDetails', [state.GUID]);
       return;
     }
 
-    chrome.networkingPrivate.startConnect(state.GUID, function() {
-      var lastError = chrome.runtime.lastError;
+    // Allow proxy to be set for connected networks.
+    if (state.ConnectionState == CrOnc.ConnectionState.CONNECTED) {
+      chrome.send('showNetworkDetails', [state.GUID]);
+      return;
+    }
+
+    if (state.Connectable === false || state.ErrorState) {
+      chrome.send('showNetworkConfig', [state.GUID]);
+      return;
+    }
+
+    chrome.networkingPrivate.startConnect(state.GUID, () => {
+      const lastError = chrome.runtime.lastError;
       if (!lastError)
         return;
-
-      if (lastError.message == 'connected' || lastError.message == 'connecting')
+      const message = lastError.message;
+      if (message == 'connecting' || message == 'connect-canceled' ||
+          message == 'connected' || message == 'Error.InvalidNetworkGuid') {
         return;
-
-      console.error('networkingPrivate.startConnect error: ' + lastError);
+      }
+      console.error(
+          'networkingPrivate.startConnect error: ' + message +
+          ' For: ' + state.GUID);
+      chrome.send('showNetworkConfig', [state.GUID]);
     });
   },
 

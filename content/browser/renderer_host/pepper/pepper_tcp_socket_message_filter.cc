@@ -32,6 +32,7 @@
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/tcp_client_socket.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "ppapi/host/dispatch_host_message.h"
 #include "ppapi/host/error_conversion.h"
 #include "ppapi/host/ppapi_host.h"
@@ -77,7 +78,7 @@ PepperTCPSocketMessageFilter::PepperTCPSocketMessageFilter(
       rcvbuf_size_(0),
       sndbuf_size_(0),
       address_index_(0),
-      socket_(new net::TCPSocket(NULL, NULL, net::NetLogSource())),
+      socket_(new net::TCPSocket(nullptr, nullptr, net::NetLogSource())),
       ssl_context_helper_(host->ssl_context_helper()),
       pending_accept_(false),
       pending_read_on_unthrottle_(false),
@@ -105,7 +106,7 @@ PepperTCPSocketMessageFilter::PepperTCPSocketMessageFilter(
       render_process_id_(0),
       render_frame_id_(0),
       host_(host),
-      factory_(NULL),
+      factory_(nullptr),
       instance_(instance),
       state_(TCPSocketState::CONNECTED),
       end_of_file_reached_(false),
@@ -166,7 +167,7 @@ PepperTCPSocketMessageFilter::OverrideTaskRunnerForMessage(
     case PpapiHostMsg_TCPSocket_SetOption::ID:
       return BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
   }
-  return NULL;
+  return nullptr;
 }
 
 int32_t PepperTCPSocketMessageFilter::OnResourceMessageReceived(
@@ -222,11 +223,9 @@ int32_t PepperTCPSocketMessageFilter::OnMsgBind(
     return PP_ERROR_NOACCESS;
   }
 
-  if (!pepper_socket_utils::CanUseSocketAPIs(external_plugin_,
-                                             false /* private_api */,
-                                             NULL,
-                                             render_process_id_,
-                                             render_frame_id_)) {
+  if (!pepper_socket_utils::CanUseSocketAPIs(
+          external_plugin_, false /* private_api */, nullptr,
+          render_process_id_, render_frame_id_)) {
     return PP_ERROR_NOACCESS;
   }
 
@@ -684,22 +683,60 @@ void PepperTCPSocketMessageFilter::DoWrite(
   DCHECK(state_.IsConnected());
 
   int net_result = net::ERR_FAILED;
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("pepper_tcp_socket", R"(
+        semantics {
+          sender: "Pepper TCP Socket"
+          description:
+            "Pepper plugins use this API to send and receive data over the "
+            "network using TCP connections. This inteface is used by Flash and "
+            "PDF viewer, and Chrome Apps which use plugins to send/receive TCP "
+            "traffic (require Chrome Apps TCP socket permission)."
+          trigger:
+            "A request from a Pepper plugin."
+          data: "Any data that the plugin sends."
+          destination: OTHER
+          destination_other:
+            "Data can be sent to any destination."
+        }
+        policy {
+          cookies_allowed: NO
+          setting:
+            "These requests cannot be disabled, but will not happen if user "
+            "does not use Flash, internal PDF Viewer, or Chrome Apps that use "
+            "Pepper interface."
+          chrome_policy {
+            DefaultPluginsSetting {
+              DefaultPluginsSetting: 2
+            }
+          }
+          chrome_policy {
+            AlwaysOpenPdfExternally {
+              AlwaysOpenPdfExternally: true
+            }
+          }
+          chrome_policy {
+            ExtensionInstallBlacklist {
+              ExtensionInstallBlacklist: {
+                entries: '*'
+              }
+            }
+          }
+        })");
   if (socket_) {
     DCHECK_EQ(state_.state(), TCPSocketState::CONNECTED);
     net_result = socket_->Write(
-        write_buffer_.get(),
-        write_buffer_->BytesRemaining(),
+        write_buffer_.get(), write_buffer_->BytesRemaining(),
         base::Bind(&PepperTCPSocketMessageFilter::OnWriteCompleted,
-                   base::Unretained(this),
-                   context));
+                   base::Unretained(this), context),
+        traffic_annotation);
   } else if (ssl_socket_) {
     DCHECK_EQ(state_.state(), TCPSocketState::SSL_CONNECTED);
     net_result = ssl_socket_->Write(
-        write_buffer_.get(),
-        write_buffer_->BytesRemaining(),
+        write_buffer_.get(), write_buffer_->BytesRemaining(),
         base::Bind(&PepperTCPSocketMessageFilter::OnWriteCompleted,
-                   base::Unretained(this),
-                   context));
+                   base::Unretained(this), context),
+        traffic_annotation);
   }
   if (net_result != net::ERR_IO_PENDING)
     OnWriteCompleted(context, net_result);
@@ -848,7 +885,7 @@ void PepperTCPSocketMessageFilter::OnConnectCompleted(
     // We have to recreate |socket_| because it doesn't allow a second connect
     // attempt. We won't lose any state such as bound address or set options,
     // because in the private or v1.0 API, connect must be the first operation.
-    socket_.reset(new net::TCPSocket(NULL, NULL, net::NetLogSource()));
+    socket_.reset(new net::TCPSocket(nullptr, nullptr, net::NetLogSource()));
 
     if (address_index_ + 1 < address_list_.size()) {
       DCHECK_EQ(version_, ppapi::TCP_SOCKET_VERSION_PRIVATE);
@@ -900,7 +937,7 @@ void PepperTCPSocketMessageFilter::OnReadCompleted(
   } else {
     SendReadError(context, NetErrorToPepperError(net_result));
   }
-  read_buffer_ = NULL;
+  read_buffer_ = nullptr;
 }
 
 void PepperTCPSocketMessageFilter::OnWriteCompleted(
@@ -925,8 +962,8 @@ void PepperTCPSocketMessageFilter::OnWriteCompleted(
   else
     SendWriteReply(context, NetErrorToPepperError(net_result));
 
-  write_buffer_ = NULL;
-  write_buffer_base_ = NULL;
+  write_buffer_ = nullptr;
+  write_buffer_base_ = nullptr;
 }
 
 void PepperTCPSocketMessageFilter::OnListenCompleted(

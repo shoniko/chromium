@@ -40,6 +40,7 @@ void MediaControlsMediaEventListener::Attach() {
   GetMediaElement().addEventListener(EventTypeNames::keyup, this, false);
   GetMediaElement().addEventListener(EventTypeNames::waiting, this, false);
   GetMediaElement().addEventListener(EventTypeNames::progress, this, false);
+  GetMediaElement().addEventListener(EventTypeNames::loadeddata, this, false);
 
   // Listen to two different fullscreen events in order to make sure the new and
   // old APIs are handled.
@@ -71,9 +72,9 @@ void MediaControlsMediaEventListener::Attach() {
     if (!remote_playback_availability_callback_id_.has_value()) {
       remote_playback_availability_callback_id_ = WTF::make_optional(
           remote->WatchAvailabilityInternal(new AvailabilityCallbackWrapper(
-              WTF::Bind(&MediaControlsMediaEventListener::
-                            OnRemotePlaybackAvailabilityChanged,
-                        WrapWeakPersistent(this)))));
+              WTF::BindRepeating(&MediaControlsMediaEventListener::
+                                     OnRemotePlaybackAvailabilityChanged,
+                                 WrapWeakPersistent(this)))));
     }
   }
 }
@@ -170,6 +171,10 @@ void MediaControlsMediaEventListener::handleEvent(
   }
   if (event->type() == EventTypeNames::progress) {
     media_controls_->OnLoadingProgress();
+    return;
+  }
+  if (event->type() == EventTypeNames::loadeddata) {
+    media_controls_->OnLoadedData();
     return;
   }
 

@@ -6,7 +6,6 @@
 #define NGPhysicalBoxFragment_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/geometry/ng_physical_offset_rect.h"
 #include "core/layout/ng/inline/ng_baseline.h"
 #include "core/layout/ng/ng_physical_container_fragment.h"
 
@@ -19,28 +18,34 @@ class CORE_EXPORT NGPhysicalBoxFragment final
   NGPhysicalBoxFragment(LayoutObject* layout_object,
                         const ComputedStyle& style,
                         NGPhysicalSize size,
-                        const NGPhysicalOffsetRect& contents_visual_rect,
                         Vector<scoped_refptr<NGPhysicalFragment>>& children,
+                        const NGPhysicalOffsetRect& contents_visual_rect,
                         Vector<NGBaseline>& baselines,
                         NGBoxType box_type,
+                        bool is_old_layout_root,
                         unsigned,  // NGBorderEdges::Physical
                         scoped_refptr<NGBreakToken> break_token = nullptr);
 
   const NGBaseline* Baseline(const NGBaselineRequest&) const;
 
+  bool HasSelfPaintingLayer() const;
+  bool ChildrenInline() const;
+
+  // True if overflow != 'visible', except for certain boxes that do not allow
+  // overflow clip; i.e., AllowOverflowClip() returns false.
+  bool HasOverflowClip() const;
+  bool ShouldClipOverflow() const;
+
   // Visual rect of this box in the local coordinate. Does not include children
   // even if they overflow this box.
-  const NGPhysicalOffsetRect LocalVisualRect() const;
+  NGPhysicalOffsetRect SelfVisualRect() const;
 
-  // Visual rect of children in the local coordinate.
-  const NGPhysicalOffsetRect& ContentsVisualRect() const {
-    return contents_visual_rect_;
-  }
+  // VisualRect of itself including contents, in the local coordinate.
+  NGPhysicalOffsetRect VisualRectWithContents() const;
 
   scoped_refptr<NGPhysicalFragment> CloneWithoutOffset() const;
 
  private:
-  NGPhysicalOffsetRect contents_visual_rect_;
   Vector<NGBaseline> baselines_;
 };
 

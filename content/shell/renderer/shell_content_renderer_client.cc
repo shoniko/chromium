@@ -107,17 +107,17 @@ ShellContentRendererClient::~ShellContentRendererClient() {
 void ShellContentRendererClient::RenderThreadStarted() {
   web_cache_impl_.reset(new web_cache::WebCacheImpl());
 
-  auto registry = base::MakeUnique<service_manager::BinderRegistry>();
+  auto registry = std::make_unique<service_manager::BinderRegistry>();
   registry->AddInterface<mojom::TestService>(
       base::Bind(&CreateTestService), base::ThreadTaskRunnerHandle::Get());
   registry->AddInterface<mojom::PowerMonitorTest>(
       base::Bind(&PowerMonitorTestImpl::MakeStrongBinding,
-                 base::Passed(base::MakeUnique<PowerMonitorTestImpl>())),
+                 base::Passed(std::make_unique<PowerMonitorTestImpl>())),
       base::ThreadTaskRunnerHandle::Get());
   content::ChildThread::Get()
       ->GetServiceManagerConnection()
       ->AddConnectionFilter(
-          base::MakeUnique<SimpleConnectionFilter>(std::move(registry)));
+          std::make_unique<SimpleConnectionFilter>(std::move(registry)));
 }
 
 void ShellContentRendererClient::RenderViewCreated(RenderView* render_view) {
@@ -128,24 +128,24 @@ bool ShellContentRendererClient::HasErrorPage(int http_status_code) {
   return http_status_code >= 400 && http_status_code < 600;
 }
 
-void ShellContentRendererClient::GetNavigationErrorStrings(
+void ShellContentRendererClient::PrepareErrorPage(
     RenderFrame* render_frame,
     const blink::WebURLRequest& failed_request,
     const blink::WebURLError& error,
     std::string* error_html,
     base::string16* error_description) {
-  if (error_html) {
+  if (error_html && error_html->empty()) {
     *error_html =
         "<head><title>Error</title></head><body>Could not load the requested "
         "resource.<br/>Error code: " +
-        base::IntToString(error.reason) +
-        (error.reason < 0 ? " (" + net::ErrorToString(error.reason) + ")"
-                          : "") +
+        base::IntToString(error.reason()) +
+        (error.reason() < 0 ? " (" + net::ErrorToString(error.reason()) + ")"
+                            : "") +
         "</body>";
   }
 }
 
-void ShellContentRendererClient::GetNavigationErrorStringsForHttpStatusError(
+void ShellContentRendererClient::PrepareErrorPageForHttpStatusError(
     content::RenderFrame* render_frame,
     const blink::WebURLRequest& failed_request,
     const GURL& unreachable_url,

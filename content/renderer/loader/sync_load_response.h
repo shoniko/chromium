@@ -7,19 +7,25 @@
 
 #include <string>
 
-#include "content/public/common/resource_response_info.h"
+#include "base/optional.h"
+#include "content/common/content_export.h"
+#include "services/network/public/cpp/resource_response_info.h"
+#include "services/network/public/interfaces/cors.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
 
 // See the SyncLoad method. (The name of this struct is not
 // suffixed with "Info" because it also contains the response data.)
-struct CONTENT_EXPORT SyncLoadResponse : ResourceResponseInfo {
+struct CONTENT_EXPORT SyncLoadResponse : network::ResourceResponseInfo {
   SyncLoadResponse();
   ~SyncLoadResponse();
 
   // The response error code.
-  int error_code;
+  int error_code = 0;
+
+  // Optional CORS error details.
+  base::Optional<network::mojom::CORSError> cors_error;
 
   // The final URL of the response.  This may differ from the request URL in
   // the case of a server redirect.

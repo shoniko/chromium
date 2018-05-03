@@ -81,7 +81,7 @@ class ImageLoader::Task {
   static std::unique_ptr<Task> Create(ImageLoader* loader,
                                       UpdateFromElementBehavior update_behavior,
                                       ReferrerPolicy referrer_policy) {
-    return WTF::MakeUnique<Task>(loader, update_behavior, referrer_policy);
+    return std::make_unique<Task>(loader, update_behavior, referrer_policy);
   }
 
   Task(ImageLoader* loader,
@@ -131,14 +131,14 @@ class ImageLoader::Task {
     script_state_ = nullptr;
   }
 
-  WeakPtr<Task> CreateWeakPtr() { return weak_factory_.CreateWeakPtr(); }
+  base::WeakPtr<Task> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
  private:
   WeakPersistent<ImageLoader> loader_;
   BypassMainWorldBehavior should_bypass_main_world_csp_;
   UpdateFromElementBehavior update_behavior_;
   scoped_refptr<ScriptState> script_state_;
-  WeakPtrFactory<Task> weak_factory_;
+  base::WeakPtrFactory<Task> weak_factory_;
   ReferrerPolicy referrer_policy_;
   KURL request_url_;
 };
@@ -151,7 +151,7 @@ ImageLoader::ImageLoader(Element* element)
   RESOURCE_LOADING_DVLOG(1) << "new ImageLoader " << this;
 }
 
-ImageLoader::~ImageLoader() {}
+ImageLoader::~ImageLoader() = default;
 
 void ImageLoader::Dispose() {
   RESOURCE_LOADING_DVLOG(1)
@@ -192,8 +192,8 @@ void ImageLoader::DispatchDecodeRequestsIfComplete() {
     Image* image = GetContent()->GetImage();
     frame->GetChromeClient().RequestDecode(
         frame, image->PaintImageForCurrentFrame(),
-        WTF::Bind(&ImageLoader::DecodeRequestFinished, WrapWeakPersistent(this),
-                  request->request_id()));
+        WTF::Bind(&ImageLoader::DecodeRequestFinished,
+                  WrapCrossThreadWeakPersistent(this), request->request_id()));
     request->NotifyDecodeDispatched();
   }
 }
@@ -316,15 +316,12 @@ inline void ImageLoader::DispatchErrorEvent() {
   // In such cases we cancel the previous event (by overwriting
   // |pending_error_event_|) and then re-schedule a new error event here.
   // crbug.com/722500
-  pending_error_event_ =
-      TaskRunnerHelper::Get(TaskType::kDOMManipulation,
-                            &GetElement()->GetDocument())
-          ->PostCancellableTask(
-              BLINK_FROM_HERE,
-              WTF::Bind(&ImageLoader::DispatchPendingErrorEvent,
-                        WrapPersistent(this),
-                        WTF::Passed(IncrementLoadEventDelayCount::Create(
-                            GetElement()->GetDocument()))));
+  pending_error_event_ = PostCancellableTask(
+      *GetElement()->GetDocument().GetTaskRunner(TaskType::kDOMManipulation),
+      FROM_HERE,
+      WTF::Bind(&ImageLoader::DispatchPendingErrorEvent, WrapPersistent(this),
+                WTF::Passed(IncrementLoadEventDelayCount::Create(
+                    GetElement()->GetDocument()))));
 }
 
 inline void ImageLoader::CrossSiteOrCSPViolationOccurred(
@@ -341,7 +338,7 @@ inline void ImageLoader::EnqueueImageLoadingMicroTask(
     ReferrerPolicy referrer_policy) {
   std::unique_ptr<Task> task =
       Task::Create(this, update_behavior, referrer_policy);
-  pending_task_ = task->CreateWeakPtr();
+  pending_task_ = task->GetWeakPtr();
   Microtask::EnqueueMicrotask(
       WTF::Bind(&Task::Run, WTF::Passed(std::move(task))));
   delay_until_do_update_from_element_ =
@@ -403,6 +400,15 @@ void ImageLoader::DoUpdateFromElement(BypassMainWorldBehavior bypass_behavior,
         !GetElement()->FastGetAttribute(HTMLNames::srcsetAttr).IsNull())
       resource_request.SetRequestContext(
           WebURLRequest::kRequestContextImageSet);
+
+    if (document.PageDismissalEventBeingDispatched() !=
+        Document::kNoDismissal) {
+      resource_request.SetHTTPHeaderField(HTTPNames::Cache_Control,
+                                          "max-age=0");
+      resource_request.SetKeepalive(true);
+      resource_request.SetRequestContext(WebURLRequest::kRequestContextPing);
+    }
+
     FetchParameters params(resource_request, resource_loader_options);
     ConfigureRequest(params, bypass_behavior, *element_,
                      document.GetClientHintsPreferences());
@@ -492,7 +498,8 @@ void ImageLoader::UpdateFromElement(UpdateFromElementBehavior update_behavior,
   // ImageResource to be populated later.
   if (loading_image_document_) {
     ResourceRequest request(ImageSourceToKURL(element_->ImageSourceURL()));
-    request.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeOmit);
+    request.SetFetchCredentialsMode(
+        network::mojom::FetchCredentialsMode::kOmit);
     ImageResource* image_resource = ImageResource::Create(request);
     image_resource->SetStatus(ResourceStatus::kPending);
     image_resource->NotifyStartLoad();
@@ -568,7 +575,9 @@ bool ImageLoader::ShouldLoadImmediately(const KURL& url) const {
   return (IsHTMLObjectElement(element_) || IsHTMLEmbedElement(element_));
 }
 
-void ImageLoader::ImageChanged(ImageResourceContent* content, const IntRect*) {
+void ImageLoader::ImageChanged(ImageResourceContent* content,
+                               CanDeferInvalidation,
+                               const IntRect*) {
   DCHECK_EQ(content, image_content_.Get());
   if (image_complete_ || !content->IsLoading() ||
       delay_until_image_notify_finished_)
@@ -590,16 +599,6 @@ void ImageLoader::ImageNotifyFinished(ImageResourceContent* resource) {
   DCHECK(failed_load_url_.IsEmpty());
   DCHECK_EQ(resource, image_content_.Get());
 
-  if (image_content_ && image_content_->GetImage()) {
-    if (IsHTMLImageElement(element_)) {
-      Image::RecordCheckerableImageUMA(*image_content_->GetImage(),
-                                       Image::ImageType::kImg);
-    } else if (IsSVGImageElement(element_)) {
-      Image::RecordCheckerableImageUMA(*image_content_->GetImage(),
-                                       Image::ImageType::kSvg);
-    }
-  }
-
   // |image_complete_| is always true for entire ImageDocument loading for
   // historical reason.
   // DoUpdateFromElement() is not called and SetImageForImageDocument()
@@ -619,17 +618,24 @@ void ImageLoader::ImageNotifyFinished(ImageResourceContent* resource) {
 
   UpdateLayoutObject();
 
-  if (image_content_ && image_content_->GetImage() &&
-      image_content_->GetImage()->IsSVGImage()) {
-    // SVG's document should be completely loaded before access control
-    // checks, which can occur anytime after ImageNotifyFinished()
-    // (See SVGImage::CurrentFrameHasSingleSecurityOrigin()).
-    // We check the document is loaded here to catch violation of the
-    // assumption reliably.
-    ToSVGImage(image_content_->GetImage())->CheckLoaded();
+  if (image_content_ && image_content_->HasImage()) {
+    Image& image = *image_content_->GetImage();
+    if (IsHTMLImageElement(element_)) {
+      Image::RecordCheckerableImageUMA(image, Image::ImageType::kImg);
+    } else if (IsSVGImageElement(element_)) {
+      Image::RecordCheckerableImageUMA(image, Image::ImageType::kSvg);
+    }
 
-    ToSVGImage(image_content_->GetImage())
-        ->UpdateUseCounters(GetElement()->GetDocument());
+    if (image.IsSVGImage()) {
+      SVGImage& svg_image = ToSVGImage(image);
+      // SVG's document should be completely loaded before access control
+      // checks, which can occur anytime after ImageNotifyFinished()
+      // (See SVGImage::CurrentFrameHasSingleSecurityOrigin()).
+      // We check the document is loaded here to catch violation of the
+      // assumption reliably.
+      svg_image.CheckLoaded();
+      svg_image.UpdateUseCounters(GetElement()->GetDocument());
+    }
   }
 
   DispatchDecodeRequestsIfComplete();
@@ -642,9 +648,9 @@ void ImageLoader::ImageNotifyFinished(ImageResourceContent* resource) {
   if (resource->ErrorOccurred()) {
     pending_load_event_.Cancel();
 
-    if (resource->GetResourceError().IsAccessCheck()) {
-      CrossSiteOrCSPViolationOccurred(
-          AtomicString(resource->GetResourceError().FailingURL()));
+    Optional<ResourceError> error = resource->GetResourceError();
+    if (error && error->IsAccessCheck()) {
+      CrossSiteOrCSPViolationOccurred(AtomicString(error->FailingURL()));
     }
 
     // The error event should not fire if the image data update is a result of
@@ -656,15 +662,12 @@ void ImageLoader::ImageNotifyFinished(ImageResourceContent* resource) {
   }
 
   CHECK(!pending_load_event_.IsActive());
-  pending_load_event_ =
-      TaskRunnerHelper::Get(TaskType::kDOMManipulation,
-                            &GetElement()->GetDocument())
-          ->PostCancellableTask(
-              BLINK_FROM_HERE,
-              WTF::Bind(&ImageLoader::DispatchPendingLoadEvent,
-                        WrapPersistent(this),
-                        WTF::Passed(IncrementLoadEventDelayCount::Create(
-                            GetElement()->GetDocument()))));
+  pending_load_event_ = PostCancellableTask(
+      *GetElement()->GetDocument().GetTaskRunner(TaskType::kDOMManipulation),
+      FROM_HERE,
+      WTF::Bind(&ImageLoader::DispatchPendingLoadEvent, WrapPersistent(this),
+                WTF::Passed(IncrementLoadEventDelayCount::Create(
+                    GetElement()->GetDocument()))));
 }
 
 LayoutImageResource* ImageLoader::GetLayoutImageResource() {
@@ -676,7 +679,7 @@ LayoutImageResource* ImageLoader::GetLayoutImageResource() {
   // We don't return style generated image because it doesn't belong to the
   // ImageLoader. See <https://bugs.webkit.org/show_bug.cgi?id=42840>
   if (layout_object->IsImage() &&
-      !static_cast<LayoutImage*>(layout_object)->IsGeneratedContent())
+      !ToLayoutImage(layout_object)->IsGeneratedContent())
     return ToLayoutImage(layout_object)->ImageResource();
 
   if (layout_object->IsSVGImage())
@@ -757,6 +760,8 @@ ScriptPromise ImageLoader::Decode(ScriptState* script_state,
                                       "The source image cannot be decoded.");
     return ScriptPromise();
   }
+
+  UseCounter::Count(GetElement()->GetDocument(), WebFeature::kImageDecodeAPI);
 
   auto* request =
       new DecodeRequest(this, ScriptPromiseResolver::Create(script_state));

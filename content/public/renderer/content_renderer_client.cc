@@ -47,17 +47,15 @@ bool ContentRendererClient::ShouldSuppressErrorPage(RenderFrame* render_frame,
   return false;
 }
 
+bool ContentRendererClient::ShouldTrackUseCounter(const GURL& url) {
+  return true;
+}
+
 void ContentRendererClient::DeferMediaLoad(
     RenderFrame* render_frame,
     bool has_played_media_before,
     const base::Closure& closure) {
   closure.Run();
-}
-
-std::unique_ptr<blink::WebMediaStreamCenter>
-ContentRendererClient::OverrideCreateWebMediaStreamCenter(
-    blink::WebMediaStreamCenterClient* client) {
-  return nullptr;
 }
 
 std::unique_ptr<blink::WebMIDIAccessor>
@@ -134,7 +132,6 @@ bool ContentRendererClient::WillSendRequest(
     blink::WebLocalFrame* frame,
     ui::PageTransition transition_type,
     const blink::WebURL& url,
-    std::vector<std::unique_ptr<URLLoaderThrottle>>* throttles,
     GURL* new_url) {
   return false;
 }
@@ -161,7 +158,7 @@ ContentRendererClient::GetPrescientNetworking() {
 
 bool ContentRendererClient::ShouldOverridePageVisibilityState(
     const RenderFrame* render_frame,
-    blink::WebPageVisibilityState* override_state) {
+    blink::mojom::PageVisibilityState* override_state) {
   return false;
 }
 
@@ -260,6 +257,18 @@ bool ContentRendererClient::OverrideLegacySymantecCertConsoleMessage(
     base::Time cert_expiration,
     std::string* console_messsage) {
   return false;
+}
+
+std::unique_ptr<URLLoaderThrottleProvider>
+ContentRendererClient::CreateURLLoaderThrottleProvider(
+    URLLoaderThrottleProviderType provider_type) {
+  return nullptr;
+}
+
+blink::WebFrame* ContentRendererClient::FindFrame(
+    blink::WebLocalFrame* relative_to_frame,
+    const std::string& name) {
+  return nullptr;
 }
 
 }  // namespace content

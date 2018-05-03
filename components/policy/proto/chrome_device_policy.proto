@@ -89,6 +89,14 @@ message DeviceOpenNetworkConfigurationProto {
   optional string open_network_configuration = 1;
 }
 
+message NetworkHostnameProto {
+  // The device hostname template. It might contain following
+  // patterns that would be substituted by the device:
+  // ASSET_ID, SERIAL_NUM, MAC_ADDR, and string after substitution should
+  // be a valid hostname.
+  optional string device_hostname_template = 1;
+}
+
 // Policies to turn on portions of the device status reports.
 message DeviceReportingProto {
   optional bool report_version_info = 1 [default = true];
@@ -904,10 +912,34 @@ message TPMFirmwareUpdateSettingsProto {
 // in session.
 message MinimumRequiredVersionProto {
   // Value is chrome_version string, e.g. 61.0.3163.120
+  // The client will use prefix matching to compare its version against the
+  // value of this field.
   optional string chrome_version = 1;
 }
 
+// Specifies a list of rules to automatically select certificates on SAML IdP
+// pages on the sign-in screen.
+message DeviceLoginScreenAutoSelectCertificateForUrls {
+  // Each entry is one rule, which must be a stringified JSON dictionary.
+  // Each dictionary must have the form { "pattern": "$URL_PATTERN", "filter" :
+  // $FILTER }. $FILTER restricts from which client certificates the browser
+  // will automatically select. Independent of the filter, only certificates
+  // will be selected that match the server's certificate request. If $FILTER
+  // has the form { "ISSUER": { "CN": "$ISSUER_CN" } }, additionally only client
+  // certificates are selected that are issued by a certificate with the
+  // CommonName $ISSUER_CN. If $FILTER is the empty dictionary {}, the selection
+  // of client certificates is not additionally restricted.
+  repeated string login_screen_auto_select_certificate_rules = 1;
+};
+
+// Setting that controls whether unaffiliated users are allowed to use ARC
+// (true by default)
+message UnaffiliatedArcAllowedProto {
+  optional bool unaffiliated_arc_allowed = 1;
+}
+
 message ChromeDeviceSettingsProto {
+  reserved 61;
   optional DevicePolicyRefreshRateProto device_policy_refresh_rate = 1;
   optional UserWhitelistProto user_whitelist = 2;
   optional GuestModeEnabledProto guest_mode_enabled = 3;
@@ -980,4 +1012,8 @@ message ChromeDeviceSettingsProto {
       58;
   optional TPMFirmwareUpdateSettingsProto tpm_firmware_update_settings = 59;
   optional MinimumRequiredVersionProto minimum_required_version = 60;
+  optional DeviceLoginScreenAutoSelectCertificateForUrls
+      device_login_screen_auto_select_certificate_for_urls = 62;
+  optional UnaffiliatedArcAllowedProto unaffiliated_arc_allowed = 63;
+  optional NetworkHostnameProto network_hostname = 64;
 }

@@ -36,10 +36,6 @@ class InstallableManager
   explicit InstallableManager(content::WebContents* web_contents);
   ~InstallableManager() override;
 
-  // Returns true if the overall security state of |web_contents| is sufficient
-  // to be considered installable.
-  static bool IsContentSecure(content::WebContents* web_contents);
-
   // Returns the minimum icon size in pixels for a site to be installable.
   static int GetMinimumIconSizeInPx();
 
@@ -73,6 +69,7 @@ class InstallableManager
  protected:
   // For mocking in tests.
   virtual void OnWaitingForServiceWorker() {}
+  virtual void OnResetData() {}
 
  private:
   friend class AddToHomescreenDataFetcherTest;
@@ -87,6 +84,8 @@ class InstallableManager
                            CheckLazyServiceWorkerPassesWhenWaiting);
   FRIEND_TEST_ALL_PREFIXES(InstallableManagerBrowserTest,
                            CheckLazyServiceWorkerNoFetchHandlerFails);
+  FRIEND_TEST_ALL_PREFIXES(InstallableManagerBrowserTest,
+                           ManifestUrlChangeFlushesState);
 
   using IconPurpose = content::Manifest::Icon::IconPurpose;
 
@@ -197,6 +196,8 @@ class InstallableManager
 
   // content::WebContentsObserver overrides
   void DidFinishNavigation(content::NavigationHandle* handle) override;
+  void DidUpdateWebManifestURL(
+      const base::Optional<GURL>& manifest_url) override;
   void WebContentsDestroyed() override;
 
   const GURL& manifest_url() const;

@@ -47,13 +47,13 @@ views::Label* CreateFormattedLabel(const base::string16& message) {
 
 }  // namespace
 
-SadTabView::SadTabView(content::WebContents* web_contents,
-                       chrome::SadTabKind kind)
+SadTabView::SadTabView(content::WebContents* web_contents, SadTabKind kind)
     : SadTab(web_contents, kind) {
   SetBackground(views::CreateThemedSolidBackground(
       this, ui::NativeTheme::kColorId_DialogBackground));
 
-  views::GridLayout* layout = views::GridLayout::CreateAndInstall(this);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   const int column_set_id = 0;
   views::ColumnSet* columns = layout->AddColumnSet(column_set_id);
@@ -174,11 +174,7 @@ void SadTabView::OnPaint(gfx::Canvas* canvas) {
   View::OnPaint(canvas);
 }
 
-namespace chrome {
-
 SadTab* SadTab::Create(content::WebContents* web_contents,
                        SadTabKind kind) {
   return new SadTabView(web_contents, kind);
 }
-
-}  // namespace chrome

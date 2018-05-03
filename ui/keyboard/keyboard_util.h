@@ -14,8 +14,6 @@ namespace aura {
 class WindowTreeHost;
 }
 
-class GURL;
-
 namespace keyboard {
 
 // For virtual keyboard IME extension.
@@ -157,11 +155,11 @@ KEYBOARD_EXPORT bool InsertText(const base::string16& text);
 // virtually pressed. The event is dispatched to the active TextInputClient
 // associated with |root_window|. The type may be "keydown" or "keyup".
 KEYBOARD_EXPORT bool SendKeyEvent(std::string type,
-                                   int key_value,
-                                   int key_code,
-                                   std::string key_name,
-                                   int modifiers,
-                                   aura::WindowTreeHost* host);
+                                  int key_value,
+                                  int key_code,
+                                  std::string key_name,
+                                  int modifiers,
+                                  aura::WindowTreeHost* host);
 
 // Marks that the keyboard load has started. This is used to measure the time it
 // takes to fully load the keyboard. This should be called before
@@ -171,13 +169,6 @@ KEYBOARD_EXPORT void MarkKeyboardLoadStarted();
 // Marks that the keyboard load has ended. This finishes measuring that the
 // keyboard is loaded.
 KEYBOARD_EXPORT void MarkKeyboardLoadFinished();
-
-// Sets the override content url.
-// This is used by for input view for extension IMEs.
-KEYBOARD_EXPORT void SetOverrideContentUrl(const GURL& url);
-
-// Gets the override content url.
-KEYBOARD_EXPORT const GURL& GetOverrideContentUrl();
 
 // Logs the keyboard control event as a UMA stat.
 void LogKeyboardControlEvent(KeyboardControlEvent event);

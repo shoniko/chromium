@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -120,7 +119,7 @@ void PowerHandler::OnJavascriptAllowed() {
   // Observe power management prefs used in the UI.
   base::Closure callback(base::Bind(&PowerHandler::SendPowerManagementSettings,
                                     base::Unretained(this), false /* force */));
-  pref_change_registrar_ = base::MakeUnique<PrefChangeRegistrar>();
+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
   pref_change_registrar_->Init(prefs_);
   pref_change_registrar_->Add(prefs::kPowerAcIdleAction, callback);
   pref_change_registrar_->Add(prefs::kPowerAcScreenDimDelayMs, callback);
@@ -145,8 +144,9 @@ void PowerHandler::OnPowerStatusChanged() {
 }
 
 void PowerHandler::PowerManagerRestarted() {
-  DBusThreadManager::Get()->GetPowerManagerClient()->GetSwitchStates(base::Bind(
-      &PowerHandler::OnGotSwitchStates, weak_ptr_factory_.GetWeakPtr()));
+  DBusThreadManager::Get()->GetPowerManagerClient()->GetSwitchStates(
+      base::BindOnce(&PowerHandler::OnGotSwitchStates,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PowerHandler::LidEventReceived(PowerManagerClient::LidState state,
@@ -353,9 +353,10 @@ void PowerHandler::SendPowerManagementSettings(bool force) {
 }
 
 void PowerHandler::OnGotSwitchStates(
-    PowerManagerClient::LidState lid_state,
-    PowerManagerClient::TabletMode tablet_mode) {
-  lid_state_ = lid_state;
+    base::Optional<PowerManagerClient::SwitchStates> result) {
+  if (!result.has_value())
+    return;
+  lid_state_ = result->lid_state;
   SendPowerManagementSettings(false /* force */);
 }
 

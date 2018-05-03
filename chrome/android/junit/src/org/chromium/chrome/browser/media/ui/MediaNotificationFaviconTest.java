@@ -20,7 +20,6 @@ import org.robolectric.annotation.Config;
 
 import org.chromium.base.BaseChromiumApplication;
 import org.chromium.base.BaseSwitches;
-import org.chromium.base.BuildInfo;
 import org.chromium.base.CommandLine;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.media.ui.MediaNotificationManager.ListenerService;
@@ -32,6 +31,9 @@ import org.chromium.testing.local.LocalRobolectricTestRunner;
  */
 @RunWith(LocalRobolectricTestRunner.class)
 @Config(manifest = Config.NONE, application = BaseChromiumApplication.class,
+        // Remove this after updating to a version of Robolectric that supports
+        // notification channel creation. crbug.com/774315
+        sdk = Build.VERSION_CODES.N_MR1,
         shadows = {MediaNotificationTestShadowResources.class,
                 MediaNotificationTestShadowNotificationManager.class})
 public class MediaNotificationFaviconTest extends MediaNotificationManagerTestBase {
@@ -53,6 +55,7 @@ public class MediaNotificationFaviconTest extends MediaNotificationManagerTestBa
         mTabHolder = new MediaNotificationTestTabHolder(TAB_ID_1, "about:blank", "title1");
     }
 
+    @Override
     @After
     public void tearDown() {
         CommandLine.reset();
@@ -84,7 +87,8 @@ public class MediaNotificationFaviconTest extends MediaNotificationManagerTestBa
 
         mTabHolder.simulateMediaSessionStateChanged(true, false);
         mTabHolder.simulateFaviconUpdated(mFavicon);
-        assertEquals(BuildInfo.isAtLeastO() ? null : mFavicon, getDisplayedIcon());
+        assertEquals(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? null : mFavicon,
+                getDisplayedIcon());
     }
 
     private Bitmap getDisplayedIcon() {

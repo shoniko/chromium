@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_lorgnette_manager_client.h"
@@ -82,8 +83,8 @@ TEST_F(DocumentScanInterfaceChromeosTest, ScanFailure) {
           [](base::RunLoop* run_loop, const std::string& scanned_image,
              const std::string& mime_type, const std::string& error) {
             run_loop->Quit();
-            EXPECT_EQ("data:image/png;base64,", scanned_image);
-            EXPECT_EQ("image/png", mime_type);
+            EXPECT_EQ("", scanned_image);
+            EXPECT_EQ("", mime_type);
             EXPECT_EQ("Image scan failed", error);
           },
           &run_loop));

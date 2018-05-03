@@ -248,6 +248,11 @@ const char kDeviceLoginScreenInputMethods[] =
 // A boolean pref that matches enable-per-user-time-zone chrome://flags value.
 const char kPerUserTimezoneEnabled[] = "cros.flags.per_user_timezone_enabled";
 
+// A boolean pref that matches enable-fine-graned-time-zone-detection
+// chrome://flags value.
+const char kFineGrainedTimeZoneResolveEnabled[] =
+    "cros.flags.fine_grained_time_zone_detection_enabled";
+
 // A dictionary pref containing time intervals and ignored policies.
 // It's used to allow less restricted usage of Chrome OS during off-hours.
 // This pref is set by an admin policy.
@@ -284,5 +289,21 @@ const char kTPMFirmwareUpdateSettings[] = "cros.tpm_firmware_update_settings";
 // allow user sign in. If the string is empty or blank no restrictions will
 // be applied.
 const char kMinimumRequiredChromeVersion[] = "cros.min_version.chrome";
+
+// String indicating what name should be advertised for casting to.
+// If the string is empty or blank the system name will be used.
+const char kCastReceiverName[] = "cros.device.cast_receiver.name";
+
+// A boolean pref that indicates whether unaffiliated users are allowed to
+// use ARC.
+const char kUnaffiliatedArcAllowed[] = "cros.device.unaffiliated_arc_allowed";
+
+// String that is used as a template for generating device hostname (that is
+// used in DHCP requests).
+// If the string contains either ASSET_ID, SERIAL_NUM or MAC_ADDR values,
+// they will be substituted for real values.
+// If the string is empty or blank, or the resulting hostname is not valid
+// as per RFC 1035, then no hostname will be used.
+const char kDeviceHostnameTemplate[] = "cros.network.hostname_template";
 
 }  // namespace chromeos

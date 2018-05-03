@@ -26,6 +26,7 @@
 #ifndef Node_h
 #define Node_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/MutationObserver.h"
 #include "core/dom/TreeScope.h"
@@ -98,8 +99,6 @@ enum class SlotChangeType {
 };
 
 class NodeRenderingData {
-  WTF_MAKE_NONCOPYABLE(NodeRenderingData);
-
  public:
   explicit NodeRenderingData(LayoutObject* layout_object,
                              scoped_refptr<ComputedStyle> non_attached_style);
@@ -122,6 +121,7 @@ class NodeRenderingData {
  private:
   LayoutObject* layout_object_;
   scoped_refptr<ComputedStyle> non_attached_style_;
+  DISALLOW_COPY_AND_ASSIGN(NodeRenderingData);
 };
 
 class NodeRareDataBase {
@@ -133,7 +133,7 @@ class NodeRareDataBase {
   }
 
  protected:
-  NodeRareDataBase(NodeRenderingData* node_layout_data)
+  explicit NodeRareDataBase(NodeRenderingData* node_layout_data)
       : node_layout_data_(node_layout_data) {}
   ~NodeRareDataBase() {
     if (node_layout_data_ && !node_layout_data_->IsSharedEmptyData())
@@ -364,6 +364,7 @@ class CORE_EXPORT Node : public EventTarget {
   // This can happen when handling queued events (e.g. during execCommand())
   ShadowRoot* ContainingShadowRoot() const;
   ShadowRoot* YoungestShadowRoot() const;
+  bool IsInUserAgentShadowRoot() const;
 
   // Returns nullptr, a child of ShadowRoot, or a legacy shadow root.
   Node* NonBoundaryShadowTreeRootNode();
@@ -515,6 +516,7 @@ class CORE_EXPORT Node : public EventTarget {
   void SetNeedsStyleInvalidation();
 
   void UpdateDistribution();
+  bool MayContainLegacyNodeTreeWhereDistributionShouldBeSupported() const;
 
   void SetIsLink(bool f);
 
@@ -625,7 +627,6 @@ class CORE_EXPORT Node : public EventTarget {
 
   struct AttachContext {
     STACK_ALLOCATED();
-    ComputedStyle* resolved_style = nullptr;
     // Keep track of previously attached in-flow box during attachment so that
     // we don't need to backtrack past display:none/contents and out of flow
     // objects when we need to do whitespace re-attachment.
@@ -829,6 +830,11 @@ class CORE_EXPORT Node : public EventTarget {
     CheckSlotChange(SlotChangeType::kSignalSlotChangeEvent);
   }
 
+  void SetHasDuplicateAttributes() { SetFlag(kHasDuplicateAttributes); }
+  bool HasDuplicateAttribute() const {
+    return GetFlag(kHasDuplicateAttributes);
+  }
+
   // If the node is a plugin, then this returns its WebPluginContainer.
   WebPluginContainerImpl* GetWebPluginContainer() const;
 
@@ -883,6 +889,8 @@ class CORE_EXPORT Node : public EventTarget {
 
     kNeedsReattachLayoutTree = 1 << 26,
     kChildNeedsReattachLayoutTree = 1 << 27,
+
+    kHasDuplicateAttributes = 1 << 28,
 
     kDefaultNodeFlags =
         kIsFinishedParsingChildrenFlag | kNeedsReattachStyleChange

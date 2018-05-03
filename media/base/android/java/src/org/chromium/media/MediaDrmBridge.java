@@ -10,6 +10,7 @@ import android.media.MediaCrypto;
 import android.media.MediaDrm;
 import android.os.Build;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
@@ -71,9 +72,10 @@ public class MediaDrmBridge {
     private static final byte[] DUMMY_KEY_ID = new byte[] {0};
 
     // Special provision response to remove the cert.
-    private static final byte[] UNPROVISION = "unprovision".getBytes();
+    private static final byte[] UNPROVISION = ApiCompatibilityUtils.getBytesUtf8("unprovision");
 
     private MediaDrm mMediaDrm;
+    private MediaCrypto mMediaCrypto;
     private long mNativeMediaDrmBridge;
     private UUID mSchemeUUID;
 
@@ -306,9 +308,9 @@ public class MediaDrmBridge {
         // Create MediaCrypto object.
         try {
             if (MediaCrypto.isCryptoSchemeSupported(mSchemeUUID)) {
-                MediaCrypto mediaCrypto = new MediaCrypto(mSchemeUUID, mMediaCryptoSession.drmId());
+                mMediaCrypto = new MediaCrypto(mSchemeUUID, mMediaCryptoSession.drmId());
                 Log.d(TAG, "MediaCrypto successfully created!");
-                onMediaCryptoReady(mediaCrypto);
+                onMediaCryptoReady(mMediaCrypto);
                 return true;
             } else {
                 Log.e(TAG, "Cannot create MediaCrypto for unsupported scheme.");
@@ -600,6 +602,11 @@ public class MediaDrmBridge {
         if (mMediaDrm != null) {
             mMediaDrm.release();
             mMediaDrm = null;
+        }
+
+        if (mMediaCrypto != null) {
+            mMediaCrypto.release();
+            mMediaCrypto = null;
         }
     }
 

@@ -29,7 +29,6 @@ namespace message_center {
 
 class Notification;
 class NotificationControlButtonsView;
-class MessageCenterController;
 
 // An base class for a notification entry. Contains background and other
 // elements shared by derived notification views.
@@ -37,8 +36,16 @@ class MESSAGE_CENTER_EXPORT MessageView
     : public views::View,
       public views::SlideOutController::Delegate {
  public:
-  MessageView(MessageCenterController* controller,
-              const Notification& notification);
+  static const char kViewClassName[];
+
+  // Notify this notification view is in the sidebar. This is necessary until
+  // removing the experimental flag for Sidebar, since the flag exists in Ash,
+  // so we don't refer the flag directly. Some layout and behavior may change by
+  // this flag.
+  // TODO(yoshiki, tetsui): Remove this after removing the flag for Sidebar.
+  static void SetSidebarEnabled();
+
+  explicit MessageView(const Notification& notification);
   ~MessageView() override;
 
   // Updates this view with the new data contained in the notification.
@@ -55,8 +62,15 @@ class MESSAGE_CENTER_EXPORT MessageView
   virtual void SetExpanded(bool expanded);
   virtual bool IsExpanded() const;
 
+  // Invoked when the container view of MessageView (e.g. MessageCenterView in
+  // ash) is starting the animation that possibly hides some part of
+  // the MessageView.
+  // During the animation, MessageView should comply with the Z order in views.
+  virtual void OnContainerAnimationStarted();
+  virtual void OnContainerAnimationEnded();
+
   void OnCloseButtonPressed();
-  void OnSettingsButtonPressed();
+  virtual void OnSettingsButtonPressed();
 
   // views::View
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
@@ -67,6 +81,7 @@ class MESSAGE_CENTER_EXPORT MessageView
   void OnFocus() override;
   void OnBlur() override;
   void Layout() override;
+  const char* GetClassName() const override;
   void OnGestureEvent(ui::GestureEvent* event) override;
 
   // views::SlideOutController::Delegate
@@ -78,9 +93,6 @@ class MESSAGE_CENTER_EXPORT MessageView
 
   void set_scroller(views::ScrollView* scroller) { scroller_ = scroller; }
   std::string notification_id() const { return notification_id_; }
-  void set_controller(MessageCenterController* controller) {
-    controller_ = controller;
-  }
 
 #if defined(OS_CHROMEOS)
   // By calling this, all notifications are treated as non-pinned forcibly.
@@ -99,10 +111,8 @@ class MESSAGE_CENTER_EXPORT MessageView
 
   views::View* background_view() { return background_view_; }
   views::ScrollView* scroller() { return scroller_; }
-  MessageCenterController* controller() { return controller_; }
 
  private:
-  MessageCenterController* controller_;  // Weak, lives longer then views.
   std::string notification_id_;
   views::View* background_view_ = nullptr;  // Owned by views hierarchy.
   views::ScrollView* scroller_ = nullptr;

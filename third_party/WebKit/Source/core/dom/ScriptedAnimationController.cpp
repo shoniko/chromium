@@ -56,11 +56,11 @@ void ScriptedAnimationController::TraceWrappers(
   visitor->TraceWrappers(callback_collection_);
 }
 
-void ScriptedAnimationController::Suspend() {
+void ScriptedAnimationController::Pause() {
   ++suspend_count_;
 }
 
-void ScriptedAnimationController::Resume() {
+void ScriptedAnimationController::Unpause() {
   // It would be nice to put an DCHECK(m_suspendCount > 0) here, but in WK1
   // resume() can be called even when suspend hasn't (if a tab was created in
   // the background).
@@ -86,11 +86,15 @@ void ScriptedAnimationController::CancelCallback(CallbackId id) {
   callback_collection_.CancelCallback(id);
 }
 
+bool ScriptedAnimationController::HasCallback() const {
+  return !callback_collection_.IsEmpty();
+}
+
 void ScriptedAnimationController::RunTasks() {
-  Vector<WTF::Closure> tasks;
+  Vector<base::OnceClosure> tasks;
   tasks.swap(task_queue_);
   for (auto& task : tasks)
-    task();
+    std::move(task).Run();
 }
 
 void ScriptedAnimationController::DispatchEvents(
@@ -172,7 +176,7 @@ void ScriptedAnimationController::ServiceScriptedAnimations(
   ScheduleAnimationIfNeeded();
 }
 
-void ScriptedAnimationController::EnqueueTask(WTF::Closure task) {
+void ScriptedAnimationController::EnqueueTask(base::OnceClosure task) {
   task_queue_.push_back(std::move(task));
   ScheduleAnimationIfNeeded();
 }

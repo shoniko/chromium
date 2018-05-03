@@ -32,6 +32,8 @@
 #define ThreadState_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "platform/PlatformExport.h"
 #include "platform/heap/BlinkGC.h"
 #include "platform/heap/ThreadingTraits.h"
@@ -51,6 +53,10 @@ class Isolate;
 };
 
 namespace blink {
+
+namespace incremental_marking_test {
+class IncrementalMarkingScope;
+}  // namespace incremental_marking_test
 
 class GarbageCollectedMixinConstructorMarkerBase;
 class PersistentNode;
@@ -129,7 +135,6 @@ class PLATFORM_EXPORT BlinkGCObserver {
 
 class PLATFORM_EXPORT ThreadState {
   USING_FAST_MALLOC(ThreadState);
-  WTF_MAKE_NONCOPYABLE(ThreadState);
 
  public:
   // See setGCState() for possible state transitions.
@@ -507,8 +512,6 @@ class PLATFORM_EXPORT ThreadState {
     }
   };
 
-  static const char* GcReasonString(BlinkGC::GCReason);
-
   // Returns |true| if |object| resides on this thread's heap.
   // It is well-defined to call this method on any heap allocated
   // reference, provided its associated heap hasn't been detached
@@ -520,7 +523,11 @@ class PLATFORM_EXPORT ThreadState {
 
   int GcAge() const { return gc_age_; }
 
+  Visitor* CurrentVisitor() { return current_gc_data_.visitor.get(); }
+
  private:
+  // Needs to set up visitor for testing purposes.
+  friend class incremental_marking_test::IncrementalMarkingScope;
   template <typename T>
   friend class PrefinalizerRegistration;
 
@@ -668,6 +675,8 @@ class PLATFORM_EXPORT ThreadState {
     std::unique_ptr<Visitor> visitor;
   };
   GCData current_gc_data_;
+
+  DISALLOW_COPY_AND_ASSIGN(ThreadState);
 };
 
 template <>

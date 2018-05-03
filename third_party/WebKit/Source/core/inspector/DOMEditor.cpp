@@ -30,8 +30,11 @@
 
 #include "core/inspector/DOMEditor.h"
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/DOMException.h"
+#include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
 #include "core/dom/Text.h"
@@ -39,15 +42,12 @@
 #include "core/inspector/DOMPatchSupport.h"
 #include "core/inspector/InspectorHistory.h"
 #include "core/inspector/protocol/Protocol.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
 using protocol::Response;
 
 class DOMEditor::RemoveChildAction final : public InspectorHistory::Action {
-  WTF_MAKE_NONCOPYABLE(RemoveChildAction);
-
  public:
   RemoveChildAction(ContainerNode* parent_node, Node* node)
       : InspectorHistory::Action("RemoveChild"),
@@ -81,11 +81,10 @@ class DOMEditor::RemoveChildAction final : public InspectorHistory::Action {
   Member<ContainerNode> parent_node_;
   Member<Node> node_;
   Member<Node> anchor_node_;
+  DISALLOW_COPY_AND_ASSIGN(RemoveChildAction);
 };
 
 class DOMEditor::InsertBeforeAction final : public InspectorHistory::Action {
-  WTF_MAKE_NONCOPYABLE(InsertBeforeAction);
-
  public:
   InsertBeforeAction(ContainerNode* parent_node, Node* node, Node* anchor_node)
       : InspectorHistory::Action("InsertBefore"),
@@ -135,11 +134,10 @@ class DOMEditor::InsertBeforeAction final : public InspectorHistory::Action {
   Member<Node> node_;
   Member<Node> anchor_node_;
   Member<RemoveChildAction> remove_child_action_;
+  DISALLOW_COPY_AND_ASSIGN(InsertBeforeAction);
 };
 
 class DOMEditor::RemoveAttributeAction final : public InspectorHistory::Action {
-  WTF_MAKE_NONCOPYABLE(RemoveAttributeAction);
-
  public:
   RemoveAttributeAction(Element* element, const AtomicString& name)
       : InspectorHistory::Action("RemoveAttribute"),
@@ -170,11 +168,10 @@ class DOMEditor::RemoveAttributeAction final : public InspectorHistory::Action {
   Member<Element> element_;
   AtomicString name_;
   AtomicString value_;
+  DISALLOW_COPY_AND_ASSIGN(RemoveAttributeAction);
 };
 
 class DOMEditor::SetAttributeAction final : public InspectorHistory::Action {
-  WTF_MAKE_NONCOPYABLE(SetAttributeAction);
-
  public:
   SetAttributeAction(Element* element,
                      const AtomicString& name,
@@ -217,11 +214,10 @@ class DOMEditor::SetAttributeAction final : public InspectorHistory::Action {
   AtomicString value_;
   bool had_attribute_;
   AtomicString old_value_;
+  DISALLOW_COPY_AND_ASSIGN(SetAttributeAction);
 };
 
 class DOMEditor::SetOuterHTMLAction final : public InspectorHistory::Action {
-  WTF_MAKE_NONCOPYABLE(SetOuterHTMLAction);
-
  public:
   SetOuterHTMLAction(Node* node, const String& html)
       : InspectorHistory::Action("SetOuterHTML"),
@@ -234,9 +230,12 @@ class DOMEditor::SetOuterHTMLAction final : public InspectorHistory::Action {
 
   bool Perform(ExceptionState& exception_state) override {
     old_html_ = CreateMarkup(node_.Get());
-    DCHECK(node_->ownerDocument());
-    DOMPatchSupport dom_patch_support(dom_editor_.Get(),
-                                      *node_->ownerDocument());
+    Document* document =
+        node_->IsDocumentNode() ? ToDocument(node_) : node_->ownerDocument();
+    DCHECK(document);
+    if (!document->documentElement())
+      return false;
+    DOMPatchSupport dom_patch_support(dom_editor_.Get(), *document);
     new_node_ =
         dom_patch_support.PatchNode(node_.Get(), html_, exception_state);
     return !exception_state.HadException();
@@ -269,12 +268,11 @@ class DOMEditor::SetOuterHTMLAction final : public InspectorHistory::Action {
   Member<Node> new_node_;
   Member<InspectorHistory> history_;
   Member<DOMEditor> dom_editor_;
+  DISALLOW_COPY_AND_ASSIGN(SetOuterHTMLAction);
 };
 
 class DOMEditor::ReplaceWholeTextAction final
     : public InspectorHistory::Action {
-  WTF_MAKE_NONCOPYABLE(ReplaceWholeTextAction);
-
  public:
   ReplaceWholeTextAction(Text* text_node, const String& text)
       : InspectorHistory::Action("ReplaceWholeText"),
@@ -305,12 +303,11 @@ class DOMEditor::ReplaceWholeTextAction final
   Member<Text> text_node_;
   String text_;
   String old_text_;
+  DISALLOW_COPY_AND_ASSIGN(ReplaceWholeTextAction);
 };
 
 class DOMEditor::ReplaceChildNodeAction final
     : public InspectorHistory::Action {
-  WTF_MAKE_NONCOPYABLE(ReplaceChildNodeAction);
-
  public:
   ReplaceChildNodeAction(ContainerNode* parent_node,
                          Node* new_node,
@@ -345,11 +342,10 @@ class DOMEditor::ReplaceChildNodeAction final
   Member<ContainerNode> parent_node_;
   Member<Node> new_node_;
   Member<Node> old_node_;
+  DISALLOW_COPY_AND_ASSIGN(ReplaceChildNodeAction);
 };
 
 class DOMEditor::SetNodeValueAction final : public InspectorHistory::Action {
-  WTF_MAKE_NONCOPYABLE(SetNodeValueAction);
-
  public:
   SetNodeValueAction(Node* node, const String& value)
       : InspectorHistory::Action("SetNodeValue"), node_(node), value_(value) {}
@@ -378,6 +374,7 @@ class DOMEditor::SetNodeValueAction final : public InspectorHistory::Action {
   Member<Node> node_;
   String value_;
   String old_value_;
+  DISALLOW_COPY_AND_ASSIGN(SetNodeValueAction);
 };
 
 DOMEditor::DOMEditor(InspectorHistory* history) : history_(history) {}

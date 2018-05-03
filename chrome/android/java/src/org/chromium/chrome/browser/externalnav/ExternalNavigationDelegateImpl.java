@@ -21,6 +21,7 @@ import android.provider.Browser;
 import android.provider.Telephony;
 import android.support.v7.app.AlertDialog;
 import android.text.TextUtils;
+import android.view.WindowManager.BadTokenException;
 import android.webkit.MimeTypeMap;
 
 import org.chromium.base.ApplicationState;
@@ -362,6 +363,11 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             }
             if (activityWasLaunched) recordExternalNavigationDispatched(intent);
             return activityWasLaunched;
+        } catch (SecurityException e) {
+            // https://crbug.com/808494: Handle the URL in Chrome if dispatching to another
+            // application fails with a SecurityException. This happens due to malformed manifests
+            // in another app.
+            return false;
         } catch (RuntimeException e) {
             IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
             return false;
@@ -379,7 +385,19 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public void startIncognitoIntent(final Intent intent, final String referrerUrl,
+    public boolean startIncognitoIntent(final Intent intent, final String referrerUrl,
+            final String fallbackUrl, final Tab tab, final boolean needsToCloseTab,
+            final boolean proxy) {
+        try {
+            startIncognitoIntentInternal(
+                    intent, referrerUrl, fallbackUrl, tab, needsToCloseTab, proxy);
+        } catch (BadTokenException e) {
+            return false;
+        }
+        return true;
+    }
+
+    private void startIncognitoIntentInternal(final Intent intent, final String referrerUrl,
             final String fallbackUrl, final Tab tab, final boolean needsToCloseTab,
             final boolean proxy) {
         Context context = tab.getWindowAndroid().getContext().get();
@@ -489,7 +507,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         LoadUrlParams loadUrlParams = new LoadUrlParams(url, PageTransition.AUTO_TOPLEVEL);
         if (!TextUtils.isEmpty(referrerUrl)) {
             Referrer referrer =
-                    new Referrer(referrerUrl, WebReferrerPolicy.WEB_REFERRER_POLICY_ALWAYS);
+                    new Referrer(referrerUrl, WebReferrerPolicy.ALWAYS);
             loadUrlParams.setReferrer(referrer);
         }
         tab.loadUrl(loadUrlParams);
@@ -502,7 +520,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         final LoadUrlParams loadUrlParams = new LoadUrlParams(url, transitionType);
         if (!TextUtils.isEmpty(referrerUrl)) {
             Referrer referrer =
-                    new Referrer(referrerUrl, WebReferrerPolicy.WEB_REFERRER_POLICY_ALWAYS);
+                    new Referrer(referrerUrl, WebReferrerPolicy.ALWAYS);
             loadUrlParams.setReferrer(referrer);
         }
         if (tab != null) {

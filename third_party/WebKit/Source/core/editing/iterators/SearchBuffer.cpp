@@ -84,7 +84,7 @@ inline SearchBuffer::SearchBuffer(const String& target, FindOptions options)
     }
   }
 
-  text_searcher_ = WTF::MakeUnique<TextSearcherICU>();
+  text_searcher_ = std::make_unique<TextSearcherICU>();
   text_searcher_->SetPattern(StringView(target_.data(), target_.size()),
                              !(options_ & kCaseInsensitive));
 
@@ -94,7 +94,7 @@ inline SearchBuffer::SearchBuffer(const String& target, FindOptions options)
                                    normalized_target_);
 }
 
-inline SearchBuffer::~SearchBuffer() {}
+inline SearchBuffer::~SearchBuffer() = default;
 
 template <typename CharType>
 inline void SearchBuffer::Append(const CharType* characters, size_t length) {

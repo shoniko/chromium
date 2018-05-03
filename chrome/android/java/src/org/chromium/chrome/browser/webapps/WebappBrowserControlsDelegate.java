@@ -24,7 +24,8 @@ class WebappBrowserControlsDelegate extends TabStateBrowserControlsVisibilityDel
         if (!super.canShowBrowserControls()) return false;
 
         return shouldShowBrowserControls(mActivity.scopePolicy(), mActivity.getWebappInfo(),
-                mTab.getUrl(), mTab.getSecurityLevel());
+                mTab.getUrl(), mTab.getSecurityLevel(),
+                mActivity.getBrowserSession() != null && mActivity.didVerificationFail());
     }
 
     @Override
@@ -43,14 +44,17 @@ class WebappBrowserControlsDelegate extends TabStateBrowserControlsVisibilityDel
      * @param info data of a Web App
      * @param url The webapp's current URL
      * @param securityLevel The security level for the webapp's current URL.
+     * @param twaVerificationFailed Whether a verification attempt for TWA to client has failed.
      * @return Whether the browser controls should be shown for {@code url}.
      */
-    static boolean shouldShowBrowserControls(
-            WebappScopePolicy scopePolicy, WebappInfo info, String url, int securityLevel) {
+    static boolean shouldShowBrowserControls(WebappScopePolicy scopePolicy, WebappInfo info,
+            String url, int securityLevel, boolean twaVerificationFailed) {
         // Do not show browser controls when URL is not ready yet.
         if (TextUtils.isEmpty(url)) return false;
 
-        return shouldShowBrowserControlsForUrl(scopePolicy, info, url)
+        // If this is a Trusted Web Activity that has failed verification, always show browser
+        // controls independent of policy/webapp info.
+        return twaVerificationFailed || shouldShowBrowserControlsForUrl(scopePolicy, info, url)
                 || shouldShowBrowserControlsForDisplayMode(info)
                 || shouldShowBrowserControlsForSecurityLevel(securityLevel);
     }
@@ -63,13 +67,14 @@ class WebappBrowserControlsDelegate extends TabStateBrowserControlsVisibilityDel
      */
     static boolean shouldShowToolbarCloseButton(WebappActivity activity) {
         // Show if we're on the URL requiring browser controls, i.e. off-scope.
-        return shouldShowBrowserControlsForUrl(activity.scopePolicy(), activity.mWebappInfo,
+        return shouldShowBrowserControlsForUrl(activity.scopePolicy(), activity.getWebappInfo(),
                        activity.getActivityTab().getUrl())
                 // Also keep shown if toolbar is not visible, so that during the in and off-scope
                 // transitions we avoid button flickering when toolbar is appearing/disappearing.
-                || !shouldShowBrowserControls(activity.scopePolicy(), activity.mWebappInfo,
+                || !shouldShowBrowserControls(activity.scopePolicy(), activity.getWebappInfo(),
                            activity.getActivityTab().getUrl(),
-                           activity.getActivityTab().getSecurityLevel());
+                           activity.getActivityTab().getSecurityLevel(),
+                           activity.getBrowserSession() != null && activity.didVerificationFail());
     }
 
     /**

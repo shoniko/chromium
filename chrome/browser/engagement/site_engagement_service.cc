@@ -21,6 +21,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/engagement/site_engagement_helper.h"
 #include "chrome/browser/engagement/site_engagement_metrics.h"
+#include "chrome/browser/engagement/site_engagement_observer.h"
 #include "chrome/browser/engagement/site_engagement_score.h"
 #include "chrome/browser/engagement/site_engagement_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -34,7 +35,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/associated_interface_provider.h"
+#include "third_party/WebKit/common/associated_interfaces/associated_interface_provider.h"
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
@@ -69,14 +70,6 @@ std::set<GURL> GetEngagementOriginsFromContentSettings(Profile* profile) {
   // Fetch URLs of sites with engagement details stored.
   for (const auto& site : GetContentSettingsFromProfile(
            profile, CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT)) {
-    urls.insert(GURL(site.primary_pattern.ToString()));
-  }
-
-  // Fetch URLs of sites for which notifications are allowed.
-  for (const auto& site : GetContentSettingsFromProfile(
-           profile, CONTENT_SETTINGS_TYPE_NOTIFICATIONS)) {
-    if (site.GetContentSetting() != CONTENT_SETTING_ALLOW)
-      continue;
     urls.insert(GURL(site.primary_pattern.ToString()));
   }
 
@@ -180,14 +173,11 @@ void SiteEngagementService::HandleNotificationInteraction(const GURL& url) {
   if (!ShouldRecordEngagement(url))
     return;
 
-  SiteEngagementMetrics::RecordEngagement(
-      SiteEngagementMetrics::ENGAGEMENT_NOTIFICATION_INTERACTION);
   AddPoints(url, SiteEngagementScore::GetNotificationInteractionPoints());
 
   RecordMetrics();
-  double score = GetScore(url);
-  for (SiteEngagementObserver& observer : observer_list_)
-    observer.OnEngagementIncreased(nullptr /* web_contents */, url, score);
+  OnEngagementEvent(nullptr /* web_contents */, url,
+                    ENGAGEMENT_NOTIFICATION_INTERACTION);
 }
 
 bool SiteEngagementService::IsBootstrapped() const {
@@ -234,7 +224,9 @@ void SiteEngagementService::ResetBaseScoreForURL(const GURL& url,
   engagement_score.Commit();
 }
 
-void SiteEngagementService::SetLastShortcutLaunchTime(const GURL& url) {
+void SiteEngagementService::SetLastShortcutLaunchTime(
+    content::WebContents* web_contents,
+    const GURL& url) {
   SiteEngagementScore score = CreateEngagementScore(url);
 
   // Record the number of days since the last launch in UMA. If the user's clock
@@ -245,11 +237,11 @@ void SiteEngagementService::SetLastShortcutLaunchTime(const GURL& url) {
     SiteEngagementMetrics::RecordDaysSinceLastShortcutLaunch(
         std::max(0, (now - last_launch).InDays()));
   }
-  SiteEngagementMetrics::RecordEngagement(
-      SiteEngagementMetrics::ENGAGEMENT_WEBAPP_SHORTCUT_LAUNCH);
 
   score.set_last_shortcut_launch_time(now);
   score.Commit();
+
+  OnEngagementEvent(web_contents, url, ENGAGEMENT_WEBAPP_SHORTCUT_LAUNCH);
 }
 
 void SiteEngagementService::HelperCreated(
@@ -508,16 +500,13 @@ void SiteEngagementService::HandleMediaPlaying(
   if (!ShouldRecordEngagement(url))
     return;
 
-  SiteEngagementMetrics::RecordEngagement(
-      is_hidden ? SiteEngagementMetrics::ENGAGEMENT_MEDIA_HIDDEN
-                : SiteEngagementMetrics::ENGAGEMENT_MEDIA_VISIBLE);
   AddPoints(url, is_hidden ? SiteEngagementScore::GetHiddenMediaPoints()
                            : SiteEngagementScore::GetVisibleMediaPoints());
 
   RecordMetrics();
-  double score = GetScore(url);
-  for (SiteEngagementObserver& observer : observer_list_)
-    observer.OnEngagementIncreased(web_contents, url, score);
+  OnEngagementEvent(
+      web_contents, url,
+      is_hidden ? ENGAGEMENT_MEDIA_HIDDEN : ENGAGEMENT_MEDIA_VISIBLE);
 }
 
 void SiteEngagementService::HandleNavigation(content::WebContents* web_contents,
@@ -526,30 +515,33 @@ void SiteEngagementService::HandleNavigation(content::WebContents* web_contents,
   if (!IsEngagementNavigation(transition) || !ShouldRecordEngagement(url))
     return;
 
-  SiteEngagementMetrics::RecordEngagement(
-      SiteEngagementMetrics::ENGAGEMENT_NAVIGATION);
   AddPoints(url, SiteEngagementScore::GetNavigationPoints());
 
   RecordMetrics();
-  double score = GetScore(url);
-  for (SiteEngagementObserver& observer : observer_list_)
-    observer.OnEngagementIncreased(web_contents, url, score);
+  OnEngagementEvent(web_contents, url, ENGAGEMENT_NAVIGATION);
 }
 
-void SiteEngagementService::HandleUserInput(
-    content::WebContents* web_contents,
-    SiteEngagementMetrics::EngagementType type) {
+void SiteEngagementService::HandleUserInput(content::WebContents* web_contents,
+                                            EngagementType type) {
   const GURL& url = web_contents->GetLastCommittedURL();
   if (!ShouldRecordEngagement(url))
     return;
 
-  SiteEngagementMetrics::RecordEngagement(type);
   AddPoints(url, SiteEngagementScore::GetUserInputPoints());
 
   RecordMetrics();
+  OnEngagementEvent(web_contents, url, type);
+}
+
+void SiteEngagementService::OnEngagementEvent(
+    content::WebContents* web_contents,
+    const GURL& url,
+    EngagementType type) {
+  SiteEngagementMetrics::RecordEngagement(type);
+
   double score = GetScore(url);
   for (SiteEngagementObserver& observer : observer_list_)
-    observer.OnEngagementIncreased(web_contents, url, score);
+    observer.OnEngagementEvent(web_contents, url, score, type);
 }
 
 void SiteEngagementService::SendLevelChangeToHelpers(

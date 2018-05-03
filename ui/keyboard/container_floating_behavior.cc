@@ -7,27 +7,28 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/keyboard/container_type.h"
+#include "ui/keyboard/drag_descriptor.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_ui.h"
 
 namespace keyboard {
 
-// Width of the floatin keyboard
-constexpr int kKeyboardWidth = 600;
-
 // Length of the animation to show and hide the keyboard.
 constexpr int kAnimationDurationMs = 200;
-
-// The opacity of virtual keyboard container when show animation starts or
-// hide animation finishes. This cannot be zero because we call Show() on the
-// keyboard window before setting the opacity back to 1.0. Since windows are not
-// allowed to be shown with zero opacity, we always animate to 0.01 instead.
-constexpr float kAnimationStartOrAfterHideOpacity = 0.01f;
 
 // Distance the keyboard moves during the animation
 constexpr int kAnimationDistance = 30;
 
+ContainerFloatingBehavior::ContainerFloatingBehavior(
+    KeyboardController* controller) {
+  controller_ = controller;
+}
 ContainerFloatingBehavior::~ContainerFloatingBehavior() {}
+
+ContainerType ContainerFloatingBehavior::GetType() const {
+  return ContainerType::FLOATING;
+}
 
 void ContainerFloatingBehavior::DoHidingAnimation(
     aura::Window* container,
@@ -53,20 +54,9 @@ void ContainerFloatingBehavior::DoShowingAnimation(
 
 void ContainerFloatingBehavior::InitializeShowAnimationStartingState(
     aura::Window* container) {
-  KeyboardController* controller = KeyboardController::GetInstance();
   aura::Window* root_window = container->GetRootWindow();
-  const gfx::Rect& display_bounds = root_window->bounds();
 
-  gfx::Size keyboard_size =
-      gfx::Size(kKeyboardWidth, container->bounds().height());
-  gfx::Point keyboard_location =
-      GetPositionForShowingKeyboard(keyboard_size, display_bounds);
-  container->SetBounds(gfx::Rect(keyboard_location, keyboard_size));
-
-  // UI content container is a child of the keyboard controller container and
-  // should always be positioned to the origin (0, 0).
-  controller->ui()->GetContentsWindow()->SetBounds(
-      gfx::Rect(gfx::Point(0, 0), keyboard_size));
+  SetCanonicalBounds(container, root_window->bounds());
 
   gfx::Transform transform;
   transform.Translate(0, kAnimationDistance);
@@ -79,24 +69,17 @@ const gfx::Rect ContainerFloatingBehavior::AdjustSetBoundsRequest(
     const gfx::Rect& requested_bounds) {
   gfx::Rect keyboard_bounds = requested_bounds;
 
-  // floating keyboard has a fixed width.
-  keyboard_bounds.set_width(kKeyboardWidth);
-  const bool is_possibly_initial_load_request = requested_bounds.x() == 0;
-  if (is_possibly_initial_load_request && UseDefaultPosition()) {
+  if (UseDefaultPosition()) {
     // If the keyboard hasn't been shown yet, ignore the request and use
     // default.
-    gfx::Point keyboard_location =
+    gfx::Point default_location =
         GetPositionForShowingKeyboard(keyboard_bounds.size(), display_bounds);
-    keyboard_bounds = gfx::Rect(keyboard_location, keyboard_bounds.size());
+    keyboard_bounds = gfx::Rect(default_location, keyboard_bounds.size());
   } else {
     // Otherwise, simply make sure that the new bounds are not off the edge of
     // the screen.
     keyboard_bounds =
         ContainKeyboardToScreenBounds(keyboard_bounds, display_bounds);
-
-    // When this isn't a default load request, (i.e. the user is moving the
-    // keyboard), save the coordinates for use for next time.
-    UpdateLastPoint(keyboard_bounds.origin());
   }
 
   return keyboard_bounds;
@@ -140,10 +123,6 @@ bool ContainerFloatingBehavior::UseDefaultPosition() const {
   return default_position_.x() == -1;
 }
 
-void ContainerFloatingBehavior::UpdateLastPoint(const gfx::Point& position) {
-  default_position_ = gfx::Point(position);
-}
-
 gfx::Point ContainerFloatingBehavior::GetPositionForShowingKeyboard(
     const gfx::Size& keyboard_size,
     const gfx::Rect& display_bounds) const {
@@ -164,6 +143,102 @@ gfx::Point ContainerFloatingBehavior::GetPositionForShowingKeyboard(
       ContainKeyboardToScreenBounds(keyboard_bounds, display_bounds);
 
   return valid_keyboard_bounds.origin();
+}
+
+void ContainerFloatingBehavior::SavePosition(const gfx::Point& position) {
+  default_position_ = position;
+}
+
+bool ContainerFloatingBehavior::IsDragHandle(
+    const gfx::Vector2d& offset,
+    const gfx::Size& keyboard_size) const {
+  return draggable_area_.Contains(offset.x(), offset.y());
+}
+
+void ContainerFloatingBehavior::HandlePointerEvent(
+    const ui::LocatedEvent& event) {
+  // Cannot call UI-backed operations without a KeyboardController
+  DCHECK(controller_);
+  auto kb_offset = gfx::Vector2d(event.x(), event.y());
+
+  aura::Window* container = controller_->GetContainerWindow();
+
+  const gfx::Rect& keyboard_bounds = container->bounds();
+
+  // Don't handle events if this runs in a partially initialized state.
+  if (keyboard_bounds.height() <= 0)
+    return;
+
+  bool handle_drag = false;
+  const ui::EventType type = event.type();
+  if (IsDragHandle(kb_offset, keyboard_bounds.size())) {
+    if (type == ui::ET_TOUCH_PRESSED ||
+        (type == ui::ET_MOUSE_PRESSED &&
+         ((const ui::MouseEvent*)&event)->IsOnlyLeftMouseButton())) {
+      // Drag is starting.
+      // Mouse events are limited to just the left mouse button.
+
+      drag_started_by_touch_ = (type == ui::ET_TOUCH_PRESSED);
+      if (!drag_descriptor_) {
+        // If there is no active drag descriptor, start a new one.
+        drag_descriptor_.reset(
+            new DragDescriptor(keyboard_bounds.origin(), kb_offset));
+      }
+      handle_drag = true;
+    }
+  }
+  if (drag_descriptor_ &&
+      (type == ui::ET_MOUSE_DRAGGED ||
+       (drag_started_by_touch_ && type == ui::ET_TOUCH_MOVED))) {
+    // Drag continues.
+    // If there is an active drag, use it to determine the new location
+    // of the keyboard.
+    const gfx::Point original_click_location =
+        drag_descriptor_->original_keyboard_location() +
+        drag_descriptor_->original_click_offset();
+    const gfx::Point current_drag_location =
+        keyboard_bounds.origin() + kb_offset;
+    const gfx::Vector2d cumulative_drag_offset =
+        current_drag_location - original_click_location;
+    const gfx::Point new_keyboard_location =
+        drag_descriptor_->original_keyboard_location() + cumulative_drag_offset;
+    const gfx::Rect new_bounds =
+        gfx::Rect(new_keyboard_location, keyboard_bounds.size());
+    controller_->MoveKeyboard(new_bounds);
+    SavePosition(container->bounds().origin());
+    handle_drag = true;
+  }
+  if (!handle_drag && drag_descriptor_) {
+    // drag has ended
+    drag_descriptor_ = nullptr;
+  }
+}
+
+void ContainerFloatingBehavior::SetCanonicalBounds(
+    aura::Window* container,
+    const gfx::Rect& display_bounds) {
+  gfx::Point keyboard_location =
+      GetPositionForShowingKeyboard(container->bounds().size(), display_bounds);
+  SavePosition(keyboard_location);
+  container->SetBounds(
+      gfx::Rect(keyboard_location, container->bounds().size()));
+}
+
+bool ContainerFloatingBehavior::TextBlurHidesKeyboard() const {
+  return true;
+}
+
+bool ContainerFloatingBehavior::BoundsObscureUsableRegion() const {
+  return false;
+}
+
+bool ContainerFloatingBehavior::BoundsAffectWorkspaceLayout() const {
+  return false;
+}
+
+bool ContainerFloatingBehavior::SetDraggableArea(const gfx::Rect& rect) {
+  draggable_area_ = rect;
+  return true;
 }
 
 }  //  namespace keyboard

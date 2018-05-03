@@ -59,15 +59,15 @@ uint32_t GetWriteFlags(const PrefService::Preference* pref) {
 }  // namespace
 
 PrefService::PrefService(
-    PrefNotifierImpl* pref_notifier,
-    PrefValueStore* pref_value_store,
+    std::unique_ptr<PrefNotifierImpl> pref_notifier,
+    std::unique_ptr<PrefValueStore> pref_value_store,
     PersistentPrefStore* user_prefs,
     PrefRegistry* pref_registry,
     base::Callback<void(PersistentPrefStore::PrefReadError)>
         read_error_callback,
     bool async)
-    : pref_notifier_(pref_notifier),
-      pref_value_store_(pref_value_store),
+    : pref_notifier_(std::move(pref_notifier)),
+      pref_value_store_(std::move(pref_value_store)),
       pref_registry_(pref_registry),
       user_pref_store_(user_prefs),
       read_error_callback_(read_error_callback) {
@@ -317,7 +317,7 @@ const base::Value* PrefService::GetUserPrefValue(
   if (!user_pref_store_->GetMutableValue(path, &value))
     return nullptr;
 
-  if (!value->IsType(pref->GetType())) {
+  if (value->type() != pref->GetType()) {
     NOTREACHED() << "Pref value type doesn't match registered type.";
     return nullptr;
   }
@@ -365,8 +365,8 @@ void PrefService::RemovePrefObserver(const std::string& path,
   pref_notifier_->RemovePrefObserver(path, obs);
 }
 
-void PrefService::AddPrefInitObserver(base::Callback<void(bool)> obs) {
-  pref_notifier_->AddInitObserver(obs);
+void PrefService::AddPrefInitObserver(base::OnceCallback<void(bool)> obs) {
+  pref_notifier_->AddInitObserver(std::move(obs));
 }
 
 PrefRegistry* PrefService::DeprecatedGetPrefRegistry() {
@@ -405,19 +405,19 @@ void PrefService::Set(const std::string& path, const base::Value& value) {
 }
 
 void PrefService::SetBoolean(const std::string& path, bool value) {
-  SetUserPrefValue(path, base::MakeUnique<base::Value>(value));
+  SetUserPrefValue(path, std::make_unique<base::Value>(value));
 }
 
 void PrefService::SetInteger(const std::string& path, int value) {
-  SetUserPrefValue(path, base::MakeUnique<base::Value>(value));
+  SetUserPrefValue(path, std::make_unique<base::Value>(value));
 }
 
 void PrefService::SetDouble(const std::string& path, double value) {
-  SetUserPrefValue(path, base::MakeUnique<base::Value>(value));
+  SetUserPrefValue(path, std::make_unique<base::Value>(value));
 }
 
 void PrefService::SetString(const std::string& path, const std::string& value) {
-  SetUserPrefValue(path, base::MakeUnique<base::Value>(value));
+  SetUserPrefValue(path, std::make_unique<base::Value>(value));
 }
 
 void PrefService::SetFilePath(const std::string& path,
@@ -427,7 +427,7 @@ void PrefService::SetFilePath(const std::string& path,
 
 void PrefService::SetInt64(const std::string& path, int64_t value) {
   SetUserPrefValue(path,
-                   base::MakeUnique<base::Value>(base::Int64ToString(value)));
+                   std::make_unique<base::Value>(base::Int64ToString(value)));
 }
 
 int64_t PrefService::GetInt64(const std::string& path) const {
@@ -449,7 +449,7 @@ int64_t PrefService::GetInt64(const std::string& path) const {
 
 void PrefService::SetUint64(const std::string& path, uint64_t value) {
   SetUserPrefValue(path,
-                   base::MakeUnique<base::Value>(base::Uint64ToString(value)));
+                   std::make_unique<base::Value>(base::NumberToString(value)));
 }
 
 uint64_t PrefService::GetUint64(const std::string& path) const {
@@ -467,6 +467,15 @@ uint64_t PrefService::GetUint64(const std::string& path) const {
   uint64_t val;
   base::StringToUint64(result, &val);
   return val;
+}
+
+void PrefService::SetTime(const std::string& path, base::Time value) {
+  SetInt64(path, value.ToDeltaSinceWindowsEpoch().InMicroseconds());
+}
+
+base::Time PrefService::GetTime(const std::string& path) const {
+  return base::Time::FromDeltaSinceWindowsEpoch(
+      base::TimeDelta::FromMicroseconds(GetInt64(path)));
 }
 
 base::Value* PrefService::GetMutableUserPref(const std::string& path,
@@ -489,7 +498,7 @@ base::Value* PrefService::GetMutableUserPref(const std::string& path,
   // exist or isn't the correct type, create a new user preference.
   base::Value* value = nullptr;
   if (!user_pref_store_->GetMutableValue(path, &value) ||
-      !value->IsType(type)) {
+      value->type() != type) {
     if (type == base::Value::Type::DICTIONARY) {
       value = new base::DictionaryValue;
     } else if (type == base::Value::Type::LIST) {
@@ -543,22 +552,14 @@ void PrefService::UpdateCommandLinePrefStore(PrefStore* command_line_store) {
 // PrefService::Preference
 
 PrefService::Preference::Preference(const PrefService* service,
-                                    const std::string& name,
+                                    std::string name,
                                     base::Value::Type type)
-    : name_(name), type_(type), pref_service_(service) {
-  DCHECK(service);
-  // Cache the registration flags at creation time to avoid multiple map lookups
-  // later.
-  registration_flags_ = service->pref_registry_->GetRegistrationFlags(name_);
-}
-
-const std::string PrefService::Preference::name() const {
-  return name_;
-}
-
-base::Value::Type PrefService::Preference::GetType() const {
-  return type_;
-}
+    : name_(std::move(name)),
+      type_(type),
+      // Cache the registration flags at creation time to avoid multiple map
+      // lookups later.
+      registration_flags_(service->pref_registry_->GetRegistrationFlags(name_)),
+      pref_service_(service) {}
 
 const base::Value* PrefService::Preference::GetValue() const {
   const base::Value* result = pref_service_->GetPreferenceValue(name_);
@@ -572,7 +573,7 @@ const base::Value* PrefService::Preference::GetRecommendedValue() const {
 
   const base::Value* found_value = nullptr;
   if (pref_value_store()->GetRecommendedValue(name_, type_, &found_value)) {
-    DCHECK(found_value->IsType(type_));
+    DCHECK(found_value->type() == type_);
     return found_value;
   }
 
@@ -636,7 +637,7 @@ const base::Value* PrefService::GetPreferenceValue(
     const base::Value* found_value = nullptr;
     base::Value::Type default_type = default_value->type();
     if (pref_value_store_->GetValue(path, default_type, &found_value)) {
-      DCHECK(found_value->IsType(default_type));
+      DCHECK(found_value->type() == default_type);
       return found_value;
     } else {
       // Every registered preference has at least a default value.

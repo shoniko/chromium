@@ -35,18 +35,12 @@ class CORE_EXPORT PointerEventFactory {
                        const Vector<WebMouseEvent>&,
                        LocalDOMWindow*);
 
-  PointerEvent* Create(const WebTouchPoint&,
-                       const Vector<std::pair<WebTouchPoint, TimeTicks>>&,
-                       WebInputEvent::Modifiers,
-                       TimeTicks event_platform_time_stamp,
-                       LocalFrame*,
-                       DOMWindow*);
-
-  PointerEvent* CreatePointerCancelEvent(const WebPointerEvent&);
+  PointerEvent* Create(const WebPointerEvent&,
+                       const Vector<WebPointerEvent>&,
+                       LocalDOMWindow*);
 
   PointerEvent* CreatePointerCancelEvent(
       const int pointer_id,
-      const WebPointerProperties::PointerType,
       TimeTicks platfrom_time_stamp);
 
   // For creating capture events (i.e got/lostpointercapture)
@@ -87,7 +81,7 @@ class CORE_EXPORT PointerEventFactory {
  private:
   typedef WTF::UnsignedWithZeroKeyHashTraits<int> UnsignedHash;
   typedef struct IncomingId : public std::pair<int, int> {
-    IncomingId() {}
+    IncomingId() = default;
     IncomingId(WebPointerProperties::PointerType pointer_type, int raw_id)
         : std::pair<int, int>(static_cast<int>(pointer_type), raw_id) {}
     int PointerTypeInt() const { return first; }

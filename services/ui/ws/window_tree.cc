@@ -12,6 +12,7 @@
 #include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/map.h"
 #include "services/ui/display/screen_manager.h"
 #include "services/ui/ws/cursor_location_manager.h"
@@ -180,6 +181,14 @@ void WindowTree::Init(std::unique_ptr<WindowTreeBinding> binding,
                     drawn, root->current_local_surface_id());
 }
 
+void WindowTree::OnAcceleratedWidgetAvailableForDisplay(Display* display) {
+  DCHECK(window_manager_internal_);
+  // TODO(sad): Use GpuSurfaceTracker on platforms where a gpu::SurfaceHandle is
+  // not the same as a gfx::AcceleratedWidget.
+  window_manager_internal_->WmOnAcceleratedWidgetForDisplay(
+      display->GetId(), display->platform_display()->GetAcceleratedWidget());
+}
+
 void WindowTree::ConfigureWindowManager(
     bool automatically_create_display_roots) {
   // ConfigureWindowManager() should be called early on, before anything
@@ -192,7 +201,7 @@ void WindowTree::ConfigureWindowManager(
   automatically_create_display_roots_ = automatically_create_display_roots;
   window_manager_internal_ = binding_->GetWindowManager();
   window_manager_internal_->OnConnect();
-  window_manager_state_ = base::MakeUnique<WindowManagerState>(this);
+  window_manager_state_ = std::make_unique<WindowManagerState>(this);
 }
 
 const ServerWindow* WindowTree::GetWindow(const WindowId& id) const {
@@ -313,11 +322,6 @@ ServerWindow* WindowTree::ProcessSetDisplayRoot(
   DCHECK(window_manager_state_);  // Only called for window manager.
   DVLOG(3) << "SetDisplayRoot client=" << id_
            << " global window_id=" << client_window_id.ToString();
-  if (display_manager()->GetDisplayById(display_to_create.id())) {
-    DVLOG(1) << "SetDisplayRoot called with existing display "
-             << display_to_create.id();
-    return nullptr;
-  }
 
   if (automatically_create_display_roots_) {
     DVLOG(1) << "SetDisplayRoot is only applicable when "
@@ -339,19 +343,27 @@ ServerWindow* WindowTree::ProcessSetDisplayRoot(
     return nullptr;
   }
 
-  if (!mirrors.empty()) {
-    NOTIMPLEMENTED() << "TODO(crbug.com/764472): Mus unified/mirroring modes.";
-    return nullptr;
+  Display* display = display_manager()->GetDisplayById(display_to_create.id());
+  const bool display_already_existed = display != nullptr;
+  if (!display) {
+    // Create a display if the window manager is extending onto a new display.
+    display = display_manager()->AddDisplayForWindowManager(
+        is_primary_display, display_to_create, viewport_metrics);
+  } else if (!display->GetWindowManagerDisplayRootForUser(
+                 window_manager_state_->user_id())) {
+    // Init the root if the display already existed as a mirroring destination.
+    display->InitWindowManagerDisplayRoots();
   }
 
-  Display* display = display_manager()->AddDisplayForWindowManager(
-      is_primary_display, display_to_create, viewport_metrics);
+  if (!mirrors.empty())
+    NOTIMPLEMENTED() << "TODO(crbug.com/764472): Mus unified mode support.";
+
   DCHECK(display);
   WindowManagerDisplayRoot* display_root =
       display->GetWindowManagerDisplayRootForUser(
           window_manager_state_->user_id());
   DCHECK(display_root);
-  DCHECK(display_root->root()->children().empty());
+  display_root->root()->RemoveAllChildren();
 
   // NOTE: this doesn't resize the window in any way. We assume the client takes
   // care of any modifications it needs to do.
@@ -363,6 +375,13 @@ ServerWindow* WindowTree::ProcessSetDisplayRoot(
   if (is_moving_to_new_display) {
     DCHECK(old_parent);
     window_manager_state_->DeleteWindowManagerDisplayRoot(old_parent);
+  }
+  if (display_already_existed &&
+      display->platform_display()->GetAcceleratedWidget()) {
+    // Notify the window manager that the dispay's accelerated widget is already
+    // available, if the display is being reused for a new window tree host.
+    window_manager_internal_->WmOnAcceleratedWidgetForDisplay(
+        display->GetId(), display->platform_display()->GetAcceleratedWidget());
   }
   return window;
 }
@@ -712,7 +731,7 @@ void WindowTree::DispatchInputEvent(ServerWindow* target,
                                     DispatchEventCallback callback) {
   if (event_ack_id_) {
     // This is currently waiting for an event ack. Add it to the queue.
-    event_queue_.push(base::MakeUnique<TargetedEvent>(
+    event_queue_.push(std::make_unique<TargetedEvent>(
         target, event, event_location, std::move(callback)));
     // TODO(sad): If the |event_queue_| grows too large, then this should notify
     // Display, so that it can stop sending events.
@@ -723,7 +742,7 @@ void WindowTree::DispatchInputEvent(ServerWindow* target,
   // and dispatch the latest event from the queue instead that still has a live
   // target.
   if (!event_queue_.empty()) {
-    event_queue_.push(base::MakeUnique<TargetedEvent>(
+    event_queue_.push(std::make_unique<TargetedEvent>(
         target, event, event_location, std::move(callback)));
     return;
   }
@@ -736,7 +755,7 @@ bool WindowTree::IsWaitingForNewTopLevelWindow(uint32_t wm_change_id) {
          waiting_for_top_level_window_info_->wm_change_id == wm_change_id;
 }
 
-void WindowTree::OnWindowManagerCreatedTopLevelWindow(
+viz::FrameSinkId WindowTree::OnWindowManagerCreatedTopLevelWindow(
     uint32_t wm_change_id,
     uint32_t client_change_id,
     const ServerWindow* window) {
@@ -750,7 +769,7 @@ void WindowTree::OnWindowManagerCreatedTopLevelWindow(
       waiting_for_top_level_window_info->client_window_id));
   if (!window) {
     client()->OnChangeCompleted(client_change_id, false);
-    return;
+    return viz::FrameSinkId();
   }
   client_id_to_window_id_map_[waiting_for_top_level_window_info
                                   ->client_window_id] = window->id();
@@ -763,6 +782,7 @@ void WindowTree::OnWindowManagerCreatedTopLevelWindow(
   client()->OnTopLevelCreated(client_change_id, WindowToWindowData(window),
                               display_id, drawn,
                               window->current_local_surface_id());
+  return waiting_for_top_level_window_info->client_window_id;
 }
 
 void WindowTree::AddActivationParent(const ClientWindowId& window_id) {
@@ -1224,6 +1244,32 @@ bool WindowTree::CanReorderWindow(const ServerWindow* window,
   return true;
 }
 
+bool WindowTree::RemoveWindowFromParent(
+    const ClientWindowId& client_window_id) {
+  ServerWindow* window = GetWindowByClientId(client_window_id);
+  DVLOG(3) << "removing window from parent client=" << id_
+           << " client window_id= " << client_window_id
+           << " global window_id=" << DebugWindowId(window);
+  if (!window) {
+    DVLOG(1) << "RemoveWindowFromParent failed (invalid window id="
+             << client_window_id.ToString() << ")";
+    return false;
+  }
+  if (!window->parent()) {
+    DVLOG(1) << "RemoveWindowFromParent failed (no parent id="
+             << client_window_id.ToString() << ")";
+    return false;
+  }
+  if (!access_policy_->CanRemoveWindowFromParent(window)) {
+    DVLOG(1) << "RemoveWindowFromParent failed (access policy disallowed id="
+             << client_window_id.ToString() << ")";
+    return false;
+  }
+  Operation op(this, window_server_, OperationType::REMOVE_WINDOW_FROM_PARENT);
+  window->parent()->Remove(window);
+  return true;
+}
+
 bool WindowTree::DeleteWindowImpl(WindowTree* source, ServerWindow* window) {
   DCHECK(window);
   DCHECK_EQ(window->id().client_id, id_);
@@ -1466,8 +1512,23 @@ void WindowTree::DispatchInputEventImpl(ServerWindow* target,
   // Should only get events from windows attached to a host.
   DCHECK(event_source_wms_);
   bool matched_pointer_watcher = EventMatchesPointerWatcher(event);
+
+  // Pass the root window of the display supplying the event. This is necessary
+  // for Ash to determine the event position in the unified desktop mode, where
+  // each physical display mirrors part of a single virtual display.
+  Display* display = window_server_->display_manager()->GetDisplayById(
+      event_location.display_id);
+  WindowManagerDisplayRoot* event_display_root = nullptr;
+  if (display && window_manager_state_) {
+    event_display_root = display->GetWindowManagerDisplayRootForUser(
+        window_manager_state_->user_id());
+  }
+  ServerWindow* display_root_window =
+      event_display_root ? event_display_root->GetClientVisibleRoot() : nullptr;
+
   client()->OnWindowInputEvent(
       event_ack_id_, TransportIdForWindow(target), event_location.display_id,
+      display_root_window ? TransportIdForWindow(display_root_window) : Id(),
       event_location.raw_location, ui::Event::Clone(event),
       matched_pointer_watcher);
 }
@@ -1572,8 +1633,8 @@ void WindowTree::NewTopLevelWindow(
 
   display_root->window_manager_state()
       ->window_tree()
-      ->window_manager_internal_->WmCreateTopLevelWindow(wm_change_id, id_,
-                                                         transport_properties);
+      ->window_manager_internal_->WmCreateTopLevelWindow(
+          wm_change_id, client_window_id, transport_properties);
 }
 
 void WindowTree::DeleteWindow(uint32_t change_id, Id transport_window_id) {
@@ -1588,27 +1649,8 @@ void WindowTree::AddWindow(uint32_t change_id, Id parent_id, Id child_id) {
 }
 
 void WindowTree::RemoveWindowFromParent(uint32_t change_id, Id window_id) {
-  bool success = false;
-  ServerWindow* window = GetWindowByClientId(MakeClientWindowId(window_id));
-  DVLOG(3) << "removing window from parent client=" << id_
-           << " client window_id= " << window_id
-           << " global window_id=" << DebugWindowId(window);
-  if (!window) {
-    DVLOG(1) << "RemoveWindowFromParent failed (invalid window id=" << change_id
-             << ")";
-  } else if (!window->parent()) {
-    DVLOG(1) << "RemoveWindowFromParent failed (no parent id=" << change_id
-             << ")";
-  } else if (!access_policy_->CanRemoveWindowFromParent(window)) {
-    DVLOG(1) << "RemoveWindowFromParent failed (access policy disallowed id="
-             << change_id << ")";
-  } else {
-    success = true;
-    Operation op(this, window_server_,
-                 OperationType::REMOVE_WINDOW_FROM_PARENT);
-    window->parent()->Remove(window);
-  }
-  client()->OnChangeCompleted(change_id, success);
+  client()->OnChangeCompleted(
+      change_id, RemoveWindowFromParent(MakeClientWindowId(window_id)));
 }
 
 void WindowTree::AddTransientWindow(uint32_t change_id,
@@ -1897,9 +1939,10 @@ void WindowTree::OnWindowInputEventAck(uint32_t event_id,
       event_location = targeted_event->event_location();
       callback = targeted_event->TakeCallback();
     } while (!event_queue_.empty() && !GetDisplay(target));
-    if (target)
+    if (GetDisplay(target)) {
       DispatchInputEventImpl(target, *event, event_location,
                              std::move(callback));
+    }
   }
 }
 
@@ -2189,6 +2232,29 @@ void WindowTree::StackAtTop(uint32_t change_id, Id window_id) {
       window_server_->GenerateWindowManagerChangeId(this, change_id);
   wm_tree->window_manager_internal_->WmStackAtTop(
       wm_change_id, wm_tree->TransportIdForWindow(window));
+}
+
+void WindowTree::PerformWmAction(Id window_id, const std::string& action) {
+  ServerWindow* window = GetWindowByClientId(MakeClientWindowId(window_id));
+  if (!window) {
+    DVLOG(1) << "PerformWmAction(" << action << ") failed (invalid id)";
+    return;
+  }
+
+  if (!access_policy_->CanPerformWmAction(window)) {
+    DVLOG(1) << "PerformWmAction(" << action << ") failed (access denied)";
+    return;
+  }
+
+  WindowManagerDisplayRoot* display_root = GetWindowManagerDisplayRoot(window);
+  if (!display_root) {
+    DVLOG(1) << "PerformWmAction(" << action << ") failed (no display root)";
+    return;
+  }
+
+  WindowTree* wm_tree = display_root->window_manager_state()->window_tree();
+  wm_tree->window_manager_internal_->WmPerformWmAction(
+      wm_tree->TransportIdForWindow(window), action);
 }
 
 void WindowTree::GetWindowManagerClient(
@@ -2609,10 +2675,6 @@ void WindowTree::OnWmCreatedTopLevelWindow(uint32_t change_id,
     window_server_->WindowManagerSentBogusMessage();
     window = nullptr;
   }
-  if (window) {
-    client()->OnFrameSinkIdAllocated(transport_window_id,
-                                     window->frame_sink_id());
-  }
   window_server_->WindowManagerCreatedTopLevelWindow(this, change_id, window);
 }
 
@@ -2659,6 +2721,30 @@ bool WindowTree::IsWindowCreatedByWindowManager(
          window->id().client_id;
 }
 
+bool WindowTree::ShouldInterceptEventsForAccessPolicy(
+    const ServerWindow* window) const {
+  // Indicates the tree was created as the result of an Embed().
+  if (user_id_.empty())
+    return false;
+
+  while (window) {
+    // Find the first window created by this client. If there is an embedding,
+    // it'll be here.
+    if (window->id().client_id == id_) {
+      // embedded_tree->embedder_intercepts_events() indicates Embed() was
+      // called with kEmbedFlagEmbedderInterceptsEvents. In this case the
+      // embedder needs to see the window so that it knows the event is
+      // targetted at it.
+      WindowTree* embedded_tree = window_server_->GetTreeWithRoot(window);
+      if (embedded_tree && embedded_tree->embedder_intercepts_events())
+        return true;
+      return false;
+    }
+    window = window->parent();
+  }
+  return false;
+}
+
 void WindowTree::OnDragMoved(const gfx::Point& location) {
   DCHECK(window_server_->in_drag_loop());
   DCHECK_EQ(this, window_server_->GetCurrentDragLoopInitiator());
@@ -2673,7 +2759,7 @@ void WindowTree::OnDragMoved(const gfx::Point& location) {
     drag_move_state_->queued_cursor_location = location;
   } else {
     WindowManagerState* wms = display_root->window_manager_state();
-    drag_move_state_ = base::MakeUnique<DragMoveState>();
+    drag_move_state_ = std::make_unique<DragMoveState>();
     wms->window_tree()->window_manager_internal_->WmMoveDragImage(
         location, base::Bind(&WindowTree::OnWmMoveDragImageAck,
                              drag_weak_factory_.GetWeakPtr()));

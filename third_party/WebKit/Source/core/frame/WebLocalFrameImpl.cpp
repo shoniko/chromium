@@ -92,6 +92,7 @@
 #include <set>
 #include <utility>
 
+#include "base/macros.h"
 #include "bindings/core/v8/BindingSecurity.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptController.h"
@@ -103,11 +104,9 @@
 #include "build/build_config.h"
 #include "core/dom/Document.h"
 #include "core/dom/IconURL.h"
-#include "core/dom/MessagePort.h"
 #include "core/dom/Node.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/UserGestureIndicator.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
@@ -126,7 +125,6 @@
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/editing/spellcheck/SpellChecker.h"
-#include "core/editing/spellcheck/TextCheckerClientImpl.h"
 #include "core/exported/LocalFrameClientImpl.h"
 #include "core/exported/SharedWorkerRepositoryClientImpl.h"
 #include "core/exported/WebAssociatedURLLoaderImpl.h"
@@ -135,16 +133,18 @@
 #include "core/exported/WebPluginContainerImpl.h"
 #include "core/exported/WebRemoteFrameImpl.h"
 #include "core/exported/WebViewImpl.h"
+#include "core/frame/Deprecation.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/PageScaleConstraintsSet.h"
+#include "core/frame/PausableScriptExecutor.h"
+#include "core/frame/PausableTask.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/RemoteFrameOwner.h"
 #include "core/frame/ScreenOrientationController.h"
 #include "core/frame/Settings.h"
 #include "core/frame/SmartClip.h"
-#include "core/frame/SuspendableScriptExecutor.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/VisualViewport.h"
 #include "core/frame/WebFrameWidgetImpl.h"
@@ -163,15 +163,17 @@
 #include "core/input/EventHandler.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/HitTestResult.h"
+#include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/api/LayoutEmbeddedContentItem.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/HistoryItem.h"
 #include "core/loader/MixedContentChecker.h"
 #include "core/loader/NavigationScheduler.h"
+#include "core/messaging/MessagePort.h"
+#include "core/page/ContextMenuController.h"
 #include "core/page/FocusController.h"
 #include "core/page/FrameTree.h"
 #include "core/page/Page.h"
@@ -190,7 +192,6 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayerClient.h"
 #include "platform/graphics/paint/ClipRecorder.h"
-#include "platform/graphics/paint/DisplayItemCacheSkipper.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintRecordBuilder.h"
 #include "platform/graphics/skia/SkiaUtils.h"
@@ -205,9 +206,11 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityPolicy.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
+#include "public/platform/InterfaceRegistry.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebDoubleSize.h"
 #include "public/platform/WebFloatPoint.h"
 #include "public/platform/WebFloatRect.h"
@@ -240,6 +243,7 @@
 #include "public/web/WebRange.h"
 #include "public/web/WebScriptSource.h"
 #include "public/web/WebSerializedScriptValue.h"
+#include "public/web/WebTextDirection.h"
 #include "public/web/WebTreeScopeType.h"
 
 namespace blink {
@@ -261,13 +265,11 @@ HeapVector<ScriptSourceCode> CreateSourcesVector(
 // Simple class to override some of PrintContext behavior. Some of the methods
 // made virtual so that they can be overridden by ChromePluginPrintContext.
 class ChromePrintContext : public PrintContext {
-  WTF_MAKE_NONCOPYABLE(ChromePrintContext);
-
  public:
   explicit ChromePrintContext(LocalFrame* frame)
       : PrintContext(frame), printed_page_width_(0) {}
 
-  ~ChromePrintContext() override {}
+  ~ChromePrintContext() override = default;
 
   virtual void BeginPrintMode(float width, float height) {
     DCHECK(!printed_page_width_);
@@ -284,21 +286,21 @@ class ChromePrintContext : public PrintContext {
   float SpoolSinglePage(WebCanvas* canvas, int page_number) {
     DispatchEventsForPrintingOnAllFrames();
     if (!GetFrame()->GetDocument() ||
-        GetFrame()->GetDocument()->GetLayoutViewItem().IsNull())
+        !GetFrame()->GetDocument()->GetLayoutView())
       return 0;
 
     GetFrame()->View()->UpdateLifecyclePhasesForPrinting();
     if (!GetFrame()->GetDocument() ||
-        GetFrame()->GetDocument()->GetLayoutViewItem().IsNull())
+        !GetFrame()->GetDocument()->GetLayoutView())
       return 0;
 
     // The page rect gets scaled and translated, so specify the entire
     // print content area here as the recording rect.
     IntRect bounds(0, 0, printed_page_height_, printed_page_width_);
-    PaintRecordBuilder builder(bounds, &canvas->getMetaData());
+    PaintRecordBuilder builder(&canvas->getMetaData());
     builder.Context().SetPrinting(true);
     builder.Context().BeginRecording(bounds);
-    float scale = SpoolPage(builder.Context(), page_number, bounds);
+    float scale = SpoolPage(builder.Context(), page_number);
     canvas->drawPicture(builder.Context().EndRecording());
     return scale;
   }
@@ -308,12 +310,12 @@ class ChromePrintContext : public PrintContext {
       const FloatSize& page_size_in_pixels) {
     DispatchEventsForPrintingOnAllFrames();
     if (!GetFrame()->GetDocument() ||
-        GetFrame()->GetDocument()->GetLayoutViewItem().IsNull())
+        !GetFrame()->GetDocument()->GetLayoutView())
       return;
 
     GetFrame()->View()->UpdateLifecyclePhasesForPrinting();
     if (!GetFrame()->GetDocument() ||
-        GetFrame()->GetDocument()->GetLayoutViewItem().IsNull())
+        !GetFrame()->GetDocument()->GetLayoutView())
       return;
 
     ComputePageRects(page_size_in_pixels);
@@ -323,13 +325,13 @@ class ChromePrintContext : public PrintContext {
     int total_height = num_pages * (page_size_in_pixels.Height() + 1) - 1;
     IntRect all_pages_rect(0, 0, page_width, total_height);
 
-    PaintRecordBuilder builder(all_pages_rect, &canvas->getMetaData());
+    PaintRecordBuilder builder(&canvas->getMetaData());
     GraphicsContext& context = builder.Context();
     context.SetPrinting(true);
     context.BeginRecording(all_pages_rect);
 
     // Fill the whole background by white.
-    context.FillRect(FloatRect(0, 0, page_width, total_height), Color::kWhite);
+    context.FillRect(all_pages_rect, Color::kWhite);
 
     int current_height = 0;
     for (size_t page_index = 0; page_index < num_pages; page_index++) {
@@ -355,7 +357,7 @@ class ChromePrintContext : public PrintContext {
       context.Save();
       context.ConcatCTM(transform);
 
-      SpoolPage(context, page_index, all_pages_rect);
+      SpoolPage(context, page_index);
 
       context.Restore();
 
@@ -370,9 +372,7 @@ class ChromePrintContext : public PrintContext {
   // instead. Returns the scale to be applied.
   // On Linux, we don't have the problem with NativeTheme, hence we let WebKit
   // do the scaling and ignore the return value.
-  virtual float SpoolPage(GraphicsContext& context,
-                          int page_number,
-                          const IntRect& bounds) {
+  virtual float SpoolPage(GraphicsContext& context, int page_number) {
     IntRect page_rect = page_rects_[page_number];
     float scale = printed_page_width_ / page_rect.Width();
 
@@ -386,19 +386,13 @@ class ChromePrintContext : public PrintContext {
     context.ConcatCTM(transform);
     context.ClipRect(page_rect);
 
-    PaintRecordBuilder builder(bounds, &context.Canvas()->getMetaData(),
-                               &context);
-
-    // The local scope is so that the cache skipper is destroyed before
-    // we call endRecording().
+    PaintRecordBuilder builder(&context.Canvas()->getMetaData(), &context);
+    GetFrame()->View()->PaintContents(builder.Context(),
+                                      kGlobalPaintNormalPhase, page_rect);
     {
-      DisplayItemCacheSkipper skipper(builder.Context());
-      GetFrame()->View()->PaintContents(builder.Context(),
-                                        kGlobalPaintNormalPhase, page_rect);
-
       DrawingRecorder line_boundary_recorder(
           builder.Context(), builder,
-          DisplayItem::kPrintedContentDestinationLocations, page_rect);
+          DisplayItem::kPrintedContentDestinationLocations);
       OutputLinkedDestinations(builder.Context(), page_rect);
     }
     context.DrawRecord(builder.EndRecording());
@@ -424,6 +418,8 @@ class ChromePrintContext : public PrintContext {
   // Set when printing.
   float printed_page_width_;
   float printed_page_height_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromePrintContext);
 };
 
 // Simple class to override some of PrintContext behavior. This is used when
@@ -438,7 +434,7 @@ class ChromePluginPrintContext final : public ChromePrintContext {
         plugin_(plugin),
         print_params_(print_params) {}
 
-  ~ChromePluginPrintContext() override {}
+  ~ChromePluginPrintContext() override = default;
 
   virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(plugin_);
@@ -469,17 +465,9 @@ class ChromePluginPrintContext final : public ChromePrintContext {
   // Spools the printed page, a subrect of frame(). Skip the scale step.
   // NativeTheme doesn't play well with scaling. Scaling is done browser side
   // instead. Returns the scale to be applied.
-  float SpoolPage(GraphicsContext& context,
-                  int page_number,
-                  const IntRect& bounds) override {
-    IntRect page_rect = page_rects_[page_number];
-    PaintRecordBuilder builder(bounds, &context.Canvas()->getMetaData());
-    // The local scope is so that the cache skipper is destroyed before
-    // we call endRecording().
-    {
-      DisplayItemCacheSkipper skipper(builder.Context());
-      plugin_->PrintPage(page_number, builder.Context(), page_rect);
-    }
+  float SpoolPage(GraphicsContext& context, int page_number) override {
+    PaintRecordBuilder builder(&context.Canvas()->getMetaData());
+    plugin_->PrintPage(page_number, builder.Context());
     context.DrawRecord(builder.EndRecording());
 
     return 1.0;
@@ -613,9 +601,9 @@ WebSize WebLocalFrameImpl::ContentsSize() const {
 }
 
 bool WebLocalFrameImpl::HasVisibleContent() const {
-  LayoutEmbeddedContentItem layout_item = GetFrame()->OwnerLayoutItem();
-  if (!layout_item.IsNull() &&
-      layout_item.Style()->Visibility() != EVisibility::kVisible) {
+  auto* layout_object = GetFrame()->OwnerLayoutObject();
+  if (layout_object &&
+      layout_object->StyleRef().Visibility() != EVisibility::kVisible) {
     return false;
   }
 
@@ -679,8 +667,9 @@ void WebLocalFrameImpl::SetIsolatedWorldSecurityOrigin(
     int world_id,
     const WebSecurityOrigin& security_origin) {
   DCHECK(GetFrame());
-  DOMWrapperWorld::SetIsolatedWorldSecurityOrigin(world_id,
-                                                  security_origin.Get());
+  DOMWrapperWorld::SetIsolatedWorldSecurityOrigin(
+      world_id,
+      security_origin.Get() ? security_origin.Get()->IsolatedCopy() : nullptr);
 }
 
 void WebLocalFrameImpl::SetIsolatedWorldContentSecurityPolicy(
@@ -755,7 +744,7 @@ void WebLocalFrameImpl::RequestExecuteScriptAndReturnValue(
   DCHECK(GetFrame());
 
   scoped_refptr<DOMWrapperWorld> main_world = &DOMWrapperWorld::MainWorld();
-  SuspendableScriptExecutor* executor = SuspendableScriptExecutor::Create(
+  PausableScriptExecutor* executor = PausableScriptExecutor::Create(
       GetFrame(), std::move(main_world), CreateSourcesVector(&source, 1),
       user_gesture, callback);
   executor->Run();
@@ -769,9 +758,16 @@ void WebLocalFrameImpl::RequestExecuteV8Function(
     v8::Local<v8::Value> argv[],
     WebScriptExecutionCallback* callback) {
   DCHECK(GetFrame());
-  SuspendableScriptExecutor::CreateAndRun(GetFrame(), ToIsolate(GetFrame()),
-                                          context, function, receiver, argc,
-                                          argv, callback);
+  PausableScriptExecutor::CreateAndRun(GetFrame(), ToIsolate(GetFrame()),
+                                       context, function, receiver, argc, argv,
+                                       callback);
+}
+
+void WebLocalFrameImpl::PostPausableTask(PausableTaskCallback callback) {
+  DCHECK(GetFrame());
+  Document* document = GetFrame()->GetDocument();
+  DCHECK(document);
+  PausableTask::Post(document, std::move(callback));
 }
 
 void WebLocalFrameImpl::ExecuteScriptInIsolatedWorld(
@@ -816,15 +812,15 @@ void WebLocalFrameImpl::RequestExecuteScriptInIsolatedWorld(
 
   scoped_refptr<DOMWrapperWorld> isolated_world =
       DOMWrapperWorld::EnsureIsolatedWorld(ToIsolate(GetFrame()), world_id);
-  SuspendableScriptExecutor* executor = SuspendableScriptExecutor::Create(
+  PausableScriptExecutor* executor = PausableScriptExecutor::Create(
       GetFrame(), std::move(isolated_world),
       CreateSourcesVector(sources_in, num_sources), user_gesture, callback);
   switch (option) {
     case kAsynchronousBlockingOnload:
-      executor->RunAsync(SuspendableScriptExecutor::kOnloadBlocking);
+      executor->RunAsync(PausableScriptExecutor::kOnloadBlocking);
       break;
     case kAsynchronous:
-      executor->RunAsync(SuspendableScriptExecutor::kNonBlocking);
+      executor->RunAsync(PausableScriptExecutor::kNonBlocking);
       break;
     case kSynchronous:
       executor->Run();
@@ -832,20 +828,15 @@ void WebLocalFrameImpl::RequestExecuteScriptInIsolatedWorld(
   }
 }
 
-// TODO(bashi): Consider returning MaybeLocal.
-v8::Local<v8::Value> WebLocalFrameImpl::CallFunctionEvenIfScriptDisabled(
+v8::MaybeLocal<v8::Value> WebLocalFrameImpl::CallFunctionEvenIfScriptDisabled(
     v8::Local<v8::Function> function,
     v8::Local<v8::Value> receiver,
     int argc,
     v8::Local<v8::Value> argv[]) {
   DCHECK(GetFrame());
-  v8::Local<v8::Value> result;
-  if (!V8ScriptRunner::CallFunction(
-           function, GetFrame()->GetDocument(), receiver, argc,
-           static_cast<v8::Local<v8::Value>*>(argv), ToIsolate(GetFrame()))
-           .ToLocal(&result))
-    return v8::Local<v8::Value>();
-  return result;
+  return V8ScriptRunner::CallFunction(
+      function, GetFrame()->GetDocument(), receiver, argc,
+      static_cast<v8::Local<v8::Value>*>(argv), ToIsolate(GetFrame()));
 }
 
 v8::Local<v8::Context> WebLocalFrameImpl::MainWorldScriptContext() const {
@@ -879,8 +870,10 @@ void WebLocalFrameImpl::ReloadWithOverrideURL(const WebURL& override_url,
   WebURLRequest request = RequestForReload(load_type, override_url);
   if (request.IsNull())
     return;
+  request.SetRequestorOrigin(
+      WebSecurityOrigin(GetFrame()->GetDocument()->GetSecurityOrigin()));
   Load(request, load_type, WebHistoryItem(), kWebHistoryDifferentDocumentLoad,
-       false);
+       false, base::UnguessableToken::Create());
 }
 
 void WebLocalFrameImpl::ReloadImage(const WebNode& web_node) {
@@ -897,7 +890,8 @@ void WebLocalFrameImpl::LoadRequest(const WebURLRequest& request) {
   // TODO(clamy): Remove this function once RenderFrame calls load for all
   // requests.
   Load(request, WebFrameLoadType::kStandard, WebHistoryItem(),
-       kWebHistoryDifferentDocumentLoad, false);
+       kWebHistoryDifferentDocumentLoad, false,
+       base::UnguessableToken::Create());
 }
 
 void WebLocalFrameImpl::LoadHTMLString(const WebData& data,
@@ -1045,10 +1039,9 @@ bool WebLocalFrameImpl::ExecuteCommand(const WebString& name) {
   if (command[command.length() - 1] == UChar(':'))
     command = command.Substring(0, command.length() - 1);
 
-  Node* plugin_lookup_context_node =
-      context_menu_node_ && WebPluginContainerImpl::SupportsCommand(name)
-          ? context_menu_node_
-          : nullptr;
+  Node* plugin_lookup_context_node = nullptr;
+  if (WebPluginContainerImpl::SupportsCommand(name))
+    plugin_lookup_context_node = ContextMenuNodeInner();
 
   std::unique_ptr<UserGestureIndicator> gesture_indicator =
       Frame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
@@ -1081,14 +1074,65 @@ bool WebLocalFrameImpl::IsCommandEnabled(const WebString& name) const {
   return GetFrame()->GetEditor().CreateCommand(name).IsEnabled();
 }
 
-void WebLocalFrameImpl::EnableSpellChecking(bool enable) {
-  if (enable == IsSpellCheckingEnabled())
-    return;
-  GetFrame()->GetSpellChecker().ToggleSpellCheckingEnabled();
+bool WebLocalFrameImpl::SelectionTextDirection(WebTextDirection& start,
+                                               WebTextDirection& end) const {
+  FrameSelection& selection = frame_->Selection();
+  if (!selection.IsAvailable()) {
+    // plugins/mouse-capture-inside-shadow.html reaches here
+    return false;
+  }
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame_->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  if (selection.ComputeVisibleSelectionInDOMTree()
+          .ToNormalizedEphemeralRange()
+          .IsNull())
+    return false;
+  start = ToWebTextDirection(PrimaryDirectionOf(
+      *selection.ComputeVisibleSelectionInDOMTree().Start().AnchorNode()));
+  end = ToWebTextDirection(PrimaryDirectionOf(
+      *selection.ComputeVisibleSelectionInDOMTree().End().AnchorNode()));
+  return true;
 }
 
-bool WebLocalFrameImpl::IsSpellCheckingEnabled() const {
-  return GetFrame()->GetSpellChecker().IsSpellCheckingEnabled();
+bool WebLocalFrameImpl::IsSelectionAnchorFirst() const {
+  FrameSelection& selection = frame_->Selection();
+  if (!selection.IsAvailable()) {
+    // plugins/mouse-capture-inside-shadow.html reaches here
+    return false;
+  }
+
+  return selection.ComputeVisibleSelectionInDOMTreeDeprecated().IsBaseFirst();
+}
+
+void WebLocalFrameImpl::SetTextDirection(WebTextDirection direction) {
+  // The Editor::SetBaseWritingDirection() function checks if we can change
+  // the text direction of the selected node and updates its DOM "dir"
+  // attribute and its CSS "direction" property.
+  // So, we just call the function as Safari does.
+  Editor& editor = frame_->GetEditor();
+  if (!editor.CanEdit())
+    return;
+
+  switch (direction) {
+    case kWebTextDirectionDefault:
+      editor.SetBaseWritingDirection(NaturalWritingDirection);
+      break;
+
+    case kWebTextDirectionLeftToRight:
+      editor.SetBaseWritingDirection(LeftToRightWritingDirection);
+      break;
+
+    case kWebTextDirectionRightToLeft:
+      editor.SetBaseWritingDirection(RightToLeftWritingDirection);
+      break;
+
+    default:
+      NOTIMPLEMENTED();
+      break;
+  }
 }
 
 void WebLocalFrameImpl::ReplaceMisspelledRange(const WebString& text) {
@@ -1216,7 +1260,6 @@ void WebLocalFrameImpl::SelectRange(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(range)
           .SetAffinity(TextAffinity::kDefault)
-          .SetIsDirectional(false)
           .Build(),
       SetSelectionOptions::Builder()
           .SetShouldShowHandle(show_handles)
@@ -1563,7 +1606,7 @@ WebLocalFrame* WebLocalFrame::CreateProvisional(
     InterfaceRegistry* interface_registry,
     WebRemoteFrame* old_web_frame,
     WebSandboxFlags flags,
-    WebParsedFeaturePolicy container_policy) {
+    ParsedFeaturePolicy container_policy) {
   return WebLocalFrameImpl::CreateProvisional(
       client, interface_registry, old_web_frame, flags, container_policy);
 }
@@ -1603,7 +1646,7 @@ WebLocalFrameImpl* WebLocalFrameImpl::CreateProvisional(
     blink::InterfaceRegistry* interface_registry,
     WebRemoteFrame* old_web_frame,
     WebSandboxFlags flags,
-    WebParsedFeaturePolicy container_policy) {
+    ParsedFeaturePolicy container_policy) {
   DCHECK(client);
   WebLocalFrameImpl* web_frame =
       new WebLocalFrameImpl(old_web_frame, client, interface_registry);
@@ -1638,6 +1681,7 @@ WebLocalFrameImpl* WebLocalFrameImpl::CreateProvisional(
     // which triggers a cross-process navigation.
     new_frame->Loader().ForceSandboxFlags(static_cast<SandboxFlags>(flags));
   }
+  new_frame->SetIsProvisional(true);
 
   return web_frame;
 }
@@ -1662,9 +1706,7 @@ WebLocalFrameImpl::WebLocalFrameImpl(
       autofill_client_(nullptr),
       input_events_scale_factor_for_emulation_(1),
       interface_registry_(interface_registry),
-      web_dev_tools_frontend_(nullptr),
       input_method_controller_(*this),
-      text_checker_client_(new TextCheckerClientImpl(this)),
       spell_check_panel_host_client_(nullptr),
       self_keep_alive_(this) {
   DCHECK(client_);
@@ -1695,14 +1737,16 @@ void WebLocalFrameImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_widget_);
   visitor->Trace(text_finder_);
   visitor->Trace(print_context_);
-  visitor->Trace(context_menu_node_);
   visitor->Trace(input_method_controller_);
-  visitor->Trace(text_checker_client_);
   WebFrame::TraceFrames(visitor, this);
 }
 
 void WebLocalFrameImpl::SetCoreFrame(LocalFrame* frame) {
   frame_ = frame;
+
+  local_frame_client_->SetVirtualTimePauser(
+      frame_ ? frame_->FrameScheduler()->CreateWebScopedVirtualTimePauser()
+             : WebScopedVirtualTimePauser());
 }
 
 void WebLocalFrameImpl::InitializeCoreFrame(Page& page,
@@ -1718,7 +1762,13 @@ void WebLocalFrameImpl::InitializeCoreFrame(Page& page,
   CHECK(frame_->Loader().StateMachine()->IsDisplayingInitialEmptyDocument());
   if (!Parent() && !Opener() &&
       frame_->GetSettings()->GetShouldReuseGlobalForUnownedMainFrame()) {
-    frame_->GetDocument()->GetSecurityOrigin()->GrantUniversalAccess();
+    frame_->GetDocument()->GetMutableSecurityOrigin()->GrantUniversalAccess();
+  }
+
+  if (frame_->IsLocalRoot()) {
+    frame_->GetInterfaceRegistry()->AddAssociatedInterface(
+        WTF::BindRepeating(&WebLocalFrameImpl::BindDevToolsAgentRequest,
+                           WrapWeakPersistent(this)));
   }
 
   if (!owner) {
@@ -1900,7 +1950,7 @@ void WebLocalFrameImpl::LoadJavaScriptURL(const KURL& url) {
   v8::HandleScope handle_scope(ToIsolate(GetFrame()));
   v8::Local<v8::Value> result =
       GetFrame()->GetScriptController().ExecuteScriptInMainWorldAndReturnValue(
-          ScriptSourceCode(script));
+          ScriptSourceCode(script, ScriptSourceLocationType::kJavascriptUrl));
   if (result.IsEmpty() || !result->IsString())
     return;
   String script_result = ToCoreString(v8::Local<v8::String>::Cast(result));
@@ -1922,32 +1972,12 @@ HitTestResult WebLocalFrameImpl::HitTestResultForVisualViewportPos(
   return result;
 }
 
-static void EnsureFrameLoaderHasCommitted(FrameLoader& frame_loader) {
-  // Internally, Blink uses CommittedMultipleRealLoads to track whether the
-  // next commit should create a new history item or not. Ensure we have
-  // reached that state.
-  if (frame_loader.StateMachine()->CommittedMultipleRealLoads())
-    return;
-  frame_loader.StateMachine()->AdvanceTo(
-      FrameLoaderStateMachine::kCommittedMultipleRealLoads);
-}
-
 void WebLocalFrameImpl::SetAutofillClient(WebAutofillClient* autofill_client) {
   autofill_client_ = autofill_client;
 }
 
 WebAutofillClient* WebLocalFrameImpl::AutofillClient() {
   return autofill_client_;
-}
-
-void WebLocalFrameImpl::SetDevToolsAgentClient(
-    WebDevToolsAgentClient* dev_tools_client) {
-  DCHECK(dev_tools_client);
-  dev_tools_agent_ = WebDevToolsAgentImpl::Create(this, dev_tools_client);
-}
-
-WebDevToolsAgent* WebLocalFrameImpl::DevToolsAgent() {
-  return dev_tools_agent_.Get();
 }
 
 WebLocalFrameImpl* WebLocalFrameImpl::LocalRoot() {
@@ -1967,8 +1997,7 @@ WebFrame* WebLocalFrameImpl::FindFrameByName(const WebString& name) {
 
 void WebLocalFrameImpl::SendPings(const WebURL& destination_url) {
   DCHECK(GetFrame());
-  DCHECK(context_menu_node_.Get());
-  Element* anchor = context_menu_node_->EnclosingLinkEventParentOrSelf();
+  Element* anchor = ContextMenuNodeInner()->EnclosingLinkEventParentOrSelf();
   if (auto* html_anchor = ToHTMLAnchorElementOrNull(anchor))
     html_anchor->SendPings(destination_url);
 }
@@ -1997,11 +2026,13 @@ WebURLRequest WebLocalFrameImpl::RequestForReload(
   return WrappedResourceRequest(request);
 }
 
-void WebLocalFrameImpl::Load(const WebURLRequest& request,
-                             WebFrameLoadType web_frame_load_type,
-                             const WebHistoryItem& item,
-                             WebHistoryLoadType web_history_load_type,
-                             bool is_client_redirect) {
+void WebLocalFrameImpl::Load(
+    const WebURLRequest& request,
+    WebFrameLoadType web_frame_load_type,
+    const WebHistoryItem& item,
+    WebHistoryLoadType web_history_load_type,
+    bool is_client_redirect,
+    const base::UnguessableToken& devtools_navigation_token) {
   DCHECK(GetFrame());
   DCHECK(!request.IsNull());
   const ResourceRequest& resource_request = request.ToResourceRequest();
@@ -2015,7 +2046,9 @@ void WebLocalFrameImpl::Load(const WebURLRequest& request,
   if (text_finder_)
     text_finder_->ClearActiveFindMatch();
 
-  FrameLoadRequest frame_request = FrameLoadRequest(nullptr, resource_request);
+  FrameLoadRequest frame_request =
+      FrameLoadRequest(nullptr, resource_request, /*frame_name=*/AtomicString(),
+                       kCheckContentSecurityPolicy, devtools_navigation_token);
   if (is_client_redirect)
     frame_request.SetClientRedirect(ClientRedirectPolicy::kClientRedirect);
   HistoryItem* history_item = item;
@@ -2144,7 +2177,9 @@ bool WebLocalFrameImpl::IsNavigationScheduledWithin(
 
 void WebLocalFrameImpl::SetCommittedFirstRealLoad() {
   DCHECK(GetFrame());
-  EnsureFrameLoaderHasCommitted(GetFrame()->Loader());
+  GetFrame()->Loader().StateMachine()->AdvanceTo(
+      FrameLoaderStateMachine::kCommittedMultipleRealLoads);
+  GetFrame()->DidSendResourceTimingInfoToParent();
 }
 
 void WebLocalFrameImpl::SetHasReceivedUserGesture() {
@@ -2355,6 +2390,10 @@ void WebLocalFrameImpl::SetTickmarks(const WebVector<WebRect>& tickmarks) {
   }
 }
 
+WebNode WebLocalFrameImpl::ContextMenuNode() const {
+  return ContextMenuNodeInner();
+}
+
 void WebLocalFrameImpl::WillBeDetached() {
   if (dev_tools_agent_)
     dev_tools_agent_->WillBeDestroyed();
@@ -2480,17 +2519,16 @@ void WebLocalFrameImpl::UsageCountChromeLoadTimes(const WebString& metric) {
   } else if (metric == "connectionInfo") {
     feature = WebFeature::kChromeLoadTimesConnectionInfo;
   }
-  UseCounter::Count(GetFrame(), feature);
+  Deprecation::CountDeprecation(GetFrame(), feature);
 }
 
 WebFrameScheduler* WebLocalFrameImpl::Scheduler() const {
   return GetFrame()->FrameScheduler();
 }
 
-SingleThreadTaskRunnerRefPtr WebLocalFrameImpl::GetTaskRunner(
+scoped_refptr<base::SingleThreadTaskRunner> WebLocalFrameImpl::GetTaskRunner(
     TaskType task_type) {
-  return TaskRunnerHelper::Get(task_type, GetFrame())
-      ->ToSingleThreadTaskRunner();
+  return GetFrame()->GetTaskRunner(task_type);
 }
 
 WebInputMethodController* WebLocalFrameImpl::GetInputMethodController() {
@@ -2545,10 +2583,6 @@ void WebLocalFrameImpl::AdvanceFocusInForm(WebFocusType focus_type) {
   next_element->focus();
 }
 
-TextCheckerClient& WebLocalFrameImpl::GetTextCheckerClient() const {
-  return *text_checker_client_;
-}
-
 void WebLocalFrameImpl::SetTextCheckClient(
     WebTextCheckClient* text_check_client) {
   text_check_client_ = text_check_client;
@@ -2561,6 +2595,27 @@ void WebLocalFrameImpl::SetSpellCheckPanelHostClient(
 
 WebFrameWidgetBase* WebLocalFrameImpl::LocalRootFrameWidget() {
   return LocalRoot()->FrameWidget();
+}
+
+Node* WebLocalFrameImpl::ContextMenuNodeInner() const {
+  if (!ViewImpl() || !ViewImpl()->GetPage())
+    return nullptr;
+  return ViewImpl()
+      ->GetPage()
+      ->GetContextMenuController()
+      .ContextMenuNodeForFrame(GetFrame());
+}
+
+void WebLocalFrameImpl::SetDevToolsAgentImpl(WebDevToolsAgentImpl* agent) {
+  DCHECK(!dev_tools_agent_);
+  dev_tools_agent_ = agent;
+}
+
+void WebLocalFrameImpl::BindDevToolsAgentRequest(
+    mojom::blink::DevToolsAgentAssociatedRequest request) {
+  if (!dev_tools_agent_)
+    dev_tools_agent_ = WebDevToolsAgentImpl::CreateForFrame(this);
+  dev_tools_agent_->BindRequest(std::move(request));
 }
 
 }  // namespace blink

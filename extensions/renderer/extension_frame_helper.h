@@ -5,6 +5,7 @@
 #ifndef EXTENSIONS_RENDERER_EXTENSION_FRAME_HELPER_H_
 #define EXTENSIONS_RENDERER_EXTENSION_FRAME_HELPER_H_
 
+#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -14,6 +15,7 @@
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
 #include "extensions/common/view_type.h"
+#include "v8/include/v8.h"
 
 struct ExtensionMsg_ExternalConnectionInfo;
 struct ExtensionMsg_TabConnectionInfo;
@@ -46,11 +48,30 @@ class ExtensionFrameHelper
       int browser_window_id,
       int tab_id,
       ViewType view_type);
+  // Same as above, but returns a v8::Array of the v8 global objects for those
+  // frames, and only includes main frames.
+  // Returns an empty v8::Array if no frames are found.
+  static v8::Local<v8::Array> GetV8MainFrames(v8::Local<v8::Context> context,
+                                              const std::string& extension_id,
+                                              int browser_window_id,
+                                              int tab_id,
+                                              ViewType view_type);
 
   // Returns the main frame of the extension's background page, or null if there
   // isn't one in this process.
   static content::RenderFrame* GetBackgroundPageFrame(
       const std::string& extension_id);
+
+  // Finds a neighboring extension frame with the same extension as the one
+  // owning |relative_to_frame| (if |relative_to_frame| is not an extension
+  // frame, returns nullptr). Pierces the browsing instance boundary because
+  // certain extensions rely on this behavior.
+  // TODO(devlin, lukasza): https://crbug.com/786411: Remove this behavior, and
+  // make extensions follow the web standard for finding frames or use an
+  // explicit API.
+  static content::RenderFrame* FindFrame(
+      content::RenderFrame* relative_to_frame,
+      const std::string& name);
 
   // Returns true if the given |context| is for any frame in the extension's
   // event page.
@@ -126,7 +147,7 @@ class ExtensionFrameHelper
                                 const std::string& function_name,
                                 const base::ListValue& args);
   void OnSetFrameName(const std::string& name);
-  void OnAppWindowClosed();
+  void OnAppWindowClosed(bool send_onclosed);
 
   // Type of view associated with the RenderFrame.
   ViewType view_type_;

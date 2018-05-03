@@ -462,7 +462,7 @@ void FileNetLogObserver::WriteQueue::SwapQueue(EventQueue* local_queue) {
   memory_ = 0;
 }
 
-FileNetLogObserver::WriteQueue::~WriteQueue() {}
+FileNetLogObserver::WriteQueue::~WriteQueue() = default;
 
 FileNetLogObserver::FileWriter::FileWriter(
     const base::FilePath& log_path,
@@ -476,7 +476,7 @@ FileNetLogObserver::FileWriter::FileWriter(
       wrote_event_bytes_(false),
       task_runner_(std::move(task_runner)) {}
 
-FileNetLogObserver::FileWriter::~FileWriter() {}
+FileNetLogObserver::FileWriter::~FileWriter() = default;
 
 void FileNetLogObserver::FileWriter::Initialize(
     std::unique_ptr<base::Value> constants_value) {
@@ -600,7 +600,7 @@ base::FilePath FileNetLogObserver::FileWriter::GetEventFilePath(
   DCHECK_LT(index, total_num_event_files_);
   DCHECK(IsBounded());
   return GetInprogressDirectory().AppendASCII(
-      "event_file_" + base::SizeTToString(index) + ".json");
+      "event_file_" + base::NumberToString(index) + ".json");
 }
 
 base::FilePath FileNetLogObserver::FileWriter::GetConstantsFilePath() const {

@@ -181,10 +181,6 @@ class WebViewTestProxy : public Base, public WebViewTestProxyBase {
     // Don't forward this call to Base because we don't want to do a real
     // drag-and-drop.
   }
-  void DidChangeContents() override {
-    view_test_client()->DidChangeContents();
-    Base::DidChangeContents();
-  }
   blink::WebView* CreateView(blink::WebLocalFrame* creator,
                              const blink::WebURLRequest& request,
                              const blink::WebWindowFeatures& features,
@@ -203,16 +199,6 @@ class WebViewTestProxy : public Base, public WebViewTestProxyBase {
   }
   blink::WebSpeechRecognizer* SpeechRecognizer() override {
     return view_test_client()->SpeechRecognizer();
-  }
-  void ShowValidationMessage(
-      const blink::WebRect& anchor_in_root_view,
-      const blink::WebString& main_message,
-      blink::WebTextDirection main_message_hint,
-      const blink::WebString& sub_message,
-      blink::WebTextDirection sub_message_hint) override {
-    view_test_client()->ShowValidationMessage(anchor_in_root_view, main_message,
-                                              main_message_hint, sub_message,
-                                              sub_message_hint);
   }
   blink::WebString AcceptLanguages() override {
     return view_test_client()->AcceptLanguages();

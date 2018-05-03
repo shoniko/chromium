@@ -46,25 +46,19 @@ TEST_F(BubbleViewTest, BubbleSizeShortText) {
   CGSize bubbleSize = [bubble sizeThatFits:maxSize_];
   // Since the label is shorter than the minimum line width, expect the bubble
   // to be the minimum width and accommodate one line of text.
-  EXPECT_NEAR(56.0f, bubbleSize.width, 1.0f);
-  EXPECT_NEAR(61.5f, bubbleSize.height, 1.0f);
+  EXPECT_NEAR(52.0f, bubbleSize.width, 1.0f);
+  EXPECT_NEAR(53.5f, bubbleSize.height, 1.0f);
 }
 
-// Tests |sizeThatFits| given text that should wrap onto multiple lines.
-// TODO(crbug.com/776592): Enable this test on device.
-#if TARGET_IPHONE_SIMULATOR
-#define MAYBE_BubbleSizeMultipleLineText BubbleSizeMultipleLineText
-#else
-#define MAYBE_BubbleSizeMultipleLineText FLAKY_BubbleSizeMultipleLineText
-#endif
-TEST_F(BubbleViewTest, MAYBE_BubbleSizeMultipleLineText) {
+// Test |sizeThatFits| given text that should wrap onto multiple lines.
+TEST_F(BubbleViewTest, BubbleSizeMultipleLineText) {
   BubbleView* bubble = [[BubbleView alloc] initWithText:longText_
                                          arrowDirection:arrowDirection_
                                               alignment:alignment_];
   CGSize bubbleSize = [bubble sizeThatFits:maxSize_];
   // The bubble should fit the label, which contains two lines of text.
-  EXPECT_NEAR(349.0f, bubbleSize.width, 1.0f);
-  EXPECT_NEAR(80.5f, bubbleSize.height, 1.0f);
+  EXPECT_NEAR(339.0f, bubbleSize.width, 1.0f);
+  EXPECT_NEAR(72.5f, bubbleSize.height, 1.0f);
 }
 
 // Test that the accessibility label matches the display text.

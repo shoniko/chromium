@@ -46,7 +46,7 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/transform.h"
 #include "ui/native_theme/native_theme.h"
-#include "ui/views/accessibility/native_view_accessibility.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/context_menu_controller.h"
@@ -631,13 +631,8 @@ LayoutManager* View::GetLayoutManager() const {
   return layout_manager_.get();
 }
 
-void View::SetLayoutManager(LayoutManager* layout_manager) {
-  if (layout_manager == layout_manager_.get())
-    return;
-
-  layout_manager_.reset(layout_manager);
-  if (layout_manager_)
-    layout_manager_->Installed(this);
+void View::SetLayoutManager(std::nullptr_t) {
+  SetLayoutManagerImpl(nullptr);
 }
 
 // Attributes ------------------------------------------------------------------
@@ -1405,6 +1400,12 @@ bool View::ExceededDragThreshold(const gfx::Vector2d& delta) {
 
 // Accessibility----------------------------------------------------------------
 
+ViewAccessibility& View::GetViewAccessibility() {
+  if (!view_accessibility_)
+    view_accessibility_ = ViewAccessibility::Create(this);
+  return *view_accessibility_;
+}
+
 bool View::HandleAccessibleAction(const ui::AXActionData& action_data) {
   switch (action_data.action) {
     case ui::AX_ACTION_BLUR:
@@ -1445,11 +1446,7 @@ bool View::HandleAccessibleAction(const ui::AXActionData& action_data) {
 }
 
 gfx::NativeViewAccessible View::GetNativeViewAccessible() {
-  if (!native_view_accessibility_)
-    native_view_accessibility_ = NativeViewAccessibility::Create(this);
-  if (native_view_accessibility_)
-    return native_view_accessibility_->GetNativeObject();
-  return nullptr;
+  return GetViewAccessibility().GetNativeObject();
 }
 
 void View::NotifyAccessibilityEvent(
@@ -1458,13 +1455,13 @@ void View::NotifyAccessibilityEvent(
   if (ViewsDelegate::GetInstance())
     ViewsDelegate::GetInstance()->NotifyAccessibilityEvent(this, event_type);
 
-  if (send_native_event && GetWidget()) {
-    if (!native_view_accessibility_)
-      native_view_accessibility_ = NativeViewAccessibility::Create(this);
-    if (native_view_accessibility_)
-      native_view_accessibility_->NotifyAccessibilityEvent(event_type);
-  }
+  if (send_native_event && GetWidget())
+    GetViewAccessibility().NotifyAccessibilityEvent(event_type);
+
+  OnAccessibilityEvent(event_type);
 }
+
+void View::OnAccessibilityEvent(ui::AXEvent event_type) {}
 
 // Scrolling -------------------------------------------------------------------
 
@@ -1476,6 +1473,10 @@ void View::ScrollRectToVisible(const gfx::Rect& rect) {
     scroll_rect.Offset(GetMirroredX(), y());
     parent_->ScrollRectToVisible(scroll_rect);
   }
+}
+
+void View::ScrollViewToVisible() {
+  ScrollRectToVisible(GetLocalBounds());
 }
 
 int View::GetPageScrollIncrement(ScrollView* scroll_view,
@@ -1519,6 +1520,8 @@ void View::PreferredSizeChanged() {
   InvalidateLayout();
   if (parent_)
     parent_->ChildPreferredSizeChanged(this);
+  for (ViewObserver& observer : observers_)
+    observer.OnViewPreferredSizeChanged(this);
 }
 
 bool View::GetNeedsNotificationWhenVisibleBoundsChange() const {
@@ -1621,7 +1624,7 @@ void View::MoveLayerToParent(ui::Layer* parent_layer,
     SetLayerBounds(size(), local_offset_data);
   } else {
     internal::ScopedChildrenLock lock(this);
-    for (auto* child : children_)
+    for (auto* child : GetChildrenInZOrder())
       child->MoveLayerToParent(parent_layer, local_offset_data);
   }
 }
@@ -1701,10 +1704,6 @@ void View::UpdateChildLayerBounds(const LayerOffsetData& offset_data) {
 
 void View::OnPaintLayer(const ui::PaintContext& context) {
   PaintFromPaintRoot(context);
-}
-
-void View::OnDelegatedFrameDamage(
-    const gfx::Rect& damage_rect_in_dip) {
 }
 
 void View::OnDeviceScaleFactorChanged(float old_device_scale_factor,
@@ -1801,6 +1800,7 @@ void View::OnBlur() {
 
 void View::Focus() {
   OnFocus();
+  ScrollViewToVisible();
 }
 
 void View::Blur() {
@@ -2064,6 +2064,13 @@ void View::PaintDebugRects(const PaintInfo& parent_paint_info) {
   gfx::Canvas* canvas = recorder.canvas();
   const float scale = canvas->UndoDeviceScaleFactor();
   gfx::RectF outline_rect(ScaleToEnclosedRect(GetLocalBounds(), scale));
+  gfx::RectF content_outline_rect(
+      ScaleToEnclosedRect(GetContentsBounds(), scale));
+  if (content_outline_rect != outline_rect) {
+    content_outline_rect.Inset(0.5f, 0.5f);
+    const SkColor content_color = SkColorSetARGB(0x30, 0, 0, 0xff);
+    canvas->DrawRect(content_outline_rect, content_color);
+  }
   outline_rect.Inset(0.5f, 0.5f);
   const SkColor color = SkColorSetARGB(0x30, 0xff, 0, 0);
   canvas->DrawRect(outline_rect, color);
@@ -2273,6 +2280,8 @@ void View::BoundsChanged(const gfx::Rect& previous_bounds) {
   }
 
   OnBoundsChanged(previous_bounds);
+  if (bounds_ != previous_bounds)
+    NotifyAccessibilityEvent(ui::AX_EVENT_LOCATION_CHANGED, false);
 
   if (needs_layout_ || previous_bounds.size() != size()) {
     needs_layout_ = false;
@@ -2341,6 +2350,18 @@ void View::RemoveDescendantToNotify(View* view) {
   descendants_to_notify_->erase(i);
   if (descendants_to_notify_->empty())
     descendants_to_notify_.reset();
+}
+
+void View::SetLayoutManagerImpl(std::unique_ptr<LayoutManager> layout_manager) {
+  // Some code keeps a bare pointer to the layout manager for calling
+  // derived-class-specific-functions. It's an easy mistake to create a new
+  // unique_ptr and re-set the layout manager with a new unique_ptr, which
+  // will cause a crash. Re-setting to null is OK.
+  CHECK(!layout_manager.get() || layout_manager_.get() != layout_manager.get());
+
+  layout_manager_ = std::move(layout_manager);
+  if (layout_manager_)
+    layout_manager_->Installed(this);
 }
 
 void View::SetLayerBounds(const gfx::Size& size,

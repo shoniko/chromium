@@ -272,6 +272,7 @@ interface CDATASection : Text
     attribute @@toStringTag
     method constructor
 interface CSS
+    static getter paintWorklet
     static method escape
     static method supports
     attribute @@toStringTag
@@ -570,7 +571,6 @@ interface CredentialsContainer
     method create
     method get
     method preventSilentAccess
-    method requireUserMediation
     method store
 interface Crypto
     attribute @@toStringTag
@@ -1108,7 +1108,6 @@ interface Document : Node
     method write
     method writeln
     setter alinkColor
-    setter all
     setter bgColor
     setter body
     setter cookie
@@ -1552,6 +1551,7 @@ interface HTMLAnchorElement : HTMLElement
     getter protocol
     getter referrerPolicy
     getter rel
+    getter relList
     getter rev
     getter search
     getter shape
@@ -1577,6 +1577,7 @@ interface HTMLAnchorElement : HTMLElement
     setter protocol
     setter referrerPolicy
     setter rel
+    setter relList
     setter rev
     setter search
     setter shape
@@ -1602,6 +1603,7 @@ interface HTMLAreaElement : HTMLElement
     getter protocol
     getter referrerPolicy
     getter rel
+    getter relList
     getter search
     getter shape
     getter target
@@ -1623,6 +1625,7 @@ interface HTMLAreaElement : HTMLElement
     setter protocol
     setter referrerPolicy
     setter rel
+    setter relList
     setter search
     setter shape
     setter target
@@ -2206,6 +2209,7 @@ interface HTMLImageElement : HTMLElement
     getter complete
     getter crossOrigin
     getter currentSrc
+    getter decoding
     getter height
     getter hspace
     getter isMap
@@ -2229,6 +2233,7 @@ interface HTMLImageElement : HTMLElement
     setter alt
     setter border
     setter crossOrigin
+    setter decoding
     setter height
     setter hspace
     setter isMap
@@ -2631,7 +2636,6 @@ interface HTMLOptionsCollection : HTMLCollection
     method @@iterator
     method add
     method constructor
-    method namedItem
     method remove
     setter length
     setter selectedIndex
@@ -2762,6 +2766,7 @@ interface HTMLShadowElement : HTMLElement
 interface HTMLSlotElement : HTMLElement
     attribute @@toStringTag
     getter name
+    method assignedElements
     method assignedNodes
     method constructor
     setter name
@@ -3206,6 +3211,7 @@ interface Image
     getter complete
     getter crossOrigin
     getter currentSrc
+    getter decoding
     getter height
     getter hspace
     getter isMap
@@ -3229,6 +3235,7 @@ interface Image
     setter alt
     setter border
     setter crossOrigin
+    setter decoding
     setter height
     setter hspace
     setter isMap
@@ -3761,6 +3768,7 @@ interface NetworkInformation : EventTarget
     getter effectiveType
     getter onchange
     getter rtt
+    getter saveData
     method constructor
     setter onchange
 interface Node : EventTarget
@@ -3941,16 +3949,10 @@ interface PannerNode : AudioNode
     setter rolloffFactor
 interface PasswordCredential : Credential
     attribute @@toStringTag
-    getter additionalData
     getter iconURL
-    getter idName
     getter name
     getter password
-    getter passwordName
     method constructor
-    setter additionalData
-    setter idName
-    setter passwordName
 interface Path2D
     attribute @@toStringTag
     method arc
@@ -4041,6 +4043,7 @@ interface PerformanceLongTaskTiming : PerformanceEntry
     attribute @@toStringTag
     getter attribution
     method constructor
+    method toJSON
 interface PerformanceMark : PerformanceEntry
     attribute @@toStringTag
     method constructor
@@ -4076,6 +4079,7 @@ interface PerformanceObserver
     method constructor
     method disconnect
     method observe
+    method takeRecords
 interface PerformanceObserverEntryList
     attribute @@toStringTag
     method constructor
@@ -4102,9 +4106,18 @@ interface PerformanceResourceTiming : PerformanceEntry
     getter responseEnd
     getter responseStart
     getter secureConnectionStart
+    getter serverTiming
     getter transferSize
     getter workerStart
     method constructor
+    method toJSON
+interface PerformanceServerTiming
+    attribute @@toStringTag
+    getter description
+    getter duration
+    getter name
+    method constructor
+    method toJSON
 interface PerformanceTiming
     attribute @@toStringTag
     getter connectEnd
@@ -4343,10 +4356,12 @@ interface RTCPeerConnection : EventTarget
     getter onnegotiationneeded
     getter onremovestream
     getter onsignalingstatechange
+    getter ontrack
     getter remoteDescription
     getter signalingState
     method addIceCandidate
     method addStream
+    method addTrack
     method close
     method constructor
     method createAnswer
@@ -4356,8 +4371,10 @@ interface RTCPeerConnection : EventTarget
     method getLocalStreams
     method getReceivers
     method getRemoteStreams
+    method getSenders
     method getStats
     method removeStream
+    method removeTrack
     method setConfiguration
     method setLocalDescription
     method setRemoteDescription
@@ -4369,6 +4386,7 @@ interface RTCPeerConnection : EventTarget
     setter onnegotiationneeded
     setter onremovestream
     setter onsignalingstatechange
+    setter ontrack
 interface RTCPeerConnectionIceEvent : Event
     attribute @@toStringTag
     getter candidate
@@ -4383,6 +4401,11 @@ interface RTCRtpReceiver
     getter track
     method constructor
     method getContributingSources
+interface RTCRtpSender
+    attribute @@toStringTag
+    getter track
+    method constructor
+    method replaceTrack
 interface RTCSessionDescription
     attribute @@toStringTag
     getter sdp
@@ -4402,6 +4425,12 @@ interface RTCStatsReport
     method has
     method keys
     method values
+interface RTCTrackEvent : Event
+    attribute @@toStringTag
+    getter receiver
+    getter streams
+    getter track
+    method constructor
 interface RadioNodeList : NodeList
     attribute @@toStringTag
     getter value
@@ -4469,7 +4498,9 @@ interface RemotePlayback : EventTarget
 interface Request
     attribute @@toStringTag
     getter bodyUsed
+    getter cache
     getter credentials
+    getter destination
     getter headers
     getter integrity
     getter method
@@ -4485,6 +4516,17 @@ interface Request
     method formData
     method json
     method text
+interface ResizeObserver
+    attribute @@toStringTag
+    method constructor
+    method disconnect
+    method observe
+    method unobserve
+interface ResizeObserverEntry
+    attribute @@toStringTag
+    getter contentRect
+    getter target
+    method constructor
 interface Response
     static method error
     static method redirect
@@ -5155,6 +5197,7 @@ interface SVGGraphicsElement : SVGElement
     method getScreenCTM
 interface SVGImageElement : SVGGraphicsElement
     attribute @@toStringTag
+    getter decoding
     getter height
     getter href
     getter preserveAspectRatio
@@ -5163,6 +5206,7 @@ interface SVGImageElement : SVGGraphicsElement
     getter y
     method constructor
     method decode
+    setter decoding
 interface SVGLength
     attribute @@toStringTag
     attribute SVG_LENGTHTYPE_CM
@@ -5702,7 +5746,6 @@ interface ShadowRoot : DocumentFragment
     getter host
     getter innerHTML
     getter mode
-    getter olderShadowRoot
     getter pointerLockElement
     getter styleSheets
     method constructor
@@ -5710,11 +5753,6 @@ interface ShadowRoot : DocumentFragment
     method elementsFromPoint
     method getSelection
     setter innerHTML
-interface SharedArrayBuffer
-    attribute @@toStringTag
-    getter byteLength
-    method constructor
-    method slice
 interface SharedWorker : EventTarget
     attribute @@toStringTag
     getter onerror
@@ -5872,6 +5910,7 @@ interface TaskAttributionTiming : PerformanceEntry
     getter containerSrc
     getter containerType
     method constructor
+    method toJSON
 interface Text : CharacterData
     attribute @@toStringTag
     getter assignedSlot
@@ -7627,6 +7666,10 @@ interface Worker : EventTarget
     method terminate
     setter onerror
     setter onmessage
+interface Worklet
+    attribute @@toStringTag
+    method addModule
+    method constructor
 interface WritableStream
     getter locked
     method abort
@@ -7767,10 +7810,12 @@ interface webkitRTCPeerConnection : EventTarget
     getter onnegotiationneeded
     getter onremovestream
     getter onsignalingstatechange
+    getter ontrack
     getter remoteDescription
     getter signalingState
     method addIceCandidate
     method addStream
+    method addTrack
     method close
     method constructor
     method createAnswer
@@ -7780,8 +7825,10 @@ interface webkitRTCPeerConnection : EventTarget
     method getLocalStreams
     method getReceivers
     method getRemoteStreams
+    method getSenders
     method getStats
     method removeStream
+    method removeTrack
     method setConfiguration
     method setLocalDescription
     method setRemoteDescription
@@ -7793,6 +7840,7 @@ interface webkitRTCPeerConnection : EventTarget
     setter onnegotiationneeded
     setter onremovestream
     setter onsignalingstatechange
+    setter ontrack
 interface webkitSpeechGrammar
     attribute @@toStringTag
     getter src
@@ -7887,7 +7935,6 @@ interface webkitURL
     setter search
     setter username
 [GLOBAL OBJECT]
-    attribute Atomics
     attribute GCController
     attribute accessibilityController
     attribute chrome
@@ -7897,7 +7944,6 @@ interface webkitURL
     attribute frames
     attribute gamepadController
     attribute internals
-    attribute layoutTestController
     attribute length
     attribute location
     attribute opener

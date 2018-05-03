@@ -8,13 +8,13 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/WebLocalFrameImpl.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/compositing/CompositedLayerMapping.h"
 #include "core/paint/compositing/PaintLayerCompositor.h"
 #include "core/testing/sim/SimDisplayItemList.h"
 #include "platform/graphics/GraphicsLayer.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/WebRect.h"
 
 namespace blink {
@@ -38,7 +38,7 @@ static void PaintLayers(GraphicsLayer& layer,
 
 static void PaintFrames(LocalFrame& root, SimDisplayItemList& display_list) {
   GraphicsLayer* layer =
-      root.View()->GetLayoutViewItem().Compositor()->RootGraphicsLayer();
+      root.View()->GetLayoutView()->Compositor()->RootGraphicsLayer();
   PaintLayers(*layer, display_list);
 }
 

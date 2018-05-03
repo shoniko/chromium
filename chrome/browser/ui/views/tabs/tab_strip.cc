@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,11 @@
 #include <algorithm>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/containers/adapters.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
@@ -70,6 +72,7 @@
 #include "ui/views/window/non_client_view.h"
 
 #if defined(OS_WIN)
+#include "base/win/windows_version.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/win/hwnd_util.h"
 #include "ui/views/win/hwnd_util.h"
@@ -115,7 +118,7 @@ const int kPinnedToNonPinnedOffset = 3;
 // Returns the width needed for the new tab button (and padding).
 int GetNewTabButtonWidth() {
   return GetLayoutSize(NEW_TAB_BUTTON).width() -
-      GetLayoutConstant(TABSTRIP_NEW_TAB_BUTTON_OVERLAP);
+         GetLayoutConstant(TABSTRIP_NEW_TAB_BUTTON_OVERLAP);
 }
 
 // Animation delegate used for any automatic tab movement.  Hides the tab if it
@@ -139,12 +142,9 @@ class TabAnimationDelegate : public gfx::AnimationDelegate {
 };
 
 TabAnimationDelegate::TabAnimationDelegate(TabStrip* tab_strip, Tab* tab)
-    : tab_strip_(tab_strip),
-      tab_(tab) {
-}
+    : tab_strip_(tab_strip), tab_(tab) {}
 
-TabAnimationDelegate::~TabAnimationDelegate() {
-}
+TabAnimationDelegate::~TabAnimationDelegate() {}
 
 void TabAnimationDelegate::AnimationProgressed(
     const gfx::Animation* animation) {
@@ -167,11 +167,9 @@ class ResetDraggingStateDelegate : public TabAnimationDelegate {
 
 ResetDraggingStateDelegate::ResetDraggingStateDelegate(TabStrip* tab_strip,
                                                        Tab* tab)
-    : TabAnimationDelegate(tab_strip, tab) {
-}
+    : TabAnimationDelegate(tab_strip, tab) {}
 
-ResetDraggingStateDelegate::~ResetDraggingStateDelegate() {
-}
+ResetDraggingStateDelegate::~ResetDraggingStateDelegate() {}
 
 void ResetDraggingStateDelegate::AnimationEnded(
     const gfx::Animation* animation) {
@@ -192,8 +190,9 @@ views::View* ConvertPointToViewAndGetEventHandler(
     const gfx::Point& point_in_source) {
   gfx::Point dest_point(point_in_source);
   views::View::ConvertPointToTarget(source, dest, &dest_point);
-  return dest->HitTestPoint(dest_point) ?
-      dest->GetEventHandlerForPoint(dest_point) : NULL;
+  return dest->HitTestPoint(dest_point)
+             ? dest->GetEventHandlerForPoint(dest_point)
+             : NULL;
 }
 
 // Gets a tooltip handler for |point_in_source| from |dest|. Note that |dest|
@@ -209,8 +208,8 @@ views::View* ConvertPointToViewAndGetTooltipHandler(
 
 TabDragController::EventSource EventSourceFromEvent(
     const ui::LocatedEvent& event) {
-  return event.IsGestureEvent() ? TabDragController::EVENT_SOURCE_TOUCH :
-      TabDragController::EVENT_SOURCE_MOUSE;
+  return event.IsGestureEvent() ? TabDragController::EVENT_SOURCE_TOUCH
+                                : TabDragController::EVENT_SOURCE_MOUSE;
 }
 
 const TabSizeInfo& GetTabSizeInfo() {
@@ -230,7 +229,6 @@ const TabSizeInfo& GetTabSizeInfo() {
 
 }  // namespace
 
-
 ///////////////////////////////////////////////////////////////////////////////
 // TabStrip::RemoveTabDelegate
 //
@@ -247,10 +245,8 @@ class TabStrip::RemoveTabDelegate : public TabAnimationDelegate {
   DISALLOW_COPY_AND_ASSIGN(RemoveTabDelegate);
 };
 
-TabStrip::RemoveTabDelegate::RemoveTabDelegate(TabStrip* tab_strip,
-                                               Tab* tab)
-    : TabAnimationDelegate(tab_strip, tab) {
-}
+TabStrip::RemoveTabDelegate::RemoveTabDelegate(TabStrip* tab_strip, Tab* tab)
+    : TabAnimationDelegate(tab_strip, tab) {}
 
 void TabStrip::RemoveTabDelegate::AnimationEnded(
     const gfx::Animation* animation) {
@@ -281,20 +277,12 @@ void TabStrip::RemoveTabDelegate::AnimationCanceled(
 
 TabStrip::TabStrip(std::unique_ptr<TabStripController> controller)
     : controller_(std::move(controller)),
-      new_tab_button_(NULL),
       current_inactive_width_(Tab::GetStandardSize().width()),
       current_active_width_(Tab::GetStandardSize().width()),
-      available_width_for_tabs_(-1),
-      in_tab_close_(false),
       animation_container_(new gfx::AnimationContainer()),
-      bounds_animator_(this),
-      stacked_layout_(false),
-      adjust_layout_(false),
-      reset_to_shrink_on_exit_(false),
-      mouse_move_count_(0) {
+      bounds_animator_(this) {
   Init();
-  SetEventTargeter(
-      std::unique_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
+  SetEventTargeter(std::make_unique<views::ViewTargeter>(this));
 }
 
 TabStrip::~TabStrip() {
@@ -325,6 +313,70 @@ void TabStrip::RemoveObserver(TabStripObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
+int TabStrip::GetMaxX() const {
+  return new_tab_button_bounds_.right();
+}
+
+void TabStrip::SetBackgroundOffset(const gfx::Point& offset) {
+  for (int i = 0; i < tab_count(); ++i)
+    tab_at(i)->set_background_offset(offset);
+  new_tab_button_->set_background_offset(offset);
+}
+
+bool TabStrip::IsRectInWindowCaption(const gfx::Rect& rect) {
+  views::View* v = GetEventHandlerForRect(rect);
+
+  // If there is no control at this location, claim the hit was in the title
+  // bar to get a move action.
+  if (v == this)
+    return true;
+
+  // Check to see if the rect intersects the non-button parts of the new tab
+  // button. The button has a non-rectangular shape, so if it's not in the
+  // visual portions of the button we treat it as a click to the caption.
+  gfx::RectF rect_in_new_tab_coords_f(rect);
+  View::ConvertRectToTarget(this, new_tab_button_, &rect_in_new_tab_coords_f);
+  gfx::Rect rect_in_new_tab_coords =
+      gfx::ToEnclosingRect(rect_in_new_tab_coords_f);
+  if (new_tab_button_->GetLocalBounds().Intersects(rect_in_new_tab_coords) &&
+      !new_tab_button_->HitTestRect(rect_in_new_tab_coords))
+    return true;
+
+  // All other regions, including the new Tab button, should be considered part
+  // of the containing Window's client area so that regular events can be
+  // processed for them.
+  return false;
+}
+
+bool TabStrip::IsPositionInWindowCaption(const gfx::Point& point) {
+  return IsRectInWindowCaption(gfx::Rect(point, gfx::Size(1, 1)));
+}
+
+bool TabStrip::IsTabStripCloseable() const {
+  return !IsDragSessionActive();
+}
+
+bool TabStrip::IsTabStripEditable() const {
+  return !IsDragSessionActive() && !IsActiveDropTarget();
+}
+
+bool TabStrip::IsTabCrashed(int tab_index) const {
+  return tab_at(tab_index)->data().IsCrashed();
+}
+
+bool TabStrip::TabHasNetworkError(int tab_index) const {
+  return tab_at(tab_index)->data().network_state == TabNetworkState::kError;
+}
+
+TabAlertState TabStrip::GetTabAlertState(int tab_index) const {
+  return tab_at(tab_index)->data().alert_state;
+}
+
+void TabStrip::UpdateLoadingAnimations() {
+  for (int i = 0; i < tab_count(); i++)
+    tab_at(i)->StepLoadingAnimation();
+}
+
 void TabStrip::SetStackedLayout(bool stacked_layout) {
   if (stacked_layout == stacked_layout_)
     return;
@@ -332,16 +384,16 @@ void TabStrip::SetStackedLayout(bool stacked_layout) {
   const int active_index = controller_->GetActiveIndex();
   int active_center = 0;
   if (active_index != -1) {
-    active_center = ideal_bounds(active_index).x() +
-        ideal_bounds(active_index).width() / 2;
+    active_center =
+        ideal_bounds(active_index).x() + ideal_bounds(active_index).width() / 2;
   }
   stacked_layout_ = stacked_layout;
   SetResetToShrinkOnExit(false);
   SwapLayoutIfNecessary();
   // When transitioning to stacked try to keep the active tab centered.
   if (touch_layout_ && active_index != -1) {
-    touch_layout_->SetActiveTabLocation(
-        active_center - ideal_bounds(active_index).width() / 2);
+    touch_layout_->SetActiveTabLocation(active_center -
+                                        ideal_bounds(active_index).width() / 2);
     AnimateToIdealBounds();
   }
 
@@ -357,7 +409,7 @@ bool TabStrip::SizeTabButtonToTopOfTabStrip() {
   // Extend the button to the screen edge in maximized and immersive fullscreen.
   views::Widget* widget = GetWidget();
   return browser_defaults::kSizeTabButtonToTopOfTabStrip ||
-      (widget && (widget->IsMaximized() || widget->IsFullscreen()));
+         (widget && (widget->IsMaximized() || widget->IsFullscreen()));
 }
 
 void TabStrip::StartHighlight(int model_index) {
@@ -369,19 +421,18 @@ void TabStrip::StopAllHighlighting() {
     tab_at(i)->StopPulse();
 }
 
-void TabStrip::AddTabAt(int model_index,
-                        const TabRendererData& data,
-                        bool is_active) {
+void TabStrip::AddTabAt(int model_index, TabRendererData data, bool is_active) {
   Tab* tab = new Tab(this, animation_container_.get());
   AddChildView(tab);
-  tab->SetData(data);
+  const bool pinned = data.pinned;
+  tab->SetData(std::move(data));
   UpdateTabsClosingMap(model_index, 1);
   tabs_.Add(tab, model_index);
 
   if (touch_layout_) {
     GenerateIdealBoundsForPinnedTabs(NULL);
     int add_types = 0;
-    if (data.pinned)
+    if (pinned)
       add_types |= StackedTabStripLayout::kAddTypePinned;
     if (is_active)
       add_types |= StackedTabStripLayout::kAddTypeActive;
@@ -417,17 +468,17 @@ void TabStrip::AddTabAt(int model_index,
 
 void TabStrip::MoveTab(int from_model_index,
                        int to_model_index,
-                       const TabRendererData& data) {
+                       TabRendererData data) {
   DCHECK_GT(tabs_.view_size(), 0);
   const Tab* last_tab = GetLastVisibleTab();
-  tab_at(from_model_index)->SetData(data);
+  tab_at(from_model_index)->SetData(std::move(data));
   if (touch_layout_) {
     tabs_.MoveViewOnly(from_model_index, to_model_index);
     int pinned_count = 0;
     GenerateIdealBoundsForPinnedTabs(&pinned_count);
-    touch_layout_->MoveTab(
-        from_model_index, to_model_index, controller_->GetActiveIndex(),
-        GetStartXForNormalTabs(), pinned_count);
+    touch_layout_->MoveTab(from_model_index, to_model_index,
+                           controller_->GetActiveIndex(),
+                           GetStartXForNormalTabs(), pinned_count);
   } else {
     tabs_.Move(from_model_index, to_model_index);
   }
@@ -479,10 +530,10 @@ void TabStrip::RemoveTabAt(content::WebContents* contents, int model_index) {
   }
 }
 
-void TabStrip::SetTabData(int model_index, const TabRendererData& data) {
+void TabStrip::SetTabData(int model_index, TabRendererData data) {
   Tab* tab = tab_at(model_index);
   bool pinned_state_changed = tab->data().pinned != data.pinned;
-  tab->SetData(data);
+  tab->SetData(std::move(data));
 
   if (pinned_state_changed) {
     if (touch_layout_) {
@@ -547,7 +598,7 @@ bool TabStrip::ShouldTabBeVisible(const Tab* tab) const {
   // We need to check what would happen if the active tab were to move to this
   // tab or before.
   return (right_edge + current_active_width_ - current_inactive_width_) <=
-          GetTabAreaWidth();
+         GetTabAreaWidth();
 }
 
 void TabStrip::PrepareForCloseAt(int model_index, CloseTabSource source) {
@@ -617,30 +668,26 @@ void TabStrip::SetSelection(const ui::ListSelectionModel& old_selection,
   // and no longer selected, since selected_indices() is always sorted.
   ui::ListSelectionModel::SelectedIndices no_longer_selected =
       base::STLSetDifference<ui::ListSelectionModel::SelectedIndices>(
-          old_selection.selected_indices(),
-          new_selection.selected_indices());
+          old_selection.selected_indices(), new_selection.selected_indices());
   ui::ListSelectionModel::SelectedIndices newly_selected =
       base::STLSetDifference<ui::ListSelectionModel::SelectedIndices>(
-          new_selection.selected_indices(),
-          old_selection.selected_indices());
+          new_selection.selected_indices(), old_selection.selected_indices());
 
   // Fire accessibility events that reflect the changes to selection.
   for (size_t i = 0; i < no_longer_selected.size(); ++i) {
-    tab_at(no_longer_selected[i])->NotifyAccessibilityEvent(
-        ui::AX_EVENT_SELECTION_REMOVE, true);
+    tab_at(no_longer_selected[i])
+        ->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION_REMOVE, true);
   }
   for (size_t i = 0; i < newly_selected.size(); ++i) {
-    tab_at(newly_selected[i])->NotifyAccessibilityEvent(
-        ui::AX_EVENT_SELECTION_ADD, true);
+    tab_at(newly_selected[i])
+        ->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION_ADD, true);
   }
-  tab_at(new_selection.active())->NotifyAccessibilityEvent(
-      ui::AX_EVENT_SELECTION, true);
+  tab_at(new_selection.active())
+      ->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
 }
 
 void TabStrip::TabTitleChangedNotLoading(int model_index) {
-  Tab* tab = tab_at(model_index);
-  if (tab->data().pinned && !tab->IsActive())
-    tab->TabTitleChangedNotLoading();
+  tab_at(model_index)->TabTitleChangedNotLoading();
 }
 
 void TabStrip::SetTabNeedsAttention(int model_index, bool attention) {
@@ -672,53 +719,6 @@ bool TabStrip::IsActiveDropTarget() const {
   return false;
 }
 
-bool TabStrip::IsTabStripEditable() const {
-  return !IsDragSessionActive() && !IsActiveDropTarget();
-}
-
-bool TabStrip::IsTabStripCloseable() const {
-  return !IsDragSessionActive();
-}
-
-void TabStrip::UpdateLoadingAnimations() {
-  controller_->UpdateLoadingAnimations();
-}
-
-bool TabStrip::IsPositionInWindowCaption(const gfx::Point& point) {
-  return IsRectInWindowCaption(gfx::Rect(point, gfx::Size(1, 1)));
-}
-
-bool TabStrip::IsRectInWindowCaption(const gfx::Rect& rect) {
-  views::View* v = GetEventHandlerForRect(rect);
-
-  // If there is no control at this location, claim the hit was in the title
-  // bar to get a move action.
-  if (v == this)
-    return true;
-
-  // Check to see if the rect intersects the non-button parts of the new tab
-  // button. The button has a non-rectangular shape, so if it's not in the
-  // visual portions of the button we treat it as a click to the caption.
-  gfx::RectF rect_in_new_tab_coords_f(rect);
-  View::ConvertRectToTarget(this, new_tab_button_, &rect_in_new_tab_coords_f);
-  gfx::Rect rect_in_new_tab_coords =
-      gfx::ToEnclosingRect(rect_in_new_tab_coords_f);
-  if (new_tab_button_->GetLocalBounds().Intersects(rect_in_new_tab_coords) &&
-      !new_tab_button_->HitTestRect(rect_in_new_tab_coords))
-    return true;
-
-  // All other regions, including the new Tab button, should be considered part
-  // of the containing Window's client area so that regular events can be
-  // processed for them.
-  return false;
-}
-
-void TabStrip::SetBackgroundOffset(const gfx::Point& offset) {
-  for (int i = 0; i < tab_count(); ++i)
-    tab_at(i)->set_background_offset(offset);
-  new_tab_button_->set_background_offset(offset);
-}
-
 SkAlpha TabStrip::GetInactiveAlpha(bool for_new_tab_button) const {
 #if defined(OS_CHROMEOS)
   static const SkAlpha kInactiveTabAlphaAsh = 230;
@@ -726,12 +726,14 @@ SkAlpha TabStrip::GetInactiveAlpha(bool for_new_tab_button) const {
 #else
   static const SkAlpha kInactiveTabAlphaGlass = 200;
   static const SkAlpha kInactiveTabAlphaOpaque = 255;
-  const SkAlpha base_alpha = GetWidget()->ShouldWindowContentsBeTransparent() ?
-      kInactiveTabAlphaGlass : kInactiveTabAlphaOpaque;
+  const SkAlpha base_alpha = TitlebarBackgroundIsTransparent()
+                                 ? kInactiveTabAlphaGlass
+                                 : kInactiveTabAlphaOpaque;
 #endif  // OS_CHROMEOS
   static const double kMultiSelectionMultiplier = 0.6;
-  return (for_new_tab_button || (GetSelectionModel().size() <= 1)) ?
-      base_alpha : static_cast<SkAlpha>(kMultiSelectionMultiplier * base_alpha);
+  return (for_new_tab_button || (GetSelectionModel().size() <= 1))
+             ? base_alpha
+             : static_cast<SkAlpha>(kMultiSelectionMultiplier * base_alpha);
 }
 
 bool TabStrip::IsAnimating() const {
@@ -825,13 +827,13 @@ void TabStrip::ShowContextMenuForTab(Tab* tab,
 bool TabStrip::IsActiveTab(const Tab* tab) const {
   int model_index = GetModelIndexOfTab(tab);
   return IsValidModelIndex(model_index) &&
-      controller_->IsActiveTab(model_index);
+         controller_->IsActiveTab(model_index);
 }
 
 bool TabStrip::IsTabSelected(const Tab* tab) const {
   int model_index = GetModelIndexOfTab(tab);
   return IsValidModelIndex(model_index) &&
-      controller_->IsTabSelected(model_index);
+         controller_->IsTabSelected(model_index);
 }
 
 bool TabStrip::IsTabPinned(const Tab* tab) const {
@@ -840,7 +842,7 @@ bool TabStrip::IsTabPinned(const Tab* tab) const {
 
   int model_index = GetModelIndexOfTab(tab);
   return IsValidModelIndex(model_index) &&
-      controller_->IsTabPinned(model_index);
+         controller_->IsTabPinned(model_index);
 }
 
 void TabStrip::MaybeStartDrag(
@@ -881,13 +883,12 @@ void TabStrip::MaybeStartDrag(
   DCHECK(base::ContainsValue(tabs, tab));
   ui::ListSelectionModel selection_model;
   if (!original_selection.IsSelected(model_index))
-    selection_model.Copy(original_selection);
+    selection_model = original_selection;
   // Delete the existing DragController before creating a new one. We do this as
   // creating the DragController remembers the WebContents delegates and we need
   // to make sure the existing DragController isn't still a delegate.
   drag_controller_.reset();
-  TabDragController::MoveBehavior move_behavior =
-      TabDragController::REORDER;
+  TabDragController::MoveBehavior move_behavior = TabDragController::REORDER;
   // Use MOVE_VISIBLE_TABS in the following conditions:
   // . Mouse event generated from touch and the left button is down (the right
   //   button corresponds to a long press, which we want to reorder).
@@ -906,9 +907,9 @@ void TabStrip::MaybeStartDrag(
   }
 
   drag_controller_.reset(new TabDragController);
-  drag_controller_->Init(
-      this, tab, tabs, gfx::Point(x, y), event.x(), selection_model,
-      move_behavior, EventSourceFromEvent(event));
+  drag_controller_->Init(this, tab, tabs, gfx::Point(x, y), event.x(),
+                         std::move(selection_model), move_behavior,
+                         EventSourceFromEvent(event));
 }
 
 void TabStrip::ContinueDrag(views::View* view, const ui::LocatedEvent& event) {
@@ -959,8 +960,8 @@ bool TabStrip::ShouldPaintTab(
   if (index == -1)
     return true;  // Tab is closing, paint it all.
 
-  int active_index = IsStackingDraggedTabs() ?
-      controller_->GetActiveIndex() : touch_layout_->active_index();
+  int active_index = IsStackingDraggedTabs() ? controller_->GetActiveIndex()
+                                             : touch_layout_->active_index();
   if (active_index == tab_count())
     active_index--;
 
@@ -1018,7 +1019,7 @@ base::string16 TabStrip::GetAccessibleTabName(const Tab* tab) const {
 int TabStrip::GetBackgroundResourceId(bool* custom_image) const {
   const ui::ThemeProvider* tp = GetThemeProvider();
 
-  if (GetWidget()->ShouldWindowContentsBeTransparent()) {
+  if (TitlebarBackgroundIsTransparent()) {
     const int kBackgroundIdGlass = IDR_THEME_TAB_BACKGROUND_V;
     *custom_image = tp->HasCustomImage(kBackgroundIdGlass);
     return kBackgroundIdGlass;
@@ -1031,18 +1032,12 @@ int TabStrip::GetBackgroundResourceId(bool* custom_image) const {
   // incognito frame image from the normal frame image, in incognito mode we
   // need to look for a custom incognito _or_ regular frame image.
   const bool incognito = controller_->IsIncognito();
-  const int id = incognito ?
-      IDR_THEME_TAB_BACKGROUND_INCOGNITO : IDR_THEME_TAB_BACKGROUND;
-  *custom_image =
-      tp->HasCustomImage(id) || tp->HasCustomImage(IDR_THEME_FRAME) ||
-      (incognito && tp->HasCustomImage(IDR_THEME_FRAME_INCOGNITO));
+  const int id =
+      incognito ? IDR_THEME_TAB_BACKGROUND_INCOGNITO : IDR_THEME_TAB_BACKGROUND;
+  *custom_image = tp->HasCustomImage(id) ||
+                  tp->HasCustomImage(IDR_THEME_FRAME) ||
+                  (incognito && tp->HasCustomImage(IDR_THEME_FRAME_INCOGNITO));
   return id;
-}
-
-void TabStrip::UpdateTabAccessibilityState(const Tab* tab,
-                                           ui::AXNodeData* node_data) {
-  node_data->AddIntAttribute(ui::AX_ATTR_SET_SIZE, tab_count());
-  node_data->AddIntAttribute(ui::AX_ATTR_POS_IN_SET, GetModelIndexOfTab(tab));
 }
 
 void TabStrip::MouseMovedOutOfHost() {
@@ -1202,8 +1197,8 @@ gfx::Size TabStrip::CalculatePreferredSize() const {
     // and don't force it to be larger than is necessary to show 20 tabs.
     const int largest_min_tab_width =
         min_selected_width + 19 * (min_unselected_width - overlap);
-    needed_tab_width = std::min(
-        std::max(needed_tab_width, min_selected_width), largest_min_tab_width);
+    needed_tab_width = std::min(std::max(needed_tab_width, min_selected_width),
+                                largest_min_tab_width);
   }
   return gfx::Size(needed_tab_width + GetNewTabButtonWidth(),
                    Tab::GetMinimumInactiveSize().height());
@@ -1219,8 +1214,8 @@ void TabStrip::OnDragEntered(const DropTargetEvent& event) {
   base::string16 title;
 
   // Check whether the event data includes supported drop data.
-  if (event.data().GetURLAndTitle(
-          ui::OSExchangeData::CONVERT_FILENAMES, &url, &title) &&
+  if (event.data().GetURLAndTitle(ui::OSExchangeData::CONVERT_FILENAMES, &url,
+                                  &title) &&
       url.is_valid()) {
     drop_info_->url = url;
 
@@ -1263,10 +1258,9 @@ int TabStrip::OnPerformDrop(const DropTargetEvent& event) {
   GURL url;
   base::string16 title;
   if (!file_supported ||
-      !event.data().GetURLAndTitle(
-           ui::OSExchangeData::CONVERT_FILENAMES, &url, &title) ||
-      !url.is_valid() ||
-      url.SchemeIs(url::kJavaScriptScheme))
+      !event.data().GetURLAndTitle(ui::OSExchangeData::CONVERT_FILENAMES, &url,
+                                   &title) ||
+      !url.is_valid() || url.SchemeIs(url::kJavaScriptScheme))
     return ui::DragDropTypes::DRAG_NONE;
 
   controller_->PerformDrop(drop_before, drop_index, url);
@@ -1323,8 +1317,8 @@ void TabStrip::Init() {
       l10n_util::GetStringUTF16(IDS_ACCNAME_NEWTAB));
   new_tab_button_->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
                                      views::ImageButton::ALIGN_BOTTOM);
-  new_tab_button_->SetEventTargeter(std::unique_ptr<views::ViewTargeter>(
-      new views::ViewTargeter(new_tab_button_)));
+  new_tab_button_->SetEventTargeter(
+      std::make_unique<views::ViewTargeter>(new_tab_button_));
   AddChildView(new_tab_button_);
 
   if (drop_indicator_width == 0) {
@@ -1344,17 +1338,19 @@ void TabStrip::StartInsertTabAnimation(int model_index) {
 
   GenerateIdealBounds();
 
+  // Set the current bounds to be the correct place but 0 width.
   Tab* tab = tab_at(model_index);
   if (model_index == 0) {
     tab->SetBounds(0, ideal_bounds(model_index).y(), 0,
                    ideal_bounds(model_index).height());
   } else {
-    Tab* last_tab = tab_at(model_index - 1);
-    tab->SetBounds(last_tab->bounds().right() - Tab::GetOverlap(),
+    Tab* prev_tab = tab_at(model_index - 1);
+    tab->SetBounds(prev_tab->bounds().right() - Tab::GetOverlap(),
                    ideal_bounds(model_index).y(), 0,
                    ideal_bounds(model_index).height());
   }
 
+  // Animate in to the full width.
   AnimateToIdealBounds();
 }
 
@@ -1385,9 +1381,8 @@ void TabStrip::ScheduleRemoveTabAnimation(Tab* tab) {
   gfx::Rect tab_bounds = tab->bounds();
   tab_bounds.set_width(0);
   bounds_animator_.AnimateViewTo(tab, tab_bounds);
-  bounds_animator_.SetAnimationDelegate(tab,
-                                        std::unique_ptr<gfx::AnimationDelegate>(
-                                            new RemoveTabDelegate(this, tab)));
+  bounds_animator_.SetAnimationDelegate(
+      tab, std::make_unique<RemoveTabDelegate>(this, tab));
 
   // Don't animate the new tab button when dragging tabs. Otherwise it looks
   // like the new tab button magically appears from beyond the end of the tab
@@ -1404,8 +1399,7 @@ void TabStrip::AnimateToIdealBounds() {
     if (!tab->dragging()) {
       bounds_animator_.AnimateViewTo(tab, ideal_bounds(i));
       bounds_animator_.SetAnimationDelegate(
-          tab, std::unique_ptr<gfx::AnimationDelegate>(
-                   new TabAnimationDelegate(this, tab)));
+          tab, std::make_unique<TabAnimationDelegate>(this, tab));
     }
   }
 
@@ -1414,6 +1408,16 @@ void TabStrip::AnimateToIdealBounds() {
 
 bool TabStrip::ShouldHighlightCloseButtonAfterRemove() {
   return in_tab_close_;
+}
+
+bool TabStrip::TitlebarBackgroundIsTransparent() const {
+#if defined(OS_WIN)
+  // Windows 8+ uses transparent window contents (because the titlebar area is
+  // drawn by the system and not Chrome), but the actual titlebar is opaque.
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8)
+    return false;
+#endif
+  return GetWidget()->ShouldWindowContentsBeTransparent();
 }
 
 void TabStrip::DoLayout() {
@@ -1447,12 +1451,9 @@ void TabStrip::SetTabVisibility() {
     Tab* tab = tab_at(i);
     tab->SetVisible(ShouldTabBeVisible(tab));
   }
-  for (TabsClosingMap::const_iterator i(tabs_closing_map_.begin());
-       i != tabs_closing_map_.end(); ++i) {
-    for (Tabs::const_iterator j(i->second.begin()); j != i->second.end(); ++j) {
-      Tab* tab = *j;
+  for (const auto& closing_tab : tabs_closing_map_) {
+    for (Tab* tab : closing_tab.second)
       tab->SetVisible(ShouldTabBeVisible(tab));
-    }
   }
 }
 
@@ -1499,7 +1500,8 @@ void TabStrip::StackDraggedTabs(int delta) {
     const bool is_active_pinned = tab_at(active_index)->data().pinned;
     const int active_width = ideal_bounds(active_index).width();
     for (int i = active_index + 1; i < tab_count(); ++i) {
-      const int max_x = ideal_bounds(active_index).x() +
+      const int max_x =
+          ideal_bounds(active_index).x() +
           (kStackedPadding * std::min(i - active_index, kMaxStackedCount));
       gfx::Rect new_bounds(ideal_bounds(i));
       int new_x = std::max(new_bounds.x() + delta, max_x);
@@ -1524,7 +1526,8 @@ void TabStrip::StackDraggedTabs(int delta) {
                  delta);
     for (int last_index = tab_count() - 1, i = last_index; i >= active_index;
          --i) {
-      const int max_x = last_tab_x -
+      const int max_x =
+          last_tab_x -
           std::min(tab_count() - i - 1, kMaxStackedCount) * kStackedPadding;
       gfx::Rect new_bounds(ideal_bounds(i));
       int new_x = std::min(max_x, new_bounds.x() + adjusted_delta);
@@ -1537,7 +1540,8 @@ void TabStrip::StackDraggedTabs(int delta) {
       tabs_.set_ideal_bounds(i, new_bounds);
     }
     for (int i = active_index - 1; i >= 0; --i) {
-      const int min_x = ideal_bounds(active_index).x() -
+      const int min_x =
+          ideal_bounds(active_index).x() -
           std::min(active_index - i, kMaxStackedCount) * kStackedPadding;
       gfx::Rect new_bounds(ideal_bounds(i));
       new_bounds.set_x(std::min(min_x, new_bounds.x() + delta));
@@ -1552,8 +1556,8 @@ void TabStrip::StackDraggedTabs(int delta) {
 
 bool TabStrip::IsStackingDraggedTabs() const {
   return drag_controller_.get() && drag_controller_->started_drag() &&
-      (drag_controller_->move_behavior() ==
-       TabDragController::MOVE_VISIBLE_TABS);
+         (drag_controller_->move_behavior() ==
+          TabDragController::MOVE_VISIBLE_TABS);
 }
 
 void TabStrip::LayoutDraggedTabsAt(const Tabs& tabs,
@@ -1579,8 +1583,7 @@ void TabStrip::LayoutDraggedTabsAt(const Tabs& tabs,
     // If this is the initial layout during a drag and the tabs aren't
     // consecutive animate the view into position. Do the same if the tab is
     // already animating (which means we previously caused it to animate).
-    if ((initial_drag &&
-         GetModelIndexOfTab(tabs[i]) != consecutive_index) ||
+    if ((initial_drag && GetModelIndexOfTab(tabs[i]) != consecutive_index) ||
         bounds_animator_.IsAnimating(tabs[i])) {
       bounds_animator_.SetTargetBounds(tabs[i], new_bounds);
     } else {
@@ -1660,16 +1663,15 @@ void TabStrip::UpdateTabsClosingMap(int index, int delta) {
       tabs_closing_map_.find(index - 1) != tabs_closing_map_.end() &&
       tabs_closing_map_.find(index) != tabs_closing_map_.end()) {
     const Tabs& tabs(tabs_closing_map_[index]);
-    tabs_closing_map_[index - 1].insert(
-        tabs_closing_map_[index - 1].end(), tabs.begin(), tabs.end());
+    tabs_closing_map_[index - 1].insert(tabs_closing_map_[index - 1].end(),
+                                        tabs.begin(), tabs.end());
   }
   TabsClosingMap updated_map;
-  for (TabsClosingMap::iterator i(tabs_closing_map_.begin());
-       i != tabs_closing_map_.end(); ++i) {
-    if (i->first > index)
-      updated_map[i->first + delta] = i->second;
-    else if (i->first < index)
-      updated_map[i->first] = i->second;
+  for (auto& i : tabs_closing_map_) {
+    if (i.first > index)
+      updated_map[i.first + delta] = i.second;
+    else if (i.first < index)
+      updated_map[i.first] = i.second;
   }
   if (delta > 0 && tabs_closing_map_.find(index) != tabs_closing_map_.end())
     updated_map[index + delta] = tabs_closing_map_[index];
@@ -1753,8 +1755,7 @@ void TabStrip::StoppedDraggingTab(Tab* tab, bool* is_first_tab) {
   // Install a delegate to reset the dragging state when done. We have to leave
   // dragging true for the tab otherwise it'll draw beneath the new tab button.
   bounds_animator_.SetAnimationDelegate(
-      tab, std::unique_ptr<gfx::AnimationDelegate>(
-               new ResetDraggingStateDelegate(this, tab)));
+      tab, std::make_unique<ResetDraggingStateDelegate>(this, tab));
 }
 
 void TabStrip::OwnDragController(TabDragController* controller) {
@@ -1780,8 +1781,7 @@ TabDragController* TabStrip::ReleaseDragController() {
 
 TabStrip::FindClosingTabResult TabStrip::FindClosingTab(const Tab* tab) {
   DCHECK(tab->closing());
-  for (TabsClosingMap::iterator i(tabs_closing_map_.begin());
-       i != tabs_closing_map_.end(); ++i) {
+  for (auto i = tabs_closing_map_.begin(); i != tabs_closing_map_.end(); ++i) {
     Tabs::iterator j = std::find(i->second.begin(), i->second.end(), tab);
     if (j != i->second.end())
       return FindClosingTabResult(i, j);
@@ -1793,10 +1793,8 @@ TabStrip::FindClosingTabResult TabStrip::FindClosingTab(const Tab* tab) {
 void TabStrip::PaintClosingTabs(int index, const views::PaintInfo& paint_info) {
   if (tabs_closing_map_.find(index) == tabs_closing_map_.end())
     return;
-
-  const Tabs& tabs = tabs_closing_map_[index];
-  for (Tabs::const_reverse_iterator i(tabs.rbegin()); i != tabs.rend(); ++i)
-    (*i)->Paint(paint_info);
+  for (Tab* tab : base::Reversed(tabs_closing_map_[index]))
+    tab->Paint(paint_info);
 }
 
 void TabStrip::UpdateStackedLayoutFromMouseEvent(views::View* source,
@@ -1930,11 +1928,10 @@ void TabStrip::SetTabBoundsForDrag(const std::vector<gfx::Rect>& tab_bounds) {
 
 void TabStrip::AddMessageLoopObserver() {
   if (!mouse_watcher_.get()) {
-    mouse_watcher_.reset(
-        new views::MouseWatcher(
-            new views::MouseWatcherViewHost(
-                this, gfx::Insets(0, 0, kTabStripAnimationVSlop, 0)),
-            this));
+    mouse_watcher_ = std::make_unique<views::MouseWatcher>(
+        std::make_unique<views::MouseWatcherViewHost>(
+            this, gfx::Insets(0, 0, kTabStripAnimationVSlop, 0)),
+        this);
   }
   mouse_watcher_->Start();
 }
@@ -2019,8 +2016,8 @@ void TabStrip::SetDropIndex(int tab_data_index, bool drop_before) {
   }
 
   bool is_beneath;
-  gfx::Rect drop_bounds = GetDropBounds(tab_data_index, drop_before,
-                                        &is_beneath);
+  gfx::Rect drop_bounds =
+      GetDropBounds(tab_data_index, drop_before, &is_beneath);
 
   if (!drop_info_.get()) {
     drop_info_.reset(
@@ -2056,7 +2053,8 @@ gfx::ImageSkia* TabStrip::GetDropArrowImage(bool is_down) {
       is_down ? IDR_TAB_DROP_DOWN : IDR_TAB_DROP_UP);
 }
 
-// TabStrip::DropInfo ----------------------------------------------------------
+// TabStrip::DropInfo
+// ----------------------------------------------------------
 
 TabStrip::DropInfo::DropInfo(int drop_index,
                              bool drop_before,
@@ -2100,7 +2098,7 @@ void TabStrip::GenerateIdealBounds() {
 
   if (!touch_layout_) {
     const int available_width = (available_width_for_tabs_ < 0)
-                                    ?  GetTabAreaWidth()
+                                    ? GetTabAreaWidth()
                                     : available_width_for_tabs_;
     const std::vector<gfx::Rect> tabs_bounds =
         CalculateBounds(GetTabSizeInfo(), GetPinnedTabCount(), tab_count(),
@@ -2177,6 +2175,9 @@ void TabStrip::StartMouseInitiatedRemoveTabAnimation(int model_index) {
   if (tab_closing->data().pinned && !tab_at(model_index + 1)->data().pinned)
     delta += kPinnedToNonPinnedOffset;
 
+  // Set the ideal bounds of everything to be moved over to cover for the
+  // removed tab. This does not recompute the ideal bounds so every tab slides
+  // over without expansion until the user moves the mouse away.
   for (int i = model_index + 1; i < tab_count(); ++i) {
     gfx::Rect bounds = ideal_bounds(i);
     bounds.set_x(bounds.x() - delta);
@@ -2205,11 +2206,9 @@ void TabStrip::StartMouseInitiatedRemoveTabAnimation(int model_index) {
   tab_bounds.set_width(0);
   bounds_animator_.AnimateViewTo(tab_closing, tab_bounds);
 
-  // Register delegate to do cleanup when done, BoundsAnimator takes
-  // ownership of RemoveTabDelegate.
+  // Register delegate to do cleanup when done.
   bounds_animator_.SetAnimationDelegate(
-      tab_closing, std::unique_ptr<gfx::AnimationDelegate>(
-                       new RemoveTabDelegate(this, tab_closing)));
+      tab_closing, std::make_unique<RemoveTabDelegate>(this, tab_closing));
 }
 
 bool TabStrip::IsPointInTab(Tab* tab,
@@ -2300,7 +2299,7 @@ void TabStrip::SwapLayoutIfNecessary() {
     // how many pinned tabs there are).
     GenerateIdealBoundsForPinnedTabs(NULL);
     touch_layout_->SetXAndPinnedCount(GetStartXForNormalTabs(),
-                                    GetPinnedTabCount());
+                                      GetPinnedTabCount());
     touch_layout_->SetActiveIndex(controller_->GetActiveIndex());
 
     base::RecordAction(UserMetricsAction("StackedTab_EnteredStackedLayout"));
@@ -2353,7 +2352,7 @@ void TabStrip::ButtonPressed(views::Button* sender, const ui::Event& event) {
       const ui::MouseEvent& mouse = static_cast<const ui::MouseEvent&>(event);
       if (mouse.IsOnlyMiddleMouseButton()) {
         if (ui::Clipboard::IsSupportedClipboardType(
-            ui::CLIPBOARD_TYPE_SELECTION)) {
+                ui::CLIPBOARD_TYPE_SELECTION)) {
           ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
           CHECK(clipboard);
           base::string16 clipboard_text;

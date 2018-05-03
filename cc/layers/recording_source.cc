@@ -14,7 +14,6 @@
 #include "cc/paint/display_item_list.h"
 #include "cc/paint/solid_color_analyzer.h"
 #include "cc/raster/raster_source.h"
-#include "skia/ext/analysis_canvas.h"
 
 namespace {
 
@@ -41,7 +40,7 @@ RecordingSource::RecordingSource()
       background_color_(SK_ColorTRANSPARENT),
       recording_scale_factor_(1.f) {}
 
-RecordingSource::~RecordingSource() {}
+RecordingSource::~RecordingSource() = default;
 
 void RecordingSource::UpdateInvalidationForNewViewport(
     const gfx::Rect& old_recorded_viewport,
@@ -101,7 +100,10 @@ bool RecordingSource::UpdateAndExpandInvalidation(
 
 void RecordingSource::UpdateDisplayItemList(
     const scoped_refptr<DisplayItemList>& display_list,
-    const size_t& painter_reported_memory_usage) {
+    const size_t& painter_reported_memory_usage,
+    float recording_scale_factor) {
+  recording_scale_factor_ = recording_scale_factor;
+
   display_list_ = display_list;
   painter_reported_memory_usage_ = painter_reported_memory_usage;
 
@@ -139,10 +141,6 @@ const DisplayItemList* RecordingSource::GetDisplayItemList() {
 
 scoped_refptr<RasterSource> RecordingSource::CreateRasterSource() const {
   return scoped_refptr<RasterSource>(new RasterSource(this));
-}
-
-void RecordingSource::SetRecordingScaleFactor(float recording_scale_factor) {
-  recording_scale_factor_ = recording_scale_factor;
 }
 
 void RecordingSource::DetermineIfSolidColor() {

@@ -16,6 +16,7 @@ namespace blink {
 
 class CSSSyntaxDescriptor;
 class Document;
+class DocumentPaintDefinition;
 class Image;
 class PaintWorklet;
 
@@ -26,12 +27,10 @@ class CSSPaintImageGeneratorImpl final : public CSSPaintImageGenerator {
                                         Observer*);
   ~CSSPaintImageGeneratorImpl() override;
 
-  // The |container_size| is the container size with subpixel snapping, where
-  // the |logical_size| is without it. Both sizes include zoom.
+  // The |container_size| is the container size with subpixel snapping.
   scoped_refptr<Image> Paint(const ImageResourceObserver&,
                              const IntSize& container_size,
-                             const CSSStyleValueVector*,
-                             const LayoutSize* logical_size) final;
+                             const CSSStyleValueVector*) final;
   const Vector<CSSPropertyID>& NativeInvalidationProperties() const final;
   const Vector<AtomicString>& CustomInvalidationProperties() const final;
   bool HasAlpha() const final;
@@ -49,6 +48,11 @@ class CSSPaintImageGeneratorImpl final : public CSSPaintImageGenerator {
   CSSPaintImageGeneratorImpl(PaintWorklet*, const String&);
 
   bool HasDocumentDefinition() const;
+  // This function first checks whether the document definition with |name_|
+  // exists or not. If it does exist, the function fetches the document
+  // definition and checks if it is valid. The function returns true when the
+  // document definition exists and is valid.
+  bool GetValidDocumentDefinition(DocumentPaintDefinition*&) const;
 
   Member<Observer> observer_;
   Member<PaintWorklet> paint_worklet_;

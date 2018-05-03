@@ -8,6 +8,7 @@
 
 #include "base/macros.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/core/tls_client_handshaker.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/platform/api/quic_test.h"
@@ -35,7 +36,8 @@ class MockQuicSpdyClientSession : public QuicSpdyClientSession {
             QuicServerId("example.com", 443, PRIVACY_MODE_DISABLED),
             &crypto_config_,
             push_promise_index),
-        crypto_config_(crypto_test_utils::ProofVerifierForTesting()),
+        crypto_config_(crypto_test_utils::ProofVerifierForTesting(),
+                       TlsClientHandshaker::CreateSslCtx()),
         authorized_(true) {}
   ~MockQuicSpdyClientSession() override {}
 
@@ -144,6 +146,19 @@ TEST_F(QuicClientPromisedInfoTest, PushPromiseCleanupAlarm) {
 TEST_F(QuicClientPromisedInfoTest, PushPromiseInvalidMethod) {
   // Promise with an unsafe method
   push_promise_[":method"] = "PUT";
+
+  EXPECT_CALL(*connection_,
+              SendRstStream(promise_id_, QUIC_INVALID_PROMISE_METHOD, 0));
+  ReceivePromise(promise_id_);
+
+  // Verify that the promise headers were ignored
+  EXPECT_EQ(session_.GetPromisedById(promise_id_), nullptr);
+  EXPECT_EQ(session_.GetPromisedByUrl(promise_url_), nullptr);
+}
+
+TEST_F(QuicClientPromisedInfoTest, PushPromiseMissingMethod) {
+  // Promise with a missing method
+  push_promise_.erase(":method");
 
   EXPECT_CALL(*connection_,
               SendRstStream(promise_id_, QUIC_INVALID_PROMISE_METHOD, 0));

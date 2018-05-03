@@ -32,7 +32,7 @@ class LocalWPT(object):
         if self.host.filesystem.exists(self.path):
             _log.info('WPT checkout exists at %s, fetching latest', self.path)
             self.run(['git', 'fetch', 'origin'])
-            self.run(['git', 'checkout', 'origin/master'])
+            self.run(['git', 'reset', '--hard', 'origin/master'])
             return
 
         _log.info('Cloning GitHub w3c/web-platform-tests into %s', self.path)
@@ -162,14 +162,42 @@ class LocalWPT(object):
         """
         return self.run(['git', 'log', '-1', '--grep', grep_str])
 
+    def commits_in_range(self, revision_start, revision_end):
+        """Finds all commits in the given range.
+
+        Args:
+            revision_start: The start of the revision range (exclusive).
+            revision_end: The end of the revision range (inclusive).
+
+        Return:
+            A list of (SHA, commit subject) pairs ordered reverse-chronologically.
+        """
+        revision_range = revision_start + '..' + revision_end
+        output = self.run(['git', 'rev-list', '--pretty=oneline', revision_range])
+        commits = []
+        for line in output.splitlines():
+            # Split at the first space.
+            commits.append(tuple(line.strip().split(' ', 1)))
+        return commits
+
+    def is_commit_affecting_directory(self, commit, directory):
+        """Checks if a commit affects a directory."""
+        exit_code = self.run(['git', 'diff-tree', '--quiet', '--no-commit-id', commit, '--', directory],
+                             return_exit_code=True)
+        return exit_code == 1
+
+    # Note: the regexes in the two following methods use the start-of-line
+    # anchor ^ to prevent matching quoted text in commit messages. The end-of-
+    # line anchor $ is omitted to accommodate trailing whitespaces and non-
+    # standard line endings caused by manual editing.
+
     def seek_change_id(self, change_id):
         """Finds the most recent commit with the given Chromium change ID.
 
         Returns:
             A string of the matched commit log, empty if not found.
         """
-        # Note: anchors (^, $) are important so that quoted commit messages are not matched.
-        return self._most_recent_log_matching('^Change-Id: %s$' % change_id)
+        return self._most_recent_log_matching('^Change-Id: %s' % change_id)
 
     def seek_commit_position(self, commit_position):
         """Finds the most recent commit with the given Chromium commit position.
@@ -177,5 +205,4 @@ class LocalWPT(object):
         Returns:
             A string of the matched commit log, empty if not found.
         """
-        # Note: anchors (^, $) are important so that quoted commit messages are not matched.
-        return self._most_recent_log_matching('^Cr-Commit-Position: %s$' % commit_position)
+        return self._most_recent_log_matching('^Cr-Commit-Position: %s' % commit_position)

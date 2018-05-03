@@ -15,8 +15,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.JavaBridgeTestCommon.Controller;
 import org.chromium.content.browser.test.ContentJUnit4ClassRunner;
@@ -43,14 +43,11 @@ import java.util.concurrent.CountDownLatch;
  * - Inheritance
  */
 @RunWith(ContentJUnit4ClassRunner.class)
-@SuppressFBWarnings(
-        {"UMAC_UNCALLABLE_METHOD_OF_ANONYMOUS_CLASS", "URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
 public class JavaBridgeBasicsTest {
     @Rule
     public JavaBridgeActivityTestRule mActivityTestRule =
             new JavaBridgeActivityTestRule().shouldSetUp(false);
 
-    @SuppressFBWarnings("CHROMIUM_SYNCHRONIZED_METHOD")
     private static class TestController extends Controller {
         private int mIntValue;
         private long mLongValue;
@@ -151,7 +148,7 @@ public class JavaBridgeBasicsTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                mActivityTestRule.getWebContents().addPossiblyUnsafeJavascriptInterface(
+                mActivityTestRule.getJavascriptInjector().addPossiblyUnsafeInterface(
                         new Object(), "testObject", null);
             }
         });
@@ -175,7 +172,7 @@ public class JavaBridgeBasicsTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                mActivityTestRule.getWebContents().removeJavascriptInterface("testObject");
+                mActivityTestRule.getJavascriptInjector().removeInterface("testObject");
             }
         });
         // Check that the Java object is being held by the Java bridge, thus it's not
@@ -199,7 +196,7 @@ public class JavaBridgeBasicsTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                mActivityTestRule.getWebContents().removeJavascriptInterface("foo");
+                mActivityTestRule.getJavascriptInjector().removeInterface("foo");
                 mActivityTestRule.getWebContents().getNavigationController().reload(true);
             }
         });
@@ -652,9 +649,7 @@ public class JavaBridgeBasicsTest {
         mActivityTestRule.injectObjectAndReload(new Object() {
             public void method() {}
             private void privateMethod() {}
-            @SuppressFBWarnings("UUF_UNUSED")
             public int field;
-            @SuppressFBWarnings("UUF_UNUSED")
             private int mPrivateField;
         }, "testObject");
         mActivityTestRule.executeJavaScript("var result = \"\"; "
@@ -721,13 +716,13 @@ public class JavaBridgeBasicsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Android-JavaBridge"})
+    @DisabledTest(message = "https://crbug.com/795378")
     public void testReflectPrivateFieldRaisesException() throws Throwable {
         mActivityTestRule.injectObjectAndReload(new Object() {
             public Class<?> myGetClass() {
                 return getClass();
             }
 
-            @SuppressFBWarnings("UUF_UNUSED")
             private int mField;
         }, "testObject");
         String fieldName = "mField";
@@ -958,7 +953,7 @@ public class JavaBridgeBasicsTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                mActivityTestRule.getWebContents().setAllowJavascriptInterfacesInspection(false);
+                mActivityTestRule.getJavascriptInjector().setAllowInspection(false);
             }
         });
 

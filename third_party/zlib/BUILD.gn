@@ -51,18 +51,97 @@ source_set("zlib_adler32_simd") {
     }
   }
 
-  configs -= [ "//build/config/compiler:chromium_code" ]
-  configs += [ "//build/config/compiler:no_chromium_code" ]
-
   public_configs = [ ":zlib_adler32_simd_config" ]
 }
 
+config("zlib_inflate_chunk_simd_config") {
+  if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
+    defines = [ "INFLATE_CHUNK_SIMD_SSE2" ]
+  }
+
+  if (current_cpu == "arm" || current_cpu == "arm64") {
+    if (arm_use_neon) {
+      defines = [ "INFLATE_CHUNK_SIMD_NEON" ]
+    }
+  }
+}
+
+source_set("zlib_inflate_chunk_simd") {
+  visibility = [ ":*" ]
+
+  if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
+    include_dirs = [ "." ]
+
+    sources = [
+      "contrib/optimizations/chunkcopy.h",
+      "contrib/optimizations/inffast_chunk.c",
+      "contrib/optimizations/inffast_chunk.h",
+      "contrib/optimizations/inflate.c",
+    ]
+  }
+
+  if (current_cpu == "arm" || current_cpu == "arm64") {
+    if (arm_use_neon) {
+      include_dirs = [ "." ]
+
+      sources = [
+        "contrib/optimizations/chunkcopy.h",
+        "contrib/optimizations/inffast_chunk.c",
+        "contrib/optimizations/inffast_chunk.h",
+        "contrib/optimizations/inflate.c",
+      ]
+
+      # TODO(772870) back off from -O3 while investigating Android
+      # One perf bot PNG decode regression.
+      # if (!is_debug) {
+      #  # Use optimize_speed (-O3) to output the _smallest_ code.
+      #  configs -= [ "//build/config/compiler:default_optimization" ]
+      #  configs += [ "//build/config/compiler:optimize_speed" ]
+      # }
+    }
+  }
+
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+
+  public_configs = [ ":zlib_inflate_chunk_simd_config" ]
+}
+
+config("zlib_crc32_simd_config") {
+  if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
+    defines = [ "CRC32_SIMD_SSE42_PCLMUL" ]
+  }
+}
+
+source_set("zlib_crc32_simd") {
+  visibility = [ ":*" ]
+
+  if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
+    sources = [
+      "crc32_simd.c",
+      "crc32_simd.h",
+    ]
+
+    if (!is_win || is_clang) {
+      cflags = [
+        "-msse4.2",
+        "-mpclmul",
+      ]
+    }
+  }
+
+  public_configs = [ ":zlib_crc32_simd_config" ]
+}
+
 static_library("zlib_x86_simd") {
+  visibility = [ ":*" ]
+
   if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
     sources = [
       "crc_folding.c",
       "fill_window_sse.c",
     ]
+
     if (!is_win || is_clang) {
       cflags = [
         "-msse4.2",
@@ -122,33 +201,25 @@ static_library("zlib") {
     "zutil.h",
   ]
 
-  if (current_cpu == "arm" || current_cpu == "arm64") {
-    if (arm_use_neon) {
-      # TODO: handle InflateBack case, see crbug.com/769880.
-      sources -= [
-        "inffast.c",
-        "inflate.c",
-      ]
-      sources += [
-        "contrib/arm/chunkcopy.h",
-        "contrib/arm/inffast.c",
-        "contrib/arm/inflate.c",
-      ]
-    }
-  }
-
   defines = []
   deps = []
 
   if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
-    sources += [ "x86.c" ]
+    deps += [ ":zlib_crc32_simd" ]
 
     deps += [ ":zlib_adler32_simd" ]
+    sources += [ "x86.c" ]
+
+    deps += [ ":zlib_inflate_chunk_simd" ]
+    sources -= [ "inflate.c" ]
   }
 
   if (current_cpu == "arm" || current_cpu == "arm64") {
     if (arm_use_neon) {
       deps += [ ":zlib_adler32_simd" ]
+
+      deps += [ ":zlib_inflate_chunk_simd" ]
+      sources -= [ "inflate.c" ]
     }
   }
 
@@ -162,9 +233,7 @@ static_library("zlib") {
 
   public_configs = [ ":zlib_config" ]
 
-  deps += [
-    ":zlib_x86_simd"
-  ]
+  deps += [ ":zlib_x86_simd" ]
 }
 
 config("minizip_warnings") {

@@ -16,6 +16,10 @@
 #include "ui/base/base_window.h"
 #include "ui/gfx/geometry/rect.h"
 
+#if defined(OS_CHROMEOS)
+#include "ash/public/cpp/window_pin_type.h"
+#endif
+
 namespace extensions {
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -85,6 +89,10 @@ std::unique_ptr<base::DictionaryValue> WindowController::CreateWindowValue()
     window_state = keys::kShowStateValueMinimized;
   } else if (window()->IsFullscreen()) {
     window_state = keys::kShowStateValueFullscreen;
+#if defined(OS_CHROMEOS)
+    if (ash::IsWindowTrustedPinned(window()))
+      window_state = keys::kShowStateValueLockedFullscreen;
+#endif
   } else if (window()->IsMaximized()) {
     window_state = keys::kShowStateValueMaximized;
   } else {

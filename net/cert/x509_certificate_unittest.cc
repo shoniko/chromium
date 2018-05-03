@@ -103,7 +103,7 @@ void CheckGoogleCert(const scoped_refptr<X509Certificate>& google_cert,
   EXPECT_EQ(valid_to, valid_expiry.ToDoubleT());
 
   EXPECT_EQ(expected_fingerprint, X509Certificate::CalculateFingerprint256(
-                                      google_cert->os_cert_handle()));
+                                      google_cert->cert_buffer()));
 
   std::vector<std::string> dns_names;
   google_cert->GetDNSNames(&dns_names);
@@ -265,7 +265,6 @@ TEST(X509CertificateTest, UnescapedSpecialCharacters) {
   EXPECT_EQ(0U, subject.domain_components.size());
 }
 
-#if BUILDFLAG(USE_BYTE_CERTS)
 TEST(X509CertificateTest, InvalidPrintableStringIsUtf8) {
   base::FilePath certs_dir =
       GetTestNetDataDirectory().AppendASCII("parse_certificate_unittest");
@@ -285,18 +284,18 @@ TEST(X509CertificateTest, InvalidPrintableStringIsUtf8) {
       x509_util::CreateCryptoBuffer(cert_der);
   ASSERT_TRUE(cert_handle);
 
-  EXPECT_FALSE(X509Certificate::CreateFromHandle(cert_handle.get(), {}));
+  EXPECT_FALSE(X509Certificate::CreateFromBuffer(
+      x509_util::DupCryptoBuffer(cert_handle.get()), {}));
 
   X509Certificate::UnsafeCreateOptions options;
   options.printable_string_is_utf8 = true;
   scoped_refptr<X509Certificate> cert =
-      X509Certificate::CreateFromHandleUnsafeOptions(cert_handle.get(), {},
-                                                     options);
+      X509Certificate::CreateFromBufferUnsafeOptions(
+          x509_util::DupCryptoBuffer(cert_handle.get()), {}, options);
 
   const CertPrincipal& subject = cert->subject();
   EXPECT_EQ("Foo@#_ Clïênt Cërt", subject.common_name);
 }
-#endif
 
 TEST(X509CertificateTest, TeletexStringIsLatin1) {
   base::FilePath certs_dir =
@@ -458,7 +457,7 @@ TEST(X509CertificateTest, SHA256FingerprintsCorrectly) {
        0x7f, 0x77, 0x49, 0x38, 0x42, 0x81, 0x26, 0x7f, 0xed, 0x38}};
 
   EXPECT_EQ(google_sha256_fingerprint, X509Certificate::CalculateFingerprint256(
-                                           google_cert->os_cert_handle()));
+                                           google_cert->cert_buffer()));
 }
 
 TEST(X509CertificateTest, CAFingerprints) {
@@ -476,49 +475,31 @@ TEST(X509CertificateTest, CAFingerprints) {
       ImportCertFromFile(certs_dir, "verisign_intermediate_ca_2016.pem");
   ASSERT_NE(static_cast<X509Certificate*>(NULL), intermediate_cert2.get());
 
-  X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(intermediate_cert1->os_cert_handle());
+  std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
+  intermediates.push_back(
+      x509_util::DupCryptoBuffer(intermediate_cert1->cert_buffer()));
   scoped_refptr<X509Certificate> cert_chain1 =
-      X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
-                                        intermediates);
+      X509Certificate::CreateFromBuffer(
+          x509_util::DupCryptoBuffer(server_cert->cert_buffer()),
+          std::move(intermediates));
   ASSERT_TRUE(cert_chain1);
 
   intermediates.clear();
-  intermediates.push_back(intermediate_cert2->os_cert_handle());
+  intermediates.push_back(
+      x509_util::DupCryptoBuffer(intermediate_cert2->cert_buffer()));
   scoped_refptr<X509Certificate> cert_chain2 =
-      X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
-                                        intermediates);
+      X509Certificate::CreateFromBuffer(
+          x509_util::DupCryptoBuffer(server_cert->cert_buffer()),
+          std::move(intermediates));
   ASSERT_TRUE(cert_chain2);
 
   // No intermediate CA certicates.
   intermediates.clear();
   scoped_refptr<X509Certificate> cert_chain3 =
-      X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
-                                        intermediates);
+      X509Certificate::CreateFromBuffer(
+          x509_util::DupCryptoBuffer(server_cert->cert_buffer()),
+          std::move(intermediates));
   ASSERT_TRUE(cert_chain3);
-
-  SHA256HashValue cert_chain1_ca_fingerprint_256 = {
-      {0x51, 0x15, 0x30, 0x49, 0x97, 0x54, 0xf8, 0xb4, 0x17, 0x41, 0x6b,
-       0x58, 0x78, 0xb0, 0x89, 0xd2, 0xc3, 0xae, 0x66, 0xc1, 0x16, 0x80,
-       0xa0, 0x78, 0xe7, 0x53, 0x45, 0xa2, 0xfb, 0x80, 0xe1, 0x07}};
-  SHA256HashValue cert_chain2_ca_fingerprint_256 = {
-      {0x00, 0xbd, 0x2b, 0x0e, 0xdd, 0x83, 0x40, 0xb1, 0x74, 0x6c, 0xc3,
-       0x95, 0xc0, 0xe3, 0x55, 0xb2, 0x16, 0x58, 0x53, 0xfd, 0xb9, 0x3c,
-       0x52, 0xda, 0xdd, 0xa8, 0x22, 0x8b, 0x07, 0x00, 0x2d, 0xce}};
-  // The SHA-256 hash of nothing.
-  SHA256HashValue cert_chain3_ca_fingerprint_256 = {
-      {0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4,
-       0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b,
-       0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55}};
-  EXPECT_EQ(cert_chain1_ca_fingerprint_256,
-            X509Certificate::CalculateCAFingerprint256(
-                cert_chain1->GetIntermediateCertificates()));
-  EXPECT_EQ(cert_chain2_ca_fingerprint_256,
-            X509Certificate::CalculateCAFingerprint256(
-                cert_chain2->GetIntermediateCertificates()));
-  EXPECT_EQ(cert_chain3_ca_fingerprint_256,
-            X509Certificate::CalculateCAFingerprint256(
-                cert_chain3->GetIntermediateCertificates()));
 
   SHA256HashValue cert_chain1_chain_fingerprint_256 = {
       {0xac, 0xff, 0xcc, 0x63, 0x0d, 0xd0, 0xa7, 0x19, 0x78, 0xb5, 0x8a,
@@ -533,17 +514,11 @@ TEST(X509CertificateTest, CAFingerprints) {
        0x6a, 0xa6, 0x02, 0x73, 0x30, 0x3e, 0x34, 0x1b, 0x43, 0xc2, 0x7c,
        0x98, 0x52, 0x9f, 0x34, 0x7f, 0x55, 0x97, 0xe9, 0x1a, 0x10}};
   EXPECT_EQ(cert_chain1_chain_fingerprint_256,
-            X509Certificate::CalculateChainFingerprint256(
-                cert_chain1->os_cert_handle(),
-                cert_chain1->GetIntermediateCertificates()));
+            cert_chain1->CalculateChainFingerprint256());
   EXPECT_EQ(cert_chain2_chain_fingerprint_256,
-            X509Certificate::CalculateChainFingerprint256(
-                cert_chain2->os_cert_handle(),
-                cert_chain2->GetIntermediateCertificates()));
+            cert_chain2->CalculateChainFingerprint256());
   EXPECT_EQ(cert_chain3_chain_fingerprint_256,
-            X509Certificate::CalculateChainFingerprint256(
-                cert_chain3->os_cert_handle(),
-                cert_chain3->GetIntermediateCertificates()));
+            cert_chain3->CalculateChainFingerprint256());
 }
 
 TEST(X509CertificateTest, ParseSubjectAltNames) {
@@ -607,12 +582,9 @@ TEST(X509CertificateTest, ExtractSPKIFromDERCert) {
       ImportCertFromFile(certs_dir, "nist.der");
   ASSERT_NE(static_cast<X509Certificate*>(NULL), cert.get());
 
-  std::string derBytes;
-  EXPECT_TRUE(X509Certificate::GetDEREncoded(cert->os_cert_handle(),
-                                             &derBytes));
-
   base::StringPiece spkiBytes;
-  EXPECT_TRUE(asn1::ExtractSPKIFromDERCert(derBytes, &spkiBytes));
+  EXPECT_TRUE(asn1::ExtractSPKIFromDERCert(
+      x509_util::CryptoBufferAsStringPiece(cert->cert_buffer()), &spkiBytes));
 
   uint8_t hash[base::kSHA1Length];
   base::SHA1HashBytes(reinterpret_cast<const uint8_t*>(spkiBytes.data()),
@@ -621,37 +593,14 @@ TEST(X509CertificateTest, ExtractSPKIFromDERCert) {
   EXPECT_EQ(0, memcmp(hash, kNistSPKIHash, sizeof(hash)));
 }
 
-TEST(X509CertificateTest, ExtractCRLURLsFromDERCert) {
-  base::FilePath certs_dir = GetTestCertsDirectory();
-  scoped_refptr<X509Certificate> cert =
-      ImportCertFromFile(certs_dir, "nist.der");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), cert.get());
-
-  std::string derBytes;
-  EXPECT_TRUE(X509Certificate::GetDEREncoded(cert->os_cert_handle(),
-                                             &derBytes));
-
-  std::vector<base::StringPiece> crl_urls;
-  EXPECT_TRUE(asn1::ExtractCRLURLsFromDERCert(derBytes, &crl_urls));
-
-  EXPECT_EQ(1u, crl_urls.size());
-  if (crl_urls.size() > 0) {
-    EXPECT_EQ("http://SVRSecure-G3-crl.verisign.com/SVRSecureG3.crl",
-              crl_urls[0].as_string());
-  }
-}
-
 TEST(X509CertificateTest, HasTLSFeatureExtension) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> cert =
       ImportCertFromFile(certs_dir, "tls_feature_extension.pem");
   ASSERT_NE(static_cast<X509Certificate*>(NULL), cert.get());
 
-  std::string derBytes;
-  EXPECT_TRUE(
-      X509Certificate::GetDEREncoded(cert->os_cert_handle(), &derBytes));
-
-  EXPECT_TRUE(asn1::HasTLSFeatureExtension(derBytes));
+  EXPECT_TRUE(asn1::HasTLSFeatureExtension(
+      x509_util::CryptoBufferAsStringPiece(cert->cert_buffer())));
 }
 
 TEST(X509CertificateTest, DoesNotHaveTLSFeatureExtension) {
@@ -660,101 +609,94 @@ TEST(X509CertificateTest, DoesNotHaveTLSFeatureExtension) {
       ImportCertFromFile(certs_dir, "ok_cert.pem");
   ASSERT_NE(static_cast<X509Certificate*>(NULL), cert.get());
 
-  std::string derBytes;
-  EXPECT_TRUE(
-      X509Certificate::GetDEREncoded(cert->os_cert_handle(), &derBytes));
-
-  EXPECT_FALSE(asn1::HasTLSFeatureExtension(derBytes));
+  EXPECT_FALSE(asn1::HasTLSFeatureExtension(
+      x509_util::CryptoBufferAsStringPiece(cert->cert_buffer())));
 }
 
-// Tests OSCertHandle deduping via X509Certificate::CreateFromHandle.  We
-// call X509Certificate::CreateFromHandle several times and observe whether
-// it returns a cached or new OSCertHandle.
+// Tests CRYPTO_BUFFER deduping via X509Certificate::CreateFromBuffer.  We
+// call X509Certificate::CreateFromBuffer several times and observe whether
+// it returns a cached or new CRYPTO_BUFFER.
 TEST(X509CertificateTest, Cache) {
-  X509Certificate::OSCertHandle google_cert_handle;
-  X509Certificate::OSCertHandle thawte_cert_handle;
+  bssl::UniquePtr<CRYPTO_BUFFER> google_cert_handle;
+  bssl::UniquePtr<CRYPTO_BUFFER> thawte_cert_handle;
 
   // Add a single certificate to the certificate cache.
-  google_cert_handle = X509Certificate::CreateOSCertHandleFromBytes(
+  google_cert_handle = X509Certificate::CreateCertBufferFromBytes(
       reinterpret_cast<const char*>(google_der), sizeof(google_der));
-  scoped_refptr<X509Certificate> cert1(X509Certificate::CreateFromHandle(
-      google_cert_handle, X509Certificate::OSCertHandles()));
-  X509Certificate::FreeOSCertHandle(google_cert_handle);
+  ASSERT_TRUE(google_cert_handle);
+  scoped_refptr<X509Certificate> cert1(
+      X509Certificate::CreateFromBuffer(std::move(google_cert_handle), {}));
   ASSERT_TRUE(cert1);
 
   // Add the same certificate, but as a new handle.
-  google_cert_handle = X509Certificate::CreateOSCertHandleFromBytes(
+  google_cert_handle = X509Certificate::CreateCertBufferFromBytes(
       reinterpret_cast<const char*>(google_der), sizeof(google_der));
-  scoped_refptr<X509Certificate> cert2(X509Certificate::CreateFromHandle(
-      google_cert_handle, X509Certificate::OSCertHandles()));
-  X509Certificate::FreeOSCertHandle(google_cert_handle);
+  ASSERT_TRUE(google_cert_handle);
+  scoped_refptr<X509Certificate> cert2(
+      X509Certificate::CreateFromBuffer(std::move(google_cert_handle), {}));
   ASSERT_TRUE(cert2);
 
   // A new X509Certificate should be returned.
   EXPECT_NE(cert1.get(), cert2.get());
   // But both instances should share the underlying OS certificate handle.
-  EXPECT_EQ(cert1->os_cert_handle(), cert2->os_cert_handle());
-  EXPECT_EQ(0u, cert1->GetIntermediateCertificates().size());
-  EXPECT_EQ(0u, cert2->GetIntermediateCertificates().size());
+  EXPECT_EQ(cert1->cert_buffer(), cert2->cert_buffer());
+  EXPECT_EQ(0u, cert1->intermediate_buffers().size());
+  EXPECT_EQ(0u, cert2->intermediate_buffers().size());
 
   // Add the same certificate, but this time with an intermediate. This
   // should result in the intermediate being cached. Note that this is not
   // a legitimate chain, but is suitable for testing.
-  google_cert_handle = X509Certificate::CreateOSCertHandleFromBytes(
+  google_cert_handle = X509Certificate::CreateCertBufferFromBytes(
       reinterpret_cast<const char*>(google_der), sizeof(google_der));
-  thawte_cert_handle = X509Certificate::CreateOSCertHandleFromBytes(
+  thawte_cert_handle = X509Certificate::CreateCertBufferFromBytes(
       reinterpret_cast<const char*>(thawte_der), sizeof(thawte_der));
-  X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(thawte_cert_handle);
-  scoped_refptr<X509Certificate> cert3(X509Certificate::CreateFromHandle(
-      google_cert_handle, intermediates));
-  X509Certificate::FreeOSCertHandle(google_cert_handle);
-  X509Certificate::FreeOSCertHandle(thawte_cert_handle);
+  ASSERT_TRUE(google_cert_handle);
+  ASSERT_TRUE(thawte_cert_handle);
+  std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
+  intermediates.push_back(std::move(thawte_cert_handle));
+  scoped_refptr<X509Certificate> cert3(X509Certificate::CreateFromBuffer(
+      std::move(google_cert_handle), std::move(intermediates)));
   ASSERT_TRUE(cert3);
 
   // Test that the new certificate, even with intermediates, results in the
   // same underlying handle being used.
-  EXPECT_EQ(cert1->os_cert_handle(), cert3->os_cert_handle());
+  EXPECT_EQ(cert1->cert_buffer(), cert3->cert_buffer());
   // Though they use the same OS handle, the intermediates should be different.
-  EXPECT_NE(cert1->GetIntermediateCertificates().size(),
-      cert3->GetIntermediateCertificates().size());
+  EXPECT_NE(cert1->intermediate_buffers().size(),
+            cert3->intermediate_buffers().size());
 }
 
 TEST(X509CertificateTest, Pickle) {
-  X509Certificate::OSCertHandle google_cert_handle =
-      X509Certificate::CreateOSCertHandleFromBytes(
+  bssl::UniquePtr<CRYPTO_BUFFER> google_cert_handle =
+      X509Certificate::CreateCertBufferFromBytes(
           reinterpret_cast<const char*>(google_der), sizeof(google_der));
-  X509Certificate::OSCertHandle thawte_cert_handle =
-      X509Certificate::CreateOSCertHandleFromBytes(
+  ASSERT_TRUE(google_cert_handle);
+  bssl::UniquePtr<CRYPTO_BUFFER> thawte_cert_handle =
+      X509Certificate::CreateCertBufferFromBytes(
           reinterpret_cast<const char*>(thawte_der), sizeof(thawte_der));
+  ASSERT_TRUE(thawte_cert_handle);
 
-  X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(thawte_cert_handle);
-  scoped_refptr<X509Certificate> cert = X509Certificate::CreateFromHandle(
-      google_cert_handle, intermediates);
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), cert.get());
-
-  X509Certificate::FreeOSCertHandle(google_cert_handle);
-  X509Certificate::FreeOSCertHandle(thawte_cert_handle);
+  std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
+  intermediates.push_back(std::move(thawte_cert_handle));
+  scoped_refptr<X509Certificate> cert = X509Certificate::CreateFromBuffer(
+      std::move(google_cert_handle), std::move(intermediates));
+  ASSERT_TRUE(cert);
 
   base::Pickle pickle;
   cert->Persist(&pickle);
 
   base::PickleIterator iter(pickle);
   scoped_refptr<X509Certificate> cert_from_pickle =
-      X509Certificate::CreateFromPickle(
-          &iter, X509Certificate::PICKLETYPE_CERTIFICATE_CHAIN_V3);
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), cert_from_pickle.get());
-  EXPECT_TRUE(X509Certificate::IsSameOSCert(
-      cert->os_cert_handle(), cert_from_pickle->os_cert_handle()));
-  const X509Certificate::OSCertHandles& cert_intermediates =
-      cert->GetIntermediateCertificates();
-  const X509Certificate::OSCertHandles& pickle_intermediates =
-      cert_from_pickle->GetIntermediateCertificates();
+      X509Certificate::CreateFromPickle(&iter);
+  ASSERT_TRUE(cert_from_pickle);
+  EXPECT_TRUE(x509_util::CryptoBufferEqual(cert->cert_buffer(),
+                                           cert_from_pickle->cert_buffer()));
+  const auto& cert_intermediates = cert->intermediate_buffers();
+  const auto& pickle_intermediates = cert_from_pickle->intermediate_buffers();
   ASSERT_EQ(cert_intermediates.size(), pickle_intermediates.size());
   for (size_t i = 0; i < cert_intermediates.size(); ++i) {
-    EXPECT_TRUE(X509Certificate::IsSameOSCert(cert_intermediates[i],
-                                              pickle_intermediates[i]));
+    EXPECT_TRUE(x509_util::CryptoBufferEqual(cert_intermediates[i].get(),
+                                             pickle_intermediates[i].get()));
   }
 }
 
@@ -769,35 +711,34 @@ TEST(X509CertificateTest, IntermediateCertificates) {
           reinterpret_cast<const char*>(thawte_der), sizeof(thawte_der)));
   ASSERT_TRUE(thawte_cert);
 
-  X509Certificate::OSCertHandle google_handle;
+  bssl::UniquePtr<CRYPTO_BUFFER> google_handle;
   // Create object with no intermediates:
-  google_handle = X509Certificate::CreateOSCertHandleFromBytes(
+  google_handle = X509Certificate::CreateCertBufferFromBytes(
       reinterpret_cast<const char*>(google_der), sizeof(google_der));
-  X509Certificate::OSCertHandles intermediates1;
   scoped_refptr<X509Certificate> cert1;
-  cert1 = X509Certificate::CreateFromHandle(google_handle, intermediates1);
+  cert1 = X509Certificate::CreateFromBuffer(
+      x509_util::DupCryptoBuffer(google_handle.get()), {});
   ASSERT_TRUE(cert1);
-  EXPECT_EQ(0u, cert1->GetIntermediateCertificates().size());
+  EXPECT_EQ(0u, cert1->intermediate_buffers().size());
 
   // Create object with 2 intermediates:
-  X509Certificate::OSCertHandles intermediates2;
-  intermediates2.push_back(webkit_cert->os_cert_handle());
-  intermediates2.push_back(thawte_cert->os_cert_handle());
+  std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates2;
+  intermediates2.push_back(
+      x509_util::DupCryptoBuffer(webkit_cert->cert_buffer()));
+  intermediates2.push_back(
+      x509_util::DupCryptoBuffer(thawte_cert->cert_buffer()));
   scoped_refptr<X509Certificate> cert2;
-  cert2 = X509Certificate::CreateFromHandle(google_handle, intermediates2);
+  cert2 = X509Certificate::CreateFromBuffer(std::move(google_handle),
+                                            std::move(intermediates2));
   ASSERT_TRUE(cert2);
 
   // Verify it has all the intermediates:
-  const X509Certificate::OSCertHandles& cert2_intermediates =
-      cert2->GetIntermediateCertificates();
+  const auto& cert2_intermediates = cert2->intermediate_buffers();
   ASSERT_EQ(2u, cert2_intermediates.size());
-  EXPECT_TRUE(X509Certificate::IsSameOSCert(cert2_intermediates[0],
-                                            webkit_cert->os_cert_handle()));
-  EXPECT_TRUE(X509Certificate::IsSameOSCert(cert2_intermediates[1],
-                                            thawte_cert->os_cert_handle()));
-
-  // Cleanup
-  X509Certificate::FreeOSCertHandle(google_handle);
+  EXPECT_TRUE(x509_util::CryptoBufferEqual(cert2_intermediates[0].get(),
+                                           webkit_cert->cert_buffer()));
+  EXPECT_TRUE(x509_util::CryptoBufferEqual(cert2_intermediates[1].get(),
+                                           thawte_cert->cert_buffer()));
 }
 
 TEST(X509CertificateTest, IsIssuedByEncoded) {
@@ -848,22 +789,22 @@ TEST(X509CertificateTest, IsSelfSigned) {
   scoped_refptr<X509Certificate> cert(
       ImportCertFromFile(certs_dir, "mit.davidben.der"));
   ASSERT_NE(static_cast<X509Certificate*>(NULL), cert.get());
-  EXPECT_FALSE(X509Certificate::IsSelfSigned(cert->os_cert_handle()));
+  EXPECT_FALSE(X509Certificate::IsSelfSigned(cert->cert_buffer()));
 
   scoped_refptr<X509Certificate> self_signed(
       ImportCertFromFile(certs_dir, "aia-root.pem"));
   ASSERT_NE(static_cast<X509Certificate*>(NULL), self_signed.get());
-  EXPECT_TRUE(X509Certificate::IsSelfSigned(self_signed->os_cert_handle()));
+  EXPECT_TRUE(X509Certificate::IsSelfSigned(self_signed->cert_buffer()));
 
   scoped_refptr<X509Certificate> bad_name(
       ImportCertFromFile(certs_dir, "self-signed-invalid-name.pem"));
   ASSERT_NE(static_cast<X509Certificate*>(NULL), bad_name.get());
-  EXPECT_FALSE(X509Certificate::IsSelfSigned(bad_name->os_cert_handle()));
+  EXPECT_FALSE(X509Certificate::IsSelfSigned(bad_name->cert_buffer()));
 
   scoped_refptr<X509Certificate> bad_sig(
       ImportCertFromFile(certs_dir, "self-signed-invalid-sig.pem"));
   ASSERT_NE(static_cast<X509Certificate*>(NULL), bad_sig.get());
-  EXPECT_FALSE(X509Certificate::IsSelfSigned(bad_sig->os_cert_handle()));
+  EXPECT_FALSE(X509Certificate::IsSelfSigned(bad_sig->cert_buffer()));
 }
 
 TEST(X509CertificateTest, IsIssuedByEncodedWithIntermediates) {
@@ -893,11 +834,12 @@ TEST(X509CertificateTest, IsIssuedByEncodedWithIntermediates) {
   std::string policy_root_dn(reinterpret_cast<const char*>(kPolicyRootDN),
                              sizeof(kPolicyRootDN));
 
-  X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(policy_chain[1]->os_cert_handle());
-  scoped_refptr<X509Certificate> cert_chain =
-      X509Certificate::CreateFromHandle(policy_chain[0]->os_cert_handle(),
-                                        intermediates);
+  std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
+  intermediates.push_back(
+      x509_util::DupCryptoBuffer(policy_chain[1]->cert_buffer()));
+  scoped_refptr<X509Certificate> cert_chain = X509Certificate::CreateFromBuffer(
+      x509_util::DupCryptoBuffer(policy_chain[0]->cert_buffer()),
+      std::move(intermediates));
   ASSERT_TRUE(cert_chain);
 
   std::vector<std::string> issuers;
@@ -928,11 +870,6 @@ TEST(X509CertificateTest, IsIssuedByEncodedWithIntermediates) {
   issuers.clear();
   issuers.push_back(mit_issuer);
   EXPECT_FALSE(cert_chain->IsIssuedByEncoded(issuers));
-}
-
-// Tests that FreeOSCertHandle ignores NULL on each OS.
-TEST(X509CertificateTest, FreeNullHandle) {
-  X509Certificate::FreeOSCertHandle(NULL);
 }
 
 const struct CertificateFormatTestData {
@@ -1023,7 +960,7 @@ const struct CertificateFormatTestData {
 class X509CertificateParseTest
     : public testing::TestWithParam<CertificateFormatTestData> {
  public:
-  virtual ~X509CertificateParseTest() {}
+  virtual ~X509CertificateParseTest() = default;
   void SetUp() override { test_data_ = GetParam(); }
   void TearDown() override {}
 
@@ -1057,7 +994,7 @@ TEST_P(X509CertificateParseTest, CanParseFormat) {
     // comparing fingerprints.
     EXPECT_EQ(
         *test_data_.chain_fingerprints[i],
-        X509Certificate::CalculateFingerprint256(certs[i]->os_cert_handle()));
+        X509Certificate::CalculateFingerprint256(certs[i]->cert_buffer()));
   }
 }
 
@@ -1333,7 +1270,7 @@ TEST_P(X509CertificatePublicKeyInfoTest, GetPublicKeyInfo) {
   X509Certificate::PublicKeyType actual_type =
       X509Certificate::kPublicKeyTypeUnknown;
 
-  X509Certificate::GetPublicKeyInfo(cert->os_cert_handle(), &actual_bits,
+  X509Certificate::GetPublicKeyInfo(cert->cert_buffer(), &actual_bits,
                                     &actual_type);
 
   EXPECT_EQ(data.expected_bits, actual_bits);

@@ -33,8 +33,8 @@
 #include "cc/base/math_util.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
 #include "cc/input/layer_selection_bound.h"
+#include "cc/input/overscroll_behavior.h"
 #include "cc/input/page_scale_animation.h"
-#include "cc/input/scroll_boundary_behavior.h"
 #include "cc/layers/heads_up_display_layer.h"
 #include "cc/layers/heads_up_display_layer_impl.h"
 #include "cc/layers/layer.h"
@@ -55,18 +55,21 @@
 #include "cc/trees/swap_promise_manager.h"
 #include "cc/trees/transform_node.h"
 #include "cc/trees/tree_synchronizer.h"
+#include "cc/trees/ukm_manager.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
 
 namespace {
 static base::AtomicSequenceNumber s_layer_tree_host_sequence_number;
+static base::AtomicSequenceNumber s_image_decode_sequence_number;
 }
 
 namespace cc {
 
-LayerTreeHost::InitParams::InitParams() {}
+LayerTreeHost::InitParams::InitParams() = default;
 
-LayerTreeHost::InitParams::~InitParams() {}
+LayerTreeHost::InitParams::~InitParams() = default;
 
 std::unique_ptr<LayerTreeHost> LayerTreeHost::CreateThreaded(
     scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
@@ -96,6 +99,7 @@ LayerTreeHost::CreateSingleThreaded(
 LayerTreeHost::LayerTreeHost(InitParams* params, CompositorMode mode)
     : micro_benchmark_controller_(this),
       image_worker_task_runner_(params->image_worker_task_runner),
+      ukm_recorder_factory_(std::move(params->ukm_recorder_factory)),
       compositor_mode_(mode),
       ui_resource_manager_(std::make_unique<UIResourceManager>()),
       client_(params->client),
@@ -185,6 +189,10 @@ LayerTreeHost::~LayerTreeHost() {
     root_layer_ = nullptr;
   }
 
+  // Fail any pending image decodes.
+  for (auto& pair : pending_image_decodes_)
+    std::move(pair.second).Run(false);
+
   if (proxy_) {
     DCHECK(task_runner_provider_->IsMainThread());
     proxy_->Stop();
@@ -271,8 +279,8 @@ const LayerTreeDebugState& LayerTreeHost::GetDebugState() const {
   return debug_state_;
 }
 
-void LayerTreeHost::RequestMainFrameUpdate() {
-  client_->UpdateLayerTreeHost();
+void LayerTreeHost::RequestMainFrameUpdate(VisualStateUpdate requested_update) {
+  client_->UpdateLayerTreeHost(requested_update);
 }
 
 // This function commits the LayerTreeHost to an impl tree. When modifying
@@ -311,14 +319,31 @@ void LayerTreeHost::FinishCommitOnImplThread(
 
   sync_tree->set_source_frame_number(SourceFrameNumber());
 
+  // Set presentation token if any pending .
+  bool request_presentation_time = false;
+  if (!pending_presentation_time_callbacks_.empty()) {
+    request_presentation_time = true;
+    frame_to_presentation_time_callbacks_[SourceFrameNumber()] =
+        std::move(pending_presentation_time_callbacks_);
+    pending_presentation_time_callbacks_.clear();
+  } else if (!frame_to_presentation_time_callbacks_.empty()) {
+    // There are pending callbacks. Keep requesting the presentation callback
+    // in case a previous frame was dropped (the callbacks run when the frame
+    // makes it to screen).
+    request_presentation_time = true;
+  }
+  sync_tree->set_request_presentation_time(request_presentation_time);
+
   if (needs_full_tree_sync_)
     TreeSynchronizer::SynchronizeTrees(root_layer(), sync_tree);
 
   // Track the navigation state before pushing properties since it overwrites
   // the |content_source_id_| on the sync tree.
   bool did_navigate = content_source_id_ != sync_tree->content_source_id();
-  if (did_navigate)
+  if (did_navigate) {
+    proxy_->ClearHistoryOnNavigation();
     host_impl->ClearImageCacheOnNavigation();
+  }
 
   {
     TRACE_EVENT0("cc", "LayerTreeHostInProcess::PushProperties");
@@ -365,12 +390,26 @@ void LayerTreeHost::FinishCommitOnImplThread(
   }
 
   // Transfer image decode requests to the impl thread.
-  for (auto& request : queued_image_decodes_)
-    host_impl->QueueImageDecode(std::move(request.first), request.second);
+  for (auto& request : queued_image_decodes_) {
+    int next_id = s_image_decode_sequence_number.GetNext();
+    pending_image_decodes_[next_id] = std::move(request.second);
+    host_impl->QueueImageDecode(next_id, std::move(request.first));
+  }
   queued_image_decodes_.clear();
 
   micro_benchmark_controller_.ScheduleImplBenchmarks(host_impl);
   property_trees_.ResetAllChangeTracking();
+}
+
+void LayerTreeHost::ImageDecodesFinished(
+    const std::vector<std::pair<int, bool>>& results) {
+  // Issue stored callbacks and remove them from the pending list.
+  for (const auto& pair : results) {
+    auto it = pending_image_decodes_.find(pair.first);
+    DCHECK(it != pending_image_decodes_.end());
+    std::move(it->second).Run(pair.second);
+    pending_image_decodes_.erase(it);
+  }
 }
 
 void LayerTreeHost::PushPropertyTreesTo(LayerTreeImpl* tree_impl) {
@@ -466,10 +505,15 @@ LayerTreeHost::CreateLayerTreeHostImpl(
       settings_, client, task_runner_provider_.get(),
       rendering_stats_instrumentation_.get(), task_graph_runner_,
       std::move(mutator_host_impl), id_, std::move(image_worker_task_runner_));
+  if (ukm_recorder_factory_) {
+    host_impl->InitializeUkm(ukm_recorder_factory_->CreateRecorder());
+    ukm_recorder_factory_.reset();
+  }
+
   host_impl->SetHasGpuRasterizationTrigger(has_gpu_rasterization_trigger_);
   host_impl->SetContentHasSlowPaths(content_has_slow_paths_);
   host_impl->SetContentHasNonAAPaint(content_has_non_aa_paint_);
-  task_graph_runner_ = NULL;
+  task_graph_runner_ = nullptr;
   input_handler_weak_ptr_ = host_impl->AsWeakPtr();
   return host_impl;
 }
@@ -640,6 +684,22 @@ bool LayerTreeHost::UpdateLayers() {
   }
 
   return result;
+}
+
+void LayerTreeHost::DidPresentCompositorFrame(
+    const std::vector<int>& source_frames,
+    base::TimeTicks time,
+    base::TimeDelta refresh,
+    uint32_t flags) {
+  for (int frame : source_frames) {
+    if (!frame_to_presentation_time_callbacks_.count(frame))
+      continue;
+
+    for (auto& callback : frame_to_presentation_time_callbacks_[frame])
+      std::move(callback).Run(time, refresh, flags);
+
+    frame_to_presentation_time_callbacks_.erase(frame);
+  }
 }
 
 void LayerTreeHost::DidCompletePageScaleAnimation() {
@@ -865,7 +925,8 @@ void LayerTreeHost::UpdateBrowserControlsState(
 void LayerTreeHost::AnimateLayers(base::TimeTicks monotonic_time) {
   std::unique_ptr<MutatorEvents> events = mutator_host_->CreateEvents();
 
-  if (mutator_host_->TickAnimations(monotonic_time))
+  if (mutator_host_->TickAnimations(monotonic_time,
+                                    property_trees()->scroll_tree))
     mutator_host_->UpdateAnimationState(true, events.get());
 
   if (!events->IsEmpty())
@@ -903,6 +964,11 @@ bool LayerTreeHost::IsThreaded() const {
   return compositor_mode_ == CompositorMode::THREADED;
 }
 
+void LayerTreeHost::RequestPresentationTimeForNextFrame(
+    PresentationTimeCallback callback) {
+  pending_presentation_time_callbacks_.push_back(std::move(callback));
+}
+
 void LayerTreeHost::SetRootLayer(scoped_refptr<Layer> root_layer) {
   if (root_layer_.get() == root_layer.get())
     return;
@@ -925,9 +991,9 @@ void LayerTreeHost::SetRootLayer(scoped_refptr<Layer> root_layer) {
   SetNeedsFullTreeSync();
 }
 
-LayerTreeHost::ViewportLayers::ViewportLayers() {}
+LayerTreeHost::ViewportLayers::ViewportLayers() = default;
 
-LayerTreeHost::ViewportLayers::~ViewportLayers() {}
+LayerTreeHost::ViewportLayers::~ViewportLayers() = default;
 
 void LayerTreeHost::RegisterViewportLayers(const ViewportLayers& layers) {
   DCHECK(!layers.inner_viewport_scroll ||
@@ -1015,11 +1081,10 @@ void LayerTreeHost::SetBrowserControlsShownRatio(float ratio) {
   SetNeedsCommit();
 }
 
-void LayerTreeHost::SetScrollBoundaryBehavior(
-    const ScrollBoundaryBehavior& behavior) {
-  if (scroll_boundary_behavior_ == behavior)
+void LayerTreeHost::SetOverscrollBehavior(const OverscrollBehavior& behavior) {
+  if (overscroll_behavior_ == behavior)
     return;
-  scroll_boundary_behavior_ = behavior;
+  overscroll_behavior_ = behavior;
   SetNeedsCommit();
 }
 
@@ -1274,7 +1339,7 @@ void LayerTreeHost::PushLayerTreePropertiesTo(LayerTreeImpl* tree_impl) {
       browser_controls_shrink_blink_size_);
   tree_impl->set_top_controls_height(top_controls_height_);
   tree_impl->set_bottom_controls_height(bottom_controls_height_);
-  tree_impl->set_scroll_boundary_behavior(scroll_boundary_behavior_);
+  tree_impl->set_overscroll_behavior(overscroll_behavior_);
   tree_impl->PushBrowserControlsFromMainThread(top_controls_shown_ratio_);
   tree_impl->elastic_overscroll()->PushMainToPending(elastic_overscroll_);
   if (tree_impl->IsActiveTree())
@@ -1459,11 +1524,10 @@ gfx::ScrollOffset LayerTreeHost::GetScrollOffsetForAnimation(
   return property_trees()->scroll_tree.current_scroll_offset(element_id);
 }
 
-void LayerTreeHost::QueueImageDecode(
-    const PaintImage& image,
-    const base::Callback<void(bool)>& callback) {
+void LayerTreeHost::QueueImageDecode(const PaintImage& image,
+                                     base::OnceCallback<void(bool)> callback) {
   TRACE_EVENT0("cc", "LayerTreeHost::QueueImageDecode");
-  queued_image_decodes_.emplace_back(image, callback);
+  queued_image_decodes_.emplace_back(image, std::move(callback));
   SetNeedsCommit();
 }
 
@@ -1494,6 +1558,10 @@ void LayerTreeHost::SetHasCopyRequest(bool has_copy_request) {
 
 void LayerTreeHost::RequestBeginMainFrameNotExpected(bool new_state) {
   proxy_->RequestBeginMainFrameNotExpected(new_state);
+}
+
+void LayerTreeHost::SetURLForUkm(const GURL& url) {
+  proxy_->SetURLForUkm(url);
 }
 
 }  // namespace cc

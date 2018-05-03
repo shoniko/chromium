@@ -8,12 +8,6 @@
   await TestRunner.loadModule('console_test_runner');
   await TestRunner.loadModule('sources_test_runner');
   await TestRunner.showPanel('sources');
-  await TestRunner.loadHTML(`
-      <p>
-      Tests that evaluation in console works fine when script is paused. It also checks that
-      stack and global variables are accessible from the console.
-      </p>
-    `);
   await TestRunner.evaluateInPagePromise(`
       var globalVar = { b: 1 };
 
@@ -33,7 +27,9 @@
   SourcesTestRunner.startDebuggerTest(step1);
 
   function step1() {
-    SourcesTestRunner.runTestFunctionAndWaitUntilPaused(step2);
+    SourcesTestRunner.runTestFunctionAndWaitUntilPaused();
+    TestRunner.addSniffer(
+              Sources.CallStackSidebarPane.prototype, '_updatedForTest', step2);
   }
 
   function step2(callFrames) {

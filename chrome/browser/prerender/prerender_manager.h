@@ -38,9 +38,7 @@ class SimpleTestTickClock;
 class TickClock;
 }
 
-namespace chrome {
 struct NavigateParams;
-}
 
 namespace chrome_browser_net {
 enum class NetworkPredictionStatus;
@@ -154,14 +152,6 @@ class PrerenderManager : public content::NotificationObserver,
       content::SessionStorageNamespace* session_storage_namespace,
       const gfx::Rect& bounds);
 
-  // Adds a prerender for Instant Search |url| if valid. The
-  // |session_storage_namespace| matches the namespace of the active tab at the
-  // time the prerender is generated. Returns a PrerenderHandle or NULL.
-  std::unique_ptr<PrerenderHandle> AddPrerenderForInstant(
-      const GURL& url,
-      content::SessionStorageNamespace* session_storage_namespace,
-      const gfx::Size& size);
-
   // Cancels all active prerenders.
   void CancelAllPrerenders();
 
@@ -169,26 +159,12 @@ class PrerenderManager : public content::NotificationObserver,
   // to swap it and merge browsing histories. Returns |true| and updates
   // |params->target_contents| if a prerendered page is swapped in, |false|
   // otherwise.
-  bool MaybeUsePrerenderedPage(const GURL& url,
-                               chrome::NavigateParams* params);
+  bool MaybeUsePrerenderedPage(const GURL& url, NavigateParams* params);
 
   // Moves a PrerenderContents to the pending delete list from the list of
   // active prerenders when prerendering should be cancelled.
   virtual void MoveEntryToPendingDelete(PrerenderContents* entry,
                                         FinalStatus final_status);
-
-  // Called when a NoStatePrefetch request has received a response (including
-  // redirects). May be called several times per resource, in case of redirects.
-  void RecordPrefetchResponseReceived(Origin origin,
-                                      bool is_main_resource,
-                                      bool is_redirect,
-                                      bool is_no_store);
-
-  // Called when a NoStatePrefetch resource has been loaded. This is called only
-  // once per resource, when all redirects have been resolved.
-  void RecordPrefetchRedirectCount(Origin origin,
-                                   bool is_main_resource,
-                                   int redirect_count);
 
   // Called to record the time to First Contentful Paint for all pages that were
   // not prerendered.
@@ -222,7 +198,6 @@ class PrerenderManager : public content::NotificationObserver,
   static PrerenderManagerMode GetMode(Origin origin);
   static void SetMode(PrerenderManagerMode mode);
   static void SetOmniboxMode(PrerenderManagerMode mode);
-  static void SetInstantMode(PrerenderManagerMode mode);
   static bool IsAnyPrerenderingPossible();
   static bool IsNoStatePrefetch(Origin origin);
   static bool IsSimpleLoadExperiment(Origin origin);
@@ -267,13 +242,6 @@ class PrerenderManager : public content::NotificationObserver,
 
   // Checks whether |url| has been recently navigated to.
   bool HasRecentlyBeenNavigatedTo(Origin origin, const GURL& url);
-
-  // Returns true iff the scheme of the URL given is valid for prerendering.
-  static bool DoesURLHaveValidScheme(const GURL& url);
-
-  // Returns true iff the scheme of the subresource URL given is valid for
-  // prerendering.
-  static bool DoesSubresourceURLHaveValidScheme(const GURL& url);
 
   // Returns a Value object containing the active pages being prerendered, and
   // a history of pages which were prerendered.
@@ -578,7 +546,6 @@ class PrerenderManager : public content::NotificationObserver,
   std::unique_ptr<PrerenderContents::Factory> prerender_contents_factory_;
 
   static PrerenderManagerMode mode_;
-  static PrerenderManagerMode instant_mode_;
   static PrerenderManagerMode omnibox_mode_;
 
   // RepeatingTimer to perform periodic cleanups of pending prerendered

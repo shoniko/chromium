@@ -31,15 +31,16 @@
 #include "chrome/browser/ui/cocoa/l10n_util.h"
 #include "chrome/browser/ui/cocoa/test/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/test/scoped_force_rtl_mac.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/signin/core/browser/fake_account_fetcher_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/scoped_account_consistency.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 
 using ::testing::Return;
@@ -53,6 +54,10 @@ const std::string kLoginToken = "oauth2_login_token";
 class ProfileChooserControllerTest : public CocoaProfileTest {
  public:
   ProfileChooserControllerTest() {
+    // This file only tests Cocoa UI and can be deleted when
+    // kViewsProfileChooser is removed.
+    scoped_feature_list_.InitAndDisableFeature(features::kViewsProfileChooser);
+
     TestingProfile::TestingFactories factories;
     factories.push_back(
         std::make_pair(ProfileOAuth2TokenServiceFactory::GetInstance(),
@@ -175,6 +180,7 @@ class ProfileChooserControllerTest : public CocoaProfileTest {
   }
 
  private:
+  base::test::ScopedFeatureList scoped_feature_list_;
   base::scoped_nsobject<ProfileChooserController> controller_;
   browser_sync::ProfileSyncServiceMock* mock_sync_service_ = nullptr;
 

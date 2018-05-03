@@ -32,8 +32,7 @@ QuotaBackendImpl::QuotaBackendImpl(
       weak_ptr_factory_(this) {
 }
 
-QuotaBackendImpl::~QuotaBackendImpl() {
-}
+QuotaBackendImpl::~QuotaBackendImpl() = default;
 
 void QuotaBackendImpl::ReserveQuota(const GURL& origin,
                                     FileSystemType type,
@@ -107,14 +106,14 @@ void QuotaBackendImpl::DecrementDirtyCount(const GURL& origin,
 void QuotaBackendImpl::DidGetUsageAndQuotaForReserveQuota(
     const QuotaReservationInfo& info,
     const ReserveQuotaCallback& callback,
-    storage::QuotaStatusCode status,
+    blink::mojom::QuotaStatusCode status,
     int64_t usage,
     int64_t quota) {
   DCHECK(file_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(info.origin.is_valid());
   DCHECK_LE(0, usage);
   DCHECK_LE(0, quota);
-  if (status != storage::kQuotaStatusOk) {
+  if (status != blink::mojom::QuotaStatusCode::kOk) {
     callback.Run(base::File::FILE_ERROR_FAILED, 0);
     return;
   }
@@ -170,7 +169,6 @@ QuotaBackendImpl::QuotaReservationInfo::QuotaReservationInfo(
     int64_t delta)
     : origin(origin), type(type), delta(delta) {}
 
-QuotaBackendImpl::QuotaReservationInfo::~QuotaReservationInfo() {
-}
+QuotaBackendImpl::QuotaReservationInfo::~QuotaReservationInfo() = default;
 
 }  // namespace storage

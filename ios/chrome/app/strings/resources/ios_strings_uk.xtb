@@ -34,6 +34,7 @@
 <translation id="145015347812617860">Закладок: <ph name="COUNT" /></translation>
 <translation id="1491277525950327607">Двічі торкніться, щоб змінити налаштування</translation>
 <translation id="152234381334907219">Ніколи не зберігалося</translation>
+<translation id="1532451416480227577">Показувати адреси й дані кредитних карток із Google Pay</translation>
 <translation id="1540800554400757039">Адреса 1</translation>
 <translation id="1545749641540134597">Сканувати QR-код</translation>
 <translation id="1580783302095112590">Лист надіслано.</translation>
@@ -67,7 +68,6 @@
 <translation id="2116625576999540962">Переміщено елементів: <ph name="NUMBER_OF_SELECTED_BOOKMARKS" /></translation>
 <translation id="213900355088104901">Щоб переглядати веб-сторінки конфіденційно, відкрийте анонімну вкладку</translation>
 <translation id="2149973817440762519">Редагувати закладку</translation>
-<translation id="2154710561487035718">Копіювати URL-адресу</translation>
 <translation id="2230173723195178503">Веб-сторінку завантажено</translation>
 <translation id="2256128224215992540">Пропозиції термінів і сайтів</translation>
 <translation id="2267753748892043616">Додати обліковий запис</translation>
@@ -79,6 +79,7 @@
 <translation id="2381405137052800939">Основні</translation>
 <translation id="2386793615875593361">Вибрано 1</translation>
 <translation id="2435457462613246316">Показати пароль</translation>
+<translation id="2523363575747517183">Цей веб-сайт періодично намагається відкрити інший додаток.</translation>
 <translation id="2529021024822217800">Відкрити всі</translation>
 <translation id="2572712655377361602">пристрою</translation>
 <translation id="2584132361465095047">Додати обліковий запис…</translation>
@@ -96,6 +97,7 @@
 <translation id="2718352093833049315">Лише у Wi-Fi</translation>
 <translation id="2747003861858887689">Попереднє поле</translation>
 <translation id="2780046210906776326">Немає облік. записів</translation>
+<translation id="2781692009645368755">Google Pay</translation>
 <translation id="2800683595868705743">Закрити перемикач вкладок</translation>
 <translation id="283291358677939992">Знайти на сторінці...</translation>
 <translation id="2834956026595107950"><ph name="TITLE" />, <ph name="STATE" />, <ph name="URL" /></translation>
@@ -130,7 +132,6 @@
 <translation id="3329904751041170572">Не вдалось під’єднатися до сервера.</translation>
 <translation id="3335947283844343239">Знову відкрити закриту вкладку</translation>
 <translation id="3393920035788932672">Спливаючі вікна дозволені</translation>
-<translation id="3414292259312108062">Chrome додасть пароль у розділ <ph name="BEGIN_LINK" />Збережені паролі Google<ph name="END_LINK" /> й автоматично вводитиме його, тож вам не потрібно нічого запам’ятовувати.</translation>
 <translation id="3445288400492335833"><ph name="MINUTES" /> хв</translation>
 <translation id="3448016392200048164">Режим розділеного екрана</translation>
 <translation id="3474624961160222204">Продовжити як <ph name="NAME" /></translation>
@@ -145,19 +146,14 @@
 <translation id="3567664240939803299">Зберегти пароль для цього сайту в Google Smart Lock?</translation>
 <translation id="3588820906588687999">Відкрити зображення в новій вкладці</translation>
 <translation id="3603009562372709545">Копіювати URL-адресу посилання</translation>
-<translation id="360480449234699036">Дізнавайтеся більше про теми на веб-сайтах, не залишаючи сторінку. Функція пошуку дотиком надсилає слово та його контекст у Пошук Google і повертає визначення, зображення, результати пошуку й інші дані.
-
-Щоб змінити пошуковий термін, натисніть і утримуйте його. Щоб уточнити пошуковий запит, пересуньте панель угору та торкніться вікна пошуку.</translation>
 <translation id="3607167657931203000">Дані автозаповнення</translation>
 <translation id="3628119975092896051">Ваш список читання доступний офлайн. Щоб додати до нього сторінку, торкніться опції <ph name="SHARE_OPENING_ICON" />.</translation>
 <translation id="3638472932233958418">Попер.завантаж.стор.</translation>
 <translation id="3691593122358196899">Закладку збережено в папці "<ph name="FOLDER_TITLE" />"</translation>
-<translation id="3738139272394829648">Пошук дотиком</translation>
 <translation id="3771033907050503522">Анонімні вкладки</translation>
 <translation id="3779810277399252432">Немає з’єднання з Інтернетом</translation>
 <translation id="3783017676699494206">Зберегти зображення</translation>
 <translation id="385051799172605136">Назад</translation>
-<translation id="3857761338463387655">Створити електронний лист у додатку:</translation>
 <translation id="3897092660631435901">Меню</translation>
 <translation id="3928666092801078803">Об’єднати мої дані</translation>
 <translation id="3950820424414687140">Увійти</translation>
@@ -185,6 +181,7 @@
 <translation id="4378154925671717803">Телефон</translation>
 <translation id="441868831736628555">Примітка про конфіденційність</translation>
 <translation id="4460091562821778167">Щоразу запитувати, який додаток використовувати</translation>
+<translation id="4496373720959965247">Додавайте вкладки та переходьте між сторінками</translation>
 <translation id="4508750114462689118">Закрити заклик до входу</translation>
 <translation id="4526249700380860531">Переглядайте збережені паролі та керуйте ними на сторінці <ph name="BEGIN_LINK" />passwords.google.com<ph name="END_LINK" /></translation>
 <translation id="4536418791685807335">Спробуйте ввійти ще раз.</translation>
@@ -223,12 +220,12 @@
 <translation id="5300589172476337783">Показати</translation>
 <translation id="5317780077021120954">Зберегти</translation>
 <translation id="5327248766486351172">Назва</translation>
+<translation id="533632423981297619">Ваші паролі бачитимуть усі, хто може переглядати експортований файл. Не діліться ним.</translation>
 <translation id="5388358297987318779">Відкрити зображення</translation>
 <translation id="5409365236829784218">Немає встановлених програм, які можуть відкрити цей файл.</translation>
 <translation id="5433691172869980887">Ім’я користувача скопійовано</translation>
 <translation id="54401264925851789">Відомості про безпеку сторінки</translation>
 <translation id="5525269841082836315">Створити парол.фразу</translation>
-<translation id="5531274207066050939">Google Payments</translation>
 <translation id="5548760955356983418">За допомогою Handoff можна почати переглядати веб-сайт на цьому пристрої, а потім легко продовжити на пристрої Mac. Відкритий веб-сайт з’явиться на панелі Dock на пристрої Mac.
 
 Для цього потрібно ввімкнути Handoff у розділі "Загальні" в Налаштуваннях, а також увійти в той самий обліковий запис iCloud на пристроях.</translation>
@@ -244,6 +241,7 @@
 <translation id="5771816112378578655">Виконується налаштування..</translation>
 <translation id="5816228676161003208">Ви зможете швидше шукати голосом.</translation>
 <translation id="5846482154967366008">Пошукова система</translation>
+<translation id="5854790677617711513">Понад 30 днів тому</translation>
 <translation id="5857090052475505287">Нова папка</translation>
 <translation id="5857770089550859117">Введіть парольну фразу, щоб почати синхронізацію.</translation>
 <translation id="5860033963881614850">Вимк.</translation>
@@ -252,7 +250,6 @@
 <translation id="5911030830365207728">Google Перекладач</translation>
 <translation id="5916664084637901428">Увімкнути</translation>
 <translation id="5948291296578561264">Ви зможете зберігати знімки в бібліотеці фотографій.</translation>
-<translation id="5953603475187800576">Показувати адреси та дані кредитних карток із Google Payments</translation>
 <translation id="5955891643922670672">Перегляд офлайн-версії</translation>
 <translation id="5964480694698977962">Створити анонімну вкладку.</translation>
 <translation id="5965679971710331625">Ви ввійшли в обліковий запис</translation>
@@ -268,7 +265,6 @@
 <translation id="6122191549521593678">Онлайн</translation>
 <translation id="6127379762771434464">Веб-сайт видалено</translation>
 <translation id="6136914049981179737">Мить тому</translation>
-<translation id="6149061208933997199">Прийняти пароль</translation>
 <translation id="6158823227857319455">Нова вкладка</translation>
 <translation id="616831107264507309">Читати пізніше</translation>
 <translation id="6184086493125982861">Показати вкладки</translation>
@@ -278,7 +274,6 @@
 <translation id="6254066287920239840">Відкривайте посилання в додатку, а не у веб-переглядачі.</translation>
 <translation id="6255097610484507482">Редагувати дані кредитної картки</translation>
 <translation id="6308436439357671616">Ви зможете робити й завантажувати фотографії.</translation>
-<translation id="6314335155547195432">Згенерувати пароль</translation>
 <translation id="6324528485781869530">Змінити обліковий запис для синхронізації</translation>
 <translation id="6324669097367352121">Налаштування входу</translation>
 <translation id="6337234675334993532">Шифрування</translation>
@@ -296,7 +291,6 @@
 <translation id="6418346271604475326">Підготовка PDF</translation>
 <translation id="6445051938772793705">Країна</translation>
 <translation id="6445981559479772097">Повідомлення надіслано.</translation>
-<translation id="6456425917241817154">Пароль, згенерований Chrome</translation>
 <translation id="6464071786529933911">Відкрити в анонімній вкладці</translation>
 <translation id="6482629121755362506">Видалено елементів: <ph name="NUMBER_OF_SELECTED_BOOKMARKS" /></translation>
 <translation id="6541915733953096570">Остання година</translation>
@@ -312,7 +306,6 @@
 <translation id="6797885426782475225">Голосовий пошук</translation>
 <translation id="6807889908376551050">Показати всі...</translation>
 <translation id="681368974849482173">Закладку творено</translation>
-<translation id="6871663519944855400">Відкрити в режимі анонімного перегляду</translation>
 <translation id="6896758677409633944">Копіювати</translation>
 <translation id="6903907808598579934">Увімкнути синхронізацію</translation>
 <translation id="6945221475159498467">Вибрати</translation>
@@ -320,6 +313,7 @@
 <translation id="7004499039102548441">Останні вкладки</translation>
 <translation id="7006788746334555276">Веб-контент</translation>
 <translation id="7031882061095297553">Синхронізувати</translation>
+<translation id="7053983685419859001">Блокувати</translation>
 <translation id="7062545763355031412">Прийняти та перейти в інший обліковий запис</translation>
 <translation id="7108338896283013870">Сховати</translation>
 <translation id="7133798577887235672">Повне ім’я</translation>
@@ -340,26 +334,24 @@
 <translation id="7456847797759667638">Відкрити розташування...</translation>
 <translation id="7464701184726199289">Синхронізовані дані буде видалено з усіх пристроїв. Збережені налаштування, які можуть стосуватися ваших зацікавлень в Інтернеті, не буде видалено. <ph name="BEGIN_LINK" />Докладніше<ph name="END_LINK" /></translation>
 <translation id="7472734401283673885">Назва компанії</translation>
-<translation id="7473891865547856676">Ні, дякую</translation>
 <translation id="7481312909269577407">Переслати</translation>
 <translation id="750493650310597496">Вибрано 0</translation>
 <translation id="7514365320538308">Завантажити</translation>
 <translation id="7537586195939242955">Не вдалося внести дані в Passbook.</translation>
 <translation id="7561196759112975576">Завжди</translation>
-<translation id="7588950540487816470">Інтернет навколо нас</translation>
 <translation id="7603852183842204213">Сплив.вікна блок. (<ph name="NUMBER_OF_BLOCKED_POPUPS" />)</translation>
 <translation id="7605594153474022051">Синхронізація не працює</translation>
 <translation id="7638584964844754484">Неправильна парольна фраза</translation>
 <translation id="7649070708921625228">Довідка</translation>
 <translation id="7658239707568436148">Скасувати</translation>
 <translation id="7671141431838911305">INSTALL</translation>
-<translation id="7677825787905683892">Вибрати поштовий додаток за умовчанням</translation>
 <translation id="7765158879357617694">Перемістити</translation>
 <translation id="7769602470925380267">Прийняти та вийти</translation>
 <translation id="7772032839648071052">Підтвердити парольну фразу</translation>
 <translation id="780301667611848630">Ні, дякую</translation>
 <translation id="7859704718976024901">Історія веб-перегляду</translation>
 <translation id="7938254975914653459">FaceTime</translation>
+<translation id="7939128259257418052">Експортувати паролі…</translation>
 <translation id="7947953824732555851">Прийняти й увійти</translation>
 <translation id="7961015016161918242">Ніколи</translation>
 <translation id="7971521879845308059">Блок.сплив.вікна</translation>
@@ -370,7 +362,6 @@
 <translation id="806745655614357130">Зберігати мої дані окремо</translation>
 <translation id="8076014560081431679">Збережені налаштування, які можуть стосуватися ваших зацікавлень в Інтернеті, не буде видалено. <ph name="BEGIN_LINK" />Докладніше<ph name="END_LINK" /></translation>
 <translation id="8080028325999236607">Закрити всі вкладки</translation>
-<translation id="8137558756159375272">Функція пошуку дотиком надсилає слово та поточну сторінку як додаткові дані в Пошук Google. Її можна вимкнути в <ph name="BEGIN_LINK" />налаштуваннях<ph name="END_LINK" />.</translation>
 <translation id="8205564605687841303">Скасувати</translation>
 <translation id="8225985093977202398">Кешовані зображення й файли</translation>
 <translation id="8261506727792406068">Видалити</translation>
@@ -383,6 +374,7 @@
 <translation id="8458397775385147834">Видалено 1 елемент</translation>
 <translation id="8487700953926739672">Доступ у режимі офлайн</translation>
 <translation id="8503813439785031346">Ім’я користувача</translation>
+<translation id="850600235656508448">Відкрити в режимі анонімного перегляду</translation>
 <translation id="8517375800490286174">Ліцензії ПЗ з відкритим кодом</translation>
 <translation id="8524799873541103884"><ph name="INCOGNITO" />: вкладки <ph name="FIRST_VISIBLE_TAB" />–<ph name="LAST_VISIBLE_TAB" /> з <ph name="NUMBER_OF_OPEN_TABS" /></translation>
 <translation id="8532105204136943229">Рік закінчення терміну дії</translation>
@@ -417,8 +409,6 @@
 <translation id="9083392325882095631">1 закладка</translation>
 <translation id="9100610230175265781">Потрібно вказати парольну фразу</translation>
 <translation id="9148126808321036104">Увійти знову</translation>
-<translation id="914898748153555155">Цей параметр можна будь-коли змінити в налаштуваннях Chrome</translation>
-<translation id="91549621916703028">Створюйте різні вкладки для всіх своїх завдань</translation>
 <translation id="9157836665414082580">Заблокувати діалогові вікна</translation>
 <translation id="9188680907066685419">Вийти з керованого облікового запису</translation>
 <translation id="9203116392574189331">Handoff</translation>
@@ -429,4 +419,5 @@
 <translation id="976982866697960176">Керування синхронізованими даними…</translation>
 <translation id="988141524645182168">Інші пристрої</translation>
 <translation id="989988560359834682">Редагувати адресу</translation>
+<translation id="994757059139821576">Пропозиції статей</translation>
 </translationbundle>

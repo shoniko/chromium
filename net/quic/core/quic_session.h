@@ -23,7 +23,7 @@
 #include "net/quic/core/quic_stream.h"
 #include "net/quic/core/quic_stream_frame_data_producer.h"
 #include "net/quic/core/quic_write_blocked_list.h"
-#include "net/quic/core/stream_notifier_interface.h"
+#include "net/quic/core/session_notifier_interface.h"
 #include "net/quic/platform/api/quic_containers.h"
 #include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_socket_address.h"
@@ -39,7 +39,7 @@ class QuicSessionPeer;
 }  // namespace test
 
 class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface,
-                                        public StreamNotifierInterface,
+                                        public SessionNotifierInterface,
                                         public QuicStreamFrameDataProducer {
  public:
   // An interface from the session to the entity owning the session.
@@ -99,6 +99,9 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface,
   void OnWriteBlocked() override;
   void OnSuccessfulVersionNegotiation(
       const QuicTransportVersion& version) override;
+  void OnConnectivityProbeReceived(
+      const QuicSocketAddress& self_address,
+      const QuicSocketAddress& peer_address) override;
   void OnCanWrite() override;
   void OnCongestionWindowChange(QuicTime /*now*/) override {}
   void OnConnectionMigration(PeerAddressChangeType type) override {}
@@ -119,11 +122,11 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface,
                        QuicByteCount data_length,
                        QuicDataWriter* writer) override;
 
-  // StreamNotifierInterface methods:
-  void OnStreamFrameAcked(const QuicStreamFrame& frame,
-                          QuicTime::Delta ack_delay_time) override;
+  // SessionNotifierInterface methods:
+  void OnFrameAcked(const QuicFrame& frame,
+                    QuicTime::Delta ack_delay_time) override;
   void OnStreamFrameRetransmitted(const QuicStreamFrame& frame) override;
-  void OnStreamFrameDiscarded(const QuicStreamFrame& frame) override;
+  void OnFrameLost(const QuicFrame& frame) override;
 
   // Called on every incoming packet. Passes |packet| through to |connection_|.
   virtual void ProcessUdpPacket(const QuicSocketAddress& self_address,
@@ -137,7 +140,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface,
   // if the socket was unexpectedly blocked.
   virtual QuicConsumedData WritevData(QuicStream* stream,
                                       QuicStreamId id,
-                                      QuicIOVector iov,
+                                      size_t write_length,
                                       QuicStreamOffset offset,
                                       StreamSendingState state);
 
@@ -230,6 +233,9 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface,
   // a stream is reset because of an error).
   void OnStreamDoneWaitingForAcks(QuicStreamId id);
 
+  // Called to cancel retransmission of unencypted crypto stream data.
+  void NeuterUnencryptedData();
+
   // Returns true if the session has data to be sent, either queued in the
   // connection, or in a write-blocked stream.
   bool HasDataToWrite() const;
@@ -272,7 +278,14 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface,
   // Returns true if this stream should yield writes to another blocked stream.
   bool ShouldYield(QuicStreamId stream_id);
 
+  // Called to cancel retransmission of unencrypted stream data.
+  void NeuterUnencryptedStreamData();
+
   bool can_use_slices() const { return can_use_slices_; }
+
+  bool allow_multiple_acks_for_data() const {
+    return allow_multiple_acks_for_data_;
+  }
 
  protected:
   using StaticStreamMap = QuicSmallMap<QuicStreamId, QuicStream*, 2>;
@@ -417,6 +430,10 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface,
   // closed.
   QuicStream* GetStream(QuicStreamId id) const;
 
+  // Let streams retransmit lost data, returns true if all lost data is
+  // retransmitted. Returns false otherwise.
+  bool RetransmitLostStreamData();
+
   // Keep track of highest received byte offset of locally closed streams, while
   // waiting for a definitive final highest offset from the peer.
   std::map<QuicStreamId, QuicStreamOffset>
@@ -488,6 +505,14 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface,
   // QUIC stream can take ownership of application data provided in reference
   // counted memory to avoid data copy.
   const bool can_use_slices_;
+
+  // Latched value of quic_reloadable_flag_quic_allow_multiple_acks_for_data2.
+  const bool allow_multiple_acks_for_data_;
+
+  // TODO(fayang): switch to linked_hash_set when chromium supports it. The bool
+  // is not used here.
+  // List of streams with pending retransmissions.
+  QuicLinkedHashMap<QuicStreamId, bool> streams_with_pending_retransmission_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicSession);
 };

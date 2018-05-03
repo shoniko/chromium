@@ -21,7 +21,7 @@ void MojoVideoEncodeAcceleratorProvider::Create(
     const CreateAndInitializeVideoEncodeAcceleratorCallback&
         create_vea_callback,
     const gpu::GpuPreferences& gpu_preferences) {
-  mojo::MakeStrongBinding(base::MakeUnique<MojoVideoEncodeAcceleratorProvider>(
+  mojo::MakeStrongBinding(std::make_unique<MojoVideoEncodeAcceleratorProvider>(
                               create_vea_callback, gpu_preferences),
                           std::move(request));
 }
@@ -33,7 +33,8 @@ MojoVideoEncodeAcceleratorProvider::MojoVideoEncodeAcceleratorProvider(
     : create_vea_callback_(create_vea_callback),
       gpu_preferences_(gpu_preferences) {}
 
-MojoVideoEncodeAcceleratorProvider::~MojoVideoEncodeAcceleratorProvider() {}
+MojoVideoEncodeAcceleratorProvider::~MojoVideoEncodeAcceleratorProvider() =
+    default;
 
 void MojoVideoEncodeAcceleratorProvider::CreateVideoEncodeAccelerator(
     mojom::VideoEncodeAcceleratorRequest request) {

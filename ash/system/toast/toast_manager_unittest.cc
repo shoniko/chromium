@@ -22,13 +22,13 @@ namespace ash {
 class DummyEvent : public ui::Event {
  public:
   DummyEvent() : Event(ui::ET_UNKNOWN, base::TimeTicks(), 0) {}
-  ~DummyEvent() override {}
+  ~DummyEvent() override = default;
 };
 
 class ToastManagerTest : public AshTestBase {
  public:
-  ToastManagerTest() {}
-  ~ToastManagerTest() override {}
+  ToastManagerTest() = default;
+  ~ToastManagerTest() override = default;
 
  private:
   void SetUp() override {
@@ -183,16 +183,17 @@ TEST_F(ToastManagerTest, PositionWithVisibleBottomShelf) {
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
   gfx::Rect root_bounds =
-      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
+      screen_util::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_NEAR(root_bounds.CenterPoint().x(), toast_bounds.CenterPoint().x(), 1);
 
   gfx::Rect shelf_bounds = shelf->GetIdealBounds();
   EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
-  EXPECT_EQ(shelf_bounds.y() - 5, toast_bounds.bottom());
-  EXPECT_EQ(root_bounds.bottom() - shelf_bounds.height() - 5,
-            toast_bounds.bottom());
+  EXPECT_EQ(shelf_bounds.y() - ToastOverlay::kOffset, toast_bounds.bottom());
+  EXPECT_EQ(
+      root_bounds.bottom() - shelf_bounds.height() - ToastOverlay::kOffset,
+      toast_bounds.bottom());
 }
 
 TEST_F(ToastManagerTest, PositionWithAutoHiddenBottomShelf) {
@@ -209,11 +210,11 @@ TEST_F(ToastManagerTest, PositionWithAutoHiddenBottomShelf) {
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
   gfx::Rect root_bounds =
-      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
+      screen_util::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_NEAR(root_bounds.CenterPoint().x(), toast_bounds.CenterPoint().x(), 1);
-  EXPECT_EQ(root_bounds.bottom() - kShelfAutoHideSize - 5,
+  EXPECT_EQ(root_bounds.bottom() - kShelfAutoHideSize - ToastOverlay::kOffset,
             toast_bounds.bottom());
 }
 
@@ -228,11 +229,12 @@ TEST_F(ToastManagerTest, PositionWithHiddenBottomShelf) {
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
   gfx::Rect root_bounds =
-      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
+      screen_util::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_NEAR(root_bounds.CenterPoint().x(), toast_bounds.CenterPoint().x(), 1);
-  EXPECT_EQ(root_bounds.bottom() - 5, toast_bounds.bottom());
+  EXPECT_EQ(root_bounds.bottom() - ToastOverlay::kOffset,
+            toast_bounds.bottom());
 }
 
 TEST_F(ToastManagerTest, PositionWithVisibleLeftShelf) {
@@ -246,10 +248,11 @@ TEST_F(ToastManagerTest, PositionWithVisibleLeftShelf) {
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
   gfx::RectF precise_toast_bounds(toast_bounds);
   gfx::Rect root_bounds =
-      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
+      screen_util::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
-  EXPECT_EQ(root_bounds.bottom() - 5, toast_bounds.bottom());
+  EXPECT_EQ(root_bounds.bottom() - ToastOverlay::kOffset,
+            toast_bounds.bottom());
 
   gfx::Rect shelf_bounds = shelf->GetIdealBounds();
   EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
@@ -271,7 +274,7 @@ TEST_F(ToastManagerTest, PositionWithUnifiedDesktop) {
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
   gfx::Rect root_bounds =
-      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
+      screen_util::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_TRUE(root_bounds.Contains(toast_bounds));
@@ -279,9 +282,10 @@ TEST_F(ToastManagerTest, PositionWithUnifiedDesktop) {
 
   gfx::Rect shelf_bounds = shelf->GetIdealBounds();
   EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
-  EXPECT_EQ(shelf_bounds.y() - 5, toast_bounds.bottom());
-  EXPECT_EQ(root_bounds.bottom() - shelf_bounds.height() - 5,
-            toast_bounds.bottom());
+  EXPECT_EQ(shelf_bounds.y() - ToastOverlay::kOffset, toast_bounds.bottom());
+  EXPECT_EQ(
+      root_bounds.bottom() - shelf_bounds.height() - ToastOverlay::kOffset,
+      toast_bounds.bottom());
 }
 
 TEST_F(ToastManagerTest, CancelToast) {

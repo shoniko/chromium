@@ -314,10 +314,6 @@ void XMLDocumentParser::ClearCurrentNodeStack() {
   }
 }
 
-void XMLDocumentParser::insert(const SegmentedString&) {
-  NOTREACHED();
-}
-
 void XMLDocumentParser::Append(const String& input_source) {
   const SegmentedString source(input_source);
   if (saw_xsl_transform_ || !saw_first_element_)
@@ -666,7 +662,7 @@ scoped_refptr<XMLParserContext> XMLParserContext::CreateStringParser(
   xmlCtxtUseOptions(parser, XML_PARSE_HUGE);
   parser->_private = user_data;
   parser->replaceEntities = true;
-  return WTF::AdoptRef(new XMLParserContext(parser));
+  return base::AdoptRef(new XMLParserContext(parser));
 }
 
 // Chunk should be encoded in UTF-8
@@ -702,7 +698,7 @@ scoped_refptr<XMLParserContext> XMLParserContext::CreateMemoryParser(
   parser->str_xml_ns = xmlDictLookup(parser->dict, XML_XML_NAMESPACE, 36);
   parser->_private = user_data;
 
-  return WTF::AdoptRef(new XMLParserContext(parser));
+  return base::AdoptRef(new XMLParserContext(parser));
 }
 
 // --------------------------------
@@ -794,8 +790,7 @@ XMLParserContext::~XMLParserContext() {
   xmlFreeParserCtxt(context_);
 }
 
-XMLDocumentParser::~XMLDocumentParser() {
-}
+XMLDocumentParser::~XMLDocumentParser() = default;
 
 void XMLDocumentParser::Trace(blink::Visitor* visitor) {
   visitor->Trace(current_node_);
@@ -1019,7 +1014,7 @@ void XMLDocumentParser::EndElementNs() {
 
   if (parser_paused_) {
     pending_callbacks_.push_back(
-        WTF::MakeUnique<PendingEndElementNSCallback>(script_start_position_));
+        std::make_unique<PendingEndElementNSCallback>(script_start_position_));
     return;
   }
 
@@ -1089,7 +1084,7 @@ void XMLDocumentParser::Characters(const xmlChar* chars, int length) {
 
   if (parser_paused_) {
     pending_callbacks_.push_back(
-        WTF::MakeUnique<PendingCharactersCallback>(chars, length));
+        std::make_unique<PendingCharactersCallback>(chars, length));
     return;
   }
 
@@ -1123,7 +1118,7 @@ void XMLDocumentParser::GetProcessingInstruction(const String& target,
 
   if (parser_paused_) {
     pending_callbacks_.push_back(
-        WTF::MakeUnique<PendingProcessingInstructionCallback>(target, data));
+        std::make_unique<PendingProcessingInstructionCallback>(target, data));
     return;
   }
 
@@ -1165,7 +1160,7 @@ void XMLDocumentParser::CdataBlock(const String& text) {
 
   if (parser_paused_) {
     pending_callbacks_.push_back(
-        WTF::MakeUnique<PendingCDATABlockCallback>(text));
+        std::make_unique<PendingCDATABlockCallback>(text));
     return;
   }
 
@@ -1181,7 +1176,8 @@ void XMLDocumentParser::Comment(const String& text) {
     return;
 
   if (parser_paused_) {
-    pending_callbacks_.push_back(WTF::MakeUnique<PendingCommentCallback>(text));
+    pending_callbacks_.push_back(
+        std::make_unique<PendingCommentCallback>(text));
     return;
   }
 
@@ -1492,7 +1488,7 @@ void XMLDocumentParser::DoEnd() {
     xmlDocPtr doc = XmlDocPtrForString(
         GetDocument(), original_source_for_transform_.ToString(),
         GetDocument()->Url().GetString());
-    GetDocument()->SetTransformSource(WTF::MakeUnique<TransformSource>(doc));
+    GetDocument()->SetTransformSource(std::make_unique<TransformSource>(doc));
     DocumentParser::StopParsing();
   }
 }

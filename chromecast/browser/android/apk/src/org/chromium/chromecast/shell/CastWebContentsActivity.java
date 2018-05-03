@@ -51,12 +51,13 @@ public class CastWebContentsActivity extends Activity {
     private BroadcastReceiver mWindowDestroyedBroadcastReceiver;
     private BroadcastReceiver mScreenOffBroadcastReceiver;
     private FrameLayout mCastWebContentsLayout;
-    private AudioManager mAudioManager;
+    private CastAudioManager mAudioManager;
     private ContentViewRenderView mContentViewRenderView;
     private WindowAndroid mWindow;
     private ContentViewCore mContentViewCore;
     private ContentView mContentView;
     private boolean mReceivedUserLeave = false;
+    private boolean mIsTouchInputEnabled = false;
 
     private static final int TEARDOWN_GRACE_PERIOD_TIMEOUT_MILLIS = 300;
 
@@ -98,29 +99,20 @@ public class CastWebContentsActivity extends Activity {
         mAudioManager = CastAudioManager.getAudioManager(this);
 
         setContentView(R.layout.cast_web_contents_activity);
-
-        mWindow = new WindowAndroid(this);
-        mContentViewRenderView = new ContentViewRenderView(this) {
-            @Override
-            protected void onReadyToRender() {
-                setOverlayVideoMode(true);
-            }
-        };
-        mContentViewRenderView.onNativeLibraryLoaded(mWindow);
-        // Setting the background color to black avoids rendering a white splash screen
-        // before the players are loaded. See crbug/307113 for details.
-        mContentViewRenderView.setSurfaceViewBackgroundColor(Color.BLACK);
-
         mCastWebContentsLayout = (FrameLayout) findViewById(R.id.web_contents_container);
-        mCastWebContentsLayout.addView(mContentViewRenderView,
-                new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT));
 
         Intent intent = getIntent();
         handleIntent(intent);
     }
 
     protected void handleIntent(Intent intent) {
+        // Do not load the WebContents if we are simply bringing the same
+        // activity to the foreground.
+        if (intent.getData() == null || intent.getData().getPath() == null
+                || (mInstanceId != null && mInstanceId.equals(intent.getData().getPath()))) {
+            return;
+        }
+
         intent.setExtrasClassLoader(WebContents.class.getClassLoader());
         mInstanceId = intent.getData().getPath();
 
@@ -164,6 +156,8 @@ public class CastWebContentsActivity extends Activity {
 
         WebContents webContents = (WebContents) intent.getParcelableExtra(
                 CastWebContentsComponent.ACTION_EXTRA_WEB_CONTENTS);
+        mIsTouchInputEnabled = intent.getBooleanExtra(
+                CastWebContentsComponent.ACTION_EXTRA_TOUCH_INPUT_ENABLED, false);
 
         if (webContents == null) {
             Log.e(TAG, "Received null WebContents in intent.");
@@ -171,7 +165,6 @@ public class CastWebContentsActivity extends Activity {
             return;
         }
 
-        detachWebContentsIfAny();
         showWebContents(webContents);
     }
 
@@ -197,6 +190,8 @@ public class CastWebContentsActivity extends Activity {
     protected void onDestroy() {
         if (DEBUG) Log.d(TAG, "onDestroy");
 
+        detachWebContentsIfAny();
+
         if (mWindowDestroyedBroadcastReceiver != null) {
             LocalBroadcastManager.getInstance(this).unregisterReceiver(
                     mWindowDestroyedBroadcastReceiver);
@@ -217,10 +212,6 @@ public class CastWebContentsActivity extends Activity {
     @Override
     protected void onStop() {
         if (DEBUG) Log.d(TAG, "onStop");
-        if (isStopping()) {
-            detachWebContentsIfAny();
-            releaseStreamMuteIfNecessary();
-        }
         super.onStop();
     }
 
@@ -234,6 +225,9 @@ public class CastWebContentsActivity extends Activity {
                 != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
             Log.e(TAG, "Failed to obtain audio focus");
         }
+        if (mContentViewCore != null) {
+            mContentViewCore.onResume();
+        }
     }
 
     @Override
@@ -246,6 +240,10 @@ public class CastWebContentsActivity extends Activity {
         if (mAudioManager.abandonAudioFocus(null) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
             Log.e(TAG, "Failed to abandon audio focus");
         }
+        if (mContentViewCore != null) {
+            mContentViewCore.onPause();
+        }
+        releaseStreamMuteIfNecessary();
     }
 
     @Override
@@ -313,7 +311,11 @@ public class CastWebContentsActivity extends Activity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        return false;
+        if (mIsTouchInputEnabled) {
+            return super.dispatchTouchEvent(ev);
+        } else {
+            return false;
+        }
     }
 
     @Override
@@ -323,7 +325,7 @@ public class CastWebContentsActivity extends Activity {
 
     @SuppressWarnings("deprecation")
     private void releaseStreamMuteIfNecessary() {
-        AudioManager audioManager = CastAudioManager.getAudioManager(this);
+        AudioManager audioManager = mAudioManager.getInternal();
         boolean isMuted = false;
         try {
             isMuted = (Boolean) audioManager.getClass()
@@ -346,7 +348,7 @@ public class CastWebContentsActivity extends Activity {
         mHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (currentInstanceId == mInstanceId) {
+                if (currentInstanceId.equals(mInstanceId)) {
                     Log.d(TAG, "Finishing.");
                     finish();
                 }
@@ -358,11 +360,30 @@ public class CastWebContentsActivity extends Activity {
     private void showWebContents(WebContents webContents) {
         if (DEBUG) Log.d(TAG, "showWebContents");
 
+        detachWebContentsIfAny();
+
         // Set ContentVideoViewEmbedder to allow video playback.
         nativeSetContentVideoViewEmbedder(webContents, new ActivityContentVideoViewEmbedder(this));
 
+        // TODO(thoren): Find a way to reuse some of this for efficiency.
+        mWindow = new WindowAndroid(this);
+        mContentViewRenderView = new ContentViewRenderView(this) {
+            @Override
+            protected void onReadyToRender() {
+                setOverlayVideoMode(true);
+            }
+        };
+        mContentViewRenderView.onNativeLibraryLoaded(mWindow);
+        // Setting the background color to black avoids rendering a white splash screen
+        // before the players are loaded. See crbug/307113 for details.
+        mContentViewRenderView.setSurfaceViewBackgroundColor(Color.BLACK);
+
+        mCastWebContentsLayout.addView(mContentViewRenderView,
+                new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+
         // TODO(derekjchow): productVersion
-        mContentViewCore = new ContentViewCore(this, "");
+        mContentViewCore = ContentViewCore.create(this, "");
         mContentView = ContentView.createContentView(this, mContentViewCore);
         mContentViewCore.initialize(ViewAndroidDelegate.createBasicDelegate(mContentView),
                 mContentView, webContents, mWindow);
@@ -380,8 +401,14 @@ public class CastWebContentsActivity extends Activity {
         if (DEBUG) Log.d(TAG, "detachWebContentsIfAny");
         if (mContentView != null) {
             mCastWebContentsLayout.removeView(mContentView);
+            mCastWebContentsLayout.removeView(mContentViewRenderView);
+            mContentViewCore.destroy();
+            mContentViewRenderView.destroy();
+            mWindow.destroy();
             mContentView = null;
             mContentViewCore = null;
+            mContentViewRenderView = null;
+            mWindow = null;
 
             CastWebContentsComponent.onComponentClosed(this, mInstanceId);
         }

@@ -19,6 +19,7 @@
 #include "content/renderer/render_process.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 
 using testing::NiceMock;
 using testing::Return;
@@ -43,6 +44,8 @@ class MockWebMediaPlayerDelegateObserver
   MOCK_METHOD0(OnIdleTimeout, void());
   MOCK_METHOD0(OnPlay, void());
   MOCK_METHOD0(OnPause, void());
+  MOCK_METHOD1(OnSeekForward, void(double));
+  MOCK_METHOD1(OnSeekBackward, void(double));
   MOCK_METHOD1(OnVolumeMultiplierUpdate, void(double));
   MOCK_METHOD1(OnBecamePersistentVideo, void(bool));
 };
@@ -90,8 +93,8 @@ class RendererWebMediaPlayerDelegateTest : public content::RenderViewTest {
 
   void RunLoopOnce() {
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                  run_loop.QuitClosure());
+    blink::scheduler::GetSingleThreadTaskRunnerForTesting()->PostTask(
+        FROM_HERE, run_loop.QuitClosure());
     run_loop.Run();
   }
 
@@ -207,6 +210,18 @@ TEST_F(RendererWebMediaPlayerDelegateTest, DeliversObserverNotifications) {
   EXPECT_CALL(observer_1_, OnPlay());
   MediaPlayerDelegateMsg_Play play_msg(0, delegate_id);
   delegate_manager_->OnMessageReceived(play_msg);
+
+  const double kTestSeekForwardSeconds = 1.0;
+  EXPECT_CALL(observer_1_, OnSeekForward(kTestSeekForwardSeconds));
+  MediaPlayerDelegateMsg_SeekForward seek_forward_msg(
+      0, delegate_id, base::TimeDelta::FromSeconds(kTestSeekForwardSeconds));
+  delegate_manager_->OnMessageReceived(seek_forward_msg);
+
+  const double kTestSeekBackwardSeconds = 2.0;
+  EXPECT_CALL(observer_1_, OnSeekBackward(kTestSeekBackwardSeconds));
+  MediaPlayerDelegateMsg_SeekBackward seek_backward_msg(
+      0, delegate_id, base::TimeDelta::FromSeconds(kTestSeekBackwardSeconds));
+  delegate_manager_->OnMessageReceived(seek_backward_msg);
 
   const double kTestMultiplier = 0.5;
   EXPECT_CALL(observer_1_, OnVolumeMultiplierUpdate(kTestMultiplier));

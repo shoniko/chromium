@@ -25,7 +25,7 @@
 
 using std::make_pair;
 
-DECLARE_UI_CLASS_PROPERTY_TYPE(::wm::Shadow*);
+DEFINE_UI_CLASS_PROPERTY_TYPE(::wm::Shadow*);
 DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(::wm::Shadow, kShadowLayerKey, nullptr);
 
 namespace wm {
@@ -110,7 +110,8 @@ class ShadowController::Impl :
                                intptr_t old) override;
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override;
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override;
   void OnWindowDestroyed(aura::Window* window) override;
 
  private:
@@ -184,7 +185,8 @@ void ShadowController::Impl::OnWindowPropertyChanged(aura::Window* window,
 void ShadowController::Impl::OnWindowBoundsChanged(
     aura::Window* window,
     const gfx::Rect& old_bounds,
-    const gfx::Rect& new_bounds) {
+    const gfx::Rect& new_bounds,
+    ui::PropertyChangeReason reason) {
   Shadow* shadow = GetShadowForWindow(window);
   if (shadow)
     shadow->SetContentBounds(gfx::Rect(new_bounds.size()));

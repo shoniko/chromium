@@ -18,13 +18,17 @@
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "ppapi/features/features.h"
+#include "services/network/public/interfaces/url_loader_factory.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
+#include "third_party/WebKit/common/page/page_visibility_state.mojom.h"
 #include "third_party/WebKit/public/platform/TaskType.h"
-#include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/web/WebNavigationPolicy.h"
 #include "third_party/WebKit/public/web/WebTriggeringEventInfo.h"
+#include "ui/accessibility/ax_modes.h"
 
 namespace blink {
+class AssociatedInterfaceProvider;
+class AssociatedInterfaceRegistry;
 class WebFrame;
 class WebLocalFrame;
 class WebPlugin;
@@ -44,16 +48,7 @@ namespace url {
 class Origin;
 }
 
-namespace v8 {
-template <typename T> class Local;
-class Context;
-class Isolate;
-}
-
 namespace content {
-class AssociatedInterfaceProvider;
-class AssociatedInterfaceRegistry;
-class ChildURLLoaderFactoryGetter;
 class ContextMenuClient;
 class PluginInstanceThrottler;
 class RenderAccessibility;
@@ -167,12 +162,14 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
 
   // Returns the AssociatedInterfaceRegistry this frame can use to expose
   // frame-specific Channel-associated interfaces to the remote RenderFrameHost.
-  virtual AssociatedInterfaceRegistry* GetAssociatedInterfaceRegistry() = 0;
+  virtual blink::AssociatedInterfaceRegistry*
+  GetAssociatedInterfaceRegistry() = 0;
 
   // Returns the AssociatedInterfaceProvider this frame can use to access
   // frame-specific Channel-associated interfaces from the remote
   // RenderFrameHost.
-  virtual AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() = 0;
+  virtual blink::AssociatedInterfaceProvider*
+  GetRemoteAssociatedInterfaces() = 0;
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   // Registers a plugin that has been marked peripheral. If the origin
@@ -230,16 +227,9 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
                                size_t offset,
                                const gfx::Range& range) = 0;
 
-  // Ensures that builtin mojo bindings modules are available in |context|.
-  virtual void EnsureMojoBuiltinsAreAvailable(
-      v8::Isolate* isolate,
-      v8::Local<v8::Context> context) = 0;
-
   // Adds |message| to the DevTools console.
   virtual void AddMessageToConsole(ConsoleMessageLevel level,
                                    const std::string& message) = 0;
-  // Forcefully detaches all connected DevTools clients.
-  virtual void DetachDevToolsForTest() = 0;
 
   // Sets the PreviewsState of this frame, a bitmask of potentially several
   // Previews optimizations.
@@ -253,7 +243,7 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   virtual bool IsPasting() const = 0;
 
   // Returns the current visibility of the frame.
-  virtual blink::WebPageVisibilityState GetVisibilityState() const = 0;
+  virtual blink::mojom::PageVisibilityState GetVisibilityState() const = 0;
 
   // If PlzNavigate is enabled, returns true in between teh time that Blink
   // requests navigation until the browser responds with the result.
@@ -268,9 +258,12 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   // BindingsPolicy for details.
   virtual int GetEnabledBindings() const = 0;
 
-  // Returns a default ChildURLLoaderFactoryGetter for the RenderFrame.
-  // Used to obtain a right mojom::URLLoaderFactory.
-  virtual ChildURLLoaderFactoryGetter* GetDefaultURLLoaderFactoryGetter() = 0;
+  // Set the accessibility mode to force creation of RenderAccessibility.
+  virtual void SetAccessibilityModeForTest(ui::AXMode new_mode) = 0;
+
+  // Returns the URLLoaderFactory for the given GURL
+  virtual network::mojom::URLLoaderFactory* GetURLLoaderFactory(
+      const GURL& request_url) = 0;
 
  protected:
   ~RenderFrame() override {}

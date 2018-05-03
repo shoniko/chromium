@@ -105,6 +105,10 @@ content::WebContents* GetWebContentsFromJavaTab(
   return tab->web_contents();
 }
 
+void SavePageLaterCallback(AddRequestResult result) {
+  // do nothing.
+}
+
 void SavePageIfNotNavigatedAway(const GURL& url,
                                 const GURL& original_url,
                                 const ScopedJavaGlobalRef<jobject>& j_tab_ref,
@@ -141,7 +145,8 @@ void SavePageIfNotNavigatedAway(const GURL& url,
           RequestCoordinator::RequestAvailability::DISABLED_FOR_OFFLINER;
       params.original_url = original_url;
       params.request_origin = origin;
-      request_id = request_coordinator->SavePageLater(params);
+      request_id = request_coordinator->SavePageLater(
+          params, base::Bind(&SavePageLaterCallback));
     } else {
       DVLOG(1) << "SavePageIfNotNavigatedAway has no valid coordinator.";
     }
@@ -250,6 +255,7 @@ void OnAcquireFileAccessPermissionDone(
 
   dl_params->set_prefer_cache(true);
   dl_params->set_prompt(false);
+  dl_params->set_download_source(content::DownloadSource::OFFLINE_PAGE);
   dlm->DownloadUrl(std::move(dl_params));
 }
 
@@ -267,10 +273,11 @@ void OfflinePageDownloadBridge::Destroy(JNIEnv* env,
   delete this;
 }
 
-void StartDownload(JNIEnv* env,
-                   const JavaParamRef<jclass>& clazz,
-                   const JavaParamRef<jobject>& j_tab,
-                   const JavaParamRef<jstring>& j_origin) {
+void JNI_OfflinePageDownloadBridge_StartDownload(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& j_tab,
+    const JavaParamRef<jstring>& j_origin) {
   TabAndroid* tab = TabAndroid::GetNativeTab(env, j_tab);
   if (!tab)
     return;
@@ -306,9 +313,10 @@ void StartDownload(JNIEnv* env,
       base::Bind(&DuplicateCheckDone, url, original_url, j_tab_ref, origin));
 }
 
-static jlong Init(JNIEnv* env,
-                  const JavaParamRef<jobject>& obj,
-                  const JavaParamRef<jobject>& j_profile) {
+static jlong JNI_OfflinePageDownloadBridge_Init(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& j_profile) {
   content::BrowserContext* browser_context =
       ProfileAndroid::FromProfileAndroid(j_profile);
 

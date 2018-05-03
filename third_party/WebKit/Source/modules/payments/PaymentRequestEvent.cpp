@@ -4,6 +4,9 @@
 
 #include "modules/payments/PaymentRequestEvent.h"
 
+#include <memory>
+#include <utility>
+
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
 #include "core/workers/WorkerGlobalScope.h"
@@ -12,7 +15,6 @@
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "modules/serviceworkers/ServiceWorkerWindowClientCallback.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
@@ -32,7 +34,7 @@ PaymentRequestEvent* PaymentRequestEvent::Create(
                                  wait_until_observer);
 }
 
-PaymentRequestEvent::~PaymentRequestEvent() {}
+PaymentRequestEvent::~PaymentRequestEvent() = default;
 
 const AtomicString& PaymentRequestEvent::InterfaceName() const {
   return EventNames::PaymentRequestEvent;
@@ -94,7 +96,7 @@ ScriptPromise PaymentRequestEvent::openWindow(ScriptState* script_state,
   context->ConsumeWindowInteraction();
 
   ServiceWorkerGlobalScopeClient::From(context)->OpenWindowForPaymentHandler(
-      parsed_url_to_open, WTF::MakeUnique<NavigateClientCallback>(resolver));
+      parsed_url_to_open, std::make_unique<NavigateClientCallback>(resolver));
   return promise;
 }
 

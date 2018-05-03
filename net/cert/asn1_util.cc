@@ -15,10 +15,10 @@ namespace asn1 {
 namespace {
 
 // Parses input |in| which should point to the beginning of a Certificate, and
-// sets |*tbs_certificate| ready to parse the SubjectPublicKeyInfo. If parsing
+// sets |*tbs_certificate| ready to parse the Subject. If parsing
 // fails, this function returns false and |*tbs_certificate| is left in an
 // undefined state.
-bool SeekToSPKI(der::Input in, der::Parser* tbs_certificate) {
+bool SeekToSubject(der::Input in, der::Parser* tbs_certificate) {
   // From RFC 5280, section 4.1
   //    Certificate  ::=  SEQUENCE  {
   //      tbsCertificate       TBSCertificate,
@@ -65,10 +65,17 @@ bool SeekToSPKI(der::Input in, der::Parser* tbs_certificate) {
   // validity
   if (!tbs_certificate->SkipTag(der::kSequence))
     return false;
-  // subject
-  if (!tbs_certificate->SkipTag(der::kSequence))
-    return false;
   return true;
+}
+
+// Parses input |in| which should point to the beginning of a Certificate, and
+// sets |*tbs_certificate| ready to parse the SubjectPublicKeyInfo. If parsing
+// fails, this function returns false and |*tbs_certificate| is left in an
+// undefined state.
+bool SeekToSPKI(der::Input in, der::Parser* tbs_certificate) {
+  return SeekToSubject(in, tbs_certificate) &&
+         // Skip over Subject.
+         tbs_certificate->SkipTag(der::kSequence);
 }
 
 // Parses input |in| which should point to the beginning of a
@@ -142,6 +149,18 @@ bool SeekToExtensions(der::Input in,
 
 }  // namespace
 
+bool ExtractSubjectFromDERCert(base::StringPiece cert,
+                               base::StringPiece* subject_out) {
+  der::Parser parser;
+  if (!SeekToSubject(der::Input(cert), &parser))
+    return false;
+  der::Input subject;
+  if (!parser.ReadRawTLV(&subject))
+    return false;
+  *subject_out = subject.AsStringPiece();
+  return true;
+}
+
 bool ExtractSPKIFromDERCert(base::StringPiece cert,
                             base::StringPiece* spki_out) {
   der::Parser parser;
@@ -180,59 +199,6 @@ bool ExtractSubjectPublicKeyFromSPKI(base::StringPiece spki,
   if (!spki_parser.ReadTag(der::kBitString, &spk))
     return false;
   *spk_out = spk.AsStringPiece();
-  return true;
-}
-
-bool ExtractCRLURLsFromDERCert(base::StringPiece cert,
-                               std::vector<base::StringPiece>* urls_out) {
-  urls_out->clear();
-  std::vector<base::StringPiece> tmp_urls_out;
-  bool present;
-  der::Parser extensions_parser;
-  if (!SeekToExtensions(der::Input(cert), &present, &extensions_parser))
-    return false;
-
-  if (!present)
-    return true;
-
-  while (extensions_parser.HasMore()) {
-    der::Parser extension_parser;
-    if (!extensions_parser.ReadSequence(&extension_parser))
-      return false;
-
-    der::Input oid;
-    if (!extension_parser.ReadTag(der::kOid, &oid))
-      return false;
-
-    // CRL Distribution Points extension.
-    if (oid != CrlDistributionPointsOid())
-      continue;
-
-    // critical
-    if (!extension_parser.SkipOptionalTag(der::kBool, &present))
-      return false;
-
-    // extnValue
-    der::Input extension_value;
-    if (!extension_parser.ReadTag(der::kOctetString, &extension_value))
-      return false;
-
-    std::vector<ParsedDistributionPoint> distribution_points;
-
-    if (!ParseCrlDistributionPoints(extension_value, &distribution_points))
-      return false;
-
-    for (const auto& dp : distribution_points) {
-      // If the distribution point contains a alternative issuer, skip it.
-      if (dp.has_crl_issuer)
-        continue;
-
-      for (const auto& uri : dp.uris)
-        tmp_urls_out.push_back(uri);
-    }
-  }
-
-  urls_out->swap(tmp_urls_out);
   return true;
 }
 

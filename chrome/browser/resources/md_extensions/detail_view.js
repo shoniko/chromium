@@ -8,7 +8,10 @@ cr.define('extensions', function() {
   const DetailView = Polymer({
     is: 'extensions-detail-view',
 
-    behaviors: [I18nBehavior, CrContainerShadowBehavior],
+    behaviors: [
+      CrContainerShadowBehavior,
+      extensions.ItemBehavior,
+    ],
 
     properties: {
       /**
@@ -17,11 +20,41 @@ cr.define('extensions', function() {
        */
       data: Object,
 
+      /** @private */
+      size_: String,
+
       /** @type {!extensions.ItemDelegate} */
       delegate: Object,
 
       /** Whether the user has enabled the UI's developer mode. */
       inDevMode: Boolean,
+
+      /** Whether "allow in incognito" option should be shown. */
+      incognitoAvailable: Boolean,
+    },
+
+    observers: [
+      'onItemIdChanged_(data.id, delegate)',
+    ],
+
+    /** @private */
+    onItemIdChanged_: function() {
+      // Clear the size, since this view is reused, such that no obsolete size
+      // is displayed.:
+      this.size_ = '';
+      this.delegate.getExtensionSize(this.data.id).then(size => {
+        this.size_ = size;
+      });
+    },
+
+    /**
+     * @param {string} description
+     * @param {string} fallback
+     * @return {string}
+     * @private
+     */
+    getDescription_: function(description, fallback) {
+      return description || fallback;
     },
 
     /** @private */
@@ -80,12 +113,15 @@ cr.define('extensions', function() {
     },
 
     /**
+     * @param {!chrome.developerPrivate.ExtensionState} state
+     * @param {string} onText
+     * @param {string} offText
      * @return {string}
      * @private
      */
-    computeEnabledText_: function() {
+    computeEnabledText_: function(state, onText, offText) {
       // TODO(devlin): Get the full spectrum of these strings from bettes.
-      return this.isEnabled_() ? this.i18n('itemOn') : this.i18n('itemOff');
+      return extensions.isEnabled(state) ? onText : offText;
     },
 
     /**
@@ -95,18 +131,6 @@ cr.define('extensions', function() {
      */
     computeInspectLabel_: function(view) {
       return extensions.computeInspectableViewLabel(view);
-    },
-
-    /**
-     * @return {boolean}
-     * @private
-     */
-    shouldShowHomepageButton_: function() {
-      // Note: we ignore |data.homePage.specified| - we use an extension's
-      // webstore entry as a homepage if the extension didn't explicitly specify
-      // a homepage. (|url| can still be unset in the case of unpacked
-      // extensions.)
-      return this.data.homePage.url.length > 0;
     },
 
     /**
@@ -127,6 +151,14 @@ cr.define('extensions', function() {
           this.data.errorCollection.isEnabled;
     },
 
+    /**
+     * @return {boolean}
+     * @private
+     */
+    shouldShowIncognitoOption_: function() {
+      return this.data.incognitoAccess.isEnabled && this.incognitoAvailable;
+    },
+
     /** @private */
     onEnableChange_: function() {
       this.delegate.setItemEnabled(
@@ -142,8 +174,8 @@ cr.define('extensions', function() {
     },
 
     /** @private */
-    onOptionsTap_: function() {
-      this.delegate.showItemOptionsPage(this.data.id);
+    onExtensionOptionsTap_: function() {
+      this.delegate.showItemOptionsPage(this.data);
     },
 
     /** @private */
@@ -154,6 +186,11 @@ cr.define('extensions', function() {
     /** @private */
     onRepairTap_: function() {
       this.delegate.repairItem(this.data.id);
+    },
+
+    /** @private */
+    onLoadPathTap_: function() {
+      this.delegate.showInFolder(this.data.id);
     },
 
     /** @private */
@@ -180,18 +217,32 @@ cr.define('extensions', function() {
           this.data.id, this.$$('#collect-errors').checked);
     },
 
+    /** @private */
+    onExtensionWebSiteTap_: function() {
+      this.delegate.openUrl(this.data.manifestHomePageUrl);
+    },
+
+    /** @private */
+    onViewInStoreTap_: function() {
+      this.delegate.openUrl(this.data.webStoreUrl);
+    },
+
     /**
      * @param {!chrome.developerPrivate.DependentExtension} item
+     * @return {string}
      * @private
      */
     computeDependentEntry_: function(item) {
       return loadTimeData.getStringF('itemDependentEntry', item.name, item.id);
     },
 
-    /** @private */
+    /**
+     * @return {string}
+     * @private
+     */
     computeSourceString_: function() {
-      return extensions.getItemSourceString(
-          extensions.getItemSource(this.data));
+      return this.data.locationText ||
+          extensions.getItemSourceString(extensions.getItemSource(this.data));
     },
 
     /**

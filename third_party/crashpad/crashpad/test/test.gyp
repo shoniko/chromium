@@ -22,7 +22,6 @@
       'type': 'static_library',
       'dependencies': [
         '../compat/compat.gyp:crashpad_compat',
-        '../snapshot/snapshot.gyp:crashpad_snapshot',
         '../third_party/gtest/gtest.gyp:gtest',
         '../third_party/mini_chromium/mini_chromium.gyp:base',
         '../util/util.gyp:crashpad_util',
@@ -35,13 +34,23 @@
         'errors.h',
         'file.cc',
         'file.h',
-        'gtest_death_check.h',
+        'filesystem.cc',
+        'filesystem.h',
+        'gtest_death.h',
+        'gtest_disabled.cc',
+        'gtest_disabled.h',
         'hex_string.cc',
         'hex_string.h',
         'linux/fake_ptrace_connection.cc',
         'linux/fake_ptrace_connection.h',
+        'linux/get_tls.cc',
+        'linux/get_tls.h',
+        'linux/scoped_pr_set_ptracer.cc',
+        'linux/scoped_pr_set_ptracer.h',
         'mac/dyld.cc',
         'mac/dyld.h',
+        'mac/exception_swallower.cc',
+        'mac/exception_swallower.h',
         'mac/mach_errors.cc',
         'mac/mach_errors.h',
         'mac/mach_multiprocess.cc',
@@ -77,6 +86,10 @@
       },
       'conditions': [
         ['OS=="mac"', {
+          'dependencies': [
+            '../handler/handler.gyp:crashpad_handler_lib',
+            '../snapshot/snapshot.gyp:crashpad_snapshot',
+          ],
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/usr/lib/libbsm.dylib',
@@ -100,26 +113,40 @@
       ],
     },
     {
-      'target_name': 'crashpad_gtest_main',
-      'type': 'static_library',
-      'dependencies': [
-        'crashpad_test',
-        '../third_party/gtest/gtest.gyp:gtest',
-      ],
-      'sources': [
-        'gtest_main.cc',
-      ],
-    },
-    {
       'target_name': 'crashpad_gmock_main',
       'type': 'static_library',
       'dependencies': [
         'crashpad_test',
         '../third_party/gtest/gmock.gyp:gmock',
         '../third_party/gtest/gtest.gyp:gtest',
+        '../third_party/mini_chromium/mini_chromium.gyp:base',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'defines': [
+        'CRASHPAD_TEST_LAUNCHER_GMOCK=1',
       ],
       'sources': [
-        'gmock_main.cc',
+        'gtest_main.cc',
+      ],
+    },
+    {
+      'target_name': 'crashpad_gtest_main',
+      'type': 'static_library',
+      'dependencies': [
+        'crashpad_test',
+        '../third_party/gtest/gtest.gyp:gtest',
+        '../third_party/mini_chromium/mini_chromium.gyp:base',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'defines': [
+        'CRASHPAD_TEST_LAUNCHER_GTEST=1',
+      ],
+      'sources': [
+        'gtest_main.cc',
       ],
     },
   ],

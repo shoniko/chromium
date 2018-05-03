@@ -110,7 +110,15 @@ class DISPLAY_MANAGER_EXPORT DisplayConfigurator
 
     // Called when the hardware mirroring failed.
     virtual void SetSoftwareMirroring(bool enabled) = 0;
+
+    // Returns true when software mirroring mode is requested, but it does
+    // not guarantee that the mode is active.
     virtual bool SoftwareMirroringEnabled() const = 0;
+
+    // Returns true if hardware mirroring should not be used. (e.g. In mixed
+    // mirror mode, the API caller specifies the mirroring source and
+    // destination displays which do not exist in hardware mirroring.)
+    virtual bool IsSoftwareMirroringEnforced() const = 0;
   };
 
   // Helper class used by tests.
@@ -281,6 +289,10 @@ class DISPLAY_MANAGER_EXPORT DisplayConfigurator
                           const std::vector<GammaRampRGBEntry>& gamma_lut,
                           const std::vector<float>& correction_matrix);
 
+  void set_is_multi_mirroring_enabled_for_test(bool enabled) {
+    is_multi_mirroring_enabled_ = enabled;
+  }
+
  private:
   class DisplayLayoutManagerImpl;
 
@@ -440,6 +452,8 @@ class DISPLAY_MANAGER_EXPORT DisplayConfigurator
   std::unique_ptr<DisplayLayoutManager> layout_manager_;
 
   std::unique_ptr<UpdateDisplayConfigurationTask> configuration_task_;
+
+  bool is_multi_mirroring_enabled_;
 
   // This must be the last variable.
   base::WeakPtrFactory<DisplayConfigurator> weak_ptr_factory_;

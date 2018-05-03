@@ -26,11 +26,11 @@ import org.chromium.android_webview.test.util.AwTestTouchUtils;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JavascriptEventObserver;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.parameter.SkipCommandLineParameterization;
+import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.net.test.util.TestWebServer;
 import org.chromium.ui.display.DisplayAndroid;
@@ -44,7 +44,6 @@ import java.util.concurrent.atomic.AtomicReference;
  * Integration tests for synchronous scrolling.
  */
 @RunWith(AwJUnit4ClassRunner.class)
-@SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
 public class AndroidScrollIntegrationTest {
     @Rule
     public AwActivityTestRule mActivityTestRule = new AwActivityTestRule() {
@@ -461,8 +460,8 @@ public class AndroidScrollIntegrationTest {
         // Make sure we can't hit these values simply as a result of scrolling.
         assert (maxScrollXPix % dragStepSize) != 0;
         assert (maxScrollYPix % dragStepSize) != 0;
-        final int maxScrollXCss = (int) Math.floor(maxScrollXPix / deviceDIPScale);
-        final int maxScrollYCss = (int) Math.floor(maxScrollYPix / deviceDIPScale);
+        final int maxScrollXCss = (int) Math.round(maxScrollXPix / deviceDIPScale);
+        final int maxScrollYCss = (int) Math.round(maxScrollYPix / deviceDIPScale);
 
         setMaxScrollOnMainSync(testContainerView, maxScrollXPix, maxScrollYPix);
 
@@ -696,7 +695,7 @@ public class AndroidScrollIntegrationTest {
         }
     }
 
-    private static class TestGestureStateListener extends GestureStateListener {
+    private static class TestGestureStateListener implements GestureStateListener {
         private CallbackHelper mOnScrollUpdateGestureConsumedHelper = new CallbackHelper();
 
         public CallbackHelper getOnScrollUpdateGestureConsumedHelper() {
@@ -744,8 +743,10 @@ public class AndroidScrollIntegrationTest {
                 + "</div>");
 
         InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                () -> testContainerView.getContentViewCore().addGestureStateListener(
-                        testGestureStateListener));
+                ()
+                        -> GestureListenerManager
+                                   .fromWebContents(testContainerView.getWebContents())
+                                   .addListener(testGestureStateListener));
         final CallbackHelper onScrollUpdateGestureConsumedHelper =
                 testGestureStateListener.getOnScrollUpdateGestureConsumedHelper();
 

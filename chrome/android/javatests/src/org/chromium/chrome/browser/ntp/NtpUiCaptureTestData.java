@@ -13,12 +13,12 @@ import static org.chromium.chrome.test.util.browser.suggestions.FakeMostVisitedS
 import android.graphics.Bitmap;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.chrome.browser.favicon.IconType;
 import org.chromium.chrome.browser.favicon.LargeIconBridge;
 import org.chromium.chrome.browser.ntp.snippets.KnownCategories;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
-import org.chromium.chrome.browser.suggestions.MostVisitedSites;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
 import org.chromium.chrome.test.util.browser.offlinepages.FakeOfflinePageBridge;
 import org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils;
@@ -98,41 +98,46 @@ public class NtpUiCaptureTestData {
                     "James Roderick to step down as conductor for Laville orchestra after 5 years",
                     NEWS_PUBLISHER, "http://example.com/conductor",
                     getTimestamp(2017, Calendar.JUNE, 1), 0.0f, 0L, false,
-                    /* thumbnailDominantColor = */ null),
+                    /* thumbnailDominantColor = */ 0xFF0C5077),
             new SnippetArticle(KnownCategories.ARTICLES, "suggestion1",
                     "Boy raises orphaned goat on love and pancakes", MEME_PUBLISHER,
                     "http://example.com", getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, true,
-                    /* thumbnailDominantColor = */ null),
+                    /* thumbnailDominantColor = */ 0xFF78A683),
             new SnippetArticle(KnownCategories.ARTICLES, "suggestion2",
                     "Top gigs this week in your city", ENTERTAINMENT_PUBLISHER,
                     "http://example.com", getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, false,
-                    /* thumbnailDominantColor = */ null),
+                    /* thumbnailDominantColor = */ 0xFF804438),
             new SnippetArticle(KnownCategories.ARTICLES, "suggestion3", "No, you can’t sit here",
                     MEME_PUBLISHER, "http://example.com", getTimestamp(2017, Calendar.JANUARY, 30),
-                    0.0f, 0L, false, /* thumbnailDominantColor = */ null),
+                    0.0f, 0L, false, /* thumbnailDominantColor = */ 0xFF6890BA),
             new SnippetArticle(KnownCategories.ARTICLES, "suggestion4",
                     "Army training more difficult than expected", FACTS_PUBLISHER,
                     "http://example.com", getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, false,
-                    /* thumbnailDominantColor = */ null),
+                    /* thumbnailDominantColor = */ 0xFFF5F6F5),
             new SnippetArticle(KnownCategories.ARTICLES, "suggestion5",
                     "Classical music attracts smaller audiences", NEWS_PUBLISHER,
                     "http://example.com", getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, false,
-                    /* thumbnailDominantColor = */ null),
+                    /* thumbnailDominantColor = */ 0xFF002F39),
             new SnippetArticle(KnownCategories.ARTICLES, "suggestion6",
-                    "Report finds that freelancers are happier", ENTERTAINMENT_PUBLISHER,
-                    "http://example.com", getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, true,
-                    /* thumbnailDominantColor = */ null),
+                    "Report finds that freelancers are happier despite lack of financial security",
+                    ENTERTAINMENT_PUBLISHER, "http://example.com",
+                    getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, true,
+                    /* thumbnailDominantColor = */ 0XFFBCD6F4),
             new SnippetArticle(KnownCategories.ARTICLES, "suggestion7",
                     "Dog denies eating the cookies", MEME_PUBLISHER, "http://example.com",
                     getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, false,
-                    /* thumbnailDominantColor = */ null),
+                    /* thumbnailDominantColor = */ 0xFFAE9667),
             new SnippetArticle(KnownCategories.ARTICLES, "suggestion8",
                     "National train strike leads to massive delays for commuters", NEWS_PUBLISHER,
+                    "http://example.com", getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, false,
+                    /* thumbnailDominantColor = */ 0xFFD4A360),
+            new SnippetArticle(KnownCategories.ARTICLES, "suggestion9",
+                    "National politician has cake, eats it, claims it was pie", NEWS_PUBLISHER,
                     "http://example.com", getTimestamp(2017, Calendar.JANUARY, 30), 0.0f, 0L, false,
                     /* thumbnailDominantColor = */ null),
     };
 
-    public static void registerArticleSamples(FakeSuggestionsSource suggestionsSource) {
+    private static void registerArticleSamples(FakeSuggestionsSource suggestionsSource) {
         ContentSuggestionsTestUtils.registerCategory(suggestionsSource, KnownCategories.ARTICLES);
         suggestionsSource.setSuggestionsForCategory(
                 KnownCategories.ARTICLES, Arrays.asList(FAKE_ARTICLE_SUGGESTIONS));
@@ -165,7 +170,7 @@ public class NtpUiCaptureTestData {
         return fakeSuggestionsSource;
     }
 
-    private static MostVisitedSites createMostVisitedSites() {
+    private static FakeMostVisitedSites createMostVisitedSites() {
         FakeMostVisitedSites result = new FakeMostVisitedSites();
         result.setTileSuggestions(SITE_SUGGESTIONS);
         return result;
@@ -191,7 +196,8 @@ public class NtpUiCaptureTestData {
                 ThreadUtils.postOnUiThread(() -> {
                     int fallbackColor =
                             colorMap.containsKey(url) ? colorMap.get(url) : DEFAULT_ICON_COLOR;
-                    callback.onLargeIconAvailable(iconMap.get(url), fallbackColor, true);
+                    callback.onLargeIconAvailable(
+                            iconMap.get(url), fallbackColor, true, IconType.INVALID);
                 });
                 return true;
             }

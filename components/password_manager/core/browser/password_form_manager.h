@@ -20,6 +20,7 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/autofill/core/common/signatures_util.h"
 #include "components/password_manager/core/browser/form_fetcher.h"
 #include "components/password_manager/core/browser/password_form_metrics_recorder.h"
 #include "components/password_manager/core/browser/password_form_user_action.h"
@@ -94,6 +95,10 @@ class PasswordFormManager : public FormFetcher::Consumer {
     ALLOW_OTHER_POSSIBLE_USERNAMES,
     IGNORE_OTHER_POSSIBLE_USERNAMES
   };
+
+  // The upper limit on how many times Chrome will try to autofill the same
+  // form.
+  static constexpr int kMaxTimesAutofill = 5;
 
   // Chooses between the current and new password value which one to save. This
   // is whichever is non-empty, with the preference being given to the new one.
@@ -474,6 +479,9 @@ class PasswordFormManager : public FormFetcher::Consumer {
   // The PasswordForm from the page or dialog managed by |this|.
   const autofill::PasswordForm observed_form_;
 
+  // The form signature of |observed_form_|
+  const autofill::FormSignature observed_form_signature_;
+
   // Stores a submitted form.
   std::unique_ptr<const autofill::PasswordForm> submitted_form_;
 
@@ -589,14 +597,15 @@ class PasswordFormManager : public FormFetcher::Consumer {
   // Make sure to call Init before using |*this|, to ensure it is not null.
   scoped_refptr<PasswordFormMetricsRecorder> metrics_recorder_;
 
-  // Set if the user has edited username value in prompt. The value is the
-  // matched field name from |PasswordForm.other_possible_usernames| if the
-  // match found.
-  base::Optional<base::string16> corrected_username_element_;
+  // True iff a user edited the username value in a prompt and new username is
+  // the value of another field of the observed form.
+  bool has_username_edited_vote_ = false;
 
-  // Tracks if a form with same origin as |observed_form_| found in blacklisted
-  // forms.
-  bool blacklisted_origin_found_ = false;
+  // If Chrome has already autofilled a few times, it is probable that autofill
+  // is triggered by programmatic changes in the page. We set a maximum number
+  // of times that Chrome will autofill to avoid being stuck in an infinite
+  // loop.
+  int autofills_left_ = kMaxTimesAutofill;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordFormManager);
 };

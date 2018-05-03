@@ -4,6 +4,7 @@
 
 #include "content/public/app/content_main_delegate.h"
 
+#include "base/logging.h"
 #include "build/build_config.h"
 #include "content/public/gpu/content_gpu_client.h"
 #include "content/public/renderer/content_renderer_client.h"
@@ -41,12 +42,17 @@ bool ContentMainDelegate::DelaySandboxInitialization(
   return false;
 }
 
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
+#elif defined(OS_LINUX)
 
 void ContentMainDelegate::ZygoteStarting(
     std::vector<std::unique_ptr<ZygoteForkDelegate>>* delegates) {}
 
-#endif
+#endif  // defined(OS_LINUX)
+
+int ContentMainDelegate::TerminateForFatalInitializationError() {
+  CHECK(false);
+  return 0;
+}
 
 bool ContentMainDelegate::ShouldEnableProfilerRecording() {
   return false;

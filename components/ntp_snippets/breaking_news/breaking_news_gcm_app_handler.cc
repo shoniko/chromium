@@ -34,6 +34,12 @@ const char kBreakingNewsGCMSenderId[] = "667617379155";
 // Must match Java GoogleCloudMessaging.INSTANCE_ID_SCOPE.
 const char kGCMScope[] = "GCM";
 
+// The action key in pushed GCM message.
+const char kPushedActionKey[] = "action";
+// Allowed action key values:
+const char kPushToRefreshAction[] = "push-to-refresh";
+const char kPushByValueAction[] = "push-by-value";
+
 // Key of the news json in the data in the pushed breaking news.
 const char kPushedNewsKey[] = "payload";
 
@@ -89,7 +95,7 @@ BreakingNewsGCMAppHandler::BreakingNewsGCMAppHandler(
     PrefService* pref_service,
     std::unique_ptr<SubscriptionManager> subscription_manager,
     const ParseJSONCallback& parse_json_callback,
-    std::unique_ptr<base::Clock> clock,
+    base::Clock* clock,
     std::unique_ptr<base::OneShotTimer> token_validation_timer,
     std::unique_ptr<base::OneShotTimer> forced_subscription_timer)
     : gcm_driver_(gcm_driver),
@@ -97,7 +103,7 @@ BreakingNewsGCMAppHandler::BreakingNewsGCMAppHandler(
       pref_service_(pref_service),
       subscription_manager_(std::move(subscription_manager)),
       parse_json_callback_(parse_json_callback),
-      clock_(std::move(clock)),
+      clock_(clock),
       token_validation_timer_(std::move(token_validation_timer)),
       forced_subscription_timer_(std::move(forced_subscription_timer)),
       weak_ptr_factory_(this) {
@@ -106,6 +112,8 @@ BreakingNewsGCMAppHandler::BreakingNewsGCMAppHandler(
 #endif  // !OS_ANDROID
   DCHECK(token_validation_timer_);
   DCHECK(!token_validation_timer_->IsRunning());
+  DCHECK(forced_subscription_timer_);
+  DCHECK(!forced_subscription_timer_->IsRunning());
 }
 
 BreakingNewsGCMAppHandler::~BreakingNewsGCMAppHandler() {
@@ -115,11 +123,16 @@ BreakingNewsGCMAppHandler::~BreakingNewsGCMAppHandler() {
 }
 
 void BreakingNewsGCMAppHandler::StartListening(
-    OnNewRemoteSuggestionCallback on_new_remote_suggestion_callback) {
+    OnNewRemoteSuggestionCallback on_new_remote_suggestion_callback,
+    OnRefreshRequestedCallback on_refresh_requested_callback) {
   DCHECK(!IsListening());
   DCHECK(!on_new_remote_suggestion_callback.is_null());
   on_new_remote_suggestion_callback_ =
       std::move(on_new_remote_suggestion_callback);
+
+  DCHECK(!on_refresh_requested_callback.is_null());
+  on_refresh_requested_callback_ = std::move(on_refresh_requested_callback);
+
   Subscribe(/*force_token_retrieval=*/false);
   gcm_driver_->AddAppHandler(kBreakingNewsGCMAppID, this);
   if (IsTokenValidationEnabled()) {
@@ -159,6 +172,8 @@ void BreakingNewsGCMAppHandler::Subscribe(bool force_token_retrieval) {
     return;
   }
 
+  // TODO(vitaliii): Use |BindOnce| instead of |Bind|, because the callback is
+  // meant to be run only once.
   instance_id_driver_->GetInstanceID(kBreakingNewsGCMAppID)
       ->GetToken(kBreakingNewsGCMSenderId, kGCMScope,
                  /*options=*/std::map<std::string, std::string>(),
@@ -169,6 +184,12 @@ void BreakingNewsGCMAppHandler::Subscribe(bool force_token_retrieval) {
 void BreakingNewsGCMAppHandler::DidRetrieveToken(
     const std::string& subscription_token,
     InstanceID::Result result) {
+  if (!IsListening()) {
+    // After we requested the token, |StopListening| has been called. Thus,
+    // ignore the token.
+    return;
+  }
+
   metrics::OnTokenRetrieved(result);
 
   switch (result) {
@@ -204,6 +225,8 @@ void BreakingNewsGCMAppHandler::ResubscribeIfInvalidToken() {
 
   // InstanceIDAndroid::ValidateToken just returns |true| on Android. Instead it
   // is ok to retrieve a token, because it is cached.
+  // TODO(vitaliii): Use |BindOnce| instead of |Bind|, because the callback is
+  // meant to be run only once.
   instance_id_driver_->GetInstanceID(kBreakingNewsGCMAppID)
       ->GetToken(
           kBreakingNewsGCMSenderId, kGCMScope,
@@ -215,6 +238,12 @@ void BreakingNewsGCMAppHandler::ResubscribeIfInvalidToken() {
 void BreakingNewsGCMAppHandler::DidReceiveTokenForValidation(
     const std::string& new_token,
     InstanceID::Result result) {
+  if (!IsListening()) {
+    // After we requested the token, |StopListening| has been called. Thus,
+    // ignore the token.
+    return;
+  }
+
   metrics::OnTokenRetrieved(result);
 
   base::Optional<base::TimeDelta> time_since_last_validation;
@@ -303,10 +332,6 @@ void BreakingNewsGCMAppHandler::OnMessage(const std::string& app_id,
                                           const gcm::IncomingMessage& message) {
   DCHECK_EQ(app_id, kBreakingNewsGCMAppID);
 
-  gcm::MessageData::const_iterator it = message.data.find(kPushedNewsKey);
-  bool contains_pushed_news = (it != message.data.end());
-  metrics::OnMessageReceived(IsListening(), contains_pushed_news);
-
   if (!IsListening()) {
     // The content suggestions server may push a message right when the client
     // unsubscribes leading to a race condition. Ignore such messages.
@@ -314,18 +339,51 @@ void BreakingNewsGCMAppHandler::OnMessage(const std::string& app_id,
     return;
   }
 
-  if (contains_pushed_news) {
-    const std::string& news = it->second;
-    parse_json_callback_.Run(
-        news,
-        base::Bind(&BreakingNewsGCMAppHandler::OnJsonSuccess,
-                   weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&BreakingNewsGCMAppHandler::OnJsonError,
-                   weak_ptr_factory_.GetWeakPtr(), news));
-  } else {
+  gcm::MessageData::const_iterator it = message.data.find(kPushedActionKey);
+
+  bool contains_pushed_action = (it != message.data.end());
+  if (!contains_pushed_action) {
+    LOG(WARNING) << "Receiving pushed content failure: Action is missing.";
+    metrics::OnMessageReceived(metrics::ReceivedMessageAction::NO_ACTION);
+    return;
+  }
+  const std::string& action = it->second;
+
+  if (action == kPushToRefreshAction) {
+    metrics::OnMessageReceived(metrics::ReceivedMessageAction::PUSH_TO_REFRESH);
+    OnPushToRefreshMessage();
+    return;
+  }
+
+  if (action == kPushByValueAction) {
+    metrics::OnMessageReceived(metrics::ReceivedMessageAction::PUSH_BY_VALUE);
+    OnPushByValueMessage(message);
+    return;
+  }
+
+  LOG(WARNING) << "Receiving pushed content failure: Invalid action.";
+  metrics::OnMessageReceived(metrics::ReceivedMessageAction::INVALID_ACTION);
+}
+
+void BreakingNewsGCMAppHandler::OnPushByValueMessage(
+    const gcm::IncomingMessage& message) {
+  gcm::MessageData::const_iterator it = message.data.find(kPushedNewsKey);
+  bool contains_pushed_news = (it != message.data.end());
+  if (!contains_pushed_news) {
     LOG(WARNING)
         << "Receiving pushed content failure: Breaking News ID missing.";
   }
+
+  const std::string& news = it->second;
+  parse_json_callback_.Run(news,
+                           base::Bind(&BreakingNewsGCMAppHandler::OnJsonSuccess,
+                                      weak_ptr_factory_.GetWeakPtr()),
+                           base::Bind(&BreakingNewsGCMAppHandler::OnJsonError,
+                                      weak_ptr_factory_.GetWeakPtr(), news));
+}
+
+void BreakingNewsGCMAppHandler::OnPushToRefreshMessage() {
+  on_refresh_requested_callback_.Run();
 }
 
 void BreakingNewsGCMAppHandler::OnMessagesDeleted(const std::string& app_id) {

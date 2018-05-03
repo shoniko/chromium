@@ -31,26 +31,7 @@
 using blink::WebInputEvent;
 using ui::DidOverscrollParams;
 
-#include "ipc/ipc_message_null_macros.h"
-#undef IPC_MESSAGE_DECL
-#define IPC_MESSAGE_DECL(name, ...) \
-  case name::ID:                    \
-    return #name;
-
-const char* GetInputMessageTypeName(const IPC::Message& message) {
-  switch (message.type()) {
-// Someone else might have included input_messages.h so undef the guard.
-#undef CONTENT_COMMON_INPUT_MESSAGES_H_
-#include "content/common/input_messages.h"
-#ifndef CONTENT_COMMON_INPUT_MESSAGES_H_
-#error "Failed to include content/common/input_messages.h"
-#endif
-    default:
-      NOTREACHED() << "Invalid message type: " << message.type();
-      break;
-  };
-  return "NonInputMsgType";
-}
+const char* GetInputMessageTypeName(const IPC::Message& message);
 
 namespace content {
 
@@ -60,9 +41,9 @@ InputEventFilter::InputEventFilter(
     const scoped_refptr<base::SingleThreadTaskRunner>& target_task_runner)
     : main_task_runner_(main_task_runner),
       main_listener_(main_listener),
-      sender_(NULL),
+      sender_(nullptr),
       target_task_runner_(target_task_runner),
-      input_handler_manager_(NULL) {
+      input_handler_manager_(nullptr) {
   DCHECK(target_task_runner_.get());
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 }
@@ -103,7 +84,7 @@ void InputEventFilter::DidOverscroll(int routing_id,
 }
 
 void InputEventFilter::DidStopFlinging(int routing_id) {
-  SendMessage(base::MakeUnique<InputHostMsg_DidStopFlinging>(routing_id));
+  SendMessage(std::make_unique<InputHostMsg_DidStopFlinging>(routing_id));
 }
 
 void InputEventFilter::QueueClosureForMainThreadEventQueue(
@@ -118,7 +99,6 @@ void InputEventFilter::QueueClosureForMainThreadEventQueue(
 
   // For some reason we didn't find an event queue for the route.
   // Don't drop the task on the floor allow it to execute.
-  NOTREACHED();
   main_task_runner_->PostTask(FROM_HERE, closure);
 }
 
@@ -139,7 +119,7 @@ void InputEventFilter::SetWhiteListedTouchAction(int routing_id,
                                                  cc::TouchAction touch_action,
                                                  uint32_t unique_touch_event_id,
                                                  InputEventAckState ack_state) {
-  SendMessage(base::MakeUnique<InputHostMsg_SetWhiteListedTouchAction>(
+  SendMessage(std::make_unique<InputHostMsg_SetWhiteListedTouchAction>(
       routing_id, touch_action, unique_touch_event_id, ack_state));
 }
 
@@ -149,11 +129,11 @@ void InputEventFilter::OnFilterAdded(IPC::Channel* channel) {
 }
 
 void InputEventFilter::OnFilterRemoved() {
-  sender_ = NULL;
+  sender_ = nullptr;
 }
 
 void InputEventFilter::OnChannelClosing() {
-  sender_ = NULL;
+  sender_ = nullptr;
 }
 
 // This function returns true if the IPC message is one that the compositor
@@ -323,8 +303,11 @@ void InputEventFilter::SendMessageOnIOThread(
     return;
   static size_t s_send_failure_count_ = 0;
   s_send_failure_count_++;
-  base::debug::SetCrashKeyValue("input-event-filter-send-failure",
-                                base::IntToString(s_send_failure_count_));
+
+  static auto* crash_key = base::debug::AllocateCrashKeyString(
+      "input-event-filter-send-failure", base::debug::CrashKeySize::Size32);
+  base::debug::SetCrashKeyString(crash_key,
+                                 base::IntToString(s_send_failure_count_));
 }
 
 }  // namespace content

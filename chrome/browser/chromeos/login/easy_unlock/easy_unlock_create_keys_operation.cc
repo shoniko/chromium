@@ -16,6 +16,7 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_types.h"
+#include "chromeos/cryptohome/cryptohome_util.h"
 #include "chromeos/cryptohome/homedir_methods.h"
 #include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -338,17 +339,18 @@ void EasyUnlockCreateKeysOperation::OnGetSystemSalt(
       kEasyUnlockKeyMetaNameSerializedBeaconSeeds,
       device->serialized_beacon_seeds));
 
-  // Add cryptohome key.
-  const cryptohome::Identification id(user_context_.GetAccountId());
-
   std::unique_ptr<Key> auth_key(new Key(*user_context_.GetKey()));
   if (auth_key->GetKeyType() == Key::KEY_TYPE_PASSWORD_PLAIN)
     auth_key->Transform(Key::KEY_TYPE_SALTED_SHA256_TOP_HALF, system_salt);
 
-  cryptohome::Authorization auth(auth_key->GetSecret(), auth_key->GetLabel());
+  cryptohome::AddKeyRequest request;
+  cryptohome::KeyDefinitionToKey(key_def, request.mutable_key());
+  request.set_clobber_if_exists(true);
   cryptohome::HomedirMethods::GetInstance()->AddKeyEx(
-      id, auth, key_def,
-      true,  // clobber
+      cryptohome::Identification(user_context_.GetAccountId()),
+      cryptohome::CreateAuthorizationRequest(auth_key->GetLabel(),
+                                             auth_key->GetSecret()),
+      request,
       base::Bind(&EasyUnlockCreateKeysOperation::OnKeyCreated,
                  weak_ptr_factory_.GetWeakPtr(), index, user_key));
 }

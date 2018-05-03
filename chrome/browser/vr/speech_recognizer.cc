@@ -4,8 +4,13 @@
 
 #include "chrome/browser/vr/speech_recognizer.h"
 
+#include <memory>
+
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string16.h"
+#include "chrome/browser/vr/browser_ui_interface.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
 #include "content/public/browser/speech_recognition_manager.h"
@@ -13,19 +18,22 @@
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/speech_recognition_error.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace vr {
 
 namespace {
 
 // Length of timeout to cancel recognition if there's no speech heard.
-static const int kNoSpeechTimeoutInSeconds = 5;
+const int kNoSpeechTimeoutInSeconds = 5;
 
 // Length of timeout to cancel recognition if no different results are received.
-static const int kNoNewSpeechTimeoutInSeconds = 2;
+const int kNoNewSpeechTimeoutInSeconds = 2;
 
 // Invalid speech session.
-static const int kInvalidSessionId = -1;
+const int kInvalidSessionId = -1;
+
+const char kSearchEndStateUmaName[] = "VR.VoiceSearch.EndState";
 
 static content::SpeechRecognitionManager* g_manager_for_test = nullptr;
 
@@ -178,7 +186,7 @@ void SpeechRecognizerOnIO::StartSpeechTimeout(int timeout_seconds) {
 
 void SpeechRecognizerOnIO::SpeechTimeout() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  NotifyRecognitionStateChanged(SPEECH_RECOGNITION_READY);
+  NotifyRecognitionStateChanged(SPEECH_RECOGNITION_END);
   Stop();
 }
 
@@ -187,7 +195,7 @@ void SpeechRecognizerOnIO::OnRecognitionStart(int session_id) {
 }
 
 void SpeechRecognizerOnIO::OnRecognitionEnd(int session_id) {
-  NotifyRecognitionStateChanged(SPEECH_RECOGNITION_READY);
+  NotifyRecognitionStateChanged(SPEECH_RECOGNITION_END);
   Stop();
 }
 
@@ -219,8 +227,16 @@ void SpeechRecognizerOnIO::OnRecognitionResults(
 void SpeechRecognizerOnIO::OnRecognitionError(
     int session_id,
     const content::SpeechRecognitionError& error) {
-  if (error.code == content::SPEECH_RECOGNITION_ERROR_NETWORK) {
-    NotifyRecognitionStateChanged(SPEECH_RECOGNITION_NETWORK_ERROR);
+  switch (error.code) {
+    case content::SPEECH_RECOGNITION_ERROR_NETWORK:
+      NotifyRecognitionStateChanged(SPEECH_RECOGNITION_NETWORK_ERROR);
+      break;
+    case content::SPEECH_RECOGNITION_ERROR_NO_SPEECH:
+    case content::SPEECH_RECOGNITION_ERROR_NO_MATCH:
+      NotifyRecognitionStateChanged(SPEECH_RECOGNITION_TRY_AGAIN);
+      break;
+    default:
+      break;
   }
 }
 
@@ -248,7 +264,10 @@ void SpeechRecognizerOnIO::OnAudioLevelsChange(int session_id,
 
 void SpeechRecognizerOnIO::OnEnvironmentEstimationComplete(int session_id) {}
 
-void SpeechRecognizerOnIO::OnAudioStart(int session_id) {}
+void SpeechRecognizerOnIO::OnAudioStart(int session_id) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  NotifyRecognitionStateChanged(SPEECH_RECOGNITION_READY);
+}
 
 void SpeechRecognizerOnIO::OnAudioEnd(int session_id) {}
 
@@ -259,12 +278,14 @@ void SpeechRecognizerOnIO::SetTimerForTest(
 
 SpeechRecognizer::SpeechRecognizer(
     VoiceResultDelegate* delegate,
+    BrowserUiInterface* ui,
     net::URLRequestContextGetter* url_request_context_getter,
     const std::string& locale)
     : delegate_(delegate),
+      ui_(ui),
       url_request_context_getter_(url_request_context_getter),
       locale_(locale),
-      speech_recognizer_on_io_(base::MakeUnique<SpeechRecognizerOnIO>()),
+      speech_recognizer_on_io_(std::make_unique<SpeechRecognizerOnIO>()),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
@@ -292,6 +313,9 @@ void SpeechRecognizer::Start() {
                      base::Unretained(speech_recognizer_on_io_.get()),
                      url_request_context_getter_, weak_factory_.GetWeakPtr(),
                      locale_, auth_scope, auth_token));
+  if (ui_)
+    ui_->SetSpeechRecognitionEnabled(true);
+  final_result_.clear();
 }
 
 void SpeechRecognizer::Stop() {
@@ -304,6 +328,11 @@ void SpeechRecognizer::Stop() {
       content::BrowserThread::IO, FROM_HERE,
       base::BindOnce(&SpeechRecognizerOnIO::Stop,
                      base::Unretained(speech_recognizer_on_io_.get())));
+  if (ui_) {
+    ui_->SetSpeechRecognitionEnabled(false);
+    UMA_HISTOGRAM_ENUMERATION(kSearchEndStateUmaName, VOICE_SEARCH_CANCEL,
+                              COUNT);
+  }
 }
 
 void SpeechRecognizer::OnSpeechResult(const base::string16& query,
@@ -312,8 +341,7 @@ void SpeechRecognizer::OnSpeechResult(const base::string16& query,
   if (!is_final)
     return;
 
-  if (delegate_)
-    delegate_->OnVoiceResults(query);
+  final_result_ = query;
 }
 
 void SpeechRecognizer::OnSpeechSoundLevelChanged(float level) {
@@ -322,9 +350,38 @@ void SpeechRecognizer::OnSpeechSoundLevelChanged(float level) {
 }
 
 void SpeechRecognizer::OnSpeechRecognitionStateChanged(
-    vr::SpeechRecognitionState new_state) {
+    SpeechRecognitionState new_state) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  // TODO(bshe): notify VR UI thread state change.
+  if (!ui_)
+    return;
+  ui_->OnSpeechRecognitionStateChanged(new_state);
+  SpeechRecognitionState state = static_cast<SpeechRecognitionState>(new_state);
+  switch (state) {
+    case SPEECH_RECOGNITION_IN_SPEECH:
+    case SPEECH_RECOGNITION_READY:
+    case SPEECH_RECOGNITION_RECOGNIZING:
+    case SPEECH_RECOGNITION_NETWORK_ERROR:
+      break;
+    case SPEECH_RECOGNITION_TRY_AGAIN:
+      ui_->SetRecognitionResult(
+          l10n_util::GetStringUTF16(IDS_VR_NO_SPEECH_RECOGNITION_RESULT));
+      UMA_HISTOGRAM_ENUMERATION(kSearchEndStateUmaName, VOICE_SEARCH_TRY_AGAIN,
+                                COUNT);
+      break;
+    case SPEECH_RECOGNITION_END:
+      if (!final_result_.empty()) {
+        ui_->SetRecognitionResult(final_result_);
+        UMA_HISTOGRAM_ENUMERATION(kSearchEndStateUmaName,
+                                  VOICE_SEARCH_OPEN_SEARCH_PAGE, COUNT);
+        if (delegate_)
+          delegate_->OnVoiceResults(final_result_);
+      }
+      ui_->SetSpeechRecognitionEnabled(false);
+      break;
+    case SPEECH_RECOGNITION_OFF:
+      NOTREACHED();
+      break;
+  }
 }
 
 void SpeechRecognizer::GetSpeechAuthParameters(std::string* auth_scope,

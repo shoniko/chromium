@@ -16,7 +16,7 @@ namespace {
 static std::unique_ptr<service_manager::Service> WeakCreatePrefService(
     base::WeakPtr<InProcessPrefServiceFactory> weak_factory) {
   if (!weak_factory)
-    return base::MakeUnique<service_manager::Service>();
+    return std::make_unique<service_manager::Service>();
 
   return weak_factory->CreatePrefService();
 }
@@ -39,7 +39,7 @@ class InProcessPrefServiceFactory::RegisteringDelegate
             PrefStore* user_prefs,
             PrefStore* recommended_prefs,
             PrefStore* default_prefs,
-            PrefNotifier* pref_notifier) override {
+            PrefNotifier* /*pref_notifier*/) override {
     if (!factory_)
       return;
 
@@ -91,7 +91,7 @@ InProcessPrefServiceFactory::~InProcessPrefServiceFactory() {
 
 std::unique_ptr<PrefValueStore::Delegate>
 InProcessPrefServiceFactory::CreateDelegate() {
-  return base::MakeUnique<RegisteringDelegate>(weak_factory_.GetWeakPtr());
+  return std::make_unique<RegisteringDelegate>(weak_factory_.GetWeakPtr());
 }
 
 base::Callback<std::unique_ptr<service_manager::Service>()>

@@ -25,14 +25,14 @@
 namespace cc {
 namespace {
 
-typedef ParameterizedPixelResourceTest LayerTreeHostMasksPixelTest;
+using LayerTreeHostMasksPixelTest = ParameterizedPixelResourceTest;
 
 INSTANTIATE_PIXEL_RESOURCE_TEST_CASE_P(LayerTreeHostMasksPixelTest);
 
 class MaskContentLayerClient : public ContentLayerClient {
  public:
   explicit MaskContentLayerClient(const gfx::Size& bounds) : bounds_(bounds) {}
-  ~MaskContentLayerClient() override {}
+  ~MaskContentLayerClient() override = default;
 
   bool FillsBoundsCompletely() const override { return false; }
   size_t GetApproximateUnsharedMemoryUsage() const override { return 0; }
@@ -181,7 +181,7 @@ class CheckerContentLayerClient : public ContentLayerClient {
                            SkColor color,
                            bool vertical)
       : bounds_(bounds), color_(color), vertical_(vertical) {}
-  ~CheckerContentLayerClient() override {}
+  ~CheckerContentLayerClient() override = default;
   bool FillsBoundsCompletely() const override { return false; }
   size_t GetApproximateUnsharedMemoryUsage() const override { return 0; }
   gfx::Rect PaintableRegion() override { return gfx::Rect(bounds_); }
@@ -230,7 +230,7 @@ class CircleContentLayerClient : public ContentLayerClient {
  public:
   explicit CircleContentLayerClient(const gfx::Size& bounds)
       : bounds_(bounds) {}
-  ~CircleContentLayerClient() override {}
+  ~CircleContentLayerClient() override = default;
   bool FillsBoundsCompletely() const override { return false; }
   size_t GetApproximateUnsharedMemoryUsage() const override { return 0; }
   gfx::Rect PaintableRegion() override { return gfx::Rect(bounds_); }
@@ -272,14 +272,7 @@ INSTANTIATE_TEST_CASE_P(
     PixelResourceTest,
     LayerTreeHostMasksForBackgroundFiltersPixelTest,
     ::testing::Combine(
-        ::testing::Values(SOFTWARE,
-                          GL_GPU_RASTER_2D_DRAW,
-                          GL_ONE_COPY_2D_STAGING_2D_DRAW,
-                          GL_ONE_COPY_RECT_STAGING_2D_DRAW,
-                          GL_ONE_COPY_EXTERNAL_STAGING_2D_DRAW,
-                          GL_ZERO_COPY_2D_DRAW,
-                          GL_ZERO_COPY_RECT_DRAW,
-                          GL_ZERO_COPY_EXTERNAL_DRAW),
+        ::testing::Values(SOFTWARE, GPU, ONE_COPY, ZERO_COPY),
         ::testing::Values(Layer::LayerMaskType::SINGLE_TEXTURE_MASK,
                           Layer::LayerMaskType::MULTI_TEXTURE_MASK)));
 
@@ -400,7 +393,7 @@ class StaticPictureLayer : private ContentLayerClient, public PictureLayer {
  protected:
   explicit StaticPictureLayer(scoped_refptr<DisplayItemList> display_list)
       : PictureLayer(this), display_list_(std::move(display_list)) {}
-  ~StaticPictureLayer() override {}
+  ~StaticPictureLayer() override = default;
 
  private:
   scoped_refptr<DisplayItemList> display_list_;
@@ -412,7 +405,7 @@ class LayerTreeHostMaskAsBlendingPixelTest
  public:
   LayerTreeHostMaskAsBlendingPixelTest()
       : LayerTreeHostPixelResourceTest(
-            GetParam() ? GL_ZERO_COPY_RECT_DRAW : SOFTWARE,
+            GetParam() ? ZERO_COPY : SOFTWARE,
             Layer::LayerMaskType::SINGLE_TEXTURE_MASK),
         use_antialiasing_(GetParam() == 2 || GetParam() == 4),
         force_shaders_(GetParam() == 3 || GetParam() == 4) {
@@ -511,7 +504,8 @@ class LayerTreeHostMaskAsBlendingPixelTest
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
-      scoped_refptr<viz::ContextProvider> worker_context_provider) override {
+      scoped_refptr<viz::RasterContextProvider> worker_context_provider)
+      override {
     viz::RendererSettings modified_renderer_settings = renderer_settings;
     modified_renderer_settings.force_antialiasing = use_antialiasing_;
     modified_renderer_settings.force_blending_with_shaders = force_shaders_;

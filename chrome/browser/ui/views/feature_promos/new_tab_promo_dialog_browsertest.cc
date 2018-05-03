@@ -12,19 +12,18 @@ class NewTabPromoDialogTest : public DialogBrowserTest {
   NewTabPromoDialogTest() = default;
 
   // DialogBrowserTest:
-  void ShowDialog(const std::string& name) override {
-    BrowserView* browser_view =
-        BrowserView::GetBrowserViewForBrowser(browser());
-    browser_view->tabstrip()->new_tab_button()->ShowPromo();
+  void ShowUi(const std::string& name) override {
+    BrowserView::GetBrowserViewForBrowser(browser())
+        ->tabstrip()
+        ->new_tab_button()
+        ->ShowPromo();
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NewTabPromoDialogTest);
 };
 
-// Test that calls ShowDialog("default"). Interactive when run via
-// ../browser_tests --gtest_filter=BrowserDialogTest.Invoke
-// --interactive --dialog=NewTabPromoDialogTest.InvokeDialog_NewTabPromo
-IN_PROC_BROWSER_TEST_F(NewTabPromoDialogTest, InvokeDialog_NewTabPromo) {
-  RunDialog();
+// Test that calls ShowUi("default").
+IN_PROC_BROWSER_TEST_F(NewTabPromoDialogTest, InvokeUi_NewTabPromo) {
+  ShowAndVerifyUi();
 }

@@ -24,17 +24,20 @@
 #include "content/browser/cache_storage/cache_storage_context_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
+#include "content/browser/locks/lock_manager.h"
 #include "content/browser/notifications/platform_notification_context_impl.h"
 #include "content/browser/payments/payment_app_context_impl.h"
 #include "content/browser/push_messaging/push_messaging_context.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
+#include "content/browser/shared_worker/shared_worker_service_impl.h"
 #include "content/browser/url_loader_factory_getter.h"
 #include "content/common/content_export.h"
 #include "content/common/storage_partition_service.mojom.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/common/network_service.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "net/cookies/cookie_store.h"
+#include "services/network/public/interfaces/cookie_manager.mojom.h"
+#include "services/network/public/interfaces/network_service.mojom.h"
 #include "storage/browser/quota/special_storage_policy.h"
 
 #if !defined(OS_ANDROID)
@@ -75,16 +78,20 @@ class CONTENT_EXPORT StoragePartitionImpl
   base::FilePath GetPath() override;
   net::URLRequestContextGetter* GetURLRequestContext() override;
   net::URLRequestContextGetter* GetMediaURLRequestContext() override;
-  mojom::NetworkContext* GetNetworkContext() override;
-  mojom::URLLoaderFactory* GetURLLoaderFactoryForBrowserProcess() override;
+  network::mojom::NetworkContext* GetNetworkContext() override;
+  network::mojom::URLLoaderFactory* GetURLLoaderFactoryForBrowserProcess()
+      override;
+  network::mojom::CookieManager* GetCookieManagerForBrowserProcess() override;
   storage::QuotaManager* GetQuotaManager() override;
   ChromeAppCacheService* GetAppCacheService() override;
   storage::FileSystemContext* GetFileSystemContext() override;
   storage::DatabaseTracker* GetDatabaseTracker() override;
   DOMStorageContextWrapper* GetDOMStorageContext() override;
+  LockManager* GetLockManager();  // override; TODO: Add to interface
   IndexedDBContextImpl* GetIndexedDBContext() override;
   CacheStorageContextImpl* GetCacheStorageContext() override;
   ServiceWorkerContextWrapper* GetServiceWorkerContext() override;
+  SharedWorkerServiceImpl* GetSharedWorkerService() override;
 #if !defined(OS_ANDROID)
   HostZoomMap* GetHostZoomMap() override;
   HostZoomLevelContext* GetHostZoomLevelContext() override;
@@ -93,30 +100,29 @@ class CONTENT_EXPORT StoragePartitionImpl
   PlatformNotificationContextImpl* GetPlatformNotificationContext() override;
   void ClearDataForOrigin(uint32_t remove_mask,
                           uint32_t quota_storage_remove_mask,
-                          const GURL& storage_origin,
-                          net::URLRequestContextGetter* request_context_getter,
-                          const base::Closure& callback) override;
+                          const GURL& storage_origin) override;
   void ClearData(uint32_t remove_mask,
                  uint32_t quota_storage_remove_mask,
                  const GURL& storage_origin,
                  const OriginMatcherFunction& origin_matcher,
                  const base::Time begin,
                  const base::Time end,
-                 const base::Closure& callback) override;
+                 base::OnceClosure callback) override;
   void ClearData(uint32_t remove_mask,
                  uint32_t quota_storage_remove_mask,
                  const OriginMatcherFunction& origin_matcher,
                  const CookieMatcherFunction& cookie_matcher,
                  const base::Time begin,
                  const base::Time end,
-                 const base::Closure& callback) override;
+                 base::OnceClosure callback) override;
   void ClearHttpAndMediaCaches(
       const base::Time begin,
       const base::Time end,
       const base::Callback<bool(const GURL&)>& url_matcher,
-      const base::Closure& callback) override;
+      base::OnceClosure callback) override;
   void Flush() override;
   void ClearBluetoothAllowedDevicesMapForTesting() override;
+  void FlushNetworkInterfaceForTesting() override;
 
   BackgroundFetchContext* GetBackgroundFetchContext();
   BackgroundSyncContext* GetBackgroundSyncContext();
@@ -128,6 +134,10 @@ class CONTENT_EXPORT StoragePartitionImpl
 
   // mojom::StoragePartitionService interface.
   void OpenLocalStorage(
+      const url::Origin& origin,
+      mojo::InterfaceRequest<mojom::LevelDBWrapper> request) override;
+  void OpenSessionStorage(
+      int64_t namespace_id,
       const url::Origin& origin,
       mojo::InterfaceRequest<mojom::LevelDBWrapper> request) override;
 
@@ -145,6 +155,20 @@ class CONTENT_EXPORT StoragePartitionImpl
       mojo::InterfaceRequest<mojom::StoragePartitionService> request);
 
   auto& bindings_for_testing() { return bindings_; }
+
+  // When this StoragePartition is for guests (e.g., for a <webview> tag), this
+  // is the site URL to use when creating a SiteInstance for a service worker.
+  // Typically one would use the script URL of the service worker (e.g.,
+  // "https://example.com/sw.js"), but if this StoragePartition is for guests,
+  // one must use the "chrome-guest://blahblah" site URL to ensure that the
+  // service worker stays in this StoragePartition. This is an empty GURL if
+  // this StoragePartition is not for guests.
+  void set_site_for_service_worker(const GURL& site_for_service_worker) {
+    site_for_service_worker_ = site_for_service_worker;
+  }
+  const GURL& site_for_service_worker() const {
+    return site_for_service_worker_;
+  }
 
   struct DataDeletionHelper;
   struct QuotaManagedDataDeletionHelper;
@@ -210,10 +234,9 @@ class CONTENT_EXPORT StoragePartitionImpl
                      const GURL& remove_origin,
                      const OriginMatcherFunction& origin_matcher,
                      const CookieMatcherFunction& cookie_matcher,
-                     net::URLRequestContextGetter* rq_context,
                      const base::Time begin,
                      const base::Time end,
-                     const base::Closure& callback);
+                     base::OnceClosure callback);
 
   // Used by StoragePartitionImplMap.
   //
@@ -236,6 +259,10 @@ class CONTENT_EXPORT StoragePartitionImpl
   // storage configuration info.
   void GetQuotaSettings(storage::OptionalQuotaSettingsCallback callback);
 
+  // |is_in_memory_| and |relative_partition_path_| are cached from
+  // |StoragePartitionImpl::Create()| in order to re-create |NetworkContext|.
+  bool is_in_memory_;
+  base::FilePath relative_partition_path_;
   base::FilePath partition_path_;
   scoped_refptr<net::URLRequestContextGetter> url_request_context_;
   scoped_refptr<net::URLRequestContextGetter> media_url_request_context_;
@@ -245,9 +272,11 @@ class CONTENT_EXPORT StoragePartitionImpl
   scoped_refptr<storage::FileSystemContext> filesystem_context_;
   scoped_refptr<storage::DatabaseTracker> database_tracker_;
   scoped_refptr<DOMStorageContextWrapper> dom_storage_context_;
+  scoped_refptr<LockManager> lock_manager_;
   scoped_refptr<IndexedDBContextImpl> indexed_db_context_;
   scoped_refptr<CacheStorageContextImpl> cache_storage_context_;
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
+  std::unique_ptr<SharedWorkerServiceImpl> shared_worker_service_;
   scoped_refptr<PushMessagingContext> push_messaging_context_;
   scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
 #if !defined(OS_ANDROID)
@@ -273,12 +302,14 @@ class CONTENT_EXPORT StoragePartitionImpl
   // service. When it's disabled, the underlying NetworkContext may either be
   // provided by the embedder, or is created by the StoragePartition and owned
   // by |network_context_owner_|.
-  mojom::NetworkContextPtr network_context_;
+  network::mojom::NetworkContextPtr network_context_;
 
-  // URLLoaderFactory for use in the browser process only. See the method
-  // comment for StoragePartition::GetURLLoaderFactoryForBrowserProcess() for
+  // URLLoaderFactory/CookieManager for use in the browser process only.
+  // See the method comment for
+  // StoragePartition::GetURLLoaderFactoryForBrowserProcess() for
   // more details
-  mojom::URLLoaderFactoryPtr url_loader_factory_for_browser_process_;
+  network::mojom::URLLoaderFactoryPtr url_loader_factory_for_browser_process_;
+  ::network::mojom::CookieManagerPtr cookie_manager_for_browser_process_;
 
   // When the network service is disabled, a NetworkContext is created on the IO
   // thread that wraps access to the URLRequestContext.
@@ -288,6 +319,9 @@ class CONTENT_EXPORT StoragePartitionImpl
   // StoragePartitionImplMap which then owns StoragePartitionImpl. When the
   // BrowserContext is destroyed, |this| will be destroyed too.
   BrowserContext* browser_context_;
+
+  // See comments for site_for_service_worker().
+  GURL site_for_service_worker_;
 
   base::WeakPtrFactory<StoragePartitionImpl> weak_factory_;
 

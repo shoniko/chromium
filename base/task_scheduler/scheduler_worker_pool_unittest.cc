@@ -111,7 +111,7 @@ class TaskSchedulerWorkerPoolTest
     switch (GetParam().pool_type) {
       case PoolType::GENERIC:
         worker_pool_ = std::make_unique<SchedulerWorkerPoolImpl>(
-            "TestWorkerPool", ThreadPriority::NORMAL, &task_tracker_,
+            "TestWorkerPool", "A", ThreadPriority::NORMAL, &task_tracker_,
             &delayed_task_manager_);
         break;
 #if defined(OS_WIN)
@@ -133,7 +133,8 @@ class TaskSchedulerWorkerPoolTest
         scheduler_worker_pool_impl->Start(
             SchedulerWorkerPoolParams(kNumWorkersInWorkerPool,
                                       TimeDelta::Max()),
-            service_thread_.task_runner());
+            service_thread_.task_runner(),
+            SchedulerWorkerPoolImpl::WorkerEnvironment::NONE);
         break;
       }
 #if defined(OS_WIN)
@@ -149,7 +150,7 @@ class TaskSchedulerWorkerPoolTest
 
   std::unique_ptr<SchedulerWorkerPool> worker_pool_;
 
-  TaskTracker task_tracker_;
+  TaskTracker task_tracker_ = {"Test"};
   Thread service_thread_;
   DelayedTaskManager delayed_task_manager_;
 

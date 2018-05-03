@@ -31,7 +31,6 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_client_view.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/views/desktop_ios_promotion/desktop_ios_promotion_bubble_view.h"
@@ -276,9 +275,10 @@ void BookmarkBubbleView::OnIOSPromotionFootnoteLinkClicked() {
 void BookmarkBubbleView::Init() {
   using views::GridLayout;
 
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
   bookmark_contents_view_ = new views::View();
-  GridLayout* layout = GridLayout::CreateAndInstall(bookmark_contents_view_);
+  GridLayout* layout = bookmark_contents_view_->SetLayoutManager(
+      std::make_unique<views::GridLayout>(bookmark_contents_view_));
 
   constexpr int kColumnId = 0;
   ConfigureTextfieldStack(layout, kColumnId);
@@ -290,7 +290,7 @@ void BookmarkBubbleView::Init() {
       l10n_util::GetStringUTF16(IDS_BOOKMARK_AX_BUBBLE_NAME_LABEL));
 
   BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile_);
-  auto parent_folder_model = base::MakeUnique<RecentlyUsedFoldersComboModel>(
+  auto parent_folder_model = std::make_unique<RecentlyUsedFoldersComboModel>(
       model, model->GetMostRecentlyAddedUserNodeForURL(url_));
 
   parent_combobox_ = AddComboboxRow(
@@ -312,7 +312,7 @@ BookmarkBubbleView::BookmarkBubbleView(
     Profile* profile,
     const GURL& url,
     bool newly_bookmarked)
-    : LocationBarBubbleDelegateView(anchor_view, nullptr),
+    : LocationBarBubbleDelegateView(anchor_view, gfx::Point(), nullptr),
       observer_(observer),
       delegate_(std::move(delegate)),
       profile_(profile),
@@ -386,7 +386,7 @@ void BookmarkBubbleView::ShowIOSPromotion(
   AddChildView(ios_promo_view_);
   GetWidget()->UpdateWindowIcon();
   GetWidget()->UpdateWindowTitle();
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
   SizeToContents();
 }
 #endif

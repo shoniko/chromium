@@ -36,7 +36,7 @@ namespace blink {
 
 ElementAnimations::ElementAnimations() : animation_style_change_(false) {}
 
-ElementAnimations::~ElementAnimations() {}
+ElementAnimations::~ElementAnimations() = default;
 
 void ElementAnimations::UpdateAnimationFlags(ComputedStyle& style) {
   for (const auto& entry : animations_) {
@@ -47,16 +47,16 @@ void ElementAnimations::UpdateAnimationFlags(ComputedStyle& style) {
     const KeyframeEffectReadOnly& effect =
         *ToKeyframeEffectReadOnly(animation.effect());
     if (effect.IsCurrent()) {
-      if (effect.Affects(PropertyHandle(CSSPropertyOpacity)))
+      if (effect.Affects(PropertyHandle(GetCSSPropertyOpacity())))
         style.SetHasCurrentOpacityAnimation(true);
-      if (effect.Affects(PropertyHandle(CSSPropertyTransform)) ||
-          effect.Affects(PropertyHandle(CSSPropertyRotate)) ||
-          effect.Affects(PropertyHandle(CSSPropertyScale)) ||
-          effect.Affects(PropertyHandle(CSSPropertyTranslate)))
+      if (effect.Affects(PropertyHandle(GetCSSPropertyTransform())) ||
+          effect.Affects(PropertyHandle(GetCSSPropertyRotate())) ||
+          effect.Affects(PropertyHandle(GetCSSPropertyScale())) ||
+          effect.Affects(PropertyHandle(GetCSSPropertyTranslate())))
         style.SetHasCurrentTransformAnimation(true);
-      if (effect.Affects(PropertyHandle(CSSPropertyFilter)))
+      if (effect.Affects(PropertyHandle(GetCSSPropertyFilter())))
         style.SetHasCurrentFilterAnimation(true);
-      if (effect.Affects(PropertyHandle(CSSPropertyBackdropFilter)))
+      if (effect.Affects(PropertyHandle(GetCSSPropertyBackdropFilter())))
         style.SetHasCurrentBackdropFilterAnimation(true);
     }
   }
@@ -64,22 +64,22 @@ void ElementAnimations::UpdateAnimationFlags(ComputedStyle& style) {
   if (style.HasCurrentOpacityAnimation()) {
     style.SetIsRunningOpacityAnimationOnCompositor(
         effect_stack_.HasActiveAnimationsOnCompositor(
-            PropertyHandle(CSSPropertyOpacity)));
+            PropertyHandle(GetCSSPropertyOpacity())));
   }
   if (style.HasCurrentTransformAnimation()) {
     style.SetIsRunningTransformAnimationOnCompositor(
         effect_stack_.HasActiveAnimationsOnCompositor(
-            PropertyHandle(CSSPropertyTransform)));
+            PropertyHandle(GetCSSPropertyTransform())));
   }
   if (style.HasCurrentFilterAnimation()) {
     style.SetIsRunningFilterAnimationOnCompositor(
         effect_stack_.HasActiveAnimationsOnCompositor(
-            PropertyHandle(CSSPropertyFilter)));
+            PropertyHandle(GetCSSPropertyFilter())));
   }
   if (style.HasCurrentBackdropFilterAnimation()) {
     style.SetIsRunningBackdropFilterAnimationOnCompositor(
         effect_stack_.HasActiveAnimationsOnCompositor(
-            PropertyHandle(CSSPropertyBackdropFilter)));
+            PropertyHandle(GetCSSPropertyBackdropFilter())));
   }
 }
 
@@ -120,13 +120,13 @@ void ElementAnimations::ClearBaseComputedStyle() {
 }
 
 bool ElementAnimations::IsAnimationStyleChange() const {
-  // TODO(rune@opera.com): The FontFaceCache version number may be increased
-  // without forcing a style recalc (see crbug.com/471079). ComputedStyle
-  // objects created with different cache versions will not be considered equal
-  // as Font::operator== will compare versions, hence ComputedStyle::operator==
-  // will return false. We avoid using baseComputedStyle (the check for
-  // isFallbackValid()) in that case to avoid triggering the ComputedStyle
-  // comparison ASSERT in updateBaseComputedStyle.
+  // TODO(futhark@chromium.org): The FontFaceCache version number may be
+  // increased without forcing a style recalc (see crbug.com/471079).
+  // ComputedStyle objects created with different cache versions will not be
+  // considered equal as Font::operator== will compare versions, hence
+  // ComputedStyle::operator== will return false. We avoid using
+  // base_computed_style (the check for IsFallbackValid()) in that case to avoid
+  // triggering the ComputedStyle comparison DCHECK in UpdateBaseComputedStyle.
   return animation_style_change_ &&
          (!base_computed_style_ ||
           base_computed_style_->GetFont().IsFallbackValid());

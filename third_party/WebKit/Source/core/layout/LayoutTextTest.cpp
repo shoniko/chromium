@@ -86,16 +86,17 @@ TEST_F(LayoutTextTest, WidthMaxFromMaxLength) {
 TEST_F(LayoutTextTest, WidthWithHugeLengthAvoidsOverflow) {
   // The test case from http://crbug.com/647820 uses a 288-length string, so for
   // posterity we follow that closely.
-  SetBodyInnerHTML(
-      "<div "
-      "id='target'>"
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-      "xxxx"
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <div
+    id='target'>
+    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    xxxx
+    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    </div>
+  )HTML");
   // Width may vary by platform and we just want to make sure it's something
   // roughly reasonable.
   const float width = GetBasicText()->Width(
@@ -118,6 +119,33 @@ TEST_F(LayoutTextTest, WidthLengthBeyondLength) {
       GetBasicText()->Width(0u, 2u, LayoutUnit(), TextDirection::kLtr, false);
   ASSERT_GE(width, 4.f);
   ASSERT_LE(width, 20.f);
+}
+
+TEST_F(LayoutTextTest, ContainsOnlyWhitespaceOrNbsp) {
+  // Note that '&nbsp' is needed when only including whitespace to force
+  // LayoutText creation from the div.
+  SetBasicBody("&nbsp");
+  // GetWidth will also compute |contains_only_whitespace_|.
+  GetBasicText()->Width(0u, 1u, LayoutUnit(), TextDirection::kLtr, false);
+  EXPECT_EQ(OnlyWhitespaceOrNbsp::kYes,
+            GetBasicText()->ContainsOnlyWhitespaceOrNbsp());
+
+  SetBasicBody("   \t\t\n \n\t &nbsp \n\t&nbsp\n \t");
+  EXPECT_EQ(OnlyWhitespaceOrNbsp::kUnknown,
+            GetBasicText()->ContainsOnlyWhitespaceOrNbsp());
+  GetBasicText()->Width(0u, 18u, LayoutUnit(), TextDirection::kLtr, false);
+  EXPECT_EQ(OnlyWhitespaceOrNbsp::kYes,
+            GetBasicText()->ContainsOnlyWhitespaceOrNbsp());
+
+  SetBasicBody("abc");
+  GetBasicText()->Width(0u, 3u, LayoutUnit(), TextDirection::kLtr, false);
+  EXPECT_EQ(OnlyWhitespaceOrNbsp::kNo,
+            GetBasicText()->ContainsOnlyWhitespaceOrNbsp());
+
+  SetBasicBody("  \t&nbsp\nx \n");
+  GetBasicText()->Width(0u, 8u, LayoutUnit(), TextDirection::kLtr, false);
+  EXPECT_EQ(OnlyWhitespaceOrNbsp::kNo,
+            GetBasicText()->ContainsOnlyWhitespaceOrNbsp());
 }
 
 TEST_P(ParameterizedLayoutTextTest, CaretMinMaxOffset) {
@@ -311,6 +339,65 @@ TEST_P(ParameterizedLayoutTextTest, IsBeforeAfterNonCollapsedCharacterBR) {
   EXPECT_FALSE(GetBasicText()->IsBeforeNonCollapsedCharacter(1));
   EXPECT_FALSE(GetBasicText()->IsAfterNonCollapsedCharacter(0));
   EXPECT_TRUE(GetBasicText()->IsAfterNonCollapsedCharacter(1));
+}
+
+TEST_P(ParameterizedLayoutTextTest, LinesBoundingBox) {
+  LoadAhem();
+  SetBasicBody(
+      "<style>"
+      "div {"
+      "  font-family:Ahem;"
+      "  font-size: 13px;"
+      "  line-height: 19px;"
+      "  padding: 3px;"
+      "}"
+      "</style>"
+      "<div id=div>"
+      "  012"
+      "  <span id=one>345</span>"
+      "  <br>"
+      "  <span style='padding: 20px'>"
+      "    <span id=two style='padding: 5px'>678</span>"
+      "  </span>"
+      "</div>");
+  // Layout NG Physical Fragment Tree
+  // Box offset:3,3 size:778x44
+  //   LineBox offset:3,3 size:91x19
+  //     Text offset:0,3 size:52x13 start: 0 end: 4
+  //     Box offset:52,3 size:39x13
+  //       Text offset:0,0 size:39x13 start: 4 end: 7
+  //       Text offset:91,3 size:0x13 start: 7 end: 8
+  //   LineBox offset:3,22 size:89x19
+  //     Box offset:0,-17 size:89x53
+  //       Box offset:20,15 size:49x23
+  //         Text offset:5,5 size:39x13 start: 8 end: 11
+  const Element& div = *GetDocument().getElementById("div");
+  const Element& one = *GetDocument().getElementById("one");
+  const Element& two = *GetDocument().getElementById("two");
+  EXPECT_EQ(
+      LayoutRect(LayoutPoint(3, 6), LayoutSize(52, 13)),
+      ToLayoutText(div.firstChild()->GetLayoutObject())->LinesBoundingBox());
+  EXPECT_EQ(
+      LayoutRect(LayoutPoint(55, 6), LayoutSize(39, 13)),
+      ToLayoutText(one.firstChild()->GetLayoutObject())->LinesBoundingBox());
+  EXPECT_EQ(
+      LayoutRect(LayoutPoint(28, 25), LayoutSize(39, 13)),
+      ToLayoutText(two.firstChild()->GetLayoutObject())->LinesBoundingBox());
+}
+
+TEST_P(ParameterizedLayoutTextTest, QuadsBasic) {
+  GetDocument().SetCompatibilityMode(Document::kQuirksMode);
+  LoadAhem();
+  SetBasicBody(
+      "<style>p {font: 13px/17px Ahem;}</style>"
+      "<p id=one>one</p>");
+  const Element& one = *GetDocument().getElementById("one");
+  Vector<FloatQuad> actual_quads;
+  ToLayoutText(one.firstChild()->GetLayoutObject())->Quads(actual_quads);
+  EXPECT_EQ(
+      Vector<FloatQuad>({FloatQuad(FloatPoint(8, 10), FloatPoint(47, 10),
+                                   FloatPoint(47, 23), FloatPoint(8, 23))}),
+      actual_quads);
 }
 
 }  // namespace blink

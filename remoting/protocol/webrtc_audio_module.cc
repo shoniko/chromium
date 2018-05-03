@@ -4,8 +4,9 @@
 
 #include "remoting/protocol/webrtc_audio_module.h"
 
+#include <memory>
+
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -35,8 +36,8 @@ const int kBytesPerSample = 2;
 // functions that are actually used. All unused functions are marked as
 // NOTREACHED().
 
-WebrtcAudioModule::WebrtcAudioModule() {}
-WebrtcAudioModule::~WebrtcAudioModule() {}
+WebrtcAudioModule::WebrtcAudioModule() = default;
+WebrtcAudioModule::~WebrtcAudioModule() = default;
 
 void WebrtcAudioModule::SetAudioTaskRunner(
     scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner) {
@@ -178,15 +179,6 @@ bool WebrtcAudioModule::Recording() const {
   return false;
 }
 
-int32_t WebrtcAudioModule::SetAGC(bool enable) {
-  return 0;
-}
-
-bool WebrtcAudioModule::AGC() const {
-  NOTREACHED();
-  return false;
-}
-
 int32_t WebrtcAudioModule::InitSpeaker() {
   return 0;
 }
@@ -312,51 +304,9 @@ int32_t WebrtcAudioModule::StereoRecording(bool* enabled) const {
   return -1;
 }
 
-int32_t WebrtcAudioModule::SetRecordingChannel(const ChannelType channel) {
-  return 0;
-}
-
-int32_t WebrtcAudioModule::RecordingChannel(ChannelType* channel) const {
-  NOTREACHED();
-  return -1;
-}
-
 int32_t WebrtcAudioModule::PlayoutDelay(uint16_t* delay_ms) const {
   *delay_ms = 0;
   return 0;
-}
-
-int32_t WebrtcAudioModule::SetRecordingSampleRate(
-    const uint32_t samples_per_sec) {
-  NOTREACHED();
-  return -1;
-}
-
-int32_t WebrtcAudioModule::RecordingSampleRate(
-    uint32_t* samples_per_sec) const {
-  NOTREACHED();
-  return -1;
-}
-
-int32_t WebrtcAudioModule::SetPlayoutSampleRate(
-    const uint32_t samples_per_sec) {
-  NOTREACHED();
-  return -1;
-}
-
-int32_t WebrtcAudioModule::PlayoutSampleRate(uint32_t* samples_per_sec) const {
-  NOTREACHED();
-  return -1;
-}
-
-int32_t WebrtcAudioModule::SetLoudspeakerStatus(bool enable) {
-  NOTREACHED();
-  return -1;
-}
-
-int32_t WebrtcAudioModule::GetLoudspeakerStatus(bool* enabled) const {
-  NOTREACHED();
-  return -1;
 }
 
 bool WebrtcAudioModule::BuiltInAECIsAvailable() const {
@@ -402,7 +352,7 @@ int WebrtcAudioModule::GetRecordAudioParameters(
 
 void WebrtcAudioModule::StartPlayoutOnAudioThread() {
   DCHECK(audio_task_runner_->BelongsToCurrentThread());
-  poll_timer_ = base::MakeUnique<base::RepeatingTimer>();
+  poll_timer_ = std::make_unique<base::RepeatingTimer>();
   poll_timer_->Start(
       FROM_HERE, kPollInterval,
       base::Bind(&WebrtcAudioModule::PollFromSource, base::Unretained(this)));

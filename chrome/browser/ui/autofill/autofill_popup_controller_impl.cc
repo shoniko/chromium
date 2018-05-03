@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
@@ -66,6 +67,8 @@ AutofillPopupControllerImpl::AutofillPopupControllerImpl(
       delegate_(delegate),
       weak_ptr_factory_(this) {
   ClearState();
+  delegate->RegisterDeletionCallback(base::BindOnce(
+      &AutofillPopupControllerImpl::HideViewAndDie, GetWeakPtr()));
 }
 
 AutofillPopupControllerImpl::~AutofillPopupControllerImpl() {}
@@ -188,15 +191,13 @@ void AutofillPopupControllerImpl::UpdateDataListValues(
 
 void AutofillPopupControllerImpl::Hide() {
   if (delegate_) {
+    delegate_->ClearPreviewedForm();
     delegate_->OnPopupHidden();
     static_cast<ContentAutofillDriver*>(delegate_->GetAutofillDriver())
         ->RemoveKeyPressHandler();
   }
 
-  if (view_)
-    view_->Hide();
-
-  delete this;
+  HideViewAndDie();
 }
 
 void AutofillPopupControllerImpl::ViewDestroyed() {
@@ -311,14 +312,20 @@ AutofillPopupControllerImpl::GetSuggestions() {
 }
 
 #if !defined(OS_ANDROID)
+void AutofillPopupControllerImpl::SetTypesetter(gfx::Typesetter typesetter) {
+  typesetter_ = typesetter;
+}
+
 int AutofillPopupControllerImpl::GetElidedValueWidthForRow(int row) {
   return gfx::GetStringWidth(GetElidedValueAt(row),
-                             layout_model_.GetValueFontListForRow(row));
+                             layout_model_.GetValueFontListForRow(row),
+                             typesetter_);
 }
 
 int AutofillPopupControllerImpl::GetElidedLabelWidthForRow(int row) {
   return gfx::GetStringWidth(GetElidedLabelAt(row),
-                             layout_model_.GetLabelFontListForRow(row));
+                             layout_model_.GetLabelFontListForRow(row),
+                             typesetter_);
 }
 #endif
 
@@ -487,9 +494,11 @@ void AutofillPopupControllerImpl::ElideValueAndLabelForRow(
     int row,
     int available_width) {
   int value_width = gfx::GetStringWidth(
-      suggestions_[row].value, layout_model_.GetValueFontListForRow(row));
+      suggestions_[row].value, layout_model_.GetValueFontListForRow(row),
+      typesetter_);
   int label_width = gfx::GetStringWidth(
-      suggestions_[row].label, layout_model_.GetLabelFontListForRow(row));
+      suggestions_[row].label, layout_model_.GetLabelFontListForRow(row),
+      typesetter_);
   int total_text_length = value_width + label_width;
 
   // The line can have no strings if it represents a UI element, such as
@@ -501,12 +510,12 @@ void AutofillPopupControllerImpl::ElideValueAndLabelForRow(
   int value_size = available_width * value_width / total_text_length;
   elided_values_[row] = gfx::ElideText(
       suggestions_[row].value, layout_model_.GetValueFontListForRow(row),
-      value_size, gfx::ELIDE_TAIL);
+      value_size, gfx::ELIDE_TAIL, typesetter_);
 
   int label_size = available_width * label_width / total_text_length;
   elided_labels_[row] = gfx::ElideText(
       suggestions_[row].label, layout_model_.GetLabelFontListForRow(row),
-      label_size, gfx::ELIDE_TAIL);
+      label_size, gfx::ELIDE_TAIL, typesetter_);
 }
 #endif
 
@@ -518,6 +527,13 @@ void AutofillPopupControllerImpl::ClearState() {
   elided_labels_.clear();
 
   selected_line_.reset();
+}
+
+void AutofillPopupControllerImpl::HideViewAndDie() {
+  if (view_)
+    view_->Hide();
+
+  delete this;
 }
 
 }  // namespace autofill

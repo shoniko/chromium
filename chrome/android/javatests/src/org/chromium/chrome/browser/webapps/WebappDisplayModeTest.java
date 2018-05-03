@@ -16,6 +16,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
@@ -48,8 +49,9 @@ public class WebappDisplayModeTest {
     }
 
     @Test
-    @SmallTest
-    @Feature({"Webapps"})
+    //@SmallTest
+    //@Feature({"Webapps"})
+    @DisabledTest(message = "crbug.com/793133")
     public void testFullScreen() throws Exception {
         WebappActivity activity = startActivity(WebDisplayMode.FULLSCREEN);
 
@@ -70,7 +72,7 @@ public class WebappDisplayModeTest {
         Assert.assertEquals("Web App title should be displayed on the title bar",
                 WEB_APP_PAGE_TITLE, ((TextView) activity.findViewById(R.id.title_bar)).getText());
         Assert.assertEquals("URL Bar should display URL authority",
-                Uri.parse(mActivityTestRule.getUrlFromTestServer(WEB_APP_PATH)).getAuthority(),
+                Uri.parse(mActivityTestRule.getTestServer().getURL(WEB_APP_PATH)).getAuthority(),
                 ((UrlBar) activity.findViewById(R.id.url_bar)).getText().toString());
         Assert.assertEquals("CCT Close button should not be visible", View.GONE,
                 activity.findViewById(R.id.close_button).getVisibility());
@@ -80,7 +82,7 @@ public class WebappDisplayModeTest {
         mActivityTestRule.startWebappActivity(
                 mActivityTestRule.createIntent()
                         .putExtra(ShortcutHelper.EXTRA_URL,
-                                mActivityTestRule.getUrlFromTestServer(WEB_APP_PATH))
+                                mActivityTestRule.getTestServer().getURL(WEB_APP_PATH))
                         .putExtra(ShortcutHelper.EXTRA_DISPLAY_MODE, displayMode)
                         .putExtra(ShortcutHelper.EXTRA_THEME_COLOR, (long) Color.CYAN));
 

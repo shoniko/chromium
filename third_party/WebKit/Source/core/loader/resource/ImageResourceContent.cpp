@@ -16,19 +16,22 @@
 #include "platform/graphics/BitmapImage.h"
 #include "platform/graphics/PlaceholderImage.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/network/HTTPParsers.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/Vector.h"
 #include "v8/include/v8.h"
 
 namespace blink {
+
 namespace {
+
 class NullImageResourceInfo final
     : public GarbageCollectedFinalized<NullImageResourceInfo>,
       public ImageResourceInfo {
   USING_GARBAGE_COLLECTED_MIXIN(NullImageResourceInfo);
 
  public:
-  NullImageResourceInfo() {}
+  NullImageResourceInfo() = default;
 
   void Trace(blink::Visitor* visitor) override {
     ImageResourceInfo::Trace(visitor);
@@ -46,12 +49,14 @@ class NullImageResourceInfo final
     return false;
   }
   bool IsAccessAllowed(
-      SecurityOrigin*,
+      const SecurityOrigin*,
       DoesCurrentFrameHaveSingleSecurityOrigin) const override {
     return true;
   }
   bool HasCacheControlNoStoreHeader() const override { return false; }
-  const ResourceError& GetResourceError() const override { return error_; }
+  Optional<ResourceError> GetResourceError() const override {
+    return WTF::nullopt;
+  }
 
   void SetDecodedSize(size_t) override {}
   void WillAddClientOrObserver() override {}
@@ -63,8 +68,32 @@ class NullImageResourceInfo final
 
   const KURL url_;
   const ResourceResponse response_;
-  const ResourceError error_;
 };
+
+int64_t EstimateOriginalImageSizeForPlaceholder(
+    const ResourceResponse& response) {
+  if (response.HttpHeaderField("chrome-proxy-content-transform") ==
+      "empty-image") {
+    const String& str = response.HttpHeaderField("chrome-proxy");
+    size_t index = str.Find("ofcl=");
+    if (index != kNotFound) {
+      bool ok = false;
+      int bytes = str.Substring(index + (sizeof("ofcl=") - 1)).ToInt(&ok);
+      if (ok && bytes >= 0)
+        return bytes;
+    }
+  }
+
+  int64_t first = -1, last = -1, length = -1;
+  if (response.HttpStatusCode() == 206 &&
+      ParseContentRangeHeaderFor206(response.HttpHeaderField("content-range"),
+                                    &first, &last, &length) &&
+      length >= 0) {
+    return length;
+  }
+
+  return response.EncodedBodyLength();
+}
 
 }  // namespace
 
@@ -128,7 +157,7 @@ void ImageResourceContent::AddObserver(ImageResourceObserver* observer) {
     return;
 
   if (image_ && !image_->IsNull()) {
-    observer->ImageChanged(this);
+    observer->ImageChanged(this, CanDeferInvalidation::kNo);
   }
 
   if (IsLoaded() && observers_.Contains(observer) &&
@@ -202,46 +231,11 @@ bool ImageResourceContent::ShouldUpdateImageImmediately() const {
          (image_ && image_->MaybeAnimated());
 }
 
-std::pair<blink::Image*, float> ImageResourceContent::BrokenImage(
-    float device_scale_factor) {
-  if (device_scale_factor >= 2) {
-    DEFINE_STATIC_REF(blink::Image, broken_image_hi_res,
-                      (blink::Image::LoadPlatformResource("missingImage@2x")));
-    return std::make_pair(broken_image_hi_res, 2);
-  }
-
-  DEFINE_STATIC_REF(blink::Image, broken_image_lo_res,
-                    (blink::Image::LoadPlatformResource("missingImage")));
-  return std::make_pair(broken_image_lo_res, 1);
-}
-
 blink::Image* ImageResourceContent::GetImage() {
-  if (ErrorOccurred()) {
-    // Returning the 1x broken image is non-ideal, but we cannot reliably access
-    // the appropriate deviceScaleFactor from here. It is critical that callers
-    // use ImageResourceContent::brokenImage() when they need the real,
-    // deviceScaleFactor-appropriate broken image icon.
-    return BrokenImage(1).first;
-  }
+  if (!image_ || ErrorOccurred())
+    return Image::NullImage();
 
-  if (image_)
-    return image_.get();
-
-  return blink::Image::NullImage();
-}
-
-bool ImageResourceContent::UsesImageContainerSize() const {
-  if (image_)
-    return image_->UsesContainerSize();
-
-  return false;
-}
-
-bool ImageResourceContent::ImageHasRelativeSize() const {
-  if (image_)
-    return image_->HasRelativeSize();
-
-  return false;
+  return image_.get();
 }
 
 IntSize ImageResourceContent::IntrinsicSize(
@@ -256,6 +250,7 @@ IntSize ImageResourceContent::IntrinsicSize(
 
 void ImageResourceContent::NotifyObservers(
     NotifyFinishOption notifying_finish_option,
+    CanDeferInvalidation defer,
     const IntRect* change_rect) {
   {
     Vector<ImageResourceObserver*> finished_observers_as_vector;
@@ -267,7 +262,7 @@ void ImageResourceContent::NotifyObservers(
 
     for (auto* observer : finished_observers_as_vector) {
       if (finished_observers_.Contains(observer))
-        observer->ImageChanged(this, change_rect);
+        observer->ImageChanged(this, defer, change_rect);
     }
   }
   {
@@ -280,7 +275,7 @@ void ImageResourceContent::NotifyObservers(
 
     for (auto* observer : observers_as_vector) {
       if (observers_.Contains(observer)) {
-        observer->ImageChanged(this, change_rect);
+        observer->ImageChanged(this, defer, change_rect);
         if (notifying_finish_option == kShouldNotifyFinish &&
             observers_.Contains(observer) &&
             !info_->SchedulingReloadOrShouldReloadBrokenPlaceholder()) {
@@ -389,7 +384,7 @@ void ImageResourceContent::AsyncLoadCompleted(const blink::Image* image) {
   CHECK_EQ(size_available_, Image::kSizeAvailableAndLoadingAsynchronously);
   size_available_ = Image::kSizeAvailable;
   UpdateToLoadedContentStatus(ResourceStatus::kCached);
-  NotifyObservers(kShouldNotifyFinish);
+  NotifyObservers(kShouldNotifyFinish, CanDeferInvalidation::kNo);
 }
 
 ImageResourceContent::UpdateImageResult ImageResourceContent::UpdateImage(
@@ -448,11 +443,18 @@ ImageResourceContent::UpdateImageResult ImageResourceContent::UpdateImage(
         if (image_ && !image_->IsNull()) {
           IntSize dimensions = image_->Size();
           ClearImage();
-          image_ = PlaceholderImage::Create(this, dimensions);
+          image_ = PlaceholderImage::Create(
+              this, dimensions,
+              EstimateOriginalImageSizeForPlaceholder(info_->GetResponse()));
         }
       }
 
-      if (!image_ || image_->IsNull()) {
+      // As per spec, zero intrinsic size SVG is a valid image so do not
+      // consider such an image as DecodeError.
+      // https://www.w3.org/TR/SVG/struct.html#SVGElementWidthAttribute
+      if (!image_ ||
+          (image_->IsNull() && (!image_->IsSVGImage() ||
+                                size_available_ == Image::kSizeUnavailable))) {
         ClearImage();
         return UpdateImageResult::kShouldDecodeError;
       }
@@ -469,12 +471,16 @@ ImageResourceContent::UpdateImageResult ImageResourceContent::UpdateImage(
   // In the case of kSizeAvailableAndLoadingAsynchronously, we are waiting for
   // SVG image completion, and thus we notify observers of kDoNotNotifyFinish
   // here, and will notify observers of finish later in AsyncLoadCompleted().
+  //
+  // Don't allow defering of invalidation if it resulted from a data update.
+  // This is necessary to ensure that all PaintImages in a recording committed
+  // to the compositor have the same data.
   if (all_data_received &&
       size_available_ != Image::kSizeAvailableAndLoadingAsynchronously) {
     UpdateToLoadedContentStatus(status);
-    NotifyObservers(kShouldNotifyFinish);
+    NotifyObservers(kShouldNotifyFinish, CanDeferInvalidation::kNo);
   } else {
-    NotifyObservers(kDoNotNotifyFinish);
+    NotifyObservers(kDoNotNotifyFinish, CanDeferInvalidation::kNo);
   }
 
   return UpdateImageResult::kNoDecodeError;
@@ -510,7 +516,7 @@ bool ImageResourceContent::ShouldPauseAnimation(const blink::Image* image) {
 void ImageResourceContent::AnimationAdvanced(const blink::Image* image) {
   if (!image || image != image_)
     return;
-  NotifyObservers(kDoNotNotifyFinish);
+  NotifyObservers(kDoNotNotifyFinish, CanDeferInvalidation::kYes);
 }
 
 void ImageResourceContent::UpdateImageAnimationPolicy() {
@@ -538,10 +544,11 @@ void ImageResourceContent::ChangedInRect(const blink::Image* image,
                                          const IntRect& rect) {
   if (!image || image != image_)
     return;
-  NotifyObservers(kDoNotNotifyFinish, &rect);
+  NotifyObservers(kDoNotNotifyFinish, CanDeferInvalidation::kYes, &rect);
 }
 
-bool ImageResourceContent::IsAccessAllowed(SecurityOrigin* security_origin) {
+bool ImageResourceContent::IsAccessAllowed(
+    const SecurityOrigin* security_origin) {
   return info_->IsAccessAllowed(
       security_origin, GetImage()->CurrentFrameHasSingleSecurityOrigin()
                            ? ImageResourceInfo::kHasSingleSecurityOrigin
@@ -598,7 +605,7 @@ const ResourceResponse& ImageResourceContent::GetResponse() const {
   return info_->GetResponse();
 }
 
-const ResourceError& ImageResourceContent::GetResourceError() const {
+Optional<ResourceError> ImageResourceContent::GetResourceError() const {
   return info_->GetResourceError();
 }
 

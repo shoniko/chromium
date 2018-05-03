@@ -1029,7 +1029,7 @@ TEST_PPAPI_NACL(MAYBE_View_CreatedVisible);
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, View_CreateInvisible) {
   // Make a second tab in the foreground.
   GURL url = GetTestFileUrl("View_CreatedInvisible");
-  chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
+  NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
   ui_test_utils::NavigateToURL(&params);
 }
@@ -1051,8 +1051,8 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, DISABLED_View_PageHideShow) {
 
   // Make a new tab to cause the original one to hide, this should trigger the
   // next phase of the test.
-  chrome::NavigateParams params(
-      browser(), GURL(url::kAboutBlankURL), ui::PAGE_TRANSITION_LINK);
+  NavigateParams params(browser(), GURL(url::kAboutBlankURL),
+                        ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   ui_test_utils::NavigateToURL(&params);
 
@@ -1078,9 +1078,9 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, InputEvent_AcceptTouchEvent) {
                                  };
 
   for (size_t i = 0; i < arraysize(positive_tests); ++i) {
+    RunTest(positive_tests[i]);
     RenderViewHost* host = browser()->tab_strip_model()->
         GetActiveWebContents()->GetRenderViewHost();
-    RunTest(positive_tests[i]);
     EXPECT_TRUE(content::RenderViewHostTester::HasTouchEventHandler(host));
   }
 }

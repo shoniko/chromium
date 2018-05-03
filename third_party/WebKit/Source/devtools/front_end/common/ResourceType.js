@@ -228,9 +228,9 @@ Common.resourceTypes = {
   TextTrack: new Common.ResourceType('texttrack', 'TextTrack', Common.resourceCategories.Other, true),
   WebSocket: new Common.ResourceType('websocket', 'WebSocket', Common.resourceCategories.WebSocket, false),
   Other: new Common.ResourceType('other', 'Other', Common.resourceCategories.Other, false),
-  SourceMapScript: new Common.ResourceType('sm-script', 'Script', Common.resourceCategories.Script, false),
+  SourceMapScript: new Common.ResourceType('sm-script', 'Script', Common.resourceCategories.Script, true),
   SourceMapStyleSheet:
-      new Common.ResourceType('sm-stylesheet', 'Stylesheet', Common.resourceCategories.Stylesheet, false),
+      new Common.ResourceType('sm-stylesheet', 'Stylesheet', Common.resourceCategories.Stylesheet, true),
   Manifest: new Common.ResourceType('manifest', 'Manifest', Common.resourceCategories.Manifest, true),
 };
 
@@ -258,7 +258,7 @@ Common.ResourceType._resourceTypeByExtension = new Map([
 Common.ResourceType._mimeTypeByExtension = new Map([
   // Web extensions
   ['js', 'text/javascript'], ['css', 'text/css'], ['html', 'text/html'], ['htm', 'text/html'],
-  ['xml', 'application/xml'], ['xsl', 'application/xml'],
+  ['mjs', 'text/javascript'], ['xml', 'application/xml'], ['xsl', 'application/xml'],
 
   // HTML Embedded Scripts, ASP], JSP
   ['asp', 'application/x-aspx'], ['aspx', 'application/x-aspx'], ['jsp', 'application/x-jsp'],

@@ -5,6 +5,7 @@
 #include "components/update_client/component_patcher.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -19,6 +20,7 @@
 #include "components/update_client/component_patcher_operation.h"
 #include "components/update_client/update_client.h"
 #include "components/update_client/update_client_errors.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 namespace update_client {
 
@@ -36,7 +38,7 @@ base::ListValue* ReadCommands(const base::FilePath& unpack_path) {
   std::unique_ptr<base::Value> root =
       deserializer.Deserialize(nullptr, nullptr);
 
-  return (root.get() && root->IsType(base::Value::Type::LIST))
+  return (root.get() && root->is_list())
              ? static_cast<base::ListValue*>(root.release())
              : nullptr;
 }
@@ -47,17 +49,17 @@ ComponentPatcher::ComponentPatcher(
     const base::FilePath& input_dir,
     const base::FilePath& unpack_dir,
     scoped_refptr<CrxInstaller> installer,
-    scoped_refptr<OutOfProcessPatcher> out_of_process_patcher)
+    std::unique_ptr<service_manager::Connector> connector)
     : input_dir_(input_dir),
       unpack_dir_(unpack_dir),
       installer_(installer),
-      out_of_process_patcher_(out_of_process_patcher) {}
+      connector_(std::move(connector)) {}
 
 ComponentPatcher::~ComponentPatcher() {
 }
 
-void ComponentPatcher::Start(const Callback& callback) {
-  callback_ = callback;
+void ComponentPatcher::Start(Callback callback) {
+  callback_ = std::move(callback);
   base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&ComponentPatcher::StartPatching,
                                 scoped_refptr<ComponentPatcher>(this)));
@@ -86,17 +88,17 @@ void ComponentPatcher::PatchNextFile() {
 
   std::string operation;
   if (command_args->GetString(kOp, &operation)) {
-    current_operation_ =
-        CreateDeltaUpdateOp(operation, out_of_process_patcher_);
+    current_operation_ = CreateDeltaUpdateOp(operation, connector_.get());
   }
 
   if (!current_operation_.get()) {
     DonePatching(UnpackerError::kDeltaUnsupportedCommand, 0);
     return;
   }
-  current_operation_->Run(command_args, input_dir_, unpack_dir_, installer_,
-                          base::Bind(&ComponentPatcher::DonePatchingFile,
-                                     scoped_refptr<ComponentPatcher>(this)));
+  current_operation_->Run(
+      command_args, input_dir_, unpack_dir_, installer_,
+      base::BindOnce(&ComponentPatcher::DonePatchingFile,
+                     scoped_refptr<ComponentPatcher>(this)));
 }
 
 void ComponentPatcher::DonePatchingFile(UnpackerError error,
@@ -112,8 +114,7 @@ void ComponentPatcher::DonePatchingFile(UnpackerError error,
 void ComponentPatcher::DonePatching(UnpackerError error, int extended_error) {
   current_operation_ = nullptr;
   base::SequencedTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback_, error, extended_error));
-  callback_.Reset();
+      FROM_HERE, base::BindOnce(std::move(callback_), error, extended_error));
 }
 
 }  // namespace update_client

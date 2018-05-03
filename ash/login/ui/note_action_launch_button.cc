@@ -44,7 +44,7 @@ constexpr int kLargeBubbleRadiusDp = 56;
 constexpr float kLargeBubbleOpacity = 0.46;
 
 // The note action background color.
-constexpr int kBubbleColor = SkColorSetARGBMacro(0x9E, 0x9E, 0x9E, 0xFF);
+constexpr int kBubbleColor = SkColorSetRGB(0x9E, 0x9E, 0x9E);
 
 // The note action icon size.
 constexpr int kIconSizeDp = 16;
@@ -62,7 +62,7 @@ class BubbleLayerDelegate : public views::BasePaintedLayerDelegate {
   BubbleLayerDelegate(SkColor color, int radius)
       : views::BasePaintedLayerDelegate(color), radius_(radius) {}
 
-  ~BubbleLayerDelegate() override {}
+  ~BubbleLayerDelegate() override = default;
 
   // views::BasePaintedLayerDelegate:
   gfx::RectF GetPaintedBounds() const override {
@@ -270,6 +270,9 @@ class NoteActionLaunchButton::ActionButton : public views::ImageButton,
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override {
+    UserMetricsRecorder::RecordUserClick(
+        LoginMetricsRecorder::LockScreenUserClickTarget::
+            kLockScreenNoteActionButton);
     if (event.IsKeyEvent()) {
       Shell::Get()->tray_action()->RequestNewLockScreenNote(
           mojom::LockScreenNoteOrigin::kLockScreenButtonKeyboard);
@@ -339,12 +342,8 @@ const views::View* NoteActionLaunchButton::TestApi::BackgroundView() const {
 }
 
 NoteActionLaunchButton::NoteActionLaunchButton(
-    mojom::TrayActionState initial_note_action_state,
-    LoginDataDispatcher* login_data_dispatcher)
-    : login_data_observer_(this) {
-  login_data_observer_.Add(login_data_dispatcher);
-
-  SetLayoutManager(new views::FillLayout());
+    mojom::TrayActionState initial_note_action_state) {
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
   background_ = new BackgroundView();
   AddChildView(background_);
@@ -356,11 +355,6 @@ NoteActionLaunchButton::NoteActionLaunchButton(
 }
 
 NoteActionLaunchButton::~NoteActionLaunchButton() = default;
-
-void NoteActionLaunchButton::OnLockScreenNoteStateChanged(
-    mojom::TrayActionState state) {
-  UpdateVisibility(state);
-}
 
 void NoteActionLaunchButton::UpdateVisibility(
     mojom::TrayActionState action_state) {

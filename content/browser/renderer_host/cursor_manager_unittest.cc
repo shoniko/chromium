@@ -13,7 +13,7 @@
 #include "content/public/common/cursor_info.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/test/dummy_render_widget_host_delegate.h"
+#include "content/test/mock_render_widget_host_delegate.h"
 #include "content/test/mock_widget_impl.h"
 #include "content/test/test_render_view_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -53,7 +53,7 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
                                       int32_t routing_id) {
     mojom::WidgetPtr widget;
     std::unique_ptr<MockWidgetImpl> widget_impl =
-        base::MakeUnique<MockWidgetImpl>(mojo::MakeRequest(&widget));
+        std::make_unique<MockWidgetImpl>(mojo::MakeRequest(&widget));
 
     return new MockRenderWidgetHost(delegate, process, routing_id,
                                     std::move(widget_impl), std::move(widget));
@@ -116,7 +116,7 @@ class CursorManagerTest : public testing::Test {
   // destruction.
   MockRenderWidgetHostViewForCursors* top_view_;
 
-  DummyRenderWidgetHostDelegate delegate_;
+  MockRenderWidgetHostDelegate delegate_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CursorManagerTest);

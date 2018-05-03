@@ -35,10 +35,12 @@ import org.chromium.net.test.util.TestWebServer;
 public class CookieManagerStartupTest {
     @Rule
     public AwActivityTestRule mActivityTestRule = new AwActivityTestRule() {
+        @Override
         public boolean needsAwBrowserContextCreated() {
             return false;
         }
 
+        @Override
         public boolean needsBrowserProcessStarted() {
             return false;
         }
@@ -58,7 +60,7 @@ public class CookieManagerStartupTest {
                                      .getTargetContext()
                                      .getApplicationContext();
         ContextUtils.initApplicationContext(appContext);
-        AwBrowserProcess.loadLibrary();
+        AwBrowserProcess.loadLibrary(null);
     }
 
     private void startChromium() throws Exception {

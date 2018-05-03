@@ -73,9 +73,9 @@ struct SideTypes {
 };
 
 const BorderImageLengthBox& GetBorderImageLengthBox(
-    CSSPropertyID property,
+    const CSSProperty& property,
     const ComputedStyle& style) {
-  switch (property) {
+  switch (property.PropertyID()) {
     case CSSPropertyBorderImageOutset:
       return style.BorderImageOutset();
     case CSSPropertyBorderImageWidth:
@@ -86,15 +86,16 @@ const BorderImageLengthBox& GetBorderImageLengthBox(
       return style.MaskBoxImageWidth();
     default:
       NOTREACHED();
-      return GetBorderImageLengthBox(CSSPropertyBorderImageOutset,
-                                     ComputedStyle::InitialStyle());
+      return GetBorderImageLengthBox(
+          CSSProperty::Get(CSSPropertyBorderImageOutset),
+          ComputedStyle::InitialStyle());
   }
 }
 
-void SetBorderImageLengthBox(CSSPropertyID property,
+void SetBorderImageLengthBox(const CSSProperty& property,
                              ComputedStyle& style,
                              const BorderImageLengthBox& box) {
-  switch (property) {
+  switch (property.PropertyID()) {
     case CSSPropertyBorderImageOutset:
       style.SetBorderImageOutset(box);
       break;
@@ -122,12 +123,12 @@ class CSSBorderImageLengthBoxNonInterpolableValue
       const SideTypes& side_types,
       Vector<scoped_refptr<NonInterpolableValue>>&&
           side_non_interpolable_values) {
-    return WTF::AdoptRef(new CSSBorderImageLengthBoxNonInterpolableValue(
+    return base::AdoptRef(new CSSBorderImageLengthBoxNonInterpolableValue(
         side_types, std::move(side_non_interpolable_values)));
   }
 
   scoped_refptr<CSSBorderImageLengthBoxNonInterpolableValue> Clone() {
-    return WTF::AdoptRef(new CSSBorderImageLengthBoxNonInterpolableValue(
+    return base::AdoptRef(new CSSBorderImageLengthBoxNonInterpolableValue(
         side_types_, Vector<scoped_refptr<NonInterpolableValue>>(
                          side_non_interpolable_values_)));
   }
@@ -195,14 +196,14 @@ class InheritedSideTypesChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
   static std::unique_ptr<InheritedSideTypesChecker> Create(
-      CSSPropertyID property,
+      const CSSProperty& property,
       const SideTypes& inherited_side_types) {
     return WTF::WrapUnique(
         new InheritedSideTypesChecker(property, inherited_side_types));
   }
 
  private:
-  InheritedSideTypesChecker(CSSPropertyID property,
+  InheritedSideTypesChecker(const CSSProperty& property,
                             const SideTypes& inherited_side_types)
       : property_(property), inherited_side_types_(inherited_side_types) {}
 
@@ -212,7 +213,7 @@ class InheritedSideTypesChecker
            SideTypes(GetBorderImageLengthBox(property_, *state.ParentStyle()));
   }
 
-  const CSSPropertyID property_;
+  const CSSProperty& property_;
   const SideTypes inherited_side_types_;
 };
 

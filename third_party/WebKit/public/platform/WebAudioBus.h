@@ -30,11 +30,6 @@
 #if INSIDE_BLINK
 template <typename T>
 class scoped_refptr;
-
-namespace WTF {
-template <typename T>
-using RefPtr = scoped_refptr<T>;
-}
 #endif
 
 namespace blink {
@@ -47,7 +42,7 @@ class AudioBus;
 //
 class BLINK_PLATFORM_EXPORT WebAudioBus {
  public:
-  WebAudioBus() {}
+  WebAudioBus() = default;
   ~WebAudioBus() { Reset(); }
 
   // Initialize() allocates memory of the given length for the given number of
@@ -71,13 +66,13 @@ class BLINK_PLATFORM_EXPORT WebAudioBus {
   float* ChannelData(unsigned channel_index);
 
 #if INSIDE_BLINK
-  WTF::RefPtr<AudioBus> Release();
+  scoped_refptr<AudioBus> Release();
 #endif
 
  private:
   // Disallow copy and assign.
-  WebAudioBus(const WebAudioBus&);
-  void operator=(const WebAudioBus&);
+  WebAudioBus(const WebAudioBus&) = delete;
+  void operator=(const WebAudioBus&) = delete;
 
   AudioBus* private_ = nullptr;
 };

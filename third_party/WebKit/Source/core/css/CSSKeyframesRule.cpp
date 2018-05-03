@@ -30,6 +30,7 @@
 #include "core/css/CSSRuleList.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/css/parser/CSSParser.h"
+#include "core/dom/ExecutionContext.h"
 #include "core/frame/UseCounter.h"
 #include "platform/wtf/text/StringBuilder.h"
 
@@ -38,14 +39,9 @@ namespace blink {
 StyleRuleKeyframes::StyleRuleKeyframes()
     : StyleRuleBase(kKeyframes), version_(0) {}
 
-StyleRuleKeyframes::StyleRuleKeyframes(const StyleRuleKeyframes& o)
-    : StyleRuleBase(o),
-      keyframes_(o.keyframes_),
-      name_(o.name_),
-      version_(o.version_),
-      is_prefixed_(o.is_prefixed_) {}
+StyleRuleKeyframes::StyleRuleKeyframes(const StyleRuleKeyframes& o) = default;
 
-StyleRuleKeyframes::~StyleRuleKeyframes() {}
+StyleRuleKeyframes::~StyleRuleKeyframes() = default;
 
 void StyleRuleKeyframes::ParserAppendKeyframe(StyleRuleKeyframe* keyframe) {
   if (!keyframe)
@@ -86,7 +82,7 @@ CSSKeyframesRule::CSSKeyframesRule(StyleRuleKeyframes* keyframes_rule,
       child_rule_cssom_wrappers_(keyframes_rule->Keyframes().size()),
       is_prefixed_(keyframes_rule->IsVendorPrefixed()) {}
 
-CSSKeyframesRule::~CSSKeyframesRule() {}
+CSSKeyframesRule::~CSSKeyframesRule() = default;
 
 void CSSKeyframesRule::setName(const String& name) {
   CSSStyleSheet::RuleMutationScope mutation_scope(this);
@@ -94,13 +90,14 @@ void CSSKeyframesRule::setName(const String& name) {
   keyframes_rule_->SetName(name);
 }
 
-void CSSKeyframesRule::appendRule(const String& rule_text) {
+void CSSKeyframesRule::appendRule(const ExecutionContext* execution_context,
+                                  const String& rule_text) {
   DCHECK_EQ(child_rule_cssom_wrappers_.size(),
             keyframes_rule_->Keyframes().size());
 
   CSSStyleSheet* style_sheet = parentStyleSheet();
-  CSSParserContext* context =
-      CSSParserContext::CreateWithStyleSheet(ParserContext(), style_sheet);
+  CSSParserContext* context = CSSParserContext::CreateWithStyleSheet(
+      ParserContext(execution_context->GetSecureContextMode()), style_sheet);
   StyleRuleKeyframe* keyframe =
       CSSParser::ParseKeyframeRule(context, rule_text);
   if (!keyframe)

@@ -42,7 +42,7 @@ CSSPaintImageGeneratorImpl::CSSPaintImageGeneratorImpl(
     const String& name)
     : observer_(observer), paint_worklet_(paint_worklet), name_(name) {}
 
-CSSPaintImageGeneratorImpl::~CSSPaintImageGeneratorImpl() {}
+CSSPaintImageGeneratorImpl::~CSSPaintImageGeneratorImpl() = default;
 
 void CSSPaintImageGeneratorImpl::NotifyGeneratorReady() {
   DCHECK(observer_);
@@ -52,51 +52,53 @@ void CSSPaintImageGeneratorImpl::NotifyGeneratorReady() {
 scoped_refptr<Image> CSSPaintImageGeneratorImpl::Paint(
     const ImageResourceObserver& observer,
     const IntSize& container_size,
-    const CSSStyleValueVector* data,
-    const LayoutSize* logical_size) {
-  return paint_worklet_->Paint(name_, observer, container_size, data,
-                               logical_size);
+    const CSSStyleValueVector* data) {
+  return paint_worklet_->Paint(name_, observer, container_size, data);
 }
 
 bool CSSPaintImageGeneratorImpl::HasDocumentDefinition() const {
   return paint_worklet_->GetDocumentDefinitionMap().Contains(name_);
 }
 
+bool CSSPaintImageGeneratorImpl::GetValidDocumentDefinition(
+    DocumentPaintDefinition*& definition) const {
+  if (!HasDocumentDefinition())
+    return false;
+  definition = paint_worklet_->GetDocumentDefinitionMap().at(name_);
+  return definition != kInvalidDocumentDefinition;
+}
+
 const Vector<CSSPropertyID>&
 CSSPaintImageGeneratorImpl::NativeInvalidationProperties() const {
   DEFINE_STATIC_LOCAL(Vector<CSSPropertyID>, empty_vector, ());
-  if (!HasDocumentDefinition())
+  DocumentPaintDefinition* definition;
+  if (!GetValidDocumentDefinition(definition))
     return empty_vector;
-  DocumentPaintDefinition* definition =
-      paint_worklet_->GetDocumentDefinitionMap().at(name_);
   return definition->NativeInvalidationProperties();
 }
 
 const Vector<AtomicString>&
 CSSPaintImageGeneratorImpl::CustomInvalidationProperties() const {
   DEFINE_STATIC_LOCAL(Vector<AtomicString>, empty_vector, ());
-  if (!HasDocumentDefinition())
+  DocumentPaintDefinition* definition;
+  if (!GetValidDocumentDefinition(definition))
     return empty_vector;
-  DocumentPaintDefinition* definition =
-      paint_worklet_->GetDocumentDefinitionMap().at(name_);
   return definition->CustomInvalidationProperties();
 }
 
 bool CSSPaintImageGeneratorImpl::HasAlpha() const {
-  if (!HasDocumentDefinition())
+  DocumentPaintDefinition* definition;
+  if (!GetValidDocumentDefinition(definition))
     return false;
-  DocumentPaintDefinition* definition =
-      paint_worklet_->GetDocumentDefinitionMap().at(name_);
   return definition->GetPaintRenderingContext2DSettings().alpha();
 }
 
 const Vector<CSSSyntaxDescriptor>&
 CSSPaintImageGeneratorImpl::InputArgumentTypes() const {
   DEFINE_STATIC_LOCAL(Vector<CSSSyntaxDescriptor>, empty_vector, ());
-  if (!HasDocumentDefinition())
+  DocumentPaintDefinition* definition;
+  if (!GetValidDocumentDefinition(definition))
     return empty_vector;
-  DocumentPaintDefinition* definition =
-      paint_worklet_->GetDocumentDefinitionMap().at(name_);
   return definition->InputArgumentTypes();
 }
 

@@ -10,8 +10,8 @@
     Constructor(sequence<PaymentMethodData> methodData, PaymentDetailsInit details, optional PaymentOptions options),
     ConstructorCallWith=ExecutionContext,
     RaisesException=Constructor,
-    ActiveScriptWrappable,
-    DependentLifetime
+    Exposed=Window,
+    ActiveScriptWrappable
 ] interface PaymentRequest : EventTarget {
     [CallWith=ScriptState] Promise<PaymentResponse> show();
     [CallWith=ScriptState] Promise<void> abort();

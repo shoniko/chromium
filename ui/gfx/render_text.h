@@ -191,9 +191,19 @@ class GFX_EXPORT RenderText {
 
   virtual ~RenderText();
 
-  // Creates a platform-specific or cross-platform RenderText instance.
-  static RenderText* CreateInstance();
-  static RenderText* CreateInstanceForEditing();
+  // Creates an instance that renders using HarfBuzz.
+  static std::unique_ptr<RenderText> CreateHarfBuzzInstance();
+
+  // Creates an instance by matching a gfx::Typesetter constant to the current
+  // build and runtime configuration. E.g. the result may use CoreText on Mac,
+  // which is the only supported native typesetter.
+  static std::unique_ptr<RenderText> CreateFor(Typesetter typesetter);
+
+  // Returns CreateFor(Typesetter::BROWSER), but indicates a caller that does
+  // not know whether the text will eventually be drawn by the native typesetter
+  // or by a RenderText instance.
+  // TODO(tapted): Delete this.
+  static std::unique_ptr<RenderText> CreateInstanceDeprecated();
 
   // Creates another instance of the same concrete class.
   virtual std::unique_ptr<RenderText> CreateInstanceOfSameType() const = 0;
@@ -232,6 +242,9 @@ class GFX_EXPORT RenderText {
 
   bool clip_to_display_rect() const { return clip_to_display_rect_; }
   void set_clip_to_display_rect(bool clip) { clip_to_display_rect_ = clip; }
+
+  int glyph_spacing() const { return glyph_spacing_; }
+  void set_glyph_spacing(int spacing) { glyph_spacing_ = spacing; }
 
   // In an obscured (password) field, all text is drawn as bullets.
   bool obscured() const { return obscured_; }
@@ -468,11 +481,12 @@ class GFX_EXPORT RenderText {
   // Helper function to be used in tests for retrieving the substring bounds.
   std::vector<Rect> GetSubstringBoundsForTesting(const gfx::Range& range);
 
-  // Gets the horizontal bounds (relative to the left of the text, not the view)
-  // of the glyph starting at |index|. If the glyph is RTL then the returned
+  // Gets the horizontal span (relative to the left of the text, not the view)
+  // of the sequence of glyphs in |text_range|, over which the cursor will
+  // jump when breaking by characters. If the glyphs are RTL then the returned
   // Range will have is_reversed() true.  (This does not return a Rect because a
   // Rect can't have a negative width.)
-  virtual Range GetGlyphBounds(size_t index) = 0;
+  virtual Range GetCursorSpan(const Range& text_range) = 0;
 
   const Vector2d& GetUpdatedDisplayOffset();
   void SetDisplayOffset(int horizontal_offset);
@@ -832,6 +846,9 @@ class GFX_EXPORT RenderText {
 
   // The ratio of strike-through line thickness to text height.
   SkScalar strike_thickness_factor_;
+
+  // Extra spacing placed between glyphs; used for obscured text styling.
+  int glyph_spacing_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(RenderText);
 };

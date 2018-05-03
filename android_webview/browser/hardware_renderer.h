@@ -19,7 +19,7 @@ struct AwDrawGLInfo;
 
 namespace viz {
 class CompositorFrameSinkSupport;
-class LocalSurfaceIdAllocator;
+class ParentLocalSurfaceIdAllocator;
 }
 
 namespace android_webview {
@@ -52,6 +52,11 @@ class HardwareRenderer : public viz::mojom::CompositorFrameSinkClient {
   // viz::mojom::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
       const std::vector<viz::ReturnedResource>& resources) override;
+  void DidPresentCompositorFrame(uint32_t presentation_token,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags) override;
+  void DidDiscardCompositorFrame(uint32_t presentation_token) override;
   void OnBeginFrame(const viz::BeginFrameArgs& args) override;
   void ReclaimResources(
       const std::vector<viz::ReturnedResource>& resources) override;
@@ -89,8 +94,8 @@ class HardwareRenderer : public viz::mojom::CompositorFrameSinkClient {
 
   const scoped_refptr<SurfacesInstance> surfaces_;
   viz::FrameSinkId frame_sink_id_;
-  const std::unique_ptr<viz::LocalSurfaceIdAllocator>
-      local_surface_id_allocator_;
+  const std::unique_ptr<viz::ParentLocalSurfaceIdAllocator>
+      parent_local_surface_id_allocator_;
   std::unique_ptr<viz::CompositorFrameSinkSupport> support_;
   viz::LocalSurfaceId child_id_;
   CompositorID compositor_id_;

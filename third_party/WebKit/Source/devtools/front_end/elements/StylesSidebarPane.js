@@ -48,6 +48,7 @@ Elements.StylesSidebarPane = class extends Elements.ElementsSidebarPane {
     this._toolbarPaneElement = this._createStylesSidebarToolbar();
 
     this._sectionsContainer = this.contentElement.createChild('div');
+    UI.ARIAUtils.markAsTree(this._sectionsContainer);
     this._sectionsContainer.addEventListener('keydown', this._sectionsContainerKeyDown.bind(this), false);
     this._sectionsContainer.addEventListener('focusin', this._sectionsContainerFocusChanged.bind(this), false);
     this._sectionsContainer.addEventListener('focusout', this._sectionsContainerFocusChanged.bind(this), false);
@@ -60,11 +61,6 @@ Elements.StylesSidebarPane = class extends Elements.ElementsSidebarPane {
     this._isEditingStyle = false;
     /** @type {?RegExp} */
     this._filterRegex = null;
-
-    /** @type {?Elements.StylePropertyTreeElement} */
-    this._mouseDownTreeElement = null;
-    this._mouseDownTreeElementIsName = false;
-    this._mouseDownTreeElementIsValue = false;
 
     this.contentElement.classList.add('styles-pane');
 
@@ -213,6 +209,14 @@ Elements.StylesSidebarPane = class extends Elements.ElementsSidebarPane {
         sectionToFocus.element.focus();
         event.consume(true);
         break;
+      case 'Home':
+        section.firstSibling().element.focus();
+        event.consume(true);
+        break;
+      case 'End':
+        section.lastSibling().element.focus();
+        event.consume(true);
+        break;
     }
   }
 
@@ -245,11 +249,10 @@ Elements.StylesSidebarPane = class extends Elements.ElementsSidebarPane {
     var contextMenu = new UI.ContextMenu(event);
     for (var i = 0; i < contextMenuDescriptors.length; ++i) {
       var descriptor = contextMenuDescriptors[i];
-      contextMenu.appendItem(descriptor.text, descriptor.handler);
+      contextMenu.defaultSection().appendItem(descriptor.text, descriptor.handler);
     }
-    if (!contextMenu.isEmpty())
-      contextMenu.appendSeparator();
-    contextMenu.appendItem('inspector-stylesheet', this._createNewRuleInViaInspectorStyleSheet.bind(this));
+    contextMenu.footerSection().appendItem(
+        'inspector-stylesheet', this._createNewRuleInViaInspectorStyleSheet.bind(this));
     contextMenu.show();
 
     /**
@@ -286,11 +289,10 @@ Elements.StylesSidebarPane = class extends Elements.ElementsSidebarPane {
     if (!node)
       return;
 
-    var fullRefresh = Runtime.experiments.isEnabled('liveSASS');
     for (var section of this.allSections()) {
       if (section.isBlank)
         continue;
-      section.update(fullRefresh || section === editedSection);
+      section.update(section === editedSection);
     }
 
     if (this._filterRegex)
@@ -494,28 +496,19 @@ Elements.StylesSidebarPane = class extends Elements.ElementsSidebarPane {
     var styleSheetHeader = await cssModel.requestViaInspectorStylesheet(/** @type {!SDK.DOMNode} */ (node));
 
     this._userOperation = false;
-    this._createNewRuleInStyleSheet(styleSheetHeader);
+    await this._createNewRuleInStyleSheet(styleSheetHeader);
   }
 
   /**
    * @param {?SDK.CSSStyleSheetHeader} styleSheetHeader
    */
-  _createNewRuleInStyleSheet(styleSheetHeader) {
+  async _createNewRuleInStyleSheet(styleSheetHeader) {
     if (!styleSheetHeader)
       return;
-    styleSheetHeader.requestContent().then(onStyleSheetContent.bind(this, styleSheetHeader.id));
-
-    /**
-     * @param {string} styleSheetId
-     * @param {?string} text
-     * @this {Elements.StylesSidebarPane}
-     */
-    function onStyleSheetContent(styleSheetId, text) {
-      text = text || '';
-      var lines = text.split('\n');
-      var range = TextUtils.TextRange.createFromLocation(lines.length - 1, lines[lines.length - 1].length);
-      this._addBlankSection(this._sectionBlocks[0].sections[0], styleSheetId, range);
-    }
+    var text = await styleSheetHeader.requestContent() || '';
+    var lines = text.split('\n');
+    var range = TextUtils.TextRange.createFromLocation(lines.length - 1, lines[lines.length - 1].length);
+    this._addBlankSection(this._sectionBlocks[0].sections[0], styleSheetHeader.id, range);
   }
 
   /**
@@ -757,10 +750,13 @@ Elements.StylePropertiesSection = class {
     /** @type {?function(!Elements.StylePropertiesSection)} */
     this._afterUpdate = null;
     this._willCauseCancelEditing = false;
+    this._forceShowAll = false;
+    this._originalPropertiesCount = style.leadingProperties().length;
 
     var rule = style.parentRule;
     this.element = createElementWithClass('div', 'styles-section matched-styles monospace');
     this.element.tabIndex = -1;
+    UI.ARIAUtils.markAsTreeitem(this.element);
     this._editing = false;
     this.element.addEventListener('keydown', this._onKeyDown.bind(this), false);
     this.element._section = this;
@@ -774,6 +770,9 @@ Elements.StylePropertiesSection = class {
     this.propertiesTreeOutline.element.classList.add('style-properties', 'matched-styles', 'monospace');
     this.propertiesTreeOutline.section = this;
     this._innerElement.appendChild(this.propertiesTreeOutline.element);
+
+    this._showAllButton = UI.createTextButton('', this._showAllItems.bind(this), 'styles-show-all');
+    this._innerElement.appendChild(this._showAllButton);
 
     var selectorContainer = createElement('div');
     this._selectorElement = createElementWithClass('span', 'selector');
@@ -976,6 +975,7 @@ Elements.StylePropertiesSection = class {
     setItemsVisibility.call(this, items, false);
     sectionToolbar.element.addEventListener('mouseenter', setItemsVisibility.bind(this, items, true));
     sectionToolbar.element.addEventListener('mouseleave', setItemsVisibility.bind(this, items, false));
+    UI.ARIAUtils.markAsHidden(sectionToolbar.element);
 
     /**
      * @param {!Array<!UI.ToolbarButton>} items
@@ -1266,7 +1266,6 @@ Elements.StylePropertiesSection = class {
     this._selectorElement.textContent = this._headerText();
     this._markSelectorMatches();
     if (full) {
-      this.propertiesTreeOutline.removeChildren();
       this.onpopulate();
     } else {
       var child = this.propertiesTreeOutline.firstChild();
@@ -1289,15 +1288,43 @@ Elements.StylePropertiesSection = class {
   _afterUpdateFinishedForTest() {
   }
 
+  /**
+   * @param {!Event=} event
+   */
+  _showAllItems(event) {
+    if (event)
+      event.consume();
+    if (this._forceShowAll)
+      return;
+    this._forceShowAll = true;
+    this.onpopulate();
+  }
+
   onpopulate() {
+    this.propertiesTreeOutline.removeChildren();
     var style = this._style;
-    for (var property of style.leadingProperties()) {
+    var count = 0;
+    var properties = style.leadingProperties();
+    var maxProperties =
+        Elements.StylePropertiesSection.MaxProperties + properties.length - this._originalPropertiesCount;
+
+    for (var property of properties) {
+      if (!this._forceShowAll && count >= maxProperties)
+        break;
+      count++;
       var isShorthand = !!style.longhandProperties(property.name).length;
       var inherited = this.isPropertyInherited(property.name);
       var overloaded = this._isPropertyOverloaded(property);
       var item = new Elements.StylePropertyTreeElement(
           this._parentPane, this._matchedStyles, property, isShorthand, inherited, overloaded);
       this.propertiesTreeOutline.appendChild(item);
+    }
+
+    if (count < properties.length) {
+      this._showAllButton.classList.remove('hidden');
+      this._showAllButton.textContent = ls`Show All Properties (${properties.length - count} more)`;
+    } else {
+      this._showAllButton.classList.add('hidden');
     }
   }
 
@@ -1314,6 +1341,7 @@ Elements.StylePropertiesSection = class {
    */
   _updateFilter() {
     var hasMatchingChild = false;
+    this._showAllItems();
     for (var child of this.propertiesTreeOutline.rootElement().children())
       hasMatchingChild |= child._updateFilter();
 
@@ -1434,7 +1462,7 @@ Elements.StylePropertiesSection = class {
    * @param {number=} index
    * @return {!Elements.StylePropertyTreeElement}
    */
-  addNewBlankProperty(index) {
+  addNewBlankProperty(index = this.propertiesTreeOutline.rootElement().childCount()) {
     var property = this._style.newBlankProperty(index);
     var item =
         new Elements.StylePropertyTreeElement(this._parentPane, this._matchedStyles, property, false, false, false);
@@ -1462,7 +1490,11 @@ Elements.StylePropertiesSection = class {
       event.consume();
       return;
     }
-    this.addNewBlankProperty().startEditing();
+    var deepTarget = event.deepElementFromPoint();
+    if (deepTarget.treeElement)
+      this.addNewBlankProperty(deepTarget.treeElement.property.index + 1).startEditing();
+    else
+      this.addNewBlankProperty().startEditing();
     event.consume(true);
   }
 
@@ -1867,11 +1899,11 @@ Elements.BlankStylePropertiesSection = class extends Elements.StylePropertiesSec
         this.propertiesTreeOutline.element.classList.add('no-affect');
 
       this._updateRuleOrigin();
-      if (this.element.parentElement)  // Might have been detached already.
-        this._moveEditorFromSelector(moveDirection);
 
       this._parentPane._userOperation = false;
       this._editingSelectorEnded();
+      if (this.element.parentElement)  // Might have been detached already.
+        this._moveEditorFromSelector(moveDirection);
       this._markSelectorMatches();
 
       this._editingSelectorCommittedForTest();
@@ -1910,6 +1942,7 @@ Elements.BlankStylePropertiesSection = class extends Elements.StylePropertiesSec
     this._normal = true;
   }
 };
+Elements.StylePropertiesSection.MaxProperties = 50;
 
 Elements.KeyframePropertiesSection = class extends Elements.StylePropertiesSection {
   /**
@@ -2300,30 +2333,15 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
   onattach() {
     this.updateTitle();
 
-    this.listItemElement.addEventListener('mousedown', this._mouseDown.bind(this));
-    this.listItemElement.addEventListener('mouseup', this._resetMouseDownElement.bind(this));
-    this.listItemElement.addEventListener('click', this._mouseClick.bind(this));
-  }
-
-  /**
-   * @param {!Event} event
-   */
-  _mouseDown(event) {
-    if (this._parentPane) {
-      this._parentPane._mouseDownTreeElement = this;
-      this._parentPane._mouseDownTreeElementIsName =
-          this.nameElement && this.nameElement.isSelfOrAncestor(event.target);
-      this._parentPane._mouseDownTreeElementIsValue =
-          this.valueElement && this.valueElement.isSelfOrAncestor(event.target);
-    }
-  }
-
-  _resetMouseDownElement() {
-    if (this._parentPane) {
-      this._parentPane._mouseDownTreeElement = null;
-      this._parentPane._mouseDownTreeElementIsName = false;
-      this._parentPane._mouseDownTreeElementIsValue = false;
-    }
+    this.listItemElement.addEventListener('mousedown', event => {
+      if (event.which === 1)
+        this._parentPane[Elements.StylePropertyTreeElement.ActiveSymbol] = this;
+    }, false);
+    this.listItemElement.addEventListener('mouseup', this._mouseUp.bind(this));
+    this.listItemElement.addEventListener('click', event => {
+      if (!event.target.hasSelection() && event.target !== this.listItemElement)
+        event.consume(true);
+    });
   }
 
   /**
@@ -2341,6 +2359,8 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
   }
 
   _updateExpandElement() {
+    if (!this._expandElement)
+      return;
     if (this.expanded)
       this._expandElement.setIconType('smallicon-triangle-down');
     else
@@ -2349,7 +2369,10 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
 
   updateTitle() {
     this._updateState();
-    this._expandElement = UI.Icon.create('smallicon-triangle-right', 'expand-icon');
+    if (this.isExpandable())
+      this._expandElement = UI.Icon.create('smallicon-triangle-right', 'expand-icon');
+    else
+      this._expandElement = null;
 
     var propertyRenderer =
         new Elements.StylesSidebarPropertyRenderer(this._style.parentRule, this.node(), this.name, this.value);
@@ -2370,7 +2393,8 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
         .createTextChild(indent + (this.property.disabled ? '/* ' : ''));
     this.listItemElement.appendChild(this.nameElement);
     this.listItemElement.createTextChild(': ');
-    this.listItemElement.appendChild(this._expandElement);
+    if (this._expandElement)
+      this.listItemElement.appendChild(this._expandElement);
     this.listItemElement.appendChild(this.valueElement);
     this.listItemElement.createTextChild(';');
     if (this.property.disabled)
@@ -2393,6 +2417,7 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
       enabledCheckboxElement.className = 'enabled-button';
       enabledCheckboxElement.type = 'checkbox';
       enabledCheckboxElement.checked = !this.property.disabled;
+      enabledCheckboxElement.addEventListener('mousedown', event => event.consume(), false);
       enabledCheckboxElement.addEventListener('click', this._toggleEnabled.bind(this), false);
       this.listItemElement.insertBefore(enabledCheckboxElement, this.listItemElement.firstChild);
     }
@@ -2401,22 +2426,20 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
   /**
    * @param {!Event} event
    */
-  _mouseClick(event) {
-    if (event.target.hasSelection())
+  _mouseUp(event) {
+    var activeTreeElement = this._parentPane[Elements.StylePropertyTreeElement.ActiveSymbol];
+    this._parentPane[Elements.StylePropertyTreeElement.ActiveSymbol] = null;
+    if (activeTreeElement !== this)
+      return;
+    if (this.listItemElement.hasSelection())
+      return;
+    if (UI.isBeingEdited(/** @type {!Node} */ (event.target)))
       return;
 
     event.consume(true);
 
-    if (event.target === this.listItemElement) {
-      var section = this.section();
-      if (!section || !section.editable)
-        return;
-
-      if (section._checkWillCancelEditing())
-        return;
-      section.addNewBlankProperty(this.property.index + 1).startEditing();
+    if (event.target === this.listItemElement)
       return;
-    }
 
     if (UI.KeyboardShortcut.eventHasCtrlOrMeta(/** @type {!MouseEvent} */ (event)) && this.section().navigable) {
       this._navigateToSource(/** @type {!Element} */ (event.target));
@@ -2447,7 +2470,7 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
     if (this.parent.isShorthand)
       return;
 
-    if (selectElement === this._expandElement)
+    if (this._expandElement && selectElement === this._expandElement)
       return;
 
     var section = this.section();
@@ -2539,18 +2562,10 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
      * @this {Elements.StylePropertyTreeElement}
      */
     function blurListener(context, event) {
-      var treeElement = this._parentPane._mouseDownTreeElement;
-      var moveDirection = '';
-      if (treeElement === this) {
-        if (isEditingName && this._parentPane._mouseDownTreeElementIsValue)
-          moveDirection = 'forward';
-        if (!isEditingName && this._parentPane._mouseDownTreeElementIsName)
-          moveDirection = 'backward';
-      }
       var text = event.target.textContent;
       if (!context.isEditingName)
         text = this.value || text;
-      this._editingCommitted(text, context, moveDirection);
+      this._editingCommitted(text, context, '');
     }
 
     this._originalPropertyText = this.property.propertyText;
@@ -2562,8 +2577,8 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
     var cssCompletions = [];
     if (isEditingName) {
       cssCompletions = SDK.cssMetadata().allProperties();
-      cssCompletions =
-          cssCompletions.filter(property => SDK.cssMetadata().isSVGProperty(property) === this.node().isSVGNode());
+      if (!this.node().isSVGNode())
+        cssCompletions = cssCompletions.filter(property => !SDK.cssMetadata().isSVGProperty(property));
     } else {
       cssCompletions = SDK.cssMetadata().propertyValues(this.nameElement.textContent);
     }
@@ -2684,8 +2699,6 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
    * @param {!Elements.StylePropertyTreeElement.Context} context
    */
   editingEnded(context) {
-    this._resetMouseDownElement();
-
     this.setExpandable(context.hasChildren);
     if (context.expanded)
       this.expand();
@@ -2963,6 +2976,7 @@ Elements.StylePropertyTreeElement = class extends UI.TreeElement {
 
 /** @typedef {{expanded: boolean, hasChildren: boolean, isEditingName: boolean, previousContent: string}} */
 Elements.StylePropertyTreeElement.Context;
+Elements.StylePropertyTreeElement.ActiveSymbol = Symbol('ActiveSymbol');
 
 Elements.StylesSidebarPane.CSSPropertyPrompt = class extends UI.TextPrompt {
   /**

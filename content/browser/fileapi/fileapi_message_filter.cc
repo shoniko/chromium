@@ -36,7 +36,6 @@
 #include "storage/browser/fileapi/file_permission_policy.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/isolated_context.h"
-#include "storage/common/data_element.h"
 #include "storage/common/fileapi/directory_entry.h"
 #include "storage/common/fileapi/file_system_info.h"
 #include "storage/common/fileapi/file_system_types.h"
@@ -75,7 +74,7 @@ FileAPIMessageFilter::FileAPIMessageFilter(
       context_(file_system_context),
       security_policy_(ChildProcessSecurityPolicyImpl::GetInstance()),
       request_context_getter_(request_context_getter),
-      request_context_(NULL),
+      request_context_(nullptr),
       blob_storage_context_(blob_storage_context) {
   DCHECK(context_);
   DCHECK(request_context_getter_.get());
@@ -105,7 +104,7 @@ void FileAPIMessageFilter::OnChannelConnected(int32_t peer_pid) {
   if (request_context_getter_.get()) {
     DCHECK(!request_context_);
     request_context_ = request_context_getter_->GetURLRequestContext();
-    request_context_getter_ = NULL;
+    request_context_getter_ = nullptr;
     DCHECK(request_context_);
   }
 
@@ -125,7 +124,7 @@ base::TaskRunner* FileAPIMessageFilter::OverrideTaskRunnerForMessage(
     const IPC::Message& message) {
   if (message.type() == FileSystemHostMsg_SyncGetPlatformPath::ID)
     return context_->default_file_task_runner();
-  return NULL;
+  return nullptr;
 }
 
 bool FileAPIMessageFilter::OnMessageReceived(const IPC::Message& message) {

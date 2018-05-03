@@ -128,10 +128,26 @@ TEST_F(BufferViewTest, Write) {
   EXPECT_DEATH(buffer.write<uint32_t>(7, 0xFFFFFFFF), "");
 }
 
-TEST_F(BufferViewTest, Region) {
+TEST_F(BufferViewTest, CanAccess) {
+  MutableBufferView buffer =
+      MutableBufferView::FromRange(std::begin(bytes_), std::end(bytes_));
+  EXPECT_TRUE(buffer.can_access<uint32_t>(0));
+  EXPECT_TRUE(buffer.can_access<uint32_t>(6));
+  EXPECT_FALSE(buffer.can_access<uint32_t>(7));
+  EXPECT_FALSE(buffer.can_access<uint32_t>(10));
+  EXPECT_FALSE(buffer.can_access<uint32_t>(0xFFFFFFFFU));
+
+  EXPECT_TRUE(buffer.can_access<uint8_t>(0));
+  EXPECT_TRUE(buffer.can_access<uint8_t>(7));
+  EXPECT_TRUE(buffer.can_access<uint8_t>(9));
+  EXPECT_FALSE(buffer.can_access<uint8_t>(10));
+  EXPECT_FALSE(buffer.can_access<uint8_t>(0xFFFFFFFF));
+}
+
+TEST_F(BufferViewTest, LocalRegion) {
   ConstBufferView view(std::begin(bytes_), kLen);
 
-  BufferRegion region = view.region();
+  BufferRegion region = view.local_region();
   EXPECT_EQ(0U, region.offset);
   EXPECT_EQ(kLen, region.size);
 }
@@ -157,6 +173,29 @@ TEST_F(BufferViewTest, Covers) {
   EXPECT_FALSE(view.covers({1, size_t(-1)}));
   EXPECT_FALSE(view.covers({size_t(-1), 1}));
   EXPECT_FALSE(view.covers({size_t(-1), size_t(-1)}));
+}
+
+TEST_F(BufferViewTest, Equals) {
+  // Almost identical to |bytes_|, except at [5] and [6].
+  uint8_t bytes2[kLen] = {0x10, 0x32, 0x54, 0x76, 0x98,
+                          0xAB, 0xCD, 0xFE, 0x10, 0x00};
+  ConstBufferView view1(std::begin(bytes_), kLen);
+  ConstBufferView view2(std::begin(bytes2), kLen);
+
+  EXPECT_TRUE(view1.equals(view1));
+  EXPECT_TRUE(view2.equals(view2));
+  EXPECT_FALSE(view1.equals(view2));
+  EXPECT_FALSE(view2.equals(view1));
+
+  EXPECT_TRUE((view1[{0, 0}]).equals(view2[{0, 0}]));
+  EXPECT_TRUE((view1[{0, 0}]).equals(view2[{5, 0}]));
+  EXPECT_TRUE((view1[{0, 5}]).equals(view2[{0, 5}]));
+  EXPECT_FALSE((view1[{0, 6}]).equals(view2[{0, 6}]));
+  EXPECT_FALSE((view1[{0, 7}]).equals(view1[{0, 6}]));
+  EXPECT_TRUE((view1[{5, 3}]).equals(view1[{5, 3}]));
+  EXPECT_FALSE((view1[{5, 1}]).equals(view1[{5, 3}]));
+  EXPECT_TRUE((view2[{0, 1}]).equals(view2[{8, 1}]));
+  EXPECT_FALSE((view2[{1, 1}]).equals(view2[{8, 1}]));
 }
 
 }  // namespace zucchini

@@ -29,6 +29,7 @@ import java.util.concurrent.Executor;
 public abstract class AsyncInitTaskRunner {
     private boolean mFetchingVariations;
     private boolean mLibraryLoaded;
+    private boolean mAllocateChildConnection;
 
     private LoadTask mLoadTask;
     private FetchSeedTask mFetchSeedTask;
@@ -70,14 +71,18 @@ public abstract class AsyncInitTaskRunner {
 
     private class FetchSeedTask extends AsyncTask<Void, Void, Void> {
         private final String mRestrictMode;
+        private final String mMilestone;
+        private final String mChannel;
 
         public FetchSeedTask(String restrictMode) {
             mRestrictMode = restrictMode;
+            mMilestone = Integer.toString(ChromeVersionInfo.getProductMajorVersion());
+            mChannel = getChannelString();
         }
 
         @Override
         protected Void doInBackground(Void... params) {
-            VariationsSeedFetcher.get().fetchSeed(mRestrictMode);
+            VariationsSeedFetcher.get().fetchSeed(mRestrictMode, mMilestone, mChannel);
             return null;
         }
 
@@ -85,6 +90,22 @@ public abstract class AsyncInitTaskRunner {
         protected void onPostExecute(Void result) {
             mFetchingVariations = false;
             tasksPossiblyComplete(true);
+        }
+
+        private String getChannelString() {
+            if (ChromeVersionInfo.isCanaryBuild()) {
+                return "canary";
+            }
+            if (ChromeVersionInfo.isDevBuild()) {
+                return "dev";
+            }
+            if (ChromeVersionInfo.isBetaBuild()) {
+                return "beta";
+            }
+            if (ChromeVersionInfo.isStableBuild()) {
+                return "stable";
+            }
+            return "";
         }
     }
 
@@ -115,9 +136,11 @@ public abstract class AsyncInitTaskRunner {
             });
         }
 
-        if (allocateChildConnection) {
-            ChildProcessLauncherHelper.warmUp(ContextUtils.getApplicationContext());
-        }
+        // Remember to allocate child connection once library loading completes. We do it after
+        // the loading to reduce stress on the OS caused by running library loading in parallel
+        // with UI inflation, see AsyncInitializationActivity.setContentViewAndLoadLibrary().
+        mAllocateChildConnection = allocateChildConnection;
+
         mLoadTask = new LoadTask();
         mLoadTask.executeOnExecutor(getExecutor());
     }
@@ -132,6 +155,9 @@ public abstract class AsyncInitTaskRunner {
         }
 
         if (mLibraryLoaded && !mFetchingVariations) {
+            if (mAllocateChildConnection) {
+                ChildProcessLauncherHelper.warmUp(ContextUtils.getApplicationContext());
+            }
             onSuccess();
         }
     }

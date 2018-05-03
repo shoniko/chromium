@@ -5,20 +5,21 @@
 #include "core/loader/resource/CSSStyleSheetResource.h"
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/css/CSSCrossfadeValue.h"
 #include "core/css/CSSImageValue.h"
 #include "core/css/CSSPrimitiveValue.h"
-#include "core/css/CSSProperty.h"
+#include "core/css/CSSPropertyValue.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSSelectorList.h"
 #include "core/css/CSSStyleSheet.h"
-#include "core/css/StylePropertySet.h"
 #include "core/css/StyleRule.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSParserSelector.h"
 #include "core/dom/Document.h"
 #include "core/loader/resource/ImageResource.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/heap/Handle.h"
 #include "platform/heap/Heap.h"
 #include "platform/loader/fetch/FetchContext.h"
@@ -30,7 +31,6 @@
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/TextEncoding.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/Platform.h"
@@ -43,42 +43,42 @@ class Document;
 
 namespace {
 
-class CSSStyleSheetResourceTest : public ::testing::Test {
+class CSSStyleSheetResourceTest : public PageTestBase {
  protected:
   CSSStyleSheetResourceTest() {
     original_memory_cache_ =
         ReplaceMemoryCacheForTesting(MemoryCache::Create());
-    page_ = DummyPageHolder::Create();
-    GetDocument().SetURL(KURL(NullURL(), "https://localhost/"));
   }
 
   ~CSSStyleSheetResourceTest() override {
     ReplaceMemoryCacheForTesting(original_memory_cache_.Release());
   }
 
+  void SetUp() override {
+    PageTestBase::SetUp(IntSize());
+    GetDocument().SetURL(KURL("https://localhost/"));
+  }
+
   CSSStyleSheetResource* CreateAndSaveTestStyleSheetResource() {
     const char kUrl[] = "https://localhost/style.css";
-    KURL css_url(NullURL(), kUrl);
+    const KURL css_url(kUrl);
 
     CSSStyleSheetResource* css_resource =
         CSSStyleSheetResource::CreateForTest(css_url, UTF8Encoding());
-    css_resource->ResponseReceived(
-        ResourceResponse(css_url, "style/css", 0, g_null_atom), nullptr);
+    css_resource->ResponseReceived(ResourceResponse(css_url, "style/css"),
+                                   nullptr);
     css_resource->FinishForTest();
     GetMemoryCache()->Add(css_resource);
     return css_resource;
   }
 
-  Document& GetDocument() { return page_->GetDocument(); }
-
   Persistent<MemoryCache> original_memory_cache_;
-  std::unique_ptr<DummyPageHolder> page_;
 };
 
 TEST_F(CSSStyleSheetResourceTest, DuplicateResourceNotCached) {
   const char kUrl[] = "https://localhost/style.css";
-  KURL image_url(NullURL(), kUrl);
-  KURL css_url(NullURL(), kUrl);
+  const KURL image_url(kUrl);
+  const KURL css_url(kUrl);
 
   // Emulate using <img> to do async stylesheet preloads.
 
@@ -89,12 +89,12 @@ TEST_F(CSSStyleSheetResourceTest, DuplicateResourceNotCached) {
 
   CSSStyleSheetResource* css_resource =
       CSSStyleSheetResource::CreateForTest(css_url, UTF8Encoding());
-  css_resource->ResponseReceived(
-      ResourceResponse(css_url, "style/css", 0, g_null_atom), nullptr);
+  css_resource->ResponseReceived(ResourceResponse(css_url, "style/css"),
+                                 nullptr);
   css_resource->FinishForTest();
 
-  CSSParserContext* parser_context =
-      CSSParserContext::Create(kHTMLStandardMode);
+  CSSParserContext* parser_context = CSSParserContext::Create(
+      kHTMLStandardMode, SecureContextMode::kInsecureContext);
   StyleSheetContents* contents = StyleSheetContents::Create(parser_context);
   CSSStyleSheet* sheet = CSSStyleSheet::Create(contents, GetDocument());
   EXPECT_TRUE(sheet);
@@ -114,8 +114,8 @@ TEST_F(CSSStyleSheetResourceTest, DuplicateResourceNotCached) {
 TEST_F(CSSStyleSheetResourceTest, CreateFromCacheRestoresOriginalSheet) {
   CSSStyleSheetResource* css_resource = CreateAndSaveTestStyleSheetResource();
 
-  CSSParserContext* parser_context =
-      CSSParserContext::Create(kHTMLStandardMode);
+  CSSParserContext* parser_context = CSSParserContext::Create(
+      kHTMLStandardMode, SecureContextMode::kInsecureContext);
   StyleSheetContents* contents = StyleSheetContents::Create(parser_context);
   CSSStyleSheet* sheet = CSSStyleSheet::Create(contents, GetDocument());
   ASSERT_TRUE(sheet);
@@ -138,8 +138,8 @@ TEST_F(CSSStyleSheetResourceTest,
        CreateFromCacheWithMediaQueriesCopiesOriginalSheet) {
   CSSStyleSheetResource* css_resource = CreateAndSaveTestStyleSheetResource();
 
-  CSSParserContext* parser_context =
-      CSSParserContext::Create(kHTMLStandardMode);
+  CSSParserContext* parser_context = CSSParserContext::Create(
+      kHTMLStandardMode, SecureContextMode::kInsecureContext);
   StyleSheetContents* contents = StyleSheetContents::Create(parser_context);
   CSSStyleSheet* sheet = CSSStyleSheet::Create(contents, GetDocument());
   ASSERT_TRUE(sheet);

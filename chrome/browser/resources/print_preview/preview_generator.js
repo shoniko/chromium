@@ -163,7 +163,7 @@ cr.define('print_preview', function() {
           !this.destinationStore_.selectedDestination) {
         return {id: -1, request: null};
       }
-      var previewChanged = this.hasPreviewChanged_();
+      const previewChanged = this.hasPreviewChanged_();
       if (!previewChanged && !this.hasPreviewPageRangeChanged_()) {
         // Changes to these ticket items might not trigger a new preview, but
         // they still need to be recorded.
@@ -189,10 +189,84 @@ cr.define('print_preview', function() {
       this.generateDraft_ = this.documentInfo_.isModifiable;
       return {
         id: this.inFlightRequestId_,
-        request: this.nativeLayer_.getPreview(
-            this.destinationStore_.selectedDestination, this.printTicketStore_,
-            this.documentInfo_, this.generateDraft_, this.inFlightRequestId_),
+        request: this.getPreview_(),
       };
+    }
+
+    /**
+     * @return {!Promise} Promise that resolves when the preview has been
+     *     generated.
+     * @private
+     */
+    getPreview_() {
+      const printTicketStore = this.printTicketStore_;
+      const destination = assert(this.destinationStore_.selectedDestination);
+
+      assert(
+          printTicketStore.isTicketValidForPreview(),
+          'Trying to generate preview when ticket is not valid');
+
+      const ticket = {
+        pageRange: printTicketStore.pageRange.getDocumentPageRanges(),
+        mediaSize: printTicketStore.mediaSize.getValue(),
+        landscape: printTicketStore.landscape.getValue(),
+        color:
+            destination.getNativeColorModel(printTicketStore.color.getValue()),
+        headerFooterEnabled: printTicketStore.headerFooter.getValue(),
+        marginsType: printTicketStore.marginsType.getValue(),
+        isFirstRequest: this.inFlightRequestId_ == 0,
+        requestID: this.inFlightRequestId_,
+        previewModifiable: this.documentInfo_.isModifiable,
+        generateDraftData: this.generateDraft_,
+        fitToPageEnabled: printTicketStore.fitToPage.getValue(),
+        scaleFactor: printTicketStore.scaling.getValueAsNumber(),
+        // NOTE: Even though the following fields dont directly relate to the
+        // preview, they still need to be included.
+        // e.g. printing::PrintSettingsFromJobSettings() still checks for them.
+        collate: true,
+        copies: 1,
+        deviceName: destination.id,
+        dpiHorizontal: 'horizontal_dpi' in printTicketStore.dpi.getValue() ?
+            printTicketStore.dpi.getValue().horizontal_dpi :
+            0,
+        dpiVertical: 'vertical_dpi' in printTicketStore.dpi.getValue() ?
+            printTicketStore.dpi.getValue().vertical_dpi :
+            0,
+        duplex: printTicketStore.duplex.getValue() ?
+            PreviewGenerator.DuplexMode.LONG_EDGE :
+            PreviewGenerator.DuplexMode.SIMPLEX,
+        printToPDF: destination.id ==
+            print_preview.Destination.GooglePromotedId.SAVE_AS_PDF,
+        printWithCloudPrint: !destination.isLocal,
+        printWithPrivet: destination.isPrivet,
+        printWithExtension: destination.isExtension,
+        rasterizePDF: false,
+        shouldPrintBackgrounds: printTicketStore.cssBackground.getValue(),
+        shouldPrintSelectionOnly: printTicketStore.selectionOnly.getValue()
+      };
+
+      // Set 'cloudPrintID' only if the destination is not local.
+      if (destination && !destination.isLocal) {
+        ticket.cloudPrintID = destination.id;
+      }
+
+      if (printTicketStore.marginsType.isCapabilityAvailable() &&
+          printTicketStore.marginsType.getValue() ==
+              print_preview.ticket_items.MarginsTypeValue.CUSTOM) {
+        const customMargins = printTicketStore.customMargins.getValue();
+        const orientationEnum =
+            print_preview.ticket_items.CustomMarginsOrientation;
+        ticket.marginsCustom = {
+          marginTop: customMargins.get(orientationEnum.TOP),
+          marginRight: customMargins.get(orientationEnum.RIGHT),
+          marginBottom: customMargins.get(orientationEnum.BOTTOM),
+          marginLeft: customMargins.get(orientationEnum.LEFT)
+        };
+      }
+
+      const pageCount =
+          this.inFlightRequestId_ > 0 ? this.documentInfo_.pageCount : -1;
+      return this.nativeLayer_.getPreview(JSON.stringify(ticket), pageCount);
     }
 
     /**
@@ -207,7 +281,7 @@ cr.define('print_preview', function() {
      * @private
      */
     dispatchPageReadyEvent_(previewIndex, pageNumber, previewUid) {
-      var pageGenEvent = new Event(PreviewGenerator.EventType.PAGE_READY);
+      const pageGenEvent = new Event(PreviewGenerator.EventType.PAGE_READY);
       pageGenEvent.previewIndex = previewIndex;
       pageGenEvent.previewUrl = 'chrome://print/' + previewUid.toString() +
           '/' + (pageNumber - 1) + '/print.pdf';
@@ -222,7 +296,7 @@ cr.define('print_preview', function() {
      * @private
      */
     dispatchPreviewStartEvent_(previewUid, index) {
-      var previewStartEvent =
+      const previewStartEvent =
           new Event(PreviewGenerator.EventType.PREVIEW_START);
       if (!this.documentInfo_.isModifiable) {
         index = -1;
@@ -239,7 +313,7 @@ cr.define('print_preview', function() {
      * @private
      */
     hasPreviewChanged_() {
-      var ticketStore = this.printTicketStore_;
+      const ticketStore = this.printTicketStore_;
       return this.inFlightRequestId_ == -1 ||
           !ticketStore.mediaSize.isValueEqual(this.mediaSize_) ||
           !ticketStore.landscape.isValueEqual(this.isLandscapeEnabled_) ||
@@ -295,18 +369,18 @@ cr.define('print_preview', function() {
       // NOTE: A request ID is not specified, so assuming its for the current
       // in-flight request.
 
-      var origin = new print_preview.Coordinate2d(
+      const origin = new print_preview.Coordinate2d(
           pageLayout.printableAreaX, pageLayout.printableAreaY);
-      var size = new print_preview.Size(
+      const size = new print_preview.Size(
           pageLayout.printableAreaWidth, pageLayout.printableAreaHeight);
 
-      var margins = new print_preview.Margins(
+      const margins = new print_preview.Margins(
           Math.round(pageLayout.marginTop), Math.round(pageLayout.marginRight),
           Math.round(pageLayout.marginBottom),
           Math.round(pageLayout.marginLeft));
 
-      var o = print_preview.ticket_items.CustomMarginsOrientation;
-      var pageSize = new print_preview.Size(
+      const o = print_preview.ticket_items.CustomMarginsOrientation;
+      const pageSize = new print_preview.Size(
           pageLayout.contentWidth + margins.get(o.LEFT) + margins.get(o.RIGHT),
           pageLayout.contentHeight + margins.get(o.TOP) +
               margins.get(o.BOTTOM));
@@ -347,10 +421,10 @@ cr.define('print_preview', function() {
       if (this.inFlightRequestId_ != previewResponseId) {
         return;  // Ignore old response.
       }
-      var pageNumber = pageIndex + 1;
-      var pageNumberSet = this.printTicketStore_.pageRange.getPageNumberSet();
+      const pageNumber = pageIndex + 1;
+      const pageNumberSet = this.printTicketStore_.pageRange.getPageNumberSet();
       if (pageNumberSet.hasPageNumber(pageNumber)) {
-        var previewIndex = pageNumberSet.getPageNumberIndex(pageNumber);
+        const previewIndex = pageNumberSet.getPageNumberIndex(pageNumber);
         if (previewIndex == 0) {
           this.dispatchPreviewStartEvent_(previewUid, pageIndex);
         }
@@ -408,6 +482,13 @@ cr.define('print_preview', function() {
     // Dispatched when the current print preview request fails.
     FAIL: 'print_preview.PreviewGenerator.FAIL'
   };
+
+  /**
+   * Constant values matching printing::DuplexMode enum.
+   * @enum {number}
+   */
+  PreviewGenerator
+      .DuplexMode = {SIMPLEX: 0, LONG_EDGE: 1, UNKNOWN_DUPLEX_MODE: -1};
 
   // Export
   return {PreviewGenerator: PreviewGenerator};

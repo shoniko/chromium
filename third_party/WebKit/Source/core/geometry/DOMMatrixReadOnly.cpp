@@ -14,7 +14,7 @@
 #include "core/geometry/DOMMatrixInit.h"
 #include "core/geometry/DOMPoint.h"
 #include "core/geometry/DOMPointInit.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/style/ComputedStyle.h"
 
 namespace blink {
@@ -94,7 +94,7 @@ bool DOMMatrixReadOnly::ValidateAndFixup(DOMMatrixInit& other,
        other.m43() || other.m14() || other.m24() || other.m34() ||
        other.m33() != 1 || other.m44() != 1)) {
     exception_state.ThrowTypeError(
-        "The is2D member is set to true but the input matrix is 3d matrix.");
+        "The is2D member is set to true but the input matrix is a 3d matrix.");
     return false;
   }
 
@@ -125,7 +125,8 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::Create(
     }
 
     DOMMatrixReadOnly* matrix = new DOMMatrixReadOnly(TransformationMatrix());
-    matrix->SetMatrixValueFromString(init.GetAsString(), exception_state);
+    matrix->SetMatrixValueFromString(execution_context, init.GetAsString(),
+                                     exception_state);
     return matrix;
   }
 
@@ -209,7 +210,7 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::fromMatrix(
   return new DOMMatrixReadOnly(args, 16);
 }
 
-DOMMatrixReadOnly::~DOMMatrixReadOnly() {}
+DOMMatrixReadOnly::~DOMMatrixReadOnly() = default;
 
 bool DOMMatrixReadOnly::is2D() const {
   return is2d_;
@@ -459,6 +460,7 @@ ScriptValue DOMMatrixReadOnly::toJSONForBinding(
 }
 
 void DOMMatrixReadOnly::SetMatrixValueFromString(
+    const ExecutionContext* execution_context,
     const String& input_string,
     ExceptionState& exception_state) {
   DEFINE_STATIC_LOCAL(String, identity_matrix2d, ("matrix(1, 0, 0, 1, 0, 0)"));
@@ -466,8 +468,9 @@ void DOMMatrixReadOnly::SetMatrixValueFromString(
   if (string.IsEmpty())
     string = identity_matrix2d;
 
-  const CSSValue* value =
-      CSSParser::ParseSingleValue(CSSPropertyTransform, string);
+  const CSSValue* value = CSSParser::ParseSingleValue(
+      CSSPropertyTransform, string,
+      StrictCSSParserContext(execution_context->GetSecureContextMode()));
 
   if (!value || value->IsCSSWideKeyword()) {
     exception_state.ThrowDOMException(
@@ -490,8 +493,8 @@ void DOMMatrixReadOnly::SetMatrixValueFromString(
 
   const ComputedStyle& initial_style = ComputedStyle::InitialStyle();
   TransformOperations operations = TransformBuilder::CreateTransformOperations(
-      *value, CSSToLengthConversionData(&initial_style, &initial_style,
-                                        LayoutViewItem(nullptr), 1.0f));
+      *value,
+      CSSToLengthConversionData(&initial_style, &initial_style, nullptr, 1.0f));
 
   if (operations.DependsOnBoxSize()) {
     exception_state.ThrowDOMException(

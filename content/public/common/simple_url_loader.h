@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/callback_forward.h"
+#include "base/macros.h"
 #include "content/common/content_export.h"
 
 namespace base {
@@ -23,14 +24,15 @@ struct NetworkTrafficAnnotationTag;
 struct RedirectInfo;
 }  // namespace net
 
-namespace content {
-
+namespace network {
 struct ResourceRequest;
 struct ResourceResponseHead;
-
 namespace mojom {
 class URLLoaderFactory;
 }
+}  // namespace network
+
+namespace content {
 
 // Creates and wraps a URLLoader, and runs it to completion. It's recommended
 // that consumers use this class instead of URLLoader directly, due to the
@@ -62,7 +64,17 @@ class CONTENT_EXPORT SimpleURLLoader {
   };
 
   // The maximum size DownloadToString will accept.
-  const size_t kMaxBoundedStringDownloadSize = 1024 * 1024;
+  static const size_t kMaxBoundedStringDownloadSize;
+
+  // Maximum upload body size to send as a block to the URLLoaderFactory. This
+  // data may appear in memory twice for a while, in the retry case, and there
+  // may briefly be 3 to 5 copies as it's copied over the Mojo pipe:  This
+  // class's copy (with retries enabled), the source mojo pipe's input copy, the
+  // copy on the IPC buffer, the destination mojo pipe's copy, and the network
+  // service's copy.
+  //
+  // Only exposed for tests.
+  static const size_t kMaxUploadStringSizeToCopy;
 
   // Callback used when downloading the response body as a std::string.
   // |response_body| is the body of the response, or nullptr on failure.
@@ -76,17 +88,22 @@ class CONTENT_EXPORT SimpleURLLoader {
 
   // Callback used when a redirect is being followed. It is safe to delete the
   // SimpleURLLoader during the callback.
-  using OnRedirectCallback =
-      base::RepeatingCallback<void(const net::RedirectInfo& redirect_info,
-                                   const ResourceResponseHead& response_head)>;
+  using OnRedirectCallback = base::RepeatingCallback<void(
+      const net::RedirectInfo& redirect_info,
+      const network::ResourceResponseHead& response_head)>;
 
-  static std::unique_ptr<SimpleURLLoader> Create();
+  // Creates a SimpleURLLoader for |resource_request|. The request can be
+  // started by calling any one of the Download methods once. The loader may not
+  // be reused.
+  static std::unique_ptr<SimpleURLLoader> Create(
+      std::unique_ptr<network::ResourceRequest> resource_request,
+      const net::NetworkTrafficAnnotationTag& annotation_tag);
 
   virtual ~SimpleURLLoader();
 
-  // Starts a request for |resource_request| using |network_context|. The
-  // SimpleURLLoader will accumulate all downloaded data in an in-memory string
-  // of bounded size. If |max_body_size| is exceeded, the request will fail with
+  // Starts the request using |network_context|. The SimpleURLLoader will
+  // accumulate all downloaded data in an in-memory string of bounded size. If
+  // |max_body_size| is exceeded, the request will fail with
   // net::ERR_INSUFFICIENT_RESOURCES. |max_body_size| must be no greater than 1
   // MiB. For anything larger, it's recommended to either save to a temp file,
   // or consume the data as it is received.
@@ -96,9 +113,7 @@ class CONTENT_EXPORT SimpleURLLoader {
   // SimpleURLLoader before the callback is invoked will return in cancelling
   // the request, and the callback will not be called.
   virtual void DownloadToString(
-      const ResourceRequest& resource_request,
-      mojom::URLLoaderFactory* url_loader_factory,
-      const net::NetworkTrafficAnnotationTag& annotation_tag,
+      network::mojom::URLLoaderFactory* url_loader_factory,
       BodyAsStringCallback body_as_string_callback,
       size_t max_body_size) = 0;
 
@@ -108,9 +123,7 @@ class CONTENT_EXPORT SimpleURLLoader {
   // instead (DownloadToString if the body is expected to be of reasonable
   // length, or DownloadToFile otherwise).
   virtual void DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      const ResourceRequest& resource_request,
-      mojom::URLLoaderFactory* url_loader_factory,
-      const net::NetworkTrafficAnnotationTag& annotation_tag,
+      network::mojom::URLLoaderFactory* url_loader_factory,
       BodyAsStringCallback body_as_string_callback) = 0;
 
   // SimpleURLLoader will download the entire response to a file at the
@@ -127,9 +140,7 @@ class CONTENT_EXPORT SimpleURLLoader {
   // downloaded file will be deleted asynchronously and the callback will not be
   // invoked, regardless of other settings.
   virtual void DownloadToFile(
-      const ResourceRequest& resource_request,
-      mojom::URLLoaderFactory* url_loader_factory,
-      const net::NetworkTrafficAnnotationTag& annotation_tag,
+      network::mojom::URLLoaderFactory* url_loader_factory,
       DownloadToFileCompleteCallback download_to_file_complete_callback,
       const base::FilePath& file_path,
       int64_t max_body_size = std::numeric_limits<int64_t>::max()) = 0;
@@ -137,9 +148,7 @@ class CONTENT_EXPORT SimpleURLLoader {
   // Same as DownloadToFile, but creates a temporary file instead of taking a
   // FilePath.
   virtual void DownloadToTempFile(
-      const ResourceRequest& resource_request,
-      mojom::URLLoaderFactory* url_loader_factory,
-      const net::NetworkTrafficAnnotationTag& annotation_tag,
+      network::mojom::URLLoaderFactory* url_loader_factory,
       DownloadToFileCompleteCallback download_to_file_complete_callback,
       int64_t max_body_size = std::numeric_limits<int64_t>::max()) = 0;
 
@@ -173,6 +182,29 @@ class CONTENT_EXPORT SimpleURLLoader {
   // TODO(mmenke): Consider adding a new error code for this.
   virtual void SetAllowHttpErrorResults(bool allow_http_error_results) = 0;
 
+  // Attaches the specified string as the upload body. Depending on the length
+  // of the string, the string may be copied to the URLLoader, or may be
+  // streamed to it from the current process. May only be called once, and only
+  // if ResourceRequest passed to the constructor had a null |request_body|.
+  //
+  // |content_type| will overwrite any Content-Type header in the
+  // ResourceRequest passed to Create().
+  //
+  // TODO(mmenke): This currently always requires a copy. Update DataElement not
+  // to require this.
+  virtual void AttachStringForUpload(
+      const std::string& upload_data,
+      const std::string& upload_content_type) = 0;
+
+  // Helper method to attach a file for upload, so the consumer won't need to
+  // open the file itself off-thread. May only be called once, and only if the
+  // ResourceRequest passed to the constructor had a null |request_body|.
+  //
+  // |content_type| will overwrite any Content-Type header in the
+  // ResourceRequest passed to Create().
+  virtual void AttachFileForUpload(const base::FilePath& upload_file_path,
+                                   const std::string& upload_content_type) = 0;
+
   // Sets the when to try and the max number of times to retry a request, if
   // any. |max_retries| is the number of times to retry the request, not
   // counting the initial request. |retry_mode| is a combination of one or more
@@ -186,6 +218,9 @@ class CONTENT_EXPORT SimpleURLLoader {
   //
   // Calling this multiple times will overwrite the values previously passed to
   // this method. May only be called before the request is started.
+  //
+  // Cannot retry requests with an upload body that contains a data pipe that
+  // was added the ResourceRequest passed to Create() by the consumer.
   virtual void SetRetryOptions(int max_retries, int retry_mode) = 0;
 
   // Returns the net::Error representing the final status of the request. May
@@ -195,10 +230,13 @@ class CONTENT_EXPORT SimpleURLLoader {
   // The ResourceResponseHead for the request. Will be nullptr if ResponseInfo
   // was never received. May only be called once the loader has informed the
   // caller of completion.
-  virtual const ResourceResponseHead* ResponseInfo() const = 0;
+  virtual const network::ResourceResponseHead* ResponseInfo() const = 0;
 
  protected:
   SimpleURLLoader();
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SimpleURLLoader);
 };
 
 }  // namespace content

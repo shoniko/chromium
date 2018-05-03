@@ -12,7 +12,7 @@
 #include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/config.h"
 #include "ash/public/cpp/stylus_utils.h"
-#include "ash/public/cpp/voice_interaction_state.h"
+#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
 #include "ash/session/session_controller.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shell.h"
@@ -25,6 +25,7 @@
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_helper.h"
 #include "ash/test_shell_delegate.h"
+#include "ash/voice_interaction/voice_interaction_controller.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -34,15 +35,14 @@
 #include "ui/events/base_event_utils.h"
 #include "ui/events/devices/stylus_state.h"
 #include "ui/events/event.h"
-#include "ui/events/test/device_data_manager_test_api.h"
 #include "ui/events/test/event_generator.h"
 
 namespace ash {
 
 class PaletteTrayTest : public AshTestBase {
  public:
-  PaletteTrayTest() {}
-  ~PaletteTrayTest() override {}
+  PaletteTrayTest() = default;
+  ~PaletteTrayTest() override = default;
 
   // Performs a tap on the palette tray button.
   void PerformTap() {
@@ -51,20 +51,14 @@ class PaletteTrayTest : public AshTestBase {
     palette_tray_->PerformAction(tap);
   }
 
-  // Fake a stylus ejection. Note: this will fail in mus or mash because
-  // DeviceDataManager is not created. See crbug.com/734812.
+  // Fake a stylus ejection.
   void EjectStylus() {
-    ui::test::DeviceDataManagerTestAPI devices_test_api;
-    devices_test_api.NotifyObserversStylusStateChanged(
-        ui::StylusState::REMOVED);
+    test_api_->OnStylusStateChanged(ui::StylusState::REMOVED);
   }
 
-  // Fake a stylus insertion. Note: this will fail in mus or mash because
-  // DeviceDataManager is not created. See crbug.com/734812.
+  // Fake a stylus insertion.
   void InsertStylus() {
-    ui::test::DeviceDataManagerTestAPI devices_test_api;
-    devices_test_api.NotifyObserversStylusStateChanged(
-        ui::StylusState::INSERTED);
+    test_api_->OnStylusStateChanged(ui::StylusState::INSERTED);
   }
 
   // AshTestBase:
@@ -104,20 +98,11 @@ TEST_F(PaletteTrayTest, PaletteTrayIsInvisible) {
   EXPECT_FALSE(palette_tray_->visible());
 }
 
-// Verify that if the has seen stylus pref is not set initially, the palette
-// tray's touch event watcher should be active.
-TEST_F(PaletteTrayTest, PaletteTrayStylusWatcherAlive) {
-  ASSERT_FALSE(palette_tray_->visible());
-
-  EXPECT_TRUE(test_api_->IsStylusWatcherActive());
-}
-
 // Verify if the has seen stylus pref is not set initially, the palette tray
 // should become visible after seeing a stylus event.
 TEST_F(PaletteTrayTest, PaletteTrayVisibleAfterStylusSeen) {
   ASSERT_FALSE(palette_tray_->visible());
   ASSERT_FALSE(local_state_pref_service()->GetBoolean(prefs::kHasSeenStylus));
-  ASSERT_TRUE(test_api_->IsStylusWatcherActive());
 
   // Send a stylus event.
   GetEventGenerator().EnterPenPointerMode();
@@ -125,10 +110,7 @@ TEST_F(PaletteTrayTest, PaletteTrayVisibleAfterStylusSeen) {
   GetEventGenerator().ReleaseTouch();
   GetEventGenerator().ExitPenPointerMode();
 
-  // Verify that the palette tray is now visible, the stylus event watcher is
-  // inactive and that the has seen stylus pref is now set to true.
   EXPECT_TRUE(palette_tray_->visible());
-  EXPECT_FALSE(test_api_->IsStylusWatcherActive());
 }
 
 // Verify if the has seen stylus pref is initially set, the palette tray is
@@ -138,7 +120,6 @@ TEST_F(PaletteTrayTest, StylusSeenPrefInitiallySet) {
   local_state_pref_service()->SetBoolean(prefs::kHasSeenStylus, true);
 
   EXPECT_TRUE(palette_tray_->visible());
-  EXPECT_FALSE(test_api_->IsStylusWatcherActive());
 }
 
 // Verify taps on the palette tray button results in expected behaviour.
@@ -225,6 +206,26 @@ TEST_F(PaletteTrayTest, EnableStylusPref) {
   // Setting the pref again shows the palette tray.
   active_user_pref_service()->SetBoolean(prefs::kEnableStylusTools, true);
   EXPECT_TRUE(palette_tray_->visible());
+}
+
+TEST_F(PaletteTrayTest, WelcomeBubbleVisibility) {
+  ASSERT_FALSE(active_user_pref_service()->GetBoolean(
+      prefs::kShownPaletteWelcomeBubble));
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
+
+  // Verify that the welcome bubble does not shown up after tapping the screen
+  // with a finger.
+  ui::test::EventGenerator& generator = GetEventGenerator();
+  generator.PressTouch();
+  generator.ReleaseTouch();
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
+
+  // Verify that the welcome bubble shows up after tapping the screen with a
+  // stylus for the first time.
+  generator.EnterPenPointerMode();
+  generator.PressTouch();
+  generator.ReleaseTouch();
+  EXPECT_TRUE(test_api_->welcome_bubble()->bubble_shown());
 }
 
 // Base class for tests that rely on voice interaction enabled.
@@ -329,10 +330,10 @@ TEST_F(PaletteTrayTestWithVoiceInteraction, MetalayerToolViewCreated) {
 }
 
 TEST_F(PaletteTrayTestWithVoiceInteraction, MetalayerToolActivatesHighlighter) {
-  Shell::Get()->NotifyVoiceInteractionStatusChanged(
-      VoiceInteractionState::RUNNING);
-  Shell::Get()->NotifyVoiceInteractionEnabled(true);
-  Shell::Get()->NotifyVoiceInteractionContextEnabled(true);
+  Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+      mojom::VoiceInteractionState::RUNNING);
+  Shell::Get()->voice_interaction_controller()->NotifySettingsEnabled(true);
+  Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(true);
 
   ui::test::EventGenerator& generator = GetEventGenerator();
   generator.EnterPenPointerMode();
@@ -394,7 +395,7 @@ TEST_F(PaletteTrayTestWithVoiceInteraction, MetalayerToolActivatesHighlighter) {
   // Disabling metalayer support in the delegate should disable the palette
   // tool.
   test_api_->palette_tool_manager()->ActivateTool(PaletteToolId::METALAYER);
-  Shell::Get()->NotifyVoiceInteractionContextEnabled(false);
+  Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(false);
   EXPECT_FALSE(metalayer_enabled());
 
   // With the metalayer disabled again, press/drag does not activate the
@@ -406,10 +407,10 @@ TEST_F(PaletteTrayTestWithVoiceInteraction, MetalayerToolActivatesHighlighter) {
 
 TEST_F(PaletteTrayTestWithVoiceInteraction,
        StylusBarrelButtonActivatesHighlighter) {
-  Shell::Get()->NotifyVoiceInteractionStatusChanged(
-      VoiceInteractionState::NOT_READY);
-  Shell::Get()->NotifyVoiceInteractionEnabled(false);
-  Shell::Get()->NotifyVoiceInteractionContextEnabled(false);
+  Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+      mojom::VoiceInteractionState::NOT_READY);
+  Shell::Get()->voice_interaction_controller()->NotifySettingsEnabled(false);
+  Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(false);
 
   ui::test::EventGenerator& generator = GetEventGenerator();
   generator.EnterPenPointerMode();
@@ -429,20 +430,20 @@ TEST_F(PaletteTrayTestWithVoiceInteraction,
                              false /* no highlighter on press */);
 
   // Enable one of the two user prefs, should not be sufficient.
-  Shell::Get()->NotifyVoiceInteractionContextEnabled(true);
+  Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(true);
   WaitDragAndAssertMetalayer("one pref enabled", origin,
                              ui::EF_LEFT_MOUSE_BUTTON, false /* no metalayer */,
                              false /* no highlighter on press */);
 
   // Enable the other user pref, still not sufficient.
-  Shell::Get()->NotifyVoiceInteractionEnabled(true);
+  Shell::Get()->voice_interaction_controller()->NotifySettingsEnabled(true);
   WaitDragAndAssertMetalayer("two prefs enabled", origin,
                              ui::EF_LEFT_MOUSE_BUTTON, false /* no metalayer */,
                              false /* no highlighter on press */);
 
   // Once the service is ready, the button should start working.
-  Shell::Get()->NotifyVoiceInteractionStatusChanged(
-      VoiceInteractionState::RUNNING);
+  Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+      mojom::VoiceInteractionState::RUNNING);
 
   // Press and drag with no button, still no highlighter.
   WaitDragAndAssertMetalayer("all enabled, no button ", origin, ui::EF_NONE,
@@ -506,7 +507,7 @@ TEST_F(PaletteTrayTestWithVoiceInteraction,
 
   // Disable the metalayer support.
   // This should deactivate both the palette tool and the highlighter.
-  Shell::Get()->NotifyVoiceInteractionContextEnabled(false);
+  Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(false);
   EXPECT_FALSE(test_api_->palette_tool_manager()->IsToolActive(
       PaletteToolId::METALAYER));
 
@@ -583,10 +584,10 @@ TEST_F(PaletteTrayTestWithInternalStylus, WelcomeBubbleShownOnEject) {
                                          false);
   ASSERT_FALSE(active_user_pref_service()->GetBoolean(
       prefs::kShownPaletteWelcomeBubble));
-  EXPECT_FALSE(test_api_->welcome_bubble()->BubbleShown());
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
 
   EjectStylus();
-  EXPECT_TRUE(test_api_->welcome_bubble()->BubbleShown());
+  EXPECT_TRUE(test_api_->welcome_bubble()->bubble_shown());
 }
 
 // Verify if the pref which tracks if the welcome bubble has been shown before
@@ -596,10 +597,10 @@ TEST_F(PaletteTrayTestWithInternalStylus, WelcomeBubbleNotShownIfShownBefore) {
                                          false);
   active_user_pref_service()->SetBoolean(prefs::kShownPaletteWelcomeBubble,
                                          true);
-  EXPECT_FALSE(test_api_->welcome_bubble()->BubbleShown());
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
 
   EjectStylus();
-  EXPECT_FALSE(test_api_->welcome_bubble()->BubbleShown());
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
 }
 
 // Verify that the bubble does not get shown if the auto open palette setting is
@@ -610,10 +611,31 @@ TEST_F(PaletteTrayTestWithInternalStylus,
       prefs::kLaunchPaletteOnEjectEvent));
   active_user_pref_service()->SetBoolean(prefs::kShownPaletteWelcomeBubble,
                                          false);
-  EXPECT_FALSE(test_api_->welcome_bubble()->BubbleShown());
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
 
   EjectStylus();
-  EXPECT_FALSE(test_api_->welcome_bubble()->BubbleShown());
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
+}
+
+// Verify that the bubble does not get shown if a stylus event has been seen by
+// the tray prior to the first stylus ejection.
+TEST_F(PaletteTrayTestWithInternalStylus,
+       WelcomeBubbleNotShownIfStylusTouchTray) {
+  ASSERT_FALSE(active_user_pref_service()->GetBoolean(
+      prefs::kShownPaletteWelcomeBubble));
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
+
+  ui::test::EventGenerator& generator = GetEventGenerator();
+  generator.EnterPenPointerMode();
+  generator.set_current_location(
+      palette_tray_->GetBoundsInScreen().CenterPoint());
+  generator.PressTouch();
+  generator.ReleaseTouch();
+
+  EXPECT_TRUE(active_user_pref_service()->GetBoolean(
+      prefs::kShownPaletteWelcomeBubble));
+  EjectStylus();
+  EXPECT_FALSE(test_api_->welcome_bubble()->bubble_shown());
 }
 
 // Verify that palette bubble is shown/hidden on stylus eject/insert iff the

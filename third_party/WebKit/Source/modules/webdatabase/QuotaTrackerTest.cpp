@@ -4,8 +4,8 @@
 
 #include "modules/webdatabase/QuotaTracker.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "platform/wtf/RefPtr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -13,7 +13,7 @@ namespace {
 
 TEST(QuotaTrackerTest, UpdateAndGetSizeAndSpaceAvailable) {
   QuotaTracker& tracker = QuotaTracker::Instance();
-  scoped_refptr<SecurityOrigin> origin =
+  scoped_refptr<const SecurityOrigin> origin =
       SecurityOrigin::CreateFromString("file:///a/b/c");
 
   const String database_name = "db";

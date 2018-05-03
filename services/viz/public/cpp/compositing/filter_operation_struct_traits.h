@@ -6,10 +6,12 @@
 #define SERVICES_VIZ_PUBLIC_CPP_COMPOSITING_FILTER_OPERATION_STRUCT_TRAITS_H_
 
 #include "base/containers/span.h"
-#include "cc/base/filter_operation.h"
+#include "base/memory/aligned_memory.h"
+#include "cc/paint/filter_operation.h"
+#include "cc/paint/paint_filter.h"
+#include "services/viz/public/cpp/compositing/paint_filter_struct_traits.h"
 #include "services/viz/public/interfaces/compositing/filter_operation.mojom-shared.h"
 #include "skia/public/interfaces/blur_image_filter_tile_mode_struct_traits.h"
-#include "skia/public/interfaces/image_filter_struct_traits.h"
 
 namespace mojo {
 
@@ -124,10 +126,12 @@ struct StructTraits<viz::mojom::FilterOperationDataView, cc::FilterOperation> {
     return operation.drop_shadow_color();
   }
 
-  static sk_sp<SkImageFilter> image_filter(
+  static sk_sp<cc::PaintFilter> image_filter(
       const cc::FilterOperation& operation) {
     if (operation.type() != cc::FilterOperation::REFERENCE)
-      return sk_sp<SkImageFilter>();
+      return nullptr;
+    if (!operation.image_filter())
+      return nullptr;
     return operation.image_filter();
   }
 
@@ -207,10 +211,10 @@ struct StructTraits<viz::mojom::FilterOperationDataView, cc::FilterOperation> {
         return true;
       }
       case cc::FilterOperation::REFERENCE: {
-        sk_sp<SkImageFilter> filter;
+        sk_sp<cc::PaintFilter> filter;
         if (!data.ReadImageFilter(&filter))
           return false;
-        out->set_image_filter(filter);
+        out->set_image_filter(std::move(filter));
         return true;
       }
       case cc::FilterOperation::ALPHA_THRESHOLD:

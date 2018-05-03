@@ -61,17 +61,16 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info,
   LayoutRect overflow_rect(layout_list_marker_.VisualOverflowRect());
   overflow_rect.MoveBy(box_origin);
 
-  IntRect pixel_snapped_overflow_rect = PixelSnappedIntRect(overflow_rect);
   if (!local_paint_info.GetCullRect().IntersectsCullRect(overflow_rect))
     return;
 
   DrawingRecorder recorder(local_paint_info.context, layout_list_marker_,
-                           local_paint_info.phase, pixel_snapped_overflow_rect);
+                           local_paint_info.phase);
 
   LayoutRect box(box_origin, layout_list_marker_.Size());
 
-  IntRect marker = layout_list_marker_.GetRelativeMarkerRect();
-  marker.MoveBy(RoundedIntPoint(box_origin));
+  LayoutRect marker = layout_list_marker_.GetRelativeMarkerRect();
+  marker.MoveBy(box_origin);
 
   GraphicsContext& context = local_paint_info.context;
 
@@ -81,9 +80,9 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info,
     context.DrawImage(
         layout_list_marker_.GetImage()
             ->GetImage(layout_list_marker_, layout_list_marker_.GetDocument(),
-                       layout_list_marker_.StyleRef(), marker.Size(), nullptr)
+                       layout_list_marker_.StyleRef(), marker.Size())
             .get(),
-        Image::kSyncDecode, marker);
+        Image::kSyncDecode, FloatRect(marker));
     if (layout_list_marker_.GetSelectionState() != SelectionState::kNone) {
       LayoutRect sel_rect = layout_list_marker_.LocalSelectionRect();
       sel_rect.MoveBy(box_origin);
@@ -101,7 +100,7 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info,
   if (style_category == LayoutListMarker::ListStyleCategory::kNone)
     return;
 
-  Color color(layout_list_marker_.ResolveColor(CSSPropertyColor));
+  Color color(layout_list_marker_.ResolveColor(GetCSSPropertyColor()));
 
   if (BoxModelObjectPainter::ShouldForceWhiteBackgroundForPrintEconomy(
           layout_list_marker_.ListItem()->GetDocument(),
@@ -114,7 +113,7 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info,
   const EListStyleType list_style =
       layout_list_marker_.Style()->ListStyleType();
   if (style_category == LayoutListMarker::ListStyleCategory::kSymbol) {
-    PaintSymbol(context, color, marker, list_style);
+    PaintSymbol(context, color, PixelSnappedIntRect(marker), list_style);
     return;
   }
 
@@ -127,7 +126,7 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info,
 
   GraphicsContextStateSaver state_saver(context, false);
   if (!layout_list_marker_.Style()->IsHorizontalWritingMode()) {
-    marker.MoveBy(RoundedIntPoint(-box_origin));
+    marker.MoveBy(-box_origin);
     marker = marker.TransposedRect();
     marker.MoveBy(
         IntPoint(RoundToInt(box.X()),
@@ -139,12 +138,13 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info,
   }
 
   TextRunPaintInfo text_run_paint_info(text_run);
-  text_run_paint_info.bounds = marker;
+  text_run_paint_info.bounds = EnclosingIntRect(marker);
   const SimpleFontData* font_data =
       layout_list_marker_.Style()->GetFont().PrimaryFont();
-  IntPoint text_origin = IntPoint(
-      marker.X(),
-      marker.Y() + (font_data ? font_data->GetFontMetrics().Ascent() : 0));
+  IntPoint text_origin =
+      IntPoint(marker.X().Round(),
+               marker.Y().Round() +
+                   (font_data ? font_data->GetFontMetrics().Ascent() : 0));
 
   // Text is not arbitrary. We can judge whether it's RTL from the first
   // character, and we only need to handle the direction RightToLeft for now.
@@ -168,7 +168,7 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info,
       ConstructTextRun(font, suffix_str, 2, layout_list_marker_.StyleRef(),
                        layout_list_marker_.Style()->Direction());
   TextRunPaintInfo suffix_run_info(suffix_run);
-  suffix_run_info.bounds = marker;
+  suffix_run_info.bounds = EnclosingIntRect(marker);
 
   if (layout_list_marker_.Style()->IsLeftToRightDirection()) {
     context.DrawText(font, text_run_paint_info, text_origin);
@@ -179,6 +179,9 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info,
     context.DrawText(font, text_run_paint_info,
                      text_origin + IntSize(font.Width(suffix_run), 0));
   }
+  // TODO(npm): Check that there are non-whitespace characters. See
+  // crbug.com/788444.
+  context.GetPaintController().SetTextPainted();
 }
 
 }  // namespace blink

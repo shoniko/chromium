@@ -227,7 +227,7 @@ class TestMockTimeTaskRunner : public SingleThreadTaskRunner,
                        TestPendingTask* next_task);
 
   // RunLoop::Delegate:
-  void Run() override;
+  void Run(bool application_tasks_allowed) override;
   void Quit() override;
   void EnsureWorkScheduled() override;
 
@@ -246,12 +246,8 @@ class TestMockTimeTaskRunner : public SingleThreadTaskRunner,
   // |tasks_lock_| is held.
   size_t next_task_ordinal_ = 0;
 
-  Lock tasks_lock_;
+  mutable Lock tasks_lock_;
   ConditionVariable tasks_lock_cv_;
-
-  // Members used to in TestMockTimeTaskRunners of Type::kBoundToThread to take
-  // ownership of the thread it was created on.
-  RunLoop::Delegate::Client* run_loop_client_ = nullptr;
   std::unique_ptr<ThreadTaskRunnerHandle> thread_task_runner_handle_;
 
   // Set to true in RunLoop::Delegate::Quit() to signal the topmost

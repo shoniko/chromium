@@ -55,7 +55,7 @@ void WelcomeHandler::HandleActivateSignIn(const base::ListValue* args) {
     GoToNewTabPage();
   } else {
     Browser* browser = GetBrowser();
-    browser->signin_view_controller()->ShowModalSignin(
+    browser->signin_view_controller()->ShowSignin(
         profiles::BubbleViewMode::BUBBLE_VIEW_MODE_GAIA_SIGNIN, browser,
         signin_metrics::AccessPoint::ACCESS_POINT_START_PAGE);
   }
@@ -82,10 +82,10 @@ void WelcomeHandler::RegisterMessages() {
 }
 
 void WelcomeHandler::GoToNewTabPage() {
-  chrome::NavigateParams params(GetBrowser(), GURL(chrome::kChromeUINewTabURL),
-                                ui::PageTransition::PAGE_TRANSITION_LINK);
+  NavigateParams params(GetBrowser(), GURL(chrome::kChromeUINewTabURL),
+                        ui::PageTransition::PAGE_TRANSITION_LINK);
   params.source_contents = web_ui()->GetWebContents();
-  chrome::Navigate(&params);
+  Navigate(&params);
 }
 
 Browser* WelcomeHandler::GetBrowser() {

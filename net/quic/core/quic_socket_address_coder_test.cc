@@ -4,6 +4,7 @@
 
 #include "net/quic/core/quic_socket_address_coder.h"
 
+#include "net/quic/platform/api/quic_arraysize.h"
 #include "net/quic/platform/api/quic_test.h"
 
 using std::string;
@@ -41,7 +42,7 @@ TEST_F(QuicSocketAddressCoderTest, DecodeIPv4) {
   QuicSocketAddressCoder coder;
   ASSERT_TRUE(coder.Decode(serialized.data(), serialized.length()));
   EXPECT_EQ(IpAddressFamily::IP_V4, coder.ip().address_family());
-  string expected_addr("\x04\x1f\xc6\x2c", 4);
+  string expected_addr("\x04\x1f\xc6\x2c");
   EXPECT_EQ(expected_addr, coder.ip().ToPackedString());
   EXPECT_EQ(0x1234, coder.port());
 }
@@ -110,7 +111,7 @@ TEST_F(QuicSocketAddressCoderTest, EncodeAndDecode) {
       {"::1", 65534},
   };
 
-  for (size_t i = 0; i < arraysize(test_case); i++) {
+  for (size_t i = 0; i < QUIC_ARRAYSIZE(test_case); i++) {
     QuicIpAddress ip;
     ASSERT_TRUE(ip.FromString(test_case[i].ip_literal));
     QuicSocketAddressCoder encoder(QuicSocketAddress(ip, test_case[i].port));

@@ -24,13 +24,14 @@ class CORE_EXPORT MainThreadWorkletGlobalScope
  public:
   MainThreadWorkletGlobalScope(LocalFrame*,
                                std::unique_ptr<GlobalScopeCreationParams>,
-                               v8::Isolate*,
                                WorkerReportingProxy&);
   ~MainThreadWorkletGlobalScope() override;
+
   bool IsMainThreadWorkletGlobalScope() const final { return true; }
 
   // WorkerOrWorkletGlobalScope
   WorkerThread* GetThread() const final;
+  scoped_refptr<WebTaskRunner> GetTaskRunner(TaskType) override;
 
   void Terminate();
 

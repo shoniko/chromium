@@ -23,6 +23,7 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/css/StyleChangeReason.h"
+#include "core/frame/UseCounter.h"
 #include "core/layout/LayoutImageResource.h"
 #include "core/layout/svg/LayoutSVGImage.h"
 #include "core/svg_names.h"
@@ -77,8 +78,9 @@ bool SVGImageElement::CurrentFrameHasSingleSecurityOrigin() const {
   if (LayoutSVGImage* layout_svg_image = ToLayoutSVGImage(GetLayoutObject())) {
     LayoutImageResource* layout_image_resource =
         layout_svg_image->ImageResource();
-    if (layout_image_resource->HasImage()) {
-      if (Image* image = layout_image_resource->CachedImage()->GetImage())
+    ImageResourceContent* image_content = layout_image_resource->CachedImage();
+    if (image_content) {
+      if (Image* image = image_content->GetImage())
         return image->CurrentFrameHasSingleSecurityOrigin();
     }
   }
@@ -93,20 +95,20 @@ ScriptPromise SVGImageElement::decode(ScriptState* script_state,
 void SVGImageElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   SVGAnimatedPropertyBase* property = PropertyFromAttribute(name);
   if (property == width_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                            width_->CssValue());
+                                            &width_->CssValue());
   } else if (property == height_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                            height_->CssValue());
+                                            &height_->CssValue());
   } else if (property == x_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                            x_->CssValue());
+                                            &x_->CssValue());
   } else if (property == y_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                            y_->CssValue());
+                                            &y_->CssValue());
   } else {
     SVGGraphicsElement::CollectStyleForPresentationAttribute(name, value,
                                                              style);
@@ -152,8 +154,9 @@ void SVGImageElement::SvgAttributeChanged(const QualifiedName& attr_name) {
 
 void SVGImageElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == SVGNames::asyncAttr &&
-      RuntimeEnabledFeatures::ImageAsyncAttributeEnabled()) {
+  if (params.name == SVGNames::decodingAttr &&
+      RuntimeEnabledFeatures::ImageDecodingAttributeEnabled()) {
+    UseCounter::Count(GetDocument(), WebFeature::kImageDecodingAttribute);
     decoding_mode_ = ParseImageDecodingMode(params.new_value);
   } else {
     SVGElement::ParseAttribute(params);

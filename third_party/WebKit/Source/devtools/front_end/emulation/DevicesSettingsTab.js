@@ -14,8 +14,8 @@ Emulation.DevicesSettingsTab = class extends UI.VBox {
 
     var header = this.element.createChild('header');
     header.createChild('h3').createTextChild(Common.UIString('Emulated Devices'));
-    this.containerElement = this.element.createChild('div', 'help-container-wrapper')
-                                .createChild('div', 'settings-tab help-content help-container');
+    this.containerElement = this.element.createChild('div', 'settings-container-wrapper')
+                                .createChild('div', 'settings-tab settings-content settings-container');
 
     var buttonsRow = this.containerElement.createChild('div', 'devices-button-row');
     this._addCustomButton =
@@ -105,6 +105,7 @@ Emulation.DevicesSettingsTab = class extends UI.VBox {
     var checkbox = element.createChild('input', 'devices-list-checkbox');
     checkbox.type = 'checkbox';
     checkbox.checked = device.show();
+    checkbox.addEventListener('click', event => event.consume(), false);
     element.createChild('div', 'devices-list-title').textContent = device.title;
     element.addEventListener('click', onItemClicked.bind(this), false);
     return element;

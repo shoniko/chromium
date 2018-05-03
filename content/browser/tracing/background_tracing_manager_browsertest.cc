@@ -123,7 +123,7 @@ class BackgroundTracingManagerUploadConfigWrapper {
     const size_t kOutputBufferLength = 10 * 1024 * 1024;
     std::vector<char> output_str(kOutputBufferLength);
 
-    z_stream stream = {0};
+    z_stream stream = {nullptr};
     stream.avail_in = compressed_length;
     stream.avail_out = kOutputBufferLength;
     stream.next_in = (Bytef*)&file_contents->data()[0];
@@ -224,7 +224,7 @@ void SetupBackgroundTracingManager() {
 
 void DisableScenarioWhenIdle() {
   BackgroundTracingManager::GetInstance()->SetActiveScenario(
-      NULL, BackgroundTracingManager::ReceiveCallback(),
+      nullptr, BackgroundTracingManager::ReceiveCallback(),
       BackgroundTracingManager::NO_DATA_FILTERING);
 }
 
@@ -328,8 +328,9 @@ bool IsTraceEventArgsWhitelisted(
 
 }  // namespace
 
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS) || defined(OS_LINUX)
 // Flaky on android, chromeos: https://crbug.com/639706
+// Flaky on linux: https://crbug.com/795803
 #define MAYBE_NoWhitelistedArgsStripped DISABLED_NoWhitelistedArgsStripped
 #else
 #define MAYBE_NoWhitelistedArgsStripped NoWhitelistedArgsStripped

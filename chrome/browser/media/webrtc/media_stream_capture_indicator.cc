@@ -12,7 +12,6 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -61,20 +60,6 @@ const extensions::Extension* GetExtension(WebContents* web_contents) {
       web_contents->GetURL());
 }
 
-bool IsWhitelistedExtension(const extensions::Extension* extension) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  static const char* const kExtensionWhitelist[] = {
-    extension_misc::kHotwordNewExtensionId,
-  };
-
-  for (size_t i = 0; i < arraysize(kExtensionWhitelist); ++i) {
-    if (extension->id() == kExtensionWhitelist[i])
-      return true;
-  }
-
-  return false;
-}
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 base::string16 GetTitle(WebContents* web_contents) {
@@ -186,7 +171,7 @@ class MediaStreamCaptureIndicator::UIDelegate : public content::MediaStreamUI {
 std::unique_ptr<content::MediaStreamUI>
 MediaStreamCaptureIndicator::WebContentsDeviceUsage::RegisterMediaStream(
     const content::MediaStreamDevices& devices) {
-  return base::MakeUnique<UIDelegate>(weak_factory_.GetWeakPtr(), devices);
+  return std::make_unique<UIDelegate>(weak_factory_.GetWeakPtr(), devices);
 }
 
 void MediaStreamCaptureIndicator::WebContentsDeviceUsage::AddDevices(
@@ -262,7 +247,7 @@ MediaStreamCaptureIndicator::RegisterMediaStream(
     const content::MediaStreamDevices& devices) {
   auto& usage = usage_map_[web_contents];
   if (!usage)
-    usage = base::MakeUnique<WebContentsDeviceUsage>(this, web_contents);
+    usage = std::make_unique<WebContentsDeviceUsage>(this, web_contents);
 
   return usage->RegisterMediaStream(devices);
 }
@@ -392,7 +377,7 @@ void MediaStreamCaptureIndicator::UpdateNotificationUserInterface() {
     // icon.
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     const extensions::Extension* extension = GetExtension(web_contents);
-    if (!extension || IsWhitelistedExtension(extension))
+    if (!extension)
       continue;
 #endif
 
@@ -443,7 +428,7 @@ void MediaStreamCaptureIndicator::GetStatusTrayIconInfo(
     icon = &vector_icons::kVideocamIcon;
   } else if (audio && !video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_ONLY;
-    icon = &vector_icons::kMicrophoneIcon;
+    icon = &vector_icons::kMicIcon;
   } else if (!audio && video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_VIDEO_ONLY;
     icon = &vector_icons::kVideocamIcon;

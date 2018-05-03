@@ -29,11 +29,14 @@ class CompositorFrameSinkImpl : public mojom::CompositorFrameSink {
 
   // mojom::CompositorFrameSink:
   void SetNeedsBeginFrame(bool needs_begin_frame) override;
+  void SetWantsAnimateOnlyBeginFrames() override;
   void SubmitCompositorFrame(const LocalSurfaceId& local_surface_id,
                              CompositorFrame frame,
                              mojom::HitTestRegionListPtr hit_test_region_list,
                              uint64_t submit_time) override;
   void DidNotProduceFrame(const BeginFrameAck& begin_frame_ack) override;
+
+  CompositorFrameSinkSupport* support() const { return support_.get(); }
 
  private:
   void OnClientConnectionLost();
@@ -41,8 +44,9 @@ class CompositorFrameSinkImpl : public mojom::CompositorFrameSink {
   mojom::CompositorFrameSinkClientPtr compositor_frame_sink_client_;
   mojo::Binding<mojom::CompositorFrameSink> compositor_frame_sink_binding_;
 
-  // Must be destroyed before |compositor_frame_sink_client_|.
-  std::unique_ptr<CompositorFrameSinkSupport> support_;
+  // Must be destroyed before |compositor_frame_sink_client_|. This must never
+  // change for the lifetime of CompositorFrameSinkImpl.
+  const std::unique_ptr<CompositorFrameSinkSupport> support_;
 
   DISALLOW_COPY_AND_ASSIGN(CompositorFrameSinkImpl);
 };

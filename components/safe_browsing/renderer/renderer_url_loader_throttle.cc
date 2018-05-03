@@ -5,10 +5,11 @@
 #include "components/safe_browsing/renderer/renderer_url_loader_throttle.h"
 
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "components/safe_browsing/common/utils.h"
-#include "content/public/common/resource_request.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "net/url_request/redirect_info.h"
+#include "services/network/public/cpp/resource_request.h"
 
 namespace safe_browsing {
 
@@ -19,7 +20,13 @@ RendererURLLoaderThrottle::RendererURLLoaderThrottle(
       render_frame_id_(render_frame_id),
       weak_factory_(this) {}
 
-RendererURLLoaderThrottle::~RendererURLLoaderThrottle() = default;
+RendererURLLoaderThrottle::~RendererURLLoaderThrottle() {
+  if (deferred_)
+    TRACE_EVENT_ASYNC_END0("safe_browsing", "Deferred", this);
+
+  if (!user_action_involved_)
+    LogNoUserActionResourceLoadingDelay(total_delay_);
+}
 
 void RendererURLLoaderThrottle::DetachFromCurrentSequence() {
   // Create a new pipe to the SafeBrowsing interface that can be bound to a
@@ -29,7 +36,7 @@ void RendererURLLoaderThrottle::DetachFromCurrentSequence() {
 }
 
 void RendererURLLoaderThrottle::WillStartRequest(
-    const content::ResourceRequest& request,
+    network::ResourceRequest* request,
     bool* defer) {
   DCHECK_EQ(0u, pending_checks_);
   DCHECK(!blocked_);
@@ -42,15 +49,17 @@ void RendererURLLoaderThrottle::WillStartRequest(
     safe_browsing_ = safe_browsing_ptr_.get();
   }
 
+  original_url_ = request->url;
   pending_checks_++;
   // Use a weak pointer to self because |safe_browsing_| may not be owned by
   // this object.
   net::HttpRequestHeaders headers;
-  headers.CopyFrom(request.headers);
+  headers.CopyFrom(request->headers);
   safe_browsing_->CreateCheckerAndCheck(
-      render_frame_id_, mojo::MakeRequest(&url_checker_), request.url,
-      request.method, headers, request.load_flags, request.resource_type,
-      request.has_user_gesture,
+      render_frame_id_, mojo::MakeRequest(&url_checker_), request->url,
+      request->method, headers, request->load_flags,
+      static_cast<content::ResourceType>(request->resource_type),
+      request->has_user_gesture,
       base::BindOnce(&RendererURLLoaderThrottle::OnCheckUrlResult,
                      weak_factory_.GetWeakPtr()));
   safe_browsing_ = nullptr;
@@ -61,6 +70,7 @@ void RendererURLLoaderThrottle::WillStartRequest(
 
 void RendererURLLoaderThrottle::WillRedirectRequest(
     const net::RedirectInfo& redirect_info,
+    const network::ResourceResponseHead& response_head,
     bool* defer) {
   // If |blocked_| is true, the resource load has been canceled and there
   // shouldn't be such a notification.
@@ -80,21 +90,21 @@ void RendererURLLoaderThrottle::WillRedirectRequest(
 
 void RendererURLLoaderThrottle::WillProcessResponse(
     const GURL& response_url,
-    const content::ResourceResponseHead& response_head,
+    const network::ResourceResponseHead& response_head,
     bool* defer) {
   // If |blocked_| is true, the resource load has been canceled and there
   // shouldn't be such a notification.
   DCHECK(!blocked_);
 
-  if (pending_checks_ == 0) {
-    LogDelay(base::TimeDelta());
+  if (pending_checks_ == 0)
     return;
-  }
 
   DCHECK(!deferred_);
   deferred_ = true;
   defer_start_time_ = base::TimeTicks::Now();
   *defer = true;
+  TRACE_EVENT_ASYNC_BEGIN1("safe_browsing", "Deferred", this, "original_url",
+                           original_url_.spec());
 }
 
 void RendererURLLoaderThrottle::OnCompleteCheck(bool proceed,
@@ -149,13 +159,19 @@ void RendererURLLoaderThrottle::OnCompleteCheckInternal(
     pending_slow_checks_--;
   }
 
+  user_action_involved_ = user_action_involved_ || showed_interstitial;
+  // If the resource load is currently deferred and is going to exit that state
+  // (either being cancelled or resumed), record the total delay.
+  if (deferred_ && (!proceed || pending_checks_ == 0))
+    total_delay_ = base::TimeTicks::Now() - defer_start_time_;
+
   if (proceed) {
     if (pending_slow_checks_ == 0 && slow_check)
       delegate_->ResumeReadingBodyFromNet();
 
     if (pending_checks_ == 0 && deferred_) {
-      LogDelay(base::TimeTicks::Now() - defer_start_time_);
       deferred_ = false;
+      TRACE_EVENT_ASYNC_END0("safe_browsing", "Deferred", this);
       delegate_->Resume();
     }
   } else {
@@ -184,8 +200,10 @@ void RendererURLLoaderThrottle::OnConnectionError() {
   }
 
   if (deferred_) {
+    total_delay_ = base::TimeTicks::Now() - defer_start_time_;
+
     deferred_ = false;
-    LogDelay(base::TimeTicks::Now() - defer_start_time_);
+    TRACE_EVENT_ASYNC_END0("safe_browsing", "Deferred", this);
     delegate_->Resume();
   }
 }

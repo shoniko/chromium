@@ -4,6 +4,8 @@
 
 #include "content/public/browser/web_contents_delegate.h"
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
@@ -88,29 +90,6 @@ bool WebContentsDelegate::HandleContextMenu(
   return false;
 }
 
-void WebContentsDelegate::ViewSourceForTab(WebContents* source,
-                                           const GURL& page_url) {
-  // Fall back implementation based entirely on the view-source scheme.
-  // It suffers from http://crbug.com/523 and that is why browser overrides
-  // it with proper implementation.
-  GURL url = GURL(kViewSourceScheme + std::string(":") + page_url.spec());
-  OpenURLFromTab(
-      source,
-      OpenURLParams(url, Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                    ui::PAGE_TRANSITION_LINK, false));
-}
-
-void WebContentsDelegate::ViewSourceForFrame(WebContents* source,
-                                             const GURL& frame_url,
-                                             const PageState& page_state) {
-  // Same as ViewSourceForTab, but for given subframe.
-  GURL url = GURL(kViewSourceScheme + std::string(":") + frame_url.spec());
-  OpenURLFromTab(
-      source,
-      OpenURLParams(url, Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                    ui::PAGE_TRANSITION_LINK, false));
-}
-
 KeyboardEventProcessingResult WebContentsDelegate::PreHandleKeyboardEvent(
     WebContents* source,
     const NativeWebKeyboardEvent& event) {
@@ -178,7 +157,7 @@ blink::WebDisplayMode WebContentsDelegate::GetDisplayMode(
 content::ColorChooser* WebContentsDelegate::OpenColorChooser(
     WebContents* web_contents,
     SkColor color,
-    const std::vector<ColorSuggestion>& suggestions) {
+    const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
   return nullptr;
 }
 
@@ -247,7 +226,7 @@ void WebContentsDelegate::Detach(WebContents* web_contents) {
 }
 
 gfx::Size WebContentsDelegate::GetSizeForNewRenderView(
-   WebContents* web_contents) const {
+    WebContents* web_contents) const {
   return gfx::Size();
 }
 
@@ -275,6 +254,18 @@ bool WebContentsDelegate::ShouldAllowRunningInsecureContent(
     const url::Origin& origin,
     const GURL& resource_url) {
   return allowed_per_prefs;
+}
+
+int WebContentsDelegate::GetTopControlsHeight() const {
+  return 0;
+}
+
+int WebContentsDelegate::GetBottomControlsHeight() const {
+  return 0;
+}
+
+bool WebContentsDelegate::DoBrowserControlsShrinkBlinkSize() const {
+  return false;
 }
 
 }  // namespace content

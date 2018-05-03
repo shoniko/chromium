@@ -34,6 +34,7 @@
 #include <memory>
 #include "platform/LayoutUnit.h"
 #include "platform/PlatformExport.h"
+#include "platform/fonts/CanvasRotationInVertical.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/text/TextDirection.h"
 #include "platform/wtf/Forward.h"
@@ -46,6 +47,7 @@ struct hb_buffer_t;
 
 namespace blink {
 
+struct CharacterRange;
 class Font;
 template <typename TextContainerType>
 class PLATFORM_EXPORT ShapeResultSpacing;
@@ -57,7 +59,7 @@ class PLATFORM_EXPORT ShapeResult : public RefCounted<ShapeResult> {
   static scoped_refptr<ShapeResult> Create(const Font* font,
                                     unsigned num_characters,
                                     TextDirection direction) {
-    return WTF::AdoptRef(new ShapeResult(font, num_characters, direction));
+    return base::AdoptRef(new ShapeResult(font, num_characters, direction));
   }
   static scoped_refptr<ShapeResult> CreateForTabulationCharacters(
       const Font*,
@@ -77,6 +79,7 @@ class PLATFORM_EXPORT ShapeResult : public RefCounted<ShapeResult> {
   // even when the result is in vertical flow.
   const FloatRect& Bounds() const { return glyph_bounding_box_; }
   unsigned NumCharacters() const { return num_characters_; }
+  CharacterRange GetCharacterRange(unsigned from, unsigned to) const;
   // The character start/end index of a range shape result.
   unsigned StartIndexForResult() const;
   unsigned EndIndexForResult() const;
@@ -97,6 +100,8 @@ class PLATFORM_EXPORT ShapeResult : public RefCounted<ShapeResult> {
 
   // Returns the next or previous offsets respectively at which it is safe to
   // break without reshaping.
+  // The |offset| given and the return value is for the original string, between
+  // |StartIndexForResult| and |EndIndexForResult|.
   unsigned NextSafeToBreakOffset(unsigned offset) const;
   unsigned PreviousSafeToBreakOffset(unsigned offset) const;
 
@@ -119,18 +124,34 @@ class PLATFORM_EXPORT ShapeResult : public RefCounted<ShapeResult> {
                                          const TextRun&) const;
 
   void CopyRange(unsigned start, unsigned end, ShapeResult*) const;
+  scoped_refptr<ShapeResult> SubRange(unsigned start_offset,
+                                      unsigned end_offset) const;
 
   String ToString() const;
   void ToString(StringBuilder*) const;
 
- protected:
   struct RunInfo;
+  RunInfo* InsertRunForTesting(unsigned start_index,
+                               unsigned num_characters,
+                               TextDirection,
+                               Vector<uint16_t> safe_break_offsets = {});
+#if DCHECK_IS_ON()
+  void CheckConsistency() const;
+#endif
 
+ protected:
+  ShapeResult(const SimpleFontData*, unsigned num_characters, TextDirection);
   ShapeResult(const Font*, unsigned num_characters, TextDirection);
   ShapeResult(const ShapeResult&);
 
+  static scoped_refptr<ShapeResult> Create(const SimpleFontData* font_data,
+                                           unsigned num_characters,
+                                           TextDirection direction) {
+    return base::AdoptRef(
+        new ShapeResult(font_data, num_characters, direction));
+  }
   static scoped_refptr<ShapeResult> Create(const ShapeResult& other) {
-    return WTF::AdoptRef(new ShapeResult(other));
+    return base::AdoptRef(new ShapeResult(other));
   }
 
   template <typename TextContainerType>
@@ -146,12 +167,14 @@ class PLATFORM_EXPORT ShapeResult : public RefCounted<ShapeResult> {
                  unsigned start_glyph,
                  unsigned num_glyphs,
                  hb_buffer_t*);
+  void InsertRun(std::unique_ptr<ShapeResult::RunInfo>);
+  void InsertRunForIndex(unsigned start_character_index);
   void ReorderRtlRuns(unsigned run_size_before);
 
   float width_;
   FloatRect glyph_bounding_box_;
   Vector<std::unique_ptr<RunInfo>> runs_;
-  scoped_refptr<SimpleFontData> primary_font_;
+  scoped_refptr<const SimpleFontData> primary_font_;
 
   unsigned num_characters_;
   unsigned num_glyphs_ : 30;

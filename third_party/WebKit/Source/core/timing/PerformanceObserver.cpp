@@ -96,6 +96,12 @@ void PerformanceObserver::disconnect() {
   is_registered_ = false;
 }
 
+PerformanceEntryVector PerformanceObserver::takeRecords() {
+  PerformanceEntryVector performance_entries;
+  performance_entries.swap(performance_entries_);
+  return performance_entries;
+}
+
 void PerformanceObserver::EnqueuePerformanceEntry(PerformanceEntry& entry) {
   performance_entries_.push_back(&entry);
   if (performance_)
@@ -107,11 +113,14 @@ bool PerformanceObserver::HasPendingActivity() const {
 }
 
 bool PerformanceObserver::ShouldBeSuspended() const {
-  return execution_context_->IsContextSuspended();
+  return execution_context_->IsContextPaused();
 }
 
 void PerformanceObserver::Deliver() {
   DCHECK(!ShouldBeSuspended());
+
+  if (!GetExecutionContext())
+    return;
 
   if (performance_entries_.IsEmpty())
     return;
@@ -120,7 +129,7 @@ void PerformanceObserver::Deliver() {
   performance_entries.swap(performance_entries_);
   PerformanceObserverEntryList* entry_list =
       new PerformanceObserverEntryList(performance_entries);
-  callback_->call(this, entry_list, this);
+  callback_->InvokeAndReportException(this, entry_list, this);
 }
 
 void PerformanceObserver::Trace(blink::Visitor* visitor) {
@@ -135,6 +144,7 @@ void PerformanceObserver::Trace(blink::Visitor* visitor) {
 void PerformanceObserver::TraceWrappers(
     const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(callback_);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

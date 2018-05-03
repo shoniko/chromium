@@ -4,7 +4,6 @@
 
 #include "components/cronet/url_request_context_config.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/values.h"
 #include "net/cert/cert_verifier.h"
@@ -47,6 +46,7 @@ TEST(URLRequestContextConfigTest, TestExperimentalOptionParsing) {
       "{\"QUIC\":{\"max_server_configs_stored_in_properties\":2,"
       "\"user_agent_id\":\"Custom QUIC UAID\","
       "\"idle_connection_timeout_seconds\":300,"
+      "\"close_sessions_on_ip_change\":true,"
       "\"race_cert_verification\":true,"
       "\"connection_options\":\"TIME,TBBR,REJ\"},"
       "\"AsyncDNS\":{\"enable\":true},"
@@ -70,7 +70,7 @@ TEST(URLRequestContextConfigTest, TestExperimentalOptionParsing) {
   EXPECT_FALSE(config.effective_experimental_options->HasKey("UnknownOption"));
   // Set a ProxyConfigService to avoid DCHECK failure when building.
   builder.set_proxy_config_service(
-      base::MakeUnique<net::ProxyConfigServiceFixed>(
+      std::make_unique<net::ProxyConfigServiceFixed>(
           net::ProxyConfig::CreateDirect()));
   std::unique_ptr<net::URLRequestContext> context(builder.Build());
   const net::HttpNetworkSession::Params* params =
@@ -91,13 +91,18 @@ TEST(URLRequestContextConfigTest, TestExperimentalOptionParsing) {
   // Check idle_connection_timeout_seconds.
   EXPECT_EQ(300, params->quic_idle_connection_timeout_seconds);
 
+  EXPECT_TRUE(params->quic_close_sessions_on_ip_change);
   EXPECT_FALSE(params->quic_migrate_sessions_on_network_change);
+  EXPECT_FALSE(params->quic_migrate_sessions_on_network_change_v2);
+  EXPECT_FALSE(params->quic_migrate_sessions_early_v2);
 
   // Check race_cert_verification.
   EXPECT_TRUE(params->quic_race_cert_verification);
 
-  // Check AsyncDNS resolver is enabled.
+#if defined(ENABLE_BUILT_IN_DNS)
+  // Check AsyncDNS resolver is enabled (not supported on iOS).
   EXPECT_TRUE(context->host_resolver()->GetDnsConfigAsValue());
+#endif  // defined(ENABLE_BUILT_IN_DNS)
 
   // Check IPv6 is disabled when on wifi.
   EXPECT_TRUE(context->host_resolver()->GetNoIPv6OnWifi());
@@ -149,14 +154,234 @@ TEST(URLRequestContextConfigTest, SetQuicConnectionMigrationOptions) {
   config.ConfigureURLRequestContextBuilder(&builder, &net_log);
   // Set a ProxyConfigService to avoid DCHECK failure when building.
   builder.set_proxy_config_service(
+      std::make_unique<net::ProxyConfigServiceFixed>(
+          net::ProxyConfig::CreateDirect()));
+  std::unique_ptr<net::URLRequestContext> context(builder.Build());
+  const net::HttpNetworkSession::Params* params =
+      context->GetNetworkSessionParams();
+
+  EXPECT_FALSE(params->quic_close_sessions_on_ip_change);
+  EXPECT_TRUE(params->quic_migrate_sessions_on_network_change);
+  EXPECT_TRUE(params->quic_migrate_sessions_early);
+}
+
+TEST(URLRequestContextConfigTest, SetQuicConnectionMigrationV2Options) {
+  base::test::ScopedTaskEnvironment scoped_task_environment_(
+      base::test::ScopedTaskEnvironment::MainThreadType::IO);
+
+  URLRequestContextConfig config(
+      // Enable QUIC.
+      true,
+      // QUIC User Agent ID.
+      "Default QUIC User Agent ID",
+      // Enable SPDY.
+      true,
+      // Enable Brotli.
+      false,
+      // Type of http cache.
+      URLRequestContextConfig::HttpCacheType::DISK,
+      // Max size of http cache in bytes.
+      1024000,
+      // Disable caching for HTTP responses. Other information may be stored in
+      // the cache.
+      false,
+      // Storage path for http cache and cookie storage.
+      "/data/data/org.chromium.net/app_cronet_test/test_storage",
+      // User-Agent request header field.
+      "fake agent",
+      // JSON encoded experimental options.
+      "{\"QUIC\":{\"migrate_sessions_on_network_change_v2\":true,"
+      "\"migrate_sessions_early_v2\":true,"
+      "\"max_time_on_non_default_network_seconds\":10,"
+      "\"max_migrations_to_non_default_network_on_path_degrading\":4}}",
+      // MockCertVerifier to use for testing purposes.
+      std::unique_ptr<net::CertVerifier>(),
+      // Enable network quality estimator.
+      false,
+      // Enable Public Key Pinning bypass for local trust anchors.
+      true,
+      // Certificate verifier cache data.
+      "");
+
+  net::URLRequestContextBuilder builder;
+  net::NetLog net_log;
+  config.ConfigureURLRequestContextBuilder(&builder, &net_log);
+  // Set a ProxyConfigService to avoid DCHECK failure when building.
+  builder.set_proxy_config_service(
+      std::make_unique<net::ProxyConfigServiceFixed>(
+          net::ProxyConfig::CreateDirect()));
+  std::unique_ptr<net::URLRequestContext> context(builder.Build());
+  const net::HttpNetworkSession::Params* params =
+      context->GetNetworkSessionParams();
+
+  EXPECT_TRUE(params->quic_migrate_sessions_on_network_change_v2);
+  EXPECT_TRUE(params->quic_migrate_sessions_early_v2);
+  EXPECT_EQ(base::TimeDelta::FromSeconds(10),
+            params->quic_max_time_on_non_default_network);
+  EXPECT_EQ(
+      4, params->quic_max_migrations_to_non_default_network_on_path_degrading);
+}
+
+TEST(URLRequestContextConfigTest, SetQuicHostWhitelist) {
+  base::test::ScopedTaskEnvironment scoped_task_environment_(
+      base::test::ScopedTaskEnvironment::MainThreadType::IO);
+
+  URLRequestContextConfig config(
+      // Enable QUIC.
+      true,
+      // QUIC User Agent ID.
+      "Default QUIC User Agent ID",
+      // Enable SPDY.
+      true,
+      // Enable Brotli.
+      false,
+      // Type of http cache.
+      URLRequestContextConfig::HttpCacheType::DISK,
+      // Max size of http cache in bytes.
+      1024000,
+      // Disable caching for HTTP responses. Other information may be stored in
+      // the cache.
+      false,
+      // Storage path for http cache and cookie storage.
+      "/data/data/org.chromium.net/app_cronet_test/test_storage",
+      // User-Agent request header field.
+      "fake agent",
+      // JSON encoded experimental options.
+      "{\"QUIC\":{\"host_whitelist\":\"www.example.com,www.example.org\"}}",
+      // MockCertVerifier to use for testing purposes.
+      std::unique_ptr<net::CertVerifier>(),
+      // Enable network quality estimator.
+      false,
+      // Enable Public Key Pinning bypass for local trust anchors.
+      true,
+      // Certificate verifier cache data.
+      "");
+
+  net::URLRequestContextBuilder builder;
+  net::NetLog net_log;
+  config.ConfigureURLRequestContextBuilder(&builder, &net_log);
+  // Set a ProxyConfigService to avoid DCHECK failure when building.
+  builder.set_proxy_config_service(
+      std::make_unique<net::ProxyConfigServiceFixed>(
+          net::ProxyConfig::CreateDirect()));
+  std::unique_ptr<net::URLRequestContext> context(builder.Build());
+  const net::HttpNetworkSession::Params* params =
+      context->GetNetworkSessionParams();
+
+  EXPECT_TRUE(
+      base::ContainsKey(params->quic_host_whitelist, "www.example.com"));
+  EXPECT_TRUE(
+      base::ContainsKey(params->quic_host_whitelist, "www.example.org"));
+}
+
+TEST(URLRequestContextConfigTest, SetQuicMaxTimeBeforeCryptoHandshake) {
+  base::test::ScopedTaskEnvironment scoped_task_environment_(
+      base::test::ScopedTaskEnvironment::MainThreadType::IO);
+
+  URLRequestContextConfig config(
+      // Enable QUIC.
+      true,
+      // QUIC User Agent ID.
+      "Default QUIC User Agent ID",
+      // Enable SPDY.
+      true,
+      // Enable Brotli.
+      false,
+      // Type of http cache.
+      URLRequestContextConfig::HttpCacheType::DISK,
+      // Max size of http cache in bytes.
+      1024000,
+      // Disable caching for HTTP responses. Other information may be stored in
+      // the cache.
+      false,
+      // Storage path for http cache and cookie storage.
+      "/data/data/org.chromium.net/app_cronet_test/test_storage",
+      // User-Agent request header field.
+      "fake agent",
+      // JSON encoded experimental options.
+      "{\"QUIC\":{\"max_time_before_crypto_handshake_seconds\":7,"
+      "\"max_idle_time_before_crypto_handshake_seconds\":11}}",
+      // MockCertVerifier to use for testing purposes.
+      std::unique_ptr<net::CertVerifier>(),
+      // Enable network quality estimator.
+      false,
+      // Enable Public Key Pinning bypass for local trust anchors.
+      true,
+      // Certificate verifier cache data.
+      "");
+
+  net::URLRequestContextBuilder builder;
+  net::NetLog net_log;
+  config.ConfigureURLRequestContextBuilder(&builder, &net_log);
+  // Set a ProxyConfigService to avoid DCHECK failure when building.
+  builder.set_proxy_config_service(
+      std::make_unique<net::ProxyConfigServiceFixed>(
+          net::ProxyConfig::CreateDirect()));
+  std::unique_ptr<net::URLRequestContext> context(builder.Build());
+  const net::HttpNetworkSession::Params* params =
+      context->GetNetworkSessionParams();
+
+  EXPECT_EQ(7, params->quic_max_time_before_crypto_handshake_seconds);
+  EXPECT_EQ(11, params->quic_max_idle_time_before_crypto_handshake_seconds);
+}
+
+TEST(URLURLRequestContextConfigTest, SetQuicConnectionOptions) {
+  base::test::ScopedTaskEnvironment scoped_task_environment_(
+      base::test::ScopedTaskEnvironment::MainThreadType::IO);
+
+  URLRequestContextConfig config(
+      // Enable QUIC.
+      true,
+      // QUIC User Agent ID.
+      "Default QUIC User Agent ID",
+      // Enable SPDY.
+      true,
+      // Enable Brotli.
+      false,
+      // Type of http cache.
+      URLRequestContextConfig::HttpCacheType::DISK,
+      // Max size of http cache in bytes.
+      1024000,
+      // Disable caching for HTTP responses. Other information may be stored in
+      // the cache.
+      false,
+      // Storage path for http cache and cookie storage.
+      "/data/data/org.chromium.net/app_cronet_test/test_storage",
+      // User-Agent request header field.
+      "fake agent",
+      // JSON encoded experimental options.
+      "{\"QUIC\":{\"connection_options\":\"TIME,TBBR,REJ\","
+      "\"client_connection_options\":\"TBBR,1RTT\"}}",
+      // MockCertVerifier to use for testing purposes.
+      std::unique_ptr<net::CertVerifier>(),
+      // Enable network quality estimator.
+      false,
+      // Enable Public Key Pinning bypass for local trust anchors.
+      true,
+      // Certificate verifier cache data.
+      "");
+
+  net::URLRequestContextBuilder builder;
+  net::NetLog net_log;
+  config.ConfigureURLRequestContextBuilder(&builder, &net_log);
+  // Set a ProxyConfigService to avoid DCHECK failure when building.
+  builder.set_proxy_config_service(
       base::MakeUnique<net::ProxyConfigServiceFixed>(
           net::ProxyConfig::CreateDirect()));
   std::unique_ptr<net::URLRequestContext> context(builder.Build());
   const net::HttpNetworkSession::Params* params =
       context->GetNetworkSessionParams();
 
-  EXPECT_TRUE(params->quic_migrate_sessions_on_network_change);
-  EXPECT_TRUE(params->quic_migrate_sessions_early);
+  net::QuicTagVector connection_options;
+  connection_options.push_back(net::kTIME);
+  connection_options.push_back(net::kTBBR);
+  connection_options.push_back(net::kREJ);
+  EXPECT_EQ(connection_options, params->quic_connection_options);
+
+  net::QuicTagVector client_connection_options;
+  client_connection_options.push_back(net::kTBBR);
+  client_connection_options.push_back(net::k1RTT);
+  EXPECT_EQ(client_connection_options, params->quic_client_connection_options);
 }
 
 // See stale_host_resolver_unittest.cc for test of StaleDNS options.

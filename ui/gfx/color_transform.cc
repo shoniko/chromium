@@ -955,13 +955,11 @@ class SkiaColorTransform : public ColorTransformStep {
 
 sk_sp<SkColorSpace> ColorTransformInternal::GetSkColorSpaceIfNecessary(
     const ColorSpace& color_space) {
-  if (color_space.primaries_ != ColorSpace::PrimaryID::ICC_BASED &&
-      color_space.transfer_ != ColorSpace::TransferID::ICC_BASED) {
+  if (!color_space.icc_profile_id_)
     return nullptr;
-  }
-  DCHECK(color_space.icc_profile_sk_color_space_);
-  return color_space.icc_profile_sk_color_space_;
+  return ICCProfile::GetSkColorSpaceFromId(color_space.icc_profile_id_);
 }
+
 ColorTransformInternal::ColorTransformInternal(const ColorSpace& src,
                                                const ColorSpace& dst,
                                                Intent intent)
@@ -970,6 +968,12 @@ ColorTransformInternal::ColorTransformInternal(const ColorSpace& src,
   // TODO(ccameron): We may want dst assume sRGB at some point in the future.
   if (!src_.IsValid())
     return;
+
+  // SMPTEST2084_NON_HDR is not a valid destination.
+  if (dst.transfer_ == ColorSpace::TransferID::SMPTEST2084_NON_HDR) {
+    DLOG(ERROR) << "Invalid dst transfer function, returning identity.";
+    return;
+  }
 
   // If the target color space is not defined, just apply the adjust and
   // tranfer matrices. This path is used by YUV to RGB color conversion

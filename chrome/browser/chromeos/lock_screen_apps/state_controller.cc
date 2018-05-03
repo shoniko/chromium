@@ -13,7 +13,6 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
@@ -23,16 +22,15 @@
 #include "chrome/browser/chromeos/lock_screen_apps/app_window_metrics_tracker.h"
 #include "chrome/browser/chromeos/lock_screen_apps/first_app_run_toast_manager.h"
 #include "chrome/browser/chromeos/lock_screen_apps/focus_cycler_delegate.h"
+#include "chrome/browser/chromeos/lock_screen_apps/lock_screen_profile_creator_impl.h"
 #include "chrome/browser/chromeos/note_taking_helper.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/user.h"
 #include "content/public/browser/web_contents.h"
@@ -44,7 +42,6 @@
 #include "extensions/common/extension.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/events/devices/input_device_manager.h"
-#include "ui/events/devices/stylus_state.h"
 
 using ash::mojom::CloseLockScreenNoteReason;
 using ash::mojom::LockScreenNoteOrigin;
@@ -54,15 +51,11 @@ namespace lock_screen_apps {
 
 namespace {
 
-// The time span a stylus eject is considered valid - i.e. the time period
-// within a stylus eject event can cause a lock screen note launch.
-constexpr int kStylusEjectValidityMs = 1000;
-
 // Key for user pref that contains the 256 bit AES key that should be used to
 // encrypt persisted user data created on the lock screen.
 constexpr char kDataCryptoKeyPref[] = "lockScreenAppDataCryptoKey";
 
-StateController* g_instance = nullptr;
+StateController* g_state_controller_instance = nullptr;
 
 // Generates a random 256 bit AES key. Returns an empty string on error.
 std::string GenerateCryptoKey() {
@@ -83,8 +76,8 @@ bool StateController::IsEnabled() {
 
 // static
 StateController* StateController::Get() {
-  DCHECK(g_instance || !IsEnabled());
-  return g_instance;
+  DCHECK(g_state_controller_instance || !IsEnabled());
+  return g_state_controller_instance;
 }
 
 // static
@@ -94,20 +87,21 @@ void StateController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
 
 StateController::StateController()
     : binding_(this),
+      note_window_observer_(this),
       app_window_observer_(this),
       session_observer_(this),
       input_devices_observer_(this),
       power_manager_client_observer_(this),
       weak_ptr_factory_(this) {
-  DCHECK(!g_instance);
+  DCHECK(!g_state_controller_instance);
   DCHECK(IsEnabled());
 
-  g_instance = this;
+  g_state_controller_instance = this;
 }
 
 StateController::~StateController() {
-  DCHECK_EQ(g_instance, this);
-  g_instance = nullptr;
+  DCHECK_EQ(g_state_controller_instance, this);
+  g_state_controller_instance = nullptr;
 }
 
 void StateController::SetTrayActionPtrForTesting(
@@ -138,9 +132,15 @@ void StateController::SetAppManagerForTesting(
   app_manager_ = std::move(app_manager);
 }
 
+void StateController::SetLockScreenLockScreenProfileCreatorForTesting(
+    std::unique_ptr<LockScreenProfileCreator> profile_creator) {
+  DCHECK(!lock_screen_profile_creator_);
+  lock_screen_profile_creator_ = std::move(profile_creator);
+}
+
 void StateController::Initialize() {
   if (!tick_clock_)
-    tick_clock_ = base::MakeUnique<base::DefaultTickClock>();
+    tick_clock_ = std::make_unique<base::DefaultTickClock>();
 
   // The tray action ptr might be set previously if the client was being created
   // for testing.
@@ -163,12 +163,13 @@ void StateController::SetPrimaryProfile(Profile* profile) {
     return;
   }
 
-  g_browser_process->profile_manager()->CreateProfileAsync(
-      chromeos::ProfileHelper::GetLockScreenAppProfilePath(),
-      base::Bind(&StateController::OnProfilesReady,
-                 weak_ptr_factory_.GetWeakPtr(), profile),
-      base::string16() /* name */, "" /* icon_url*/,
-      "" /* supervised_user_id */);
+  std::string key;
+  if (!GetUserCryptoKey(profile, &key)) {
+    LOG(ERROR) << "Failed to get crypto key for user lock screen apps.";
+    return;
+  }
+
+  InitializeWithCryptoKey(profile, key);
 }
 
 void StateController::Shutdown() {
@@ -181,48 +182,12 @@ void StateController::Shutdown() {
     app_manager_.reset();
   }
   first_app_run_toast_manager_.reset();
+  lock_screen_profile_creator_.reset();
   focus_cycler_delegate_ = nullptr;
   power_manager_client_observer_.RemoveAll();
   input_devices_observer_.RemoveAll();
   binding_.Close();
   weak_ptr_factory_.InvalidateWeakPtrs();
-}
-
-void StateController::OnProfilesReady(Profile* primary_profile,
-                                      Profile* lock_screen_profile,
-                                      Profile::CreateStatus status) {
-  // Ignore CREATED status - wait for profile to be initialized before
-  // continuing.
-  if (status == Profile::CREATE_STATUS_CREATED) {
-    // Disable safe browsing for the profile to avoid activating
-    // SafeBrowsingService when the user has safe browsing disabled (reasoning
-    // similar to http://crbug.com/461493).
-    // TODO(tbarzic): Revisit this if webviews get enabled for lock screen apps.
-    lock_screen_profile->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnabled,
-                                                false);
-    return;
-  }
-
-  // On error, bail out - this will cause the lock screen apps to remain
-  // unavailable on the device.
-  if (status != Profile::CREATE_STATUS_INITIALIZED) {
-    LOG(ERROR) << "Failed to create profile for lock screen apps.";
-    return;
-  }
-
-  DCHECK(!lock_screen_profile_);
-
-  lock_screen_profile_ = lock_screen_profile;
-  lock_screen_profile_->GetPrefs()->SetBoolean(prefs::kForceEphemeralProfiles,
-                                               true);
-
-  std::string key;
-  if (!GetUserCryptoKey(primary_profile, &key)) {
-    LOG(ERROR) << "Failed to get crypto key for user lock screen apps.";
-    return;
-  }
-
-  InitializeWithCryptoKey(primary_profile, key);
 }
 
 bool StateController::GetUserCryptoKey(Profile* profile, std::string* key) {
@@ -251,18 +216,27 @@ void StateController::InitializeWithCryptoKey(Profile* profile,
   }
 
   lock_screen_data_ =
-      base::MakeUnique<extensions::lock_screen_data::LockScreenItemStorage>(
+      std::make_unique<extensions::lock_screen_data::LockScreenItemStorage>(
           profile, g_browser_process->local_state(), crypto_key,
-          base_path.AppendASCII("lock_screen_app_data"));
+          base_path.AppendASCII("lock_screen_app_data"),
+          base_path.AppendASCII("lock_screen_app_data_v2"));
   lock_screen_data_->SetSessionLocked(false);
 
   chromeos::NoteTakingHelper::Get()->SetProfileWithEnabledLockScreenApps(
       profile);
 
+  // Lock screen profile creator might have been set by a test.
+  if (!lock_screen_profile_creator_) {
+    lock_screen_profile_creator_ =
+        std::make_unique<LockScreenProfileCreatorImpl>(profile,
+                                                       tick_clock_.get());
+  }
+  lock_screen_profile_creator_->Initialize();
+
   // App manager might have been set previously by a test.
   if (!app_manager_)
-    app_manager_ = base::MakeUnique<AppManagerImpl>(tick_clock_.get());
-  app_manager_->Initialize(profile, lock_screen_profile_->GetOriginalProfile());
+    app_manager_ = std::make_unique<AppManagerImpl>(tick_clock_.get());
+  app_manager_->Initialize(profile, lock_screen_profile_creator_.get());
 
   first_app_run_toast_manager_ =
       std::make_unique<FirstAppRunToastManager>(profile);
@@ -287,11 +261,6 @@ void StateController::InitializeWithCryptoKey(Profile* profile,
 void StateController::InitializeWithStylusInputPresent() {
   stylus_input_missing_ = false;
 
-  chromeos::DBusThreadManager::Get()
-      ->GetPowerManagerClient()
-      ->GetScreenBrightnessPercent(
-          base::Bind(&StateController::SetInitialScreenState,
-                     weak_ptr_factory_.GetWeakPtr()));
   power_manager_client_observer_.Add(
       chromeos::DBusThreadManager::Get()->GetPowerManagerClient());
   session_observer_.Add(session_manager::SessionManager::Get());
@@ -349,7 +318,7 @@ void StateController::RequestNewLockScreenNote(LockScreenNoteOrigin origin) {
   // This is not needed for requests that come from the lock UI as the lock
   // screen UI sends these requests *after* the note action launch animation.
   if (origin == LockScreenNoteOrigin::kStylusEject &&
-      !ash::switches::IsUsingMdLogin()) {
+      !ash::switches::IsUsingViewsLock()) {
     app_launch_delayed_for_animation_ = true;
     return;
   }
@@ -389,14 +358,32 @@ void StateController::OnSessionStateChanged() {
       base::Bind(&StateController::OnNoteTakingAvailabilityChanged,
                  base::Unretained(this)));
   note_app_window_metrics_ =
-      base::MakeUnique<AppWindowMetricsTracker>(tick_clock_.get());
+      std::make_unique<AppWindowMetricsTracker>(tick_clock_.get());
   lock_screen_data_->SetSessionLocked(true);
   OnNoteTakingAvailabilityChanged();
+}
+
+void StateController::OnWindowVisibilityChanged(aura::Window* window,
+                                                bool visible) {
+  if (lock_screen_note_state_ != TrayActionState::kLaunching)
+    return;
+
+  if (window != note_app_window_->GetNativeWindow() || !window->IsVisible())
+    return;
+
+  note_window_observer_.Remove(window);
+
+  UpdateLockScreenNoteState(TrayActionState::kActive);
+  if (focus_cycler_delegate_) {
+    focus_cycler_delegate_->RegisterLockScreenAppFocusHandler(base::Bind(
+        &StateController::FocusAppWindow, weak_ptr_factory_.GetWeakPtr()));
+  }
 }
 
 void StateController::OnAppWindowAdded(extensions::AppWindow* app_window) {
   if (note_app_window_ != app_window)
     return;
+  note_window_observer_.Add(note_app_window_->GetNativeWindow());
   first_app_run_toast_manager_->RunForAppWindow(note_app_window_);
   note_app_window_metrics_->AppWindowCreated(app_window);
 }
@@ -408,37 +395,13 @@ void StateController::OnAppWindowRemoved(extensions::AppWindow* app_window) {
       false /*close_window*/, CloseLockScreenNoteReason::kAppWindowClosed);
 }
 
-void StateController::OnStylusStateChanged(ui::StylusState state) {
-  if (lock_screen_note_state_ != TrayActionState::kAvailable)
-    return;
-
-  if (state != ui::StylusState::REMOVED) {
-    stylus_eject_timestamp_ = base::TimeTicks();
-    return;
-  }
-
-  if (screen_state_ == ScreenState::kOn) {
-    RequestNewLockScreenNote(LockScreenNoteOrigin::kStylusEject);
-  } else {
-    stylus_eject_timestamp_ = tick_clock_->NowTicks();
-  }
-}
-
 void StateController::OnTouchscreenDeviceConfigurationChanged() {
   if (stylus_input_missing_ && ash::stylus_utils::HasStylusInput())
     InitializeWithStylusInputPresent();
 }
 
-void StateController::BrightnessChanged(int level, bool user_initiated) {
-  if (level == 0 && !user_initiated) {
-    ResetNoteTakingWindowAndMoveToNextState(
-        true /*close_window*/, CloseLockScreenNoteReason::kScreenDimmed);
-  }
-
-  SetScreenState(level == 0 ? ScreenState::kOff : ScreenState::kOn);
-}
-
-void StateController::SuspendImminent() {
+void StateController::SuspendImminent(
+    power_manager::SuspendImminent::Reason reason) {
   ResetNoteTakingWindowAndMoveToNextState(true /*close_window*/,
                                           CloseLockScreenNoteReason::kSuspend);
 }
@@ -451,10 +414,21 @@ extensions::AppWindow* StateController::CreateAppWindowForLockScreenAction(
   if (action != extensions::api::app_runtime::ACTION_TYPE_NEW_NOTE)
     return nullptr;
 
+  if (note_app_window_)
+    return nullptr;
+
   if (lock_screen_note_state_ != TrayActionState::kLaunching)
     return nullptr;
 
-  if (!lock_screen_profile_->IsSameProfile(
+  // StateController should not be able to get into kLaunching state if the
+  // lock screen profile has not been loaded, and |lock_screen_profile_creator_|
+  // has |lock_screen_profile| set to null - if the lock screen profile is not
+  // loaded, |app_manager_| should not report that note taking app is available,
+  // so state controller should not allow note launch attempt.
+  // Thus, it should be safe to assume lock screen profile is set at this point.
+  DCHECK(lock_screen_profile_creator_->lock_screen_profile());
+
+  if (!lock_screen_profile_creator_->lock_screen_profile()->IsSameProfile(
           Profile::FromBrowserContext(context))) {
     return nullptr;
   }
@@ -465,13 +439,8 @@ extensions::AppWindow* StateController::CreateAppWindowForLockScreenAction(
   // The ownership of the window is passed to the caller of this method.
   note_app_window_ =
       new extensions::AppWindow(context, app_delegate.release(), extension);
-  app_window_observer_.Add(
-      extensions::AppWindowRegistry::Get(lock_screen_profile_));
-  UpdateLockScreenNoteState(TrayActionState::kActive);
-  if (focus_cycler_delegate_) {
-    focus_cycler_delegate_->RegisterLockScreenAppFocusHandler(base::Bind(
-        &StateController::FocusAppWindow, weak_ptr_factory_.GetWeakPtr()));
-  }
+  app_window_observer_.Add(extensions::AppWindowRegistry::Get(
+      lock_screen_profile_creator_->lock_screen_profile()));
   return note_app_window_;
 }
 
@@ -522,32 +491,11 @@ void StateController::FocusAppWindow(bool reverse) {
   note_app_window_->web_contents()->Focus();
 }
 
-void StateController::SetInitialScreenState(double screen_brightness) {
-  if (screen_state_ != ScreenState::kUnknown)
-    return;
-
-  SetScreenState(screen_brightness == 0 ? ScreenState::kOff : ScreenState::kOn);
-}
-
-void StateController::SetScreenState(ScreenState screen_state) {
-  if (screen_state_ == screen_state)
-    return;
-
-  screen_state_ = screen_state;
-
-  if (screen_state_ == ScreenState::kOn && !stylus_eject_timestamp_.is_null() &&
-      tick_clock_->NowTicks() - stylus_eject_timestamp_ <
-          base::TimeDelta::FromMilliseconds(kStylusEjectValidityMs)) {
-    stylus_eject_timestamp_ = base::TimeTicks();
-    RequestNewLockScreenNote(LockScreenNoteOrigin::kStylusEject);
-  }
-}
-
 void StateController::ResetNoteTakingWindowAndMoveToNextState(
     bool close_window,
     CloseLockScreenNoteReason reason) {
+  note_window_observer_.RemoveAll();
   app_window_observer_.RemoveAll();
-  stylus_eject_timestamp_ = base::TimeTicks();
   app_launch_delayed_for_animation_ = false;
   if (first_app_run_toast_manager_)
     first_app_run_toast_manager_->Reset();
@@ -562,10 +510,12 @@ void StateController::ResetNoteTakingWindowAndMoveToNextState(
         CloseLockScreenNoteReason::kCount);
   }
 
-  if (note_app_window_) {
-    if (focus_cycler_delegate_)
-      focus_cycler_delegate_->UnregisterLockScreenAppFocusHandler();
+  if (focus_cycler_delegate_ &&
+      lock_screen_note_state_ == TrayActionState::kActive) {
+    focus_cycler_delegate_->UnregisterLockScreenAppFocusHandler();
+  }
 
+  if (note_app_window_) {
     if (close_window && note_app_window_->GetBaseWindow()) {
       // Whenever we close the window we want to immediately hide it without
       // animating, as the underlying UI implements a special animation. If we
@@ -577,7 +527,8 @@ void StateController::ResetNoteTakingWindowAndMoveToNextState(
     note_app_window_ = nullptr;
   }
 
-  UpdateLockScreenNoteState(app_manager_->IsNoteTakingAppAvailable()
+  UpdateLockScreenNoteState(app_manager_ &&
+                                    app_manager_->IsNoteTakingAppAvailable()
                                 ? TrayActionState::kAvailable
                                 : TrayActionState::kNotAvailable);
 }

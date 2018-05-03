@@ -23,6 +23,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 
 namespace content {
 
@@ -50,7 +51,7 @@ class ClientImpl final : public WebDataConsumerHandle::Client {
       : operation_(operation) {}
 
   void DidGetReadable() override {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    blink::scheduler::GetSingleThreadTaskRunnerForTesting()->PostTask(
         FROM_HERE, base::BindOnce(&ReadDataOperationBase::ReadMore,
                                   base::Unretained(operation_)));
   }
@@ -240,7 +241,7 @@ class WebDataConsumerHandleImplTest : public ::testing::Test {
 
 TEST_F(WebDataConsumerHandleImplTest, ReadData) {
   base::RunLoop run_loop;
-  auto operation = base::MakeUnique<ReadDataOperation>(
+  auto operation = std::make_unique<ReadDataOperation>(
       std::move(consumer_), &message_loop_, run_loop.QuitClosure());
 
   base::Thread t("DataConsumerHandle test thread");
@@ -261,7 +262,7 @@ TEST_F(WebDataConsumerHandleImplTest, ReadData) {
 
 TEST_F(WebDataConsumerHandleImplTest, TwoPhaseReadData) {
   base::RunLoop run_loop;
-  auto operation = base::MakeUnique<TwoPhaseReadDataOperation>(
+  auto operation = std::make_unique<TwoPhaseReadDataOperation>(
       std::move(consumer_), &message_loop_, run_loop.QuitClosure());
 
   base::Thread t("DataConsumerHandle test thread");
@@ -325,7 +326,7 @@ TEST_F(WebDataConsumerHandleImplTest, DidGetReadable) {
   static constexpr size_t kTotalSize = kBlockSize * 3;
 
   std::unique_ptr<CountDidGetReadableClient> client =
-      base::MakeUnique<CountDidGetReadableClient>();
+      std::make_unique<CountDidGetReadableClient>();
   std::unique_ptr<WebDataConsumerHandleImpl> handle(
       new WebDataConsumerHandleImpl(std::move(consumer_)));
   std::unique_ptr<WebDataConsumerHandle::Reader> reader(

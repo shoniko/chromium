@@ -29,10 +29,6 @@ namespace {
 // are held stable before switching to media remoting.
 constexpr base::TimeDelta kDelayedStart = base::TimeDelta::FromSeconds(5);
 
-// The maximum fraction of the transmission capacity that can safely be used by
-// Media Remoting to deliver the media contents.
-constexpr double kMaxMediaBitrateCapacityFraction = 0.9;
-
 constexpr int kPixelPerSec4K = 3840 * 2160 * 30;  // 4k 30fps.
 constexpr int kPixelPerSec2K = 1920 * 1080 * 30;  // 1080p 30fps.
 
@@ -41,11 +37,77 @@ constexpr int kPixelPerSec2K = 1920 * 1080 * 30;  // 1080p 30fps.
 // can feel "janky" to the user.
 constexpr double kMinRemotingMediaDurationInSec = 60;
 
+StopTrigger GetStopTrigger(mojom::RemotingStopReason reason) {
+  switch (reason) {
+    case mojom::RemotingStopReason::ROUTE_TERMINATED:
+      return ROUTE_TERMINATED;
+    case mojom::RemotingStopReason::SOURCE_GONE:
+      return MEDIA_ELEMENT_DESTROYED;
+    case mojom::RemotingStopReason::MESSAGE_SEND_FAILED:
+      return MESSAGE_SEND_FAILED;
+    case mojom::RemotingStopReason::DATA_SEND_FAILED:
+      return DATA_SEND_FAILED;
+    case mojom::RemotingStopReason::UNEXPECTED_FAILURE:
+      return UNEXPECTED_FAILURE;
+    case mojom::RemotingStopReason::SERVICE_GONE:
+      return SERVICE_GONE;
+    case mojom::RemotingStopReason::USER_DISABLED:
+      return USER_DISABLED;
+    case mojom::RemotingStopReason::LOCAL_PLAYBACK:
+      // This RemotingStopReason indicates the RendererController initiated the
+      // session shutdown in the immediate past, and the trigger for that should
+      // have already been recorded in the metrics. Here, this is just duplicate
+      // feedback from the sink for that same event. Return UNKNOWN_STOP_TRIGGER
+      // because this reason can not be a stop trigger and it would be a logic
+      // flaw for this value to be recorded in the metrics.
+      return UNKNOWN_STOP_TRIGGER;
+  }
+
+  return UNKNOWN_STOP_TRIGGER;  // To suppress compiler warning on Windows.
+}
+
+MediaObserverClient::ReasonToSwitchToLocal GetSwitchReason(
+    StopTrigger stop_trigger) {
+  switch (stop_trigger) {
+    case FRAME_DROP_RATE_HIGH:
+    case PACING_TOO_SLOWLY:
+      return MediaObserverClient::ReasonToSwitchToLocal::POOR_PLAYBACK_QUALITY;
+    case EXITED_FULLSCREEN:
+    case BECAME_AUXILIARY_CONTENT:
+    case DISABLED_BY_PAGE:
+    case USER_DISABLED:
+    case UNKNOWN_STOP_TRIGGER:
+      return MediaObserverClient::ReasonToSwitchToLocal::NORMAL;
+    case UNSUPPORTED_AUDIO_CODEC:
+    case UNSUPPORTED_VIDEO_CODEC:
+    case UNSUPPORTED_AUDIO_AND_VIDEO_CODECS:
+    case DECRYPTION_ERROR:
+    case RECEIVER_INITIALIZE_FAILED:
+    case RECEIVER_PIPELINE_ERROR:
+    case PEERS_OUT_OF_SYNC:
+    case RPC_INVALID:
+    case DATA_PIPE_CREATE_ERROR:
+    case MOJO_PIPE_ERROR:
+    case MESSAGE_SEND_FAILED:
+    case DATA_SEND_FAILED:
+    case UNEXPECTED_FAILURE:
+      return MediaObserverClient::ReasonToSwitchToLocal::PIPELINE_ERROR;
+    case ROUTE_TERMINATED:
+    case MEDIA_ELEMENT_DESTROYED:
+    case START_RACE:
+    case SERVICE_GONE:
+      return MediaObserverClient::ReasonToSwitchToLocal::ROUTE_TERMINATED;
+  }
+
+  // To suppress compiler warning on Windows.
+  return MediaObserverClient::ReasonToSwitchToLocal::ROUTE_TERMINATED;
+}
+
 }  // namespace
 
 RendererController::RendererController(scoped_refptr<SharedSession> session)
     : session_(std::move(session)),
-      clock_(new base::DefaultTickClock()),
+      clock_(base::DefaultTickClock::GetInstance()),
       weak_factory_(this) {
   session_->AddClient(this);
 }
@@ -76,7 +138,8 @@ void RendererController::OnStarted(bool success) {
 
 void RendererController::OnSessionStateChanged() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  UpdateFromSessionState(SINK_AVAILABLE, ROUTE_TERMINATED);
+  UpdateFromSessionState(SINK_AVAILABLE,
+                         GetStopTrigger(session_->get_last_stop_reason()));
 }
 
 void RendererController::UpdateFromSessionState(StartTrigger start_trigger,
@@ -109,6 +172,10 @@ void RendererController::OnBecameDominantVisibleContent(bool is_dominant) {
   if (is_dominant_content_ == is_dominant)
     return;
   is_dominant_content_ = is_dominant;
+  // Reset the errors when the media element stops being the dominant visible
+  // content in the tab.
+  if (!is_dominant_content_)
+    encountered_renderer_fatal_error_ = false;
   UpdateAndMaybeSwitch(BECAME_DOMINANT_CONTENT, BECAME_AUXILIARY_CONTENT);
 }
 
@@ -324,7 +391,7 @@ bool RendererController::CanBeRemoting() const {
            state == SharedSession::SESSION_PERMANENTLY_STOPPED;
   }
 
-  if (encountered_renderer_fatal_error_)
+  if (permanently_disable_remoting_)
     return false;
 
   switch (state) {
@@ -373,7 +440,8 @@ void RendererController::UpdateAndMaybeSwitch(StartTrigger start_trigger,
   // remote rendering. However, current technical limitations require encrypted
   // content be remoted without waiting for a user signal.
   if (!is_encrypted_)
-    should_be_remoting &= is_dominant_content_;
+    should_be_remoting &=
+        (is_dominant_content_ && !encountered_renderer_fatal_error_);
 
   if ((remote_rendering_started_ ||
        delayed_start_stability_timer_.IsRunning()) == should_be_remoting)
@@ -407,9 +475,9 @@ void RendererController::UpdateAndMaybeSwitch(StartTrigger start_trigger,
     // force-stop the session when remoting has ended; so no need to call
     // StopRemoting() from here.
     DCHECK(!is_encrypted_);
-    DCHECK_NE(stop_trigger, UNKNOWN_STOP_TRIGGER);
+    DCHECK_NE(UNKNOWN_STOP_TRIGGER, stop_trigger);
     metrics_recorder_.WillStopSession(stop_trigger);
-    client_->SwitchToLocalRenderer();
+    client_->SwitchToLocalRenderer(GetSwitchReason(stop_trigger));
     VLOG(2) << "Request to stop remoting: stop_trigger=" << stop_trigger;
     session_->StopRemoting(this);
   }
@@ -422,25 +490,17 @@ void RendererController::WaitForStabilityBeforeStart(
   DCHECK(!is_encrypted_);
   delayed_start_stability_timer_.Start(
       FROM_HERE, kDelayedStart,
-      base::Bind(
-          &RendererController::OnDelayedStartTimerFired, base::Unretained(this),
-          start_trigger,
-          client_->AudioDecodedByteCount() + client_->VideoDecodedByteCount(),
-          client_->DecodedFrameCount(), clock_->NowTicks()));
-
-  session_->EstimateTransmissionCapacity(
-      base::BindOnce(&RendererController::OnReceivedTransmissionCapacity,
-                     weak_factory_.GetWeakPtr()));
+      base::Bind(&RendererController::OnDelayedStartTimerFired,
+                 base::Unretained(this), start_trigger,
+                 client_->DecodedFrameCount(), clock_->NowTicks()));
 }
 
 void RendererController::CancelDelayedStart() {
   delayed_start_stability_timer_.Stop();
-  transmission_capacity_ = 0;
 }
 
 void RendererController::OnDelayedStartTimerFired(
     StartTrigger start_trigger,
-    size_t decoded_bytes_before_delay,
     unsigned decoded_frame_count_before_delay,
     base::TimeTicks delayed_start_time) {
   DCHECK(is_dominant_content_);
@@ -449,14 +509,6 @@ void RendererController::OnDelayedStartTimerFired(
 
   base::TimeDelta elapsed = clock_->NowTicks() - delayed_start_time;
   DCHECK(!elapsed.is_zero());
-  double kilobits_per_second =
-      (client_->AudioDecodedByteCount() + client_->VideoDecodedByteCount() -
-       decoded_bytes_before_delay) *
-      8.0 / elapsed.InSecondsF() / 1000.0;
-  DCHECK_GE(kilobits_per_second, 0);
-  const double capacity_kbps = transmission_capacity_ * 8.0 / 1000.0;
-  metrics_recorder_.RecordMediaBitrateVersusCapacity(kilobits_per_second,
-                                                     capacity_kbps);
   if (has_video()) {
     const double frame_rate =
         (client_->DecodedFrameCount() - decoded_frame_count_before_delay) /
@@ -469,19 +521,12 @@ void RendererController::OnDelayedStartTimerFired(
              mojom::RemotingSinkVideoCapability::SUPPORT_4K))) {
       VLOG(1) << "Media remoting is not supported: frame_rate = " << frame_rate
               << " resolution = " << pipeline_metadata_.natural_size.ToString();
-      encountered_renderer_fatal_error_ = true;
+      permanently_disable_remoting_ = true;
       return;
     }
   }
 
-  if (kilobits_per_second <= kMaxMediaBitrateCapacityFraction * capacity_kbps) {
-    StartRemoting(start_trigger);
-  } else {
-    VLOG(1) << "Media remoting is not supported: bitrate(kbps)="
-            << kilobits_per_second
-            << " transmission_capacity(kbps)=" << capacity_kbps;
-    encountered_renderer_fatal_error_ = true;
-  }
+  StartRemoting(start_trigger);
 }
 
 void RendererController::StartRemoting(StartTrigger start_trigger) {
@@ -491,16 +536,11 @@ void RendererController::StartRemoting(StartTrigger start_trigger) {
     client_->SwitchToRemoteRenderer(session_->sink_name());
     return;
   }
-  DCHECK_NE(start_trigger, UNKNOWN_START_TRIGGER);
+  DCHECK_NE(UNKNOWN_START_TRIGGER, start_trigger);
   metrics_recorder_.WillStartSession(start_trigger);
   // |MediaObserverClient::SwitchToRemoteRenderer()| will be called after
   // remoting is started successfully.
   session_->StartRemoting(this);
-}
-
-void RendererController::OnReceivedTransmissionCapacity(double rate) {
-  DCHECK_GE(rate, 0);
-  transmission_capacity_ = rate;
 }
 
 void RendererController::OnRendererFatalError(StopTrigger stop_trigger) {

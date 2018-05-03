@@ -215,6 +215,9 @@ overflowAnchor
 overflowWrap
 overflowX
 overflowY
+overscrollBehavior
+overscrollBehaviorX
+overscrollBehaviorY
 padding
 paddingBottom
 paddingLeft
@@ -241,9 +244,6 @@ right
 rx
 ry
 scrollBehavior
-scrollBoundaryBehavior
-scrollBoundaryBehaviorX
-scrollBoundaryBehaviorY
 setProperty
 shapeImageThreshold
 shapeMargin
@@ -271,7 +271,7 @@ textCombineUpright
 textDecoration
 textDecorationColor
 textDecorationLine
-textDecorationSkip
+textDecorationSkipInk
 textDecorationStyle
 textIndent
 textOrientation
@@ -284,6 +284,7 @@ textUnderlinePosition
 top
 touchAction
 transform
+transformBox
 transformOrigin
 transformStyle
 transition
@@ -300,8 +301,6 @@ verticalAlign
 visibility
 webkitAppRegion
 webkitAppearance
-webkitBackgroundClip
-webkitBackgroundOrigin
 webkitBorderAfter
 webkitBorderAfterColor
 webkitBorderAfterStyle

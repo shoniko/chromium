@@ -12,7 +12,6 @@
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_writer.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,6 +25,7 @@
 #include "chrome/common/net/x509_certificate_model_nss.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/web_contents.h"
 #include "net/cert/x509_util_nss.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -104,10 +104,10 @@ CertNodeBuilder& CertNodeBuilder::ChildIfNotNull(
 std::unique_ptr<base::DictionaryValue> CertNodeBuilder::Build() {
   DCHECK(!built_);
   if (!children_.empty()) {
-    node_.Set("children", base::MakeUnique<base::Value>(std::move(children_)));
+    node_.SetKey("children", std::move(children_));
   }
   built_ = true;
-  return base::MakeUnique<base::DictionaryValue>(std::move(node_));
+  return std::make_unique<base::DictionaryValue>(std::move(node_));
 }
 
 }  // namespace
@@ -266,7 +266,7 @@ std::string CertificateViewerModalDialog::GetDialogArgs() const {
       cert_node->Set("children", std::move(children));
 
     // Add this node to the children list for the next iteration.
-    children = base::MakeUnique<base::ListValue>();
+    children = std::make_unique<base::ListValue>();
     children->Append(std::move(cert_node));
   }
   // Set the last node as the top of the certificate hierarchy.
@@ -312,6 +312,13 @@ void CertificateViewerDialog::Show(WebContents* web_contents,
   // on the title for Aura ConstrainedWebDialogUI.
   dialog_ = ShowConstrainedWebDialog(web_contents->GetBrowserContext(), this,
                                      web_contents);
+
+  // Clear the zoom level for the dialog so that it is not affected by the page
+  // zoom setting.
+  content::WebContents* dialog_web_contents = dialog_->GetWebContents();
+  const GURL dialog_url = GetDialogContentURL();
+  content::HostZoomMap::Get(dialog_web_contents->GetSiteInstance())
+      ->SetZoomLevelForHostAndScheme(dialog_url.scheme(), dialog_url.host(), 0);
 }
 
 gfx::NativeWindow CertificateViewerDialog::GetNativeWebContentsModalDialog() {

@@ -32,7 +32,6 @@ ServerWindow::ServerWindow(ServerWindowDelegate* delegate,
                            const Properties& properties)
     : delegate_(delegate),
       id_(id),
-      frame_sink_id_(frame_sink_id),
       parent_(nullptr),
       stacking_target_(nullptr),
       transient_parent_(nullptr),
@@ -48,19 +47,9 @@ ServerWindow::ServerWindow(ServerWindowDelegate* delegate,
       // Don't notify newly added observers during notification. This causes
       // problems for code that adds an observer as part of an observer
       // notification (such as ServerWindowDrawTracker).
-      observers_(
-          base::ObserverList<ServerWindowObserver>::NOTIFY_EXISTING_ONLY) {
+      observers_(base::ObserverListPolicy::EXISTING_ONLY) {
   DCHECK(delegate);  // Must provide a delegate.
-  // TODO(kylechar): Add method to reregister |frame_sink_id_| when viz service
-  // has crashed.
-  DCHECK(frame_sink_id_.is_valid());
-  auto* host_frame_sink_manager = delegate_->GetHostFrameSinkManager();
-  if (host_frame_sink_manager) {
-    host_frame_sink_manager->RegisterFrameSinkId(frame_sink_id_, this);
-#if DCHECK_IS_ON()
-    host_frame_sink_manager->SetFrameSinkDebugLabel(frame_sink_id_, GetName());
-#endif
-  }
+  UpdateFrameSinkId(frame_sink_id);
 }
 
 ServerWindow::~ServerWindow() {
@@ -87,7 +76,7 @@ ServerWindow::~ServerWindow() {
   for (auto& observer : observers_)
     observer.OnWindowDestroyed(this);
 
-  auto* host_frame_sink_manager = delegate_->GetHostFrameSinkManager();
+  auto* host_frame_sink_manager = delegate_->GetVizHostProxy();
   if (host_frame_sink_manager)
     host_frame_sink_manager->InvalidateFrameSinkId(frame_sink_id_);
 }
@@ -109,23 +98,52 @@ void ServerWindow::CreateRootCompositorFrameSink(
     gfx::AcceleratedWidget widget,
     viz::mojom::CompositorFrameSinkAssociatedRequest sink_request,
     viz::mojom::CompositorFrameSinkClientPtr client,
-    viz::mojom::DisplayPrivateAssociatedRequest display_request) {
+    viz::mojom::DisplayPrivateAssociatedRequest display_request,
+    viz::mojom::DisplayClientPtr display_client) {
   has_created_compositor_frame_sink_ = true;
   // TODO(fsamuel): AcceleratedWidget cannot be transported over IPC for Mac
   // or Android. We should instead use GpuSurfaceTracker here on those
   // platforms.
-  delegate_->GetHostFrameSinkManager()->CreateRootCompositorFrameSink(
-      frame_sink_id_, widget,
-      viz::CreateRendererSettings(viz::BufferToTextureTargetMap()),
-      std::move(sink_request), std::move(client), std::move(display_request));
+
+  auto params = viz::mojom::RootCompositorFrameSinkParams::New();
+  params->frame_sink_id = frame_sink_id_;
+  params->widget = widget;
+  params->renderer_settings = viz::CreateRendererSettings();
+  params->compositor_frame_sink = std::move(sink_request);
+  params->compositor_frame_sink_client = client.PassInterface();
+  params->display_private = std::move(display_request);
+  params->display_client = display_client.PassInterface();
+
+  delegate_->GetVizHostProxy()->CreateRootCompositorFrameSink(
+      std::move(params));
 }
 
 void ServerWindow::CreateCompositorFrameSink(
     viz::mojom::CompositorFrameSinkRequest request,
     viz::mojom::CompositorFrameSinkClientPtr client) {
   has_created_compositor_frame_sink_ = true;
-  delegate_->GetHostFrameSinkManager()->CreateCompositorFrameSink(
+  delegate_->GetVizHostProxy()->CreateCompositorFrameSink(
       frame_sink_id_, std::move(request), std::move(client));
+}
+
+void ServerWindow::UpdateFrameSinkId(const viz::FrameSinkId& frame_sink_id) {
+  DCHECK(frame_sink_id.is_valid());
+  auto* host_frame_sink_manager = delegate_->GetVizHostProxy();
+  DCHECK(host_frame_sink_manager);
+  host_frame_sink_manager->RegisterFrameSinkId(frame_sink_id, this);
+#if DCHECK_IS_ON()
+  host_frame_sink_manager->SetFrameSinkDebugLabel(frame_sink_id, GetName());
+#endif
+  if (frame_sink_id_.is_valid()) {
+    if (parent()) {
+      host_frame_sink_manager->UnregisterFrameSinkHierarchy(
+          parent()->frame_sink_id(), frame_sink_id_);
+      host_frame_sink_manager->RegisterFrameSinkHierarchy(
+          parent()->frame_sink_id(), frame_sink_id);
+    }
+    host_frame_sink_manager->InvalidateFrameSinkId(frame_sink_id_);
+  }
+  frame_sink_id_ = frame_sink_id;
 }
 
 void ServerWindow::Add(ServerWindow* child) {
@@ -167,6 +185,11 @@ void ServerWindow::Remove(ServerWindow* child) {
 
   for (auto& observer : child->observers_)
     observer.OnWindowHierarchyChanged(child, nullptr, this);
+}
+
+void ServerWindow::RemoveAllChildren() {
+  while (!children_.empty())
+    Remove(children_[0]);
 }
 
 void ServerWindow::Reorder(ServerWindow* relative,
@@ -231,7 +254,7 @@ void ServerWindow::SetClientArea(
 }
 
 void ServerWindow::SetHitTestMask(const gfx::Rect& mask) {
-  hit_test_mask_ = base::MakeUnique<gfx::Rect>(mask);
+  hit_test_mask_ = std::make_unique<gfx::Rect>(mask);
 }
 
 void ServerWindow::ClearHitTestMask() {
@@ -304,7 +327,7 @@ void ServerWindow::SetModalType(ModalType modal_type) {
 
 void ServerWindow::SetChildModalParent(ServerWindow* modal_parent) {
   if (modal_parent) {
-    child_modal_parent_tracker_ = base::MakeUnique<ServerWindowTracker>();
+    child_modal_parent_tracker_ = std::make_unique<ServerWindowTracker>();
     child_modal_parent_tracker_->Add(modal_parent);
   } else {
     child_modal_parent_tracker_.reset();
@@ -391,7 +414,7 @@ void ServerWindow::SetProperty(const std::string& name,
     properties_.erase(it);
   }
 #if DCHECK_IS_ON()
-  auto* host_frame_sink_manager = delegate_->GetHostFrameSinkManager();
+  auto* host_frame_sink_manager = delegate_->GetVizHostProxy();
   if (host_frame_sink_manager && name == mojom::WindowManager::kName_Property)
     host_frame_sink_manager->SetFrameSinkDebugLabel(frame_sink_id_, GetName());
 #endif
@@ -482,6 +505,11 @@ void ServerWindow::BuildDebugInfo(const std::string& depth,
 void ServerWindow::OnFirstSurfaceActivation(
     const viz::SurfaceInfo& surface_info) {
   delegate_->OnFirstSurfaceActivation(surface_info, this);
+}
+
+void ServerWindow::OnFrameTokenChanged(uint32_t frame_token) {
+  // TODO(yiyix, fsamuel): Implement frame token propagation for Mus. See
+  // crbug.com/771331
 }
 
 void ServerWindow::RemoveImpl(ServerWindow* window) {

@@ -13,9 +13,10 @@
 #include "base/containers/circular_deque.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
-#include "cc/base/filter_operations.h"
 #include "cc/base/math_util.h"
+#include "cc/paint/filter_operations.h"
 #include "cc/resources/scoped_resource.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
@@ -182,10 +183,6 @@ void DirectRenderer::DecideRenderPassAllocationsForFrame(
 
   auto& root_render_pass = render_passes_in_draw_order.back();
 
-  struct RenderPassRequirements {
-    gfx::Size size;
-    cc::ResourceProvider::TextureHint hint;
-  };
   base::flat_map<RenderPassId, RenderPassRequirements> render_passes_in_frame;
   for (const auto& pass : render_passes_in_draw_order) {
     if (pass != root_render_pass) {
@@ -197,53 +194,16 @@ void DirectRenderer::DecideRenderPassAllocationsForFrame(
       }
     }
     render_passes_in_frame[pass->id] = {RenderPassTextureSize(pass.get()),
-                                        RenderPassTextureHint(pass.get())};
+                                        pass->generate_mipmap};
   }
-
-  std::vector<RenderPassId> passes_to_delete;
-  for (const auto& pair : render_pass_textures_) {
-    auto it = render_passes_in_frame.find(pair.first);
-    if (it == render_passes_in_frame.end()) {
-      passes_to_delete.push_back(pair.first);
-      continue;
-    }
-
-    gfx::Size required_size = it->second.size;
-    cc::ResourceProvider::TextureHint required_hint = it->second.hint;
-    cc::ScopedResource* texture = pair.second.get();
-    DCHECK(texture);
-
-    bool size_appropriate = texture->size().width() >= required_size.width() &&
-                            texture->size().height() >= required_size.height();
-    bool hint_appropriate = (texture->hint() & required_hint) == required_hint;
-    if (texture->id() && (!size_appropriate || !hint_appropriate))
-      texture->Free();
-  }
-
-  // Delete RenderPass textures from the previous frame that will not be used
-  // again.
-  for (size_t i = 0; i < passes_to_delete.size(); ++i)
-    render_pass_textures_.erase(passes_to_delete[i]);
-
-  for (auto& pass : render_passes_in_draw_order) {
-    auto& resource = render_pass_textures_[pass->id];
-    if (!resource) {
-      resource = std::make_unique<cc::ScopedResource>(resource_provider_);
-
-      // |has_damage_from_contributing_content| is used to determine if previous
-      // contents can be reused when caching render pass and as a result needs
-      // to be true when a new resource is created to ensure that it is updated
-      // and not assumed to already contain correct contents.
-      pass->has_damage_from_contributing_content = true;
-    }
-  }
+  UpdateRenderPassTextures(render_passes_in_draw_order, render_passes_in_frame);
 }
 
 void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
                                float device_scale_factor,
                                const gfx::Size& device_viewport_size) {
   DCHECK(visible_);
-  TRACE_EVENT0("cc", "DirectRenderer::DrawFrame");
+  TRACE_EVENT0("viz", "DirectRenderer::DrawFrame");
   UMA_HISTOGRAM_COUNTS(
       "Renderer4.renderPassCount",
       base::saturated_cast<int>(render_passes_in_draw_order->size()));
@@ -316,7 +276,7 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
   if (output_surface_->IsDisplayedAsOverlayPlane()) {
     cc::OverlayCandidate output_surface_plane;
     output_surface_plane.display_rect =
-        gfx::RectF(root_render_pass->output_rect);
+        gfx::RectF(device_viewport_size.width(), device_viewport_size.height());
     output_surface_plane.format = output_surface_->GetOverlayBufferFormat();
     output_surface_plane.use_output_surface_for_resource = true;
     output_surface_plane.overlay_handled = true;
@@ -326,7 +286,8 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
   // Attempt to replace some or all of the quads of the root render pass with
   // overlays.
   overlay_processor_->ProcessForOverlays(
-      resource_provider_, render_passes_in_draw_order, render_pass_filters_,
+      resource_provider_, render_passes_in_draw_order,
+      output_surface_->color_matrix(), render_pass_filters_,
       render_pass_background_filters_, &current_frame()->overlay_list,
       &current_frame()->ca_layer_overlay_list,
       &current_frame()->dc_layer_overlay_list,
@@ -354,8 +315,7 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
     // The entire surface has to be redrawn if it was reshaped or if switching
     // from or to DirectComposition layers, because the previous contents are
     // discarded and some contents would otherwise be undefined.
-    current_frame()->root_damage_rect =
-        current_frame()->root_render_pass->output_rect;
+    current_frame()->root_damage_rect = gfx::Rect(device_viewport_size);
   }
 
   // We can skip all drawing if the damage rect is now empty.
@@ -365,7 +325,7 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
   // If we have to draw but don't support partial swap, the whole output should
   // be considered damaged.
   if (!skip_drawing_root_render_pass && !use_partial_swap_)
-    current_frame()->root_damage_rect = root_render_pass->output_rect;
+    current_frame()->root_damage_rect = gfx::Rect(device_viewport_size);
 
   if (!skip_drawing_root_render_pass)
     DrawRenderPassAndExecuteCopyRequests(root_render_pass);
@@ -376,22 +336,6 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
   render_pass_background_filters_.clear();
 
   current_frame_valid_ = false;
-}
-
-gfx::Rect DirectRenderer::DrawingFrame::ComputeScissorRectForRenderPass()
-    const {
-  if (current_render_pass == root_render_pass)
-    return root_damage_rect;
-
-  // If the root damage rect has been expanded due to overlays, all the other
-  // damage rect calculations are incorrect.
-  if (!root_render_pass->damage_rect.Contains(root_damage_rect))
-    return current_render_pass->output_rect;
-
-  DCHECK(
-      current_render_pass->copy_requests.empty() ||
-      (current_render_pass->damage_rect == current_render_pass->output_rect));
-  return current_render_pass->damage_rect;
 }
 
 gfx::Rect DirectRenderer::DeviceViewportRectInDrawSpace() const {
@@ -524,8 +468,16 @@ void DirectRenderer::DrawRenderPassAndExecuteCopyRequests(
 }
 
 void DirectRenderer::DrawRenderPass(const RenderPass* render_pass) {
-  TRACE_EVENT0("cc", "DirectRenderer::DrawRenderPass");
-  if (!UseRenderPass(render_pass))
+  TRACE_EVENT0("viz", "DirectRenderer::DrawRenderPass");
+  if (CanSkipRenderPass(render_pass))
+    return;
+  UseRenderPass(render_pass);
+
+  // TODO(crbug.com/582554): This change applies only when Vulkan is enabled and
+  // it will be removed once SkiaRenderer has complete support for Vulkan.
+  if (current_frame()->current_render_pass !=
+          current_frame()->root_render_pass &&
+      !IsRenderPassResourceAllocated(render_pass->id))
     return;
 
   const gfx::Rect surface_rect_in_draw_space = OutputSurfaceRectInDrawSpace();
@@ -539,7 +491,7 @@ void DirectRenderer::DrawRenderPass(const RenderPass* render_pass) {
 
   if (use_partial_swap_) {
     render_pass_scissor_in_draw_space.Intersect(
-        current_frame()->ComputeScissorRectForRenderPass());
+        ComputeScissorRectForRenderPass(current_frame()->current_render_pass));
   }
 
   bool is_root_render_pass =
@@ -625,9 +577,37 @@ void DirectRenderer::DrawRenderPass(const RenderPass* render_pass) {
     GenerateMipmap();
 }
 
-bool DirectRenderer::UseRenderPass(const RenderPass* render_pass) {
+bool DirectRenderer::CanSkipRenderPass(const RenderPass* render_pass) const {
+  if (render_pass == current_frame()->root_render_pass)
+    return false;
+
+  // TODO(crbug.com/783275): It's possible to skip a child RenderPass if damage
+  // does not overlap it, since that means nothing has changed:
+  //   ComputeScissorRectForRenderPass(render_pass).IsEmpty()
+  // However that caused crashes where the RenderPass' texture was not present
+  // (never seen the RenderPass before, or the texture was deleted when not used
+  // for a frame). It could avoid skipping if there is no texture present, which
+  // is what was done for a while, but this seems to papering over a missing
+  // damage problem, or we're failing to understand the system wholey.
+  // If attempted again this should probably CHECK() that the texture exists,
+  // and attempt to figure out where the new RenderPass texture without damage
+  // is coming from.
+
+  // If the RenderPass wants to be cached, then we only draw it if we need to.
+  // When damage is present, then we can't skip the RenderPass. Or if the
+  // texture does not exist (first frame, or was deleted) then we can't skip
+  // the RenderPass.
+  if (render_pass->cache_render_pass) {
+    if (render_pass->has_damage_from_contributing_content)
+      return false;
+    return IsRenderPassResourceAllocated(render_pass->id);
+  }
+
+  return false;
+}
+
+void DirectRenderer::UseRenderPass(const RenderPass* render_pass) {
   current_frame()->current_render_pass = render_pass;
-  current_frame()->current_texture = nullptr;
   if (render_pass == current_frame()->root_render_pass) {
     BindFramebufferToOutputSurface();
 
@@ -638,59 +618,67 @@ bool DirectRenderer::UseRenderPass(const RenderPass* render_pass) {
     InitializeViewport(current_frame(), render_pass->output_rect,
                        gfx::Rect(current_frame()->device_viewport_size),
                        current_frame()->device_viewport_size);
-    return true;
+    return;
   }
 
-  cc::ScopedResource* texture = render_pass_textures_[render_pass->id].get();
-  DCHECK(texture);
+  gfx::Size enlarged_size = RenderPassTextureSize(render_pass);
+  enlarged_size.Enlarge(enlarge_pass_texture_amount_.width(),
+                        enlarge_pass_texture_amount_.height());
 
-  gfx::Size size = RenderPassTextureSize(render_pass);
-  size.Enlarge(enlarge_pass_texture_amount_.width(),
-               enlarge_pass_texture_amount_.height());
-  if (!texture->id()) {
-    texture->Allocate(size, RenderPassTextureHint(render_pass),
-                      BackbufferFormat(),
-                      current_frame()->current_render_pass->color_space);
-  } else if (render_pass->cache_render_pass &&
-             !render_pass->has_damage_from_contributing_content) {
-    return false;
-  } else if (current_frame()->ComputeScissorRectForRenderPass().IsEmpty()) {
-    return false;
-  }
-  DCHECK(texture->id());
+  AllocateRenderPassResourceIfNeeded(
+      render_pass->id, {enlarged_size, render_pass->generate_mipmap});
 
-  if (BindFramebufferToTexture(texture)) {
-    InitializeViewport(current_frame(), render_pass->output_rect,
-                       gfx::Rect(render_pass->output_rect.size()),
-                       texture->size());
-    return true;
-  }
+  // TODO(crbug.com/582554): This change applies only when Vulkan is enabled and
+  // it will be removed once SkiaRenderer has complete support for Vulkan.
+  if (!IsRenderPassResourceAllocated(render_pass->id))
+    return;
 
-  return false;
+  BindFramebufferToTexture(render_pass->id);
+  InitializeViewport(current_frame(), render_pass->output_rect,
+                     gfx::Rect(render_pass->output_rect.size()),
+                     GetRenderPassTextureSize(render_pass->id));
 }
 
-bool DirectRenderer::HasAllocatedResourcesForTesting(
-    RenderPassId render_pass_id) const {
-  auto iter = render_pass_textures_.find(render_pass_id);
-  return iter != render_pass_textures_.end() && iter->second->id();
+gfx::Rect DirectRenderer::ComputeScissorRectForRenderPass(
+    const RenderPass* render_pass) const {
+  const RenderPass* root_render_pass = current_frame()->root_render_pass;
+  const gfx::Rect root_damage_rect = current_frame()->root_damage_rect;
+
+  if (render_pass == root_render_pass)
+    return root_damage_rect;
+
+  // If the root damage rect has been expanded due to overlays, all the other
+  // damage rect calculations are incorrect.
+  if (!root_render_pass->damage_rect.Contains(root_damage_rect))
+    return render_pass->output_rect;
+
+  DCHECK(render_pass->copy_requests.empty() ||
+         (render_pass->damage_rect == render_pass->output_rect));
+  return render_pass->damage_rect;
 }
 
-// static
 gfx::Size DirectRenderer::RenderPassTextureSize(const RenderPass* render_pass) {
-  return render_pass->output_rect.size();
-}
-
-// static
-cc::ResourceProvider::TextureHint DirectRenderer::RenderPassTextureHint(
-    const RenderPass* render_pass) {
-  return render_pass->generate_mipmap
-             ? cc::ResourceProvider::TEXTURE_HINT_MIPMAP_FRAMEBUFFER
-             : cc::ResourceProvider::TEXTURE_HINT_FRAMEBUFFER;
+  // Round the size of the render pass backings to a multiple of 64 pixels. This
+  // reduces memory fragmentation. https://crbug.com/146070. This also allows
+  // backings to be more easily reused during a resize operation.
+  int width = render_pass->output_rect.width();
+  int height = render_pass->output_rect.height();
+  if (!settings_->dont_round_texture_sizes_for_pixel_tests) {
+    int multiple = 64;
+    width = cc::MathUtil::CheckedRoundUp(width, multiple);
+    height = cc::MathUtil::CheckedRoundUp(height, multiple);
+  }
+  return gfx::Size(width, height);
 }
 
 void DirectRenderer::SetCurrentFrameForTesting(const DrawingFrame& frame) {
   current_frame_valid_ = true;
   current_frame_ = frame;
+}
+
+bool DirectRenderer::HasAllocatedResourcesForTesting(
+    const RenderPassId& render_pass_id) const {
+  return IsRenderPassResourceAllocated(render_pass_id);
 }
 
 }  // namespace viz

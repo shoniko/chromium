@@ -26,9 +26,9 @@
 #define HTMLScriptElement_h
 
 #include "core/CoreExport.h"
-#include "core/dom/ScriptElementBase.h"
-#include "core/dom/ScriptLoader.h"
 #include "core/html/HTMLElement.h"
+#include "core/script/ScriptElementBase.h"
+#include "core/script/ScriptLoader.h"
 
 namespace blink {
 
@@ -92,11 +92,13 @@ class CORE_EXPORT HTMLScriptElement final : public HTMLElement,
   bool IsConnected() const override;
   bool HasChildren() const override;
   const AtomicString& GetNonceForElement() const override;
+  bool ElementHasDuplicateAttributes() const override {
+    return HasDuplicateAttribute();
+  }
   bool AllowInlineScriptForCSP(const AtomicString& nonce,
                                const WTF::OrdinalNumber&,
                                const String& script_content,
                                ContentSecurityPolicy::InlineType) override;
-  AtomicString InitiatorName() const override;
   void DispatchLoadEvent() override;
   void DispatchErrorEvent() override;
   void SetScriptElementForBinding(

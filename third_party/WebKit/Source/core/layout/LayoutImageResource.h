@@ -27,6 +27,8 @@
 #ifndef LayoutImageResource_h
 #define LayoutImageResource_h
 
+#include "base/macros.h"
+#include "core/CoreExport.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/style/StyleImage.h"
 
@@ -34,10 +36,8 @@ namespace blink {
 
 class LayoutObject;
 
-class LayoutImageResource
+class CORE_EXPORT LayoutImageResource
     : public GarbageCollectedFinalized<LayoutImageResource> {
-  WTF_MAKE_NONCOPYABLE(LayoutImageResource);
-
  public:
   virtual ~LayoutImageResource();
 
@@ -53,16 +53,18 @@ class LayoutImageResource
   void ResetAnimation();
   bool MaybeAnimated() const;
 
-  virtual scoped_refptr<Image> GetImage(const IntSize&) const;
+  virtual scoped_refptr<Image> GetImage(const LayoutSize&) const;
   virtual bool ErrorOccurred() const {
     return cached_image_ && cached_image_->ErrorOccurred();
   }
 
-  virtual bool ImageHasRelativeSize() const {
-    return cached_image_ ? cached_image_->ImageHasRelativeSize() : false;
-  }
+  // Replace the resource this object references with a reference to
+  // the "broken image".
+  void UseBrokenImage();
 
-  virtual LayoutSize ImageSize(float multiplier) const;
+  virtual bool ImageHasRelativeSize() const;
+
+  virtual FloatSize ImageSize(float multiplier) const;
 
   virtual WrappedImagePtr ImagePtr() const { return cached_image_.Get(); }
 
@@ -70,8 +72,17 @@ class LayoutImageResource
 
  protected:
   LayoutImageResource();
+
+  // Device scale factor for the associated LayoutObject.
+  float DeviceScaleFactor() const;
+  // Returns an image based on the passed device scale factor.
+  static Image* BrokenImage(float device_scale_factor);
+
   LayoutObject* layout_object_;
   Member<ImageResourceContent> cached_image_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(LayoutImageResource);
 };
 
 }  // namespace blink

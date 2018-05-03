@@ -45,7 +45,8 @@ class AuraWindowCaptureMachine : public media::VideoCaptureMachine,
   // Implements aura::WindowObserver.
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override;
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override;
   void OnWindowDestroying(aura::Window* window) override;
   void OnWindowAddedToRootWindow(aura::Window* window) override;
   void OnWindowRemovingFromRootWindow(aura::Window* window,
@@ -101,6 +102,7 @@ class AuraWindowCaptureMachine : public media::VideoCaptureMachine,
       base::TimeTicks event_time,
       const CaptureFrameCallback& capture_frame_cb,
       scoped_refptr<media::VideoFrame> target,
+      const gfx::Rect& region_in_frame,
       std::unique_ptr<viz::SingleReleaseCallback> release_callback,
       bool result);
 

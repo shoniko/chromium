@@ -4,7 +4,6 @@
 
 #include "ash/magnifier/magnification_controller.h"
 
-#include "ash/accessibility_types.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/strings/stringprintf.h"
@@ -36,10 +35,10 @@ class TextInputView : public views::WidgetDelegateView {
   TextInputView() : text_field_(new views::Textfield) {
     text_field_->SetTextInputType(ui::TEXT_INPUT_TYPE_TEXT);
     AddChildView(text_field_);
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
   }
 
-  ~TextInputView() override {}
+  ~TextInputView() override = default;
 
   gfx::Size CalculatePreferredSize() const override {
     return gfx::Size(kTextInputWindowWidth, kTextInputWindowHeight);
@@ -58,7 +57,7 @@ class TextInputView : public views::WidgetDelegateView {
 class MagnificationControllerTest : public AshTestBase {
  public:
   MagnificationControllerTest() : text_input_view_(NULL) {}
-  ~MagnificationControllerTest() override {}
+  ~MagnificationControllerTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
@@ -446,7 +445,7 @@ TEST_F(MagnificationControllerTest, PanWindowToRight) {
   GetMagnificationController()->SetEnabled(true);
   EXPECT_FLOAT_EQ(2.f, GetMagnificationController()->GetScale());
 
-  scale *= kMagnificationScaleFactor;
+  scale *= MagnificationController::kMagnificationScaleFactor;
   GetMagnificationController()->SetScale(scale, false);
   EXPECT_FLOAT_EQ(2.3784142, GetMagnificationController()->GetScale());
   GetEventGenerator().MoveMouseToInHost(gfx::Point(400, 300));
@@ -455,21 +454,21 @@ TEST_F(MagnificationControllerTest, PanWindowToRight) {
   EXPECT_EQ("566,299", env->last_mouse_location().ToString());
   EXPECT_EQ("705,300", GetHostMouseLocation());
 
-  scale *= kMagnificationScaleFactor;
+  scale *= MagnificationController::kMagnificationScaleFactor;
   GetMagnificationController()->SetScale(scale, false);
   EXPECT_FLOAT_EQ(2.8284268, GetMagnificationController()->GetScale());
   GetEventGenerator().MoveMouseToInHost(gfx::Point(799, 300));
   EXPECT_EQ("599,299", env->last_mouse_location().ToString());
   EXPECT_EQ("702,300", GetHostMouseLocation());
 
-  scale *= kMagnificationScaleFactor;
+  scale *= MagnificationController::kMagnificationScaleFactor;
   GetMagnificationController()->SetScale(scale, false);
   EXPECT_FLOAT_EQ(3.3635852, GetMagnificationController()->GetScale());
   GetEventGenerator().MoveMouseToInHost(gfx::Point(799, 300));
   EXPECT_EQ("627,298", env->last_mouse_location().ToString());
   EXPECT_EQ("707,300", GetHostMouseLocation());
 
-  scale *= kMagnificationScaleFactor;
+  scale *= MagnificationController::kMagnificationScaleFactor;
   GetMagnificationController()->SetScale(scale, false);
   EXPECT_FLOAT_EQ(4.f, GetMagnificationController()->GetScale());
   GetEventGenerator().MoveMouseToInHost(gfx::Point(799, 300));
@@ -491,7 +490,7 @@ TEST_F(MagnificationControllerTest, PanWindowToLeft) {
   GetMagnificationController()->SetEnabled(true);
   EXPECT_FLOAT_EQ(2.f, GetMagnificationController()->GetScale());
 
-  scale *= kMagnificationScaleFactor;
+  scale *= MagnificationController::kMagnificationScaleFactor;
   GetMagnificationController()->SetScale(scale, false);
   EXPECT_FLOAT_EQ(2.3784142, GetMagnificationController()->GetScale());
   GetEventGenerator().MoveMouseToInHost(gfx::Point(400, 300));
@@ -500,21 +499,21 @@ TEST_F(MagnificationControllerTest, PanWindowToLeft) {
   EXPECT_EQ("231,299", env->last_mouse_location().ToString());
   EXPECT_EQ("100,300", GetHostMouseLocation());
 
-  scale *= kMagnificationScaleFactor;
+  scale *= MagnificationController::kMagnificationScaleFactor;
   GetMagnificationController()->SetScale(scale, false);
   EXPECT_FLOAT_EQ(2.8284268, GetMagnificationController()->GetScale());
   GetEventGenerator().MoveMouseToInHost(gfx::Point(0, 300));
   EXPECT_EQ("194,299", env->last_mouse_location().ToString());
   EXPECT_EQ("99,300", GetHostMouseLocation());
 
-  scale *= kMagnificationScaleFactor;
+  scale *= MagnificationController::kMagnificationScaleFactor;
   GetMagnificationController()->SetScale(scale, false);
   EXPECT_FLOAT_EQ(3.3635852, GetMagnificationController()->GetScale());
   GetEventGenerator().MoveMouseToInHost(gfx::Point(0, 300));
   EXPECT_EQ("164,298", env->last_mouse_location().ToString());
   EXPECT_EQ("98,300", GetHostMouseLocation());
 
-  scale *= kMagnificationScaleFactor;
+  scale *= MagnificationController::kMagnificationScaleFactor;
   GetMagnificationController()->SetScale(scale, false);
   EXPECT_FLOAT_EQ(4.f, GetMagnificationController()->GetScale());
   GetEventGenerator().MoveMouseToInHost(gfx::Point(0, 300));
@@ -722,6 +721,21 @@ TEST_F(MagnificationControllerTest, MoveMouseToSecondDisplay) {
   GetMagnificationController()->SetEnabled(false);
   EXPECT_TRUE(root_windows[1]->layer()->transform().IsIdentity());
   EXPECT_TRUE(root_windows[0]->layer()->transform().IsIdentity());
+}
+
+TEST_F(MagnificationControllerTest, AdjustScaleFromScroll) {
+  // 0 to 1 maps to 1 to 20
+  EXPECT_EQ(1.0f, GetMagnificationController()->GetScale());
+  EXPECT_EQ(20.0f, GetMagnificationController()->GetScaleFromScroll(1));
+  EXPECT_EQ(1.0f, GetMagnificationController()->GetScaleFromScroll(0));
+
+  // It doesn't matter the starting point, the mapping is consistent.
+  GetMagnificationController()->SetScale(20.0f, false);
+  EXPECT_EQ(20.0f, GetMagnificationController()->GetScaleFromScroll(1));
+  EXPECT_EQ(1.0f, GetMagnificationController()->GetScaleFromScroll(0));
+
+  // And the mapping is not linear.
+  EXPECT_NE(21.0f / 2.0f, GetMagnificationController()->GetScaleFromScroll(.5));
 }
 
 }  // namespace ash

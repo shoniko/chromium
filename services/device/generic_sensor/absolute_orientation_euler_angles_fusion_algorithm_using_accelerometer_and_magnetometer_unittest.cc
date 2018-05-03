@@ -17,14 +17,12 @@ namespace device {
 
 namespace {
 
-constexpr double kEpsilon = 1e-8;
-
 class
     AbsoluteOrientationEulerAnglesFusionAlgorithmUsingAccelerometerAndMagnetometerTest
     : public DeviceServiceTestBase {
  public:
   AbsoluteOrientationEulerAnglesFusionAlgorithmUsingAccelerometerAndMagnetometerTest() {
-    auto fusion_algorithm = base::MakeUnique<
+    auto fusion_algorithm = std::make_unique<
         AbsoluteOrientationEulerAnglesFusionAlgorithmUsingAccelerometerAndMagnetometer>();
     fusion_algorithm_ = fusion_algorithm.get();
     fake_fusion_sensor_ = base::MakeRefCounted<FakePlatformSensorFusion>(

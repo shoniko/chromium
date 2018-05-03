@@ -36,7 +36,6 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ApplicationTestUtils;
@@ -56,10 +55,7 @@ import java.util.concurrent.TimeoutException;
  * Test the behavior of tabs when opening a URL from an external app.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @RetryOnFailure
 public class TabsOpenedFromExternalAppTest {
     @Rule
@@ -347,7 +343,7 @@ public class TabsOpenedFromExternalAppTest {
     public void testReferrerPolicyHttpsReferrerPolicyOrigin() throws InterruptedException {
         String url = mTestServer.getURL("/chrome/test/data/android/about.html");
         launchAndVerifyReferrerWithPolicy(url, mActivityTestRule,
-                WebReferrerPolicy.WEB_REFERRER_POLICY_ORIGIN, HTTPS_REFERRER_WITH_PATH,
+                WebReferrerPolicy.ORIGIN, HTTPS_REFERRER_WITH_PATH,
                 HTTPS_REFERRER);
     }
 
@@ -363,7 +359,7 @@ public class TabsOpenedFromExternalAppTest {
             throws InterruptedException {
         String url = mTestServer.getURL("/chrome/test/data/android/about.html");
         launchAndVerifyReferrerWithPolicy(url, mActivityTestRule,
-                WebReferrerPolicy.WEB_REFERRER_POLICY_ORIGIN_WHEN_CROSS_ORIGIN,
+                WebReferrerPolicy.ORIGIN_WHEN_CROSS_ORIGIN,
                 HTTPS_REFERRER_WITH_PATH, HTTPS_REFERRER);
     }
 
@@ -377,7 +373,7 @@ public class TabsOpenedFromExternalAppTest {
     public void testReferrerPolicyHttpsReferrerPolicyStrictOrigin() throws InterruptedException {
         String url = mTestServer.getURL("/chrome/test/data/android/about.html");
         launchAndVerifyReferrerWithPolicy(url, mActivityTestRule,
-                WebReferrerPolicy.WEB_REFERRER_POLICY_STRICT_ORIGIN, HTTPS_REFERRER, "");
+                WebReferrerPolicy.STRICT_ORIGIN, HTTPS_REFERRER, "");
     }
 
     /**
@@ -791,16 +787,16 @@ public class TabsOpenedFromExternalAppTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add({"enable-spdy-proxy-auth", "data-reduction-proxy-lo-fi=always-on",
-            "enable-data-reduction-proxy-lite-page"})
+    @CommandLineFlags.
+    Add({"enable-spdy-proxy-auth", "enable-features=DataReductionProxyDecidesTransform"})
     public void testLaunchWebLiteURL() throws InterruptedException {
         mActivityTestRule.startMainActivityFromLauncher();
 
         String url = mTestServer.getURL("/chrome/test/data/android/about.html");
 
         // Launch a first URL from an app.
-        launchUrlFromExternalApp("http://googleweblight.com/?lite_url=" + url, url,
-                EXTERNAL_APP_1_ID, false, null);
+        launchUrlFromExternalApp(
+                "http://googleweblight.com/i?u=" + url, url, EXTERNAL_APP_1_ID, false, null);
 
         Assert.assertEquals("Selected tab is not on the right URL.", url,
                 mActivityTestRule.getActivity().getActivityTab().getUrl());
@@ -812,10 +808,12 @@ public class TabsOpenedFromExternalAppTest {
      */
     @Test
     @MediumTest
+    @CommandLineFlags.
+    Add({"enable-spdy-proxy-auth", "disable-features=DataReductionProxyDecidesTransform"})
     public void testLaunchWebLiteURLNoPreviews() throws InterruptedException {
         mActivityTestRule.startMainActivityFromLauncher();
 
-        String url = "http://googleweblight.com/?lite_url=chrome/test/data/android/about.html";
+        String url = "http://googleweblight.com/i?u=chrome/test/data/android/about.html";
 
         // Launch a first URL from an app.
         launchUrlFromExternalApp(url, url, EXTERNAL_APP_1_ID, false, null);

@@ -4,7 +4,9 @@
 
 #import <EarlGrey/EarlGrey.h>
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
+#include "base/compiler_specific.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -12,6 +14,7 @@
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
+#include "ios/chrome/test/app/navigation_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
@@ -46,12 +49,13 @@ const char kPage3Link[] = "page-3";
 // cached page. Browsers don't have to use fresh version for back forward
 // navigation for HTTP pages and may serve version from the cache even if
 // Cache-Control response header says otherwise.
-void PurgeCachedWebViewPages() {
+bool PurgeCachedWebViewPages() WARN_UNUSED_RESULT;
+bool PurgeCachedWebViewPages() {
   web::WebState* web_state = chrome_test_util::GetCurrentWebState();
   web_state->SetWebUsageEnabled(false);
   web_state->SetWebUsageEnabled(true);
   web_state->GetNavigationManager()->LoadIfNecessary();
-  [ChromeEarlGrey waitForPageToFinishLoading];
+  return chrome_test_util::WaitForPageToFinishLoading();
 }
 
 // Response provider which can be paused. When it is paused it buffers all
@@ -152,7 +156,7 @@ class PausableResponseProvider : public HtmlResponseProvider {
   responses[_testURL3] = std::string(kTestPage3) + pageContent;
 
   std::unique_ptr<PausableResponseProvider> unique_provider =
-      base::MakeUnique<PausableResponseProvider>(responses);
+      std::make_unique<PausableResponseProvider>(responses);
   _responseProvider = unique_provider.get();
   web::test::SetUpHttpServer(std::move(unique_provider));
 
@@ -177,7 +181,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 - (void)testBackForwardNavigation {
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage2];
   [self setServerPaused:YES];
 
   // Tap the back button in the toolbar and verify that URL2 (committed URL) is
@@ -197,7 +202,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage1];
   [self setServerPaused:YES];
 
   // Tap the forward button in the toolbar and verify that URL1 (committed URL)
@@ -221,7 +227,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 - (void)testHistoryNavigation {
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage2];
   [self setServerPaused:YES];
 
   // Re-enable synchronization here to synchronize EarlGrey LongPress and Tap
@@ -259,7 +266,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 - (void)testStoppingPendingBackNavigationAndReload {
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage2];
   [self setServerPaused:YES];
 
   // Tap the back button, stop pending navigation and reload.
@@ -291,7 +299,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 - (void)testJSBackForwardNavigation {
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage2];
   [self setServerPaused:YES];
 
   // Tap the back button on the page and verify that URL2 (committed URL) is
@@ -310,7 +319,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage1];
   [self setServerPaused:YES];
 
   // Tap the forward button on the page and verify that URL1 (committed URL)
@@ -334,7 +344,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 - (void)testJSGoNavigation {
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage2];
   [self setServerPaused:YES];
 
   // Tap the go negative delta button on the page and verify that URL2
@@ -354,7 +365,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage1];
   [self setServerPaused:YES];
 
   // Tap go positive delta button on the page and verify that URL1 (committed
@@ -378,7 +390,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 - (void)testBackNavigationWithPendingReload {
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage2];
   [self setServerPaused:YES];
 
   // Start reloading the page.
@@ -412,10 +425,18 @@ class PausableResponseProvider : public HtmlResponseProvider {
 // Tests that visible URL is always the same as last committed URL during go
 // back navigation initiated with pending renderer-initiated navigation in
 // progress.
-- (void)testBackNavigationWithPendingRendererInitiatedNavigation {
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_testBackNavigationWithPendingRendererInitiatedNavigation \
+  testBackNavigationWithPendingRendererInitiatedNavigation
+#else
+#define MAYBE_testBackNavigationWithPendingRendererInitiatedNavigation \
+  FLAKY_testBackNavigationWithPendingRendererInitiatedNavigation
+#endif
+- (void)MAYBE_testBackNavigationWithPendingRendererInitiatedNavigation {
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage2];
   [self setServerPaused:YES];
 
   // Start renderer initiated navigation.
@@ -444,7 +465,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 - (void)testRendererInitiatedNavigationWithPendingBackNavigation {
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage2];
   [self setServerPaused:YES];
 
   // Tap the back button in the toolbar and verify that URL2 (committed URL) is
@@ -476,7 +498,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage3];
   [self setServerPaused:YES];
 
   // Tap the back button twice in the toolbar and verify that URL3 (committed
@@ -533,7 +556,8 @@ class PausableResponseProvider : public HtmlResponseProvider {
 
   // Purge web view caches and pause the server to make sure that tests can
   // verify omnibox state before server starts responding.
-  PurgeCachedWebViewPages();
+  GREYAssert(PurgeCachedWebViewPages(), @"Pages were not purged");
+  [ChromeEarlGrey waitForWebViewContainingText:kTestPage3];
   [self setServerPaused:YES];
 
   // Tap the back button twice on the page and verify that URL3 (committed URL)

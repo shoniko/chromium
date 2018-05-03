@@ -61,6 +61,7 @@ class PLATFORM_EXPORT NetworkStateNotifier {
     Optional<TimeDelta> http_rtt;
     Optional<TimeDelta> transport_rtt;
     Optional<double> downlink_throughput_mbps;
+    bool save_data = false;
   };
 
   class NetworkStateObserver {
@@ -72,7 +73,8 @@ class PLATFORM_EXPORT NetworkStateNotifier {
         WebEffectiveConnectionType,
         const Optional<TimeDelta>& http_rtt,
         const Optional<TimeDelta>& transport_rtt,
-        const Optional<double>& downlink_throughput_mbps) {}
+        const Optional<double>& downlink_throughput_mbps,
+        bool save_data) {}
     virtual void OnLineStateChange(bool on_line) {}
   };
 
@@ -88,14 +90,14 @@ class PLATFORM_EXPORT NetworkStateNotifier {
     NetworkStateObserverHandle(NetworkStateNotifier*,
                                ObserverType,
                                NetworkStateObserver*,
-                               RefPtr<WebTaskRunner>);
+                               scoped_refptr<WebTaskRunner>);
     ~NetworkStateObserverHandle();
 
    private:
     NetworkStateNotifier* notifier_;
     ObserverType type_;
     NetworkStateObserver* observer_;
-    RefPtr<WebTaskRunner> task_runner_;
+    scoped_refptr<WebTaskRunner> task_runner_;
 
     DISALLOW_COPY_AND_ASSIGN(NetworkStateObserverHandle);
   };
@@ -152,6 +154,14 @@ class PLATFORM_EXPORT NetworkStateNotifier {
     return state.downlink_throughput_mbps;
   }
 
+  bool SaveDataEnabled() const {
+    MutexLocker locker(mutex_);
+    const NetworkState& state = has_override_ ? override_ : state_;
+    // TODO (tbansal): Add a DCHECK to check that |state.on_line_initialized| is
+    // true once https://crbug.com/728771 is fixed.
+    return state.save_data;
+  }
+
   void SetOnLine(bool);
 
   // Can be called on any thread.
@@ -195,6 +205,7 @@ class PLATFORM_EXPORT NetworkStateNotifier {
                          TimeDelta http_rtt,
                          TimeDelta transport_rtt,
                          int downlink_throughput_kbps);
+  void SetSaveDataEnabled(bool enabled);
 
   // When called, successive setWebConnectionType/setOnLine calls are stored,
   // and supplied overridden values are used instead until clearOverride() is
@@ -209,6 +220,7 @@ class PLATFORM_EXPORT NetworkStateNotifier {
   void SetNetworkQualityInfoOverride(WebEffectiveConnectionType effective_type,
                                      unsigned long transport_rtt_msec,
                                      double downlink_throughput_mbps);
+  void SetSaveDataEnabledOverride(bool enabled);
   void ClearOverride();
 
   // Must be called on the given task runner. An added observer must be removed
@@ -217,10 +229,10 @@ class PLATFORM_EXPORT NetworkStateNotifier {
   // and then added during notification.
   std::unique_ptr<NetworkStateObserverHandle> AddConnectionObserver(
       NetworkStateObserver*,
-      RefPtr<WebTaskRunner>);
+      scoped_refptr<WebTaskRunner>);
   std::unique_ptr<NetworkStateObserverHandle> AddOnLineObserver(
       NetworkStateObserver*,
-      RefPtr<WebTaskRunner>);
+      scoped_refptr<WebTaskRunner>);
 
   // Returns the randomization salt (weak and insecure) that should be used when
   // adding noise to the network quality metrics. This is known only to the
@@ -255,33 +267,33 @@ class PLATFORM_EXPORT NetworkStateNotifier {
   // The ObserverListMap is cross-thread accessed, adding/removing Observers
   // running on a task runner.
   using ObserverListMap =
-      HashMap<RefPtr<WebTaskRunner>, std::unique_ptr<ObserverList>>;
+      HashMap<scoped_refptr<WebTaskRunner>, std::unique_ptr<ObserverList>>;
 
   void NotifyObservers(ObserverListMap&, ObserverType, const NetworkState&);
   void NotifyObserversOnTaskRunner(ObserverListMap*,
                                    ObserverType,
-                                   RefPtr<WebTaskRunner>,
+                                   scoped_refptr<WebTaskRunner>,
                                    const NetworkState&);
 
   void AddObserverToMap(ObserverListMap&,
                         NetworkStateObserver*,
-                        RefPtr<WebTaskRunner>);
+                        scoped_refptr<WebTaskRunner>);
   void RemoveObserver(ObserverType,
                       NetworkStateObserver*,
-                      RefPtr<WebTaskRunner>);
+                      scoped_refptr<WebTaskRunner>);
   void RemoveObserverFromMap(ObserverListMap&,
                              NetworkStateObserver*,
-                             RefPtr<WebTaskRunner>);
+                             scoped_refptr<WebTaskRunner>);
 
   ObserverList* LockAndFindObserverList(ObserverListMap&,
-                                        RefPtr<WebTaskRunner>);
+                                        scoped_refptr<WebTaskRunner>);
 
   // Removed observers are nulled out in the list in case the list is being
   // iterated over. Once done iterating, call this to clean up nulled
   // observers.
   void CollectZeroedObservers(ObserverListMap&,
                               ObserverList*,
-                              RefPtr<WebTaskRunner>);
+                              scoped_refptr<WebTaskRunner>);
 
   mutable Mutex mutex_;
   NetworkState state_;

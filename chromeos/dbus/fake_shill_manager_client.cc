@@ -151,7 +151,7 @@ FakeShillManagerClient::FakeShillManagerClient()
   ParseCommandLineSwitch();
 }
 
-FakeShillManagerClient::~FakeShillManagerClient() {}
+FakeShillManagerClient::~FakeShillManagerClient() = default;
 
 // ShillManagerClient overrides.
 
@@ -311,8 +311,10 @@ void FakeShillManagerClient::ConfigureService(
   merged_properties->GetStringWithoutPathExpansion(shill::kProfileProperty,
                                                    &profile_path);
   if (!profile_path.empty()) {
-    DBusThreadManager::Get()->GetShillProfileClient()->GetTestInterface()->
-        AddService(profile_path, service_path);
+    auto* profile_client =
+        DBusThreadManager::Get()->GetShillProfileClient()->GetTestInterface();
+    if (!profile_client->UpdateService(profile_path, service_path))
+      profile_client->AddService(profile_path, service_path);
   }
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -453,11 +455,11 @@ void FakeShillManagerClient::SetTechnologyInitializing(const std::string& type,
 void FakeShillManagerClient::AddGeoNetwork(
     const std::string& technology,
     const base::DictionaryValue& network) {
-  base::ListValue* list_value = NULL;
-  if (!stub_geo_networks_.GetListWithoutPathExpansion(technology,
-                                                      &list_value)) {
-    list_value = stub_geo_networks_.SetListWithoutPathExpansion(
-        technology, std::make_unique<base::ListValue>());
+  base::Value* list_value =
+      stub_geo_networks_.FindKeyOfType(technology, base::Value::Type::LIST);
+  if (!list_value) {
+    list_value = stub_geo_networks_.SetKey(
+        technology, base::Value(base::Value::Type::LIST));
   }
   list_value->GetList().push_back(network.Clone());
 }
@@ -588,12 +590,18 @@ void FakeShillManagerClient::SetBestServiceToConnect(
   best_service_ = service_path;
 }
 
+const ShillManagerClient::NetworkThrottlingStatus&
+FakeShillManagerClient::GetNetworkThrottlingStatus() {
+  return network_throttling_status_;
+}
+
 void FakeShillManagerClient::SetNetworkThrottlingStatus(
-    bool enabled,
-    uint32_t upload_rate_kbits,
-    uint32_t download_rate_kbits,
+    const NetworkThrottlingStatus& status,
     const base::Closure& callback,
-    const ErrorCallback& error_callback) {}
+    const ErrorCallback& error_callback) {
+  network_throttling_status_ = status;
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
+}
 
 void FakeShillManagerClient::SetupDefaultEnvironment() {
   // Bail out from setup if there is no message loop. This will be the common
@@ -722,6 +730,10 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
       services->SetServiceProperty(kWifi2Path, shill::kSecurityClassProperty,
                                    base::Value(shill::kSecurityPsk));
     }
+    services->SetServiceProperty(kWifi2Path, shill::kConnectableProperty,
+                                 base::Value(false));
+    services->SetServiceProperty(kWifi2Path, shill::kPassphraseRequiredProperty,
+                                 base::Value(true));
     services->SetServiceProperty(kWifi2Path, shill::kSignalStrengthProperty,
                                  base::Value(80));
     profiles->AddService(shared_profile, kWifi2Path);
@@ -977,13 +989,13 @@ void FakeShillManagerClient::NotifyObserversPropertyChanged(
 
 base::ListValue* FakeShillManagerClient::GetListProperty(
     const std::string& property) {
-  base::ListValue* list_property = NULL;
-  if (!stub_properties_.GetListWithoutPathExpansion(
-      property, &list_property)) {
-    list_property = stub_properties_.SetListWithoutPathExpansion(
-        property, std::make_unique<base::ListValue>());
+  base::Value* list_property =
+      stub_properties_.FindKeyOfType(property, base::Value::Type::LIST);
+  if (!list_property) {
+    list_property =
+        stub_properties_.SetKey(property, base::Value(base::Value::Type::LIST));
   }
-  return list_property;
+  return static_cast<base::ListValue*>(list_property);
 }
 
 bool FakeShillManagerClient::TechnologyEnabled(const std::string& type) const {

@@ -44,7 +44,9 @@ BluetoothInternalsTest.prototype = {
   preLoad: function() {
     /**
      * A test adapter factory proxy for the chrome://bluetooth-internals
-     * page.
+     * page.  Provides a fake BluetoothInternalsHandler::GetAdapter
+     * implementation and acts as a root of all Test*Proxies by containing an
+     * adapter member.
      */
     class TestAdapterFactoryProxy extends TestBrowserProxy {
       constructor() {
@@ -52,7 +54,7 @@ BluetoothInternalsTest.prototype = {
           'getAdapter',
         ]);
 
-        this.binding = new mojo.Binding(bluetooth.mojom.AdapterFactory, this);
+        this.binding = new mojo.Binding(mojom.BluetoothInternalsHandler, this);
         this.adapter = new TestAdapterProxy();
         this.adapterBinding_ = new mojo.Binding(bluetooth.mojom.Adapter,
                                                 this.adapter);
@@ -164,9 +166,9 @@ BluetoothInternalsTest.prototype = {
     }
 
     window.setupFn = () => {
-      this.adapterInterceptor = new MojoInterfaceInterceptor(
-          bluetooth.mojom.AdapterFactory.name);
-      this.adapterInterceptor.oninterfacerequest = (e) => {
+      this.bluetoothInternalsHandlerInterceptor = new MojoInterfaceInterceptor(
+          mojom.BluetoothInternalsHandler.name);
+      this.bluetoothInternalsHandlerInterceptor.oninterfacerequest = (e) => {
         this.adapterFactory = new TestAdapterFactoryProxy();
         this.adapterFactory.binding.bind(e.handle);
 
@@ -182,10 +184,10 @@ BluetoothInternalsTest.prototype = {
               deviceProxy.setTestServices([
                 this.fakeServiceInfo1(),
                 this.fakeServiceInfo2(),
-              ])
+              ]);
             }, this);
       };
-      this.adapterInterceptor.start();
+      this.bluetoothInternalsHandlerInterceptor.start();
       this.setupResolver.resolve();
       return Promise.resolve();
     };
@@ -257,7 +259,7 @@ BluetoothInternalsTest.prototype = {
       id: 'service1',
       uuid: {uuid: '00002a05-0000-1000-8000-00805f9b34fb'},
       isPrimary: true,
-    }
+    };
   },
 
   /**
@@ -269,7 +271,7 @@ BluetoothInternalsTest.prototype = {
       id: 'service2',
       uuid: {uuid: '0000180d-0000-1000-8000-00805f9b34fb'},
       isPrimary: true,
-    }
+    };
   },
 
   /**
@@ -835,37 +837,37 @@ TEST_F('BluetoothInternalsTest', 'Startup_BluetoothInternals',
     });
 
     test('ValueControl_SetValue_UTF8_EmptyArray', function() {
-      valueControl.typeSelect_.value = ValueDataType.UTF8
+      valueControl.typeSelect_.value = ValueDataType.UTF8;
       valueControl.setValue([]);
       expectEquals('', valueControl.valueInput_.value);
     });
 
     test('ValueControl_SetValue_UTF8_OneValue', function() {
-      valueControl.typeSelect_.value = ValueDataType.UTF8
+      valueControl.typeSelect_.value = ValueDataType.UTF8;
       valueControl.setValue([aCode]);
       expectEquals('a', valueControl.valueInput_.value);
     });
 
     test('ValueControl_SetValue_UTF8_ThreeValues', function() {
-      valueControl.typeSelect_.value = ValueDataType.UTF8
+      valueControl.typeSelect_.value = ValueDataType.UTF8;
       valueControl.setValue([aCode, bCode, cCode]);
       expectEquals('abc', valueControl.valueInput_.value);
     });
 
     test('ValueControl_SetValue_Decimal_EmptyArray', function() {
-      valueControl.typeSelect_.value = ValueDataType.DECIMAL
+      valueControl.typeSelect_.value = ValueDataType.DECIMAL;
       valueControl.setValue([]);
       expectEquals('', valueControl.valueInput_.value);
     });
 
     test('ValueControl_SetValue_Decimal_OneValue', function() {
-      valueControl.typeSelect_.value = ValueDataType.DECIMAL
+      valueControl.typeSelect_.value = ValueDataType.DECIMAL;
       valueControl.setValue([aCode]);
       expectEquals(String(aCode), valueControl.valueInput_.value);
     });
 
     test('ValueControl_SetValue_Decimal_ThreeValues', function() {
-      valueControl.typeSelect_.value = ValueDataType.DECIMAL
+      valueControl.typeSelect_.value = ValueDataType.DECIMAL;
       valueControl.setValue([aCode, bCode, cCode]);
       expectEquals('97-98-99', valueControl.valueInput_.value);
     });
@@ -887,25 +889,25 @@ TEST_F('BluetoothInternalsTest', 'Startup_BluetoothInternals',
     });
 
     test('ValueControl_ConvertValue_UTF8_EmptyString', function() {
-      valueControl.typeSelect_.value = ValueDataType.UTF8
+      valueControl.typeSelect_.value = ValueDataType.UTF8;
       valueControl.value_.setAs(ValueDataType.UTF8, '');
       expectEquals(0, valueControl.value_.getArray().length);
     });
 
     test('ValueControl_ConvertValue_UTF8_ThreeValues', function() {
-      valueControl.typeSelect_.value = ValueDataType.UTF8
+      valueControl.typeSelect_.value = ValueDataType.UTF8;
       valueControl.value_.setAs(ValueDataType.UTF8, 'abc');
       expectDeepEquals([aCode, bCode, cCode], valueControl.value_.getArray());
     });
 
     test('ValueControl_ConvertValue_Decimal_EmptyString', function() {
-      valueControl.typeSelect_.value = ValueDataType.DECIMAL
+      valueControl.typeSelect_.value = ValueDataType.DECIMAL;
       valueControl.value_.setAs(ValueDataType.DECIMAL, '');
       expectEquals(0, valueControl.value_.getArray().length);
     });
 
     test('ValueControl_ConvertValue_Decimal_ThreeValues_Fail', function() {
-      valueControl.typeSelect_.value = ValueDataType.DECIMAL
+      valueControl.typeSelect_.value = ValueDataType.DECIMAL;
 
       expectThrows(function() {
         valueControl.value_.setAs(ValueDataType.DECIMAL, '97-+-99' /* a-+-c */);
@@ -913,7 +915,7 @@ TEST_F('BluetoothInternalsTest', 'Startup_BluetoothInternals',
     });
 
     test('ValueControl_ConvertValue_Decimal_ThreeValues', function() {
-      valueControl.typeSelect_.value = ValueDataType.DECIMAL
+      valueControl.typeSelect_.value = ValueDataType.DECIMAL;
       valueControl.value_.setAs(ValueDataType.DECIMAL, '97-98-99' /* abc */);
       expectDeepEquals([aCode, bCode, cCode], valueControl.value_.getArray());
     });

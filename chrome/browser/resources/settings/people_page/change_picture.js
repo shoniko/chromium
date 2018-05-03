@@ -53,11 +53,24 @@ Polymer({
      * @private
      */
     firstDefaultImageIndex_: Number,
+
+    /**
+     * True when camera video mode is enabled.
+     * @private {boolean}
+     */
+    cameraVideoModeEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('changePictureVideoModeEnabled');
+      },
+      readOnly: true,
+    },
   },
 
   listeners: {
     'discard-image': 'onDiscardImage_',
     'image-activate': 'onImageActivate_',
+    'focus-action': 'onFocusAction_',
     'photo-taken': 'onPhotoTaken_',
     'switch-mode': 'onSwitchMode_',
   },
@@ -170,9 +183,9 @@ Polymer({
         this.browserProxy_.selectProfileImage();
         break;
       case CrPicture.SelectionTypes.OLD:
-        var imageIndex = image.dataset.imageIndex;
+        const imageIndex = image.dataset.imageIndex;
         if (imageIndex !== undefined && imageIndex >= 0 && image.src)
-          this.browserProxy_.selectDefaultImage(image.src);
+          this.browserProxy_.selectDefaultImage(image.dataset.url);
         else
           this.browserProxy_.selectOldImage();
         break;
@@ -193,6 +206,11 @@ Polymer({
     this.selectImage_(event.detail);
   },
 
+  /** Focus the action button in the picture pane. */
+  onFocusAction_: function() {
+    /** CrPicturePaneElement */ (this.$.picturePane).focusActionButton();
+  },
+
   /**
    * @param {!{detail: !{photoDataUrl: string}}} event
    * @private
@@ -210,7 +228,7 @@ Polymer({
    * @private
    */
   onSwitchMode_: function(event) {
-    var videomode = event.detail;
+    const videomode = event.detail;
     announceAccessibleMessage(this.i18n(
         videomode ? 'videoModeAccessibleText' : 'photoModeAccessibleText'));
   },
@@ -272,10 +290,10 @@ Polymer({
    * @private
    */
   getAuthorCredit_: function(selectedItem, defaultImages) {
-    var index = selectedItem ? selectedItem.dataset.imageIndex : undefined;
+    const index = selectedItem ? selectedItem.dataset.imageIndex : undefined;
     if (index === undefined || index < 0 || index >= defaultImages.length)
       return '';
-    var author = defaultImages[index].author;
+    const author = defaultImages[index].author;
     return author ? this.i18n('authorCreditText', author) : '';
   },
 
@@ -287,7 +305,7 @@ Polymer({
    * @private
    */
   getAuthorWebsite_: function(selectedItem, defaultImages) {
-    var index = selectedItem ? selectedItem.dataset.imageIndex : undefined;
+    const index = selectedItem ? selectedItem.dataset.imageIndex : undefined;
     if (index === undefined || index < 0 || index >= defaultImages.length)
       return '';
     return defaultImages[index].website || '';

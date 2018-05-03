@@ -5,11 +5,11 @@
 #include "core/workers/ParentFrameTaskRunners.h"
 
 #include "core/dom/Document.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/LocalFrame.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/ThreadingPrimitives.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -27,12 +27,12 @@ ParentFrameTaskRunners* ParentFrameTaskRunners::Create() {
 ParentFrameTaskRunners::ParentFrameTaskRunners(LocalFrame* frame)
     : ContextLifecycleObserver(frame ? frame->GetDocument() : nullptr) {
   // For now we only support very limited task types.
-  for (auto type :
-       {TaskType::kUnspecedTimer, TaskType::kUnspecedLoading,
-        TaskType::kNetworking, TaskType::kPostedMessage,
-        TaskType::kCanvasBlobSerialization, TaskType::kUnthrottled}) {
+  for (auto type : {TaskType::kUnspecedTimer, TaskType::kUnspecedLoading,
+                    TaskType::kNetworking, TaskType::kPostedMessage,
+                    TaskType::kCanvasBlobSerialization, TaskType::kUnthrottled,
+                    TaskType::kInternalTest}) {
     auto task_runner =
-        frame ? TaskRunnerHelper::Get(type, frame)
+        frame ? frame->GetTaskRunner(type)
               : Platform::Current()->MainThread()->GetWebTaskRunner();
     task_runners_.insert(type, std::move(task_runner));
   }

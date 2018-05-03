@@ -15,11 +15,11 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_internals_util.h"
 #include "components/signin/core/browser/signin_metrics.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
@@ -31,8 +31,11 @@ using namespace signin_internals_util;
 SigninManager::SigninManager(SigninClient* client,
                              ProfileOAuth2TokenService* token_service,
                              AccountTrackerService* account_tracker_service,
-                             GaiaCookieManagerService* cookie_manager_service)
-    : SigninManagerBase(client, account_tracker_service),
+                             GaiaCookieManagerService* cookie_manager_service,
+                             SigninErrorController* signin_error_controller)
+    : SigninManagerBase(client,
+                        account_tracker_service,
+                        signin_error_controller),
       prohibit_signout_(false),
       type_(SIGNIN_TYPE_NONE),
       client_(client),
@@ -155,7 +158,7 @@ void SigninManager::SignOut(
     signin_metrics::ProfileSignout signout_source_metric,
     signin_metrics::SignoutDelete signout_delete_metric) {
   StartSignOut(signout_source_metric, signout_delete_metric,
-               !signin::IsDiceMigrationEnabled());
+               !signin::IsDiceEnabledForProfile(client_->GetPrefs()));
 }
 
 void SigninManager::SignOutAndRemoveAllAccounts(
@@ -163,6 +166,13 @@ void SigninManager::SignOutAndRemoveAllAccounts(
     signin_metrics::SignoutDelete signout_delete_metric) {
   StartSignOut(signout_source_metric, signout_delete_metric,
                true /* remove_all_tokens */);
+}
+
+void SigninManager::SignOutAndKeepAllAccounts(
+    signin_metrics::ProfileSignout signout_source_metric,
+    signin_metrics::SignoutDelete signout_delete_metric) {
+  StartSignOut(signout_source_metric, signout_delete_metric,
+               false /* remove_all_tokens */);
 }
 
 void SigninManager::StartSignOut(
@@ -205,12 +215,13 @@ void SigninManager::DoSignOut(
 
   ClearTransientSigninData();
 
+  AccountInfo account_info = GetAuthenticatedAccountInfo();
   const std::string account_id = GetAuthenticatedAccountId();
-  const std::string username = GetAuthenticatedAccountInfo().email;
+  const std::string username = account_info.email;
   const base::Time signin_time =
       base::Time::FromInternalValue(
           client_->GetPrefs()->GetInt64(prefs::kSignedInTime));
-  clear_authenticated_user();
+  ClearAuthenticatedAccountId();
   client_->GetPrefs()->ClearPref(prefs::kGoogleServicesHostedDomain);
   client_->GetPrefs()->ClearPref(prefs::kGoogleServicesAccountId);
   client_->GetPrefs()->ClearPref(prefs::kGoogleServicesUserAccountId);
@@ -233,8 +244,10 @@ void SigninManager::DoSignOut(
     token_service_->RevokeAllCredentials();
   }
 
-  for (auto& observer : observer_list_)
+  for (auto& observer : observer_list_) {
     observer.GoogleSignedOut(account_id, username);
+    observer.GoogleSignedOut(account_info);
+  }
 }
 
 void SigninManager::Initialize(PrefService* local_state) {
@@ -428,6 +441,7 @@ void SigninManager::FireGoogleSigninSucceeded() {
   std::string email = GetAuthenticatedAccountInfo().email;
   for (auto& observer : observer_list_) {
     observer.GoogleSigninSucceeded(account_id, email);
+    observer.GoogleSigninSucceeded(GetAuthenticatedAccountInfo());
     observer.GoogleSigninSucceededWithPassword(account_id, email, password_);
   }
 }

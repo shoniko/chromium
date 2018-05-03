@@ -12,10 +12,11 @@ Received metrics:
 	Nodes
 	Resources
 	ScriptPromises
-	SuspendableObjects
+	PausableObjects
 	V8PerContextDatas
 	WorkerGlobalScopes
 	UACSSResources
+	RTCPeerConnections
 	LayoutCount
 	RecalcStyleCount
 	LayoutDuration
@@ -39,10 +40,11 @@ Received metrics:
 	Nodes
 	Resources
 	ScriptPromises
-	SuspendableObjects
+	PausableObjects
 	V8PerContextDatas
 	WorkerGlobalScopes
 	UACSSResources
+	RTCPeerConnections
 	LayoutCount
 	RecalcStyleCount
 	LayoutDuration

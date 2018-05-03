@@ -17,8 +17,7 @@ namespace content {
 
 ChromeAppCacheService::ChromeAppCacheService(
     storage::QuotaManagerProxy* quota_manager_proxy)
-    : AppCacheServiceImpl(quota_manager_proxy), resource_context_(NULL) {
-}
+    : AppCacheServiceImpl(quota_manager_proxy), resource_context_(nullptr) {}
 
 void ChromeAppCacheService::InitializeOnIOThread(
     const base::FilePath& cache_path,
@@ -42,6 +41,16 @@ void ChromeAppCacheService::InitializeOnIOThread(
   Initialize(cache_path_);
   set_appcache_policy(this);
   set_special_storage_policy(special_storage_policy.get());
+}
+
+void ChromeAppCacheService::Bind(
+    std::unique_ptr<mojom::AppCacheBackend> backend,
+    mojom::AppCacheBackendRequest request) {
+  bindings_.AddBinding(std::move(backend), std::move(request));
+}
+
+void ChromeAppCacheService::Shutdown() {
+  bindings_.CloseAllBindings();
 }
 
 bool ChromeAppCacheService::CanLoadAppCache(const GURL& manifest_url,

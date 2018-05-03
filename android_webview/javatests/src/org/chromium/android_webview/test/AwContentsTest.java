@@ -32,7 +32,6 @@ import org.chromium.android_webview.renderer_priority.RendererPriority;
 import org.chromium.android_webview.test.TestAwContentsClient.OnDownloadStartHelper;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
@@ -138,6 +137,8 @@ public class AwContentsTest {
             // we fail gracefully and do not crash when APIs are invoked after destruction.
             // Due to the large number of APIs we only test a representative selection here.
             awContents.clearHistory();
+            Assert.assertNull(awContents.getOriginalUrl());
+            Assert.assertNull(awContents.getNavigationHistory());
             awContents.loadUrl("http://www.google.com");
             awContents.findAllAsync("search");
             Assert.assertNull(awContents.getUrl());
@@ -454,7 +455,6 @@ public class AwContentsTest {
     }
 
     @Test
-    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @Feature({"AndroidWebView"})
     @SmallTest
     public void testCanInjectHeaders() throws Throwable {

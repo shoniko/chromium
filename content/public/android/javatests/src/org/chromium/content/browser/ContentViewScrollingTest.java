@@ -79,11 +79,6 @@ public class ContentViewScrollingTest {
         }
 
         @Override
-        public boolean awakenScrollBars() {
-            return false;
-        }
-
-        @Override
         public boolean super_awakenScrollBars(int startDelay, boolean invalidate) {
             return false;
         }
@@ -98,6 +93,8 @@ public class ContentViewScrollingTest {
         }
     }
 
+    private RenderCoordinates mCoordinates;
+
     private void waitForScroll(final boolean hugLeft, final boolean hugTop) {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
@@ -106,16 +103,10 @@ public class ContentViewScrollingTest {
                 final int minThreshold = 5;
                 final int maxThreshold = 100;
 
-                boolean xCorrect = hugLeft
-                        ? mActivityTestRule.getContentViewCore().getNativeScrollXForTest()
-                                < minThreshold
-                        : mActivityTestRule.getContentViewCore().getNativeScrollXForTest()
-                                > maxThreshold;
-                boolean yCorrect = hugTop
-                        ? mActivityTestRule.getContentViewCore().getNativeScrollYForTest()
-                                < minThreshold
-                        : mActivityTestRule.getContentViewCore().getNativeScrollYForTest()
-                                > maxThreshold;
+                boolean xCorrect = hugLeft ? mCoordinates.getScrollXPixInt() < minThreshold
+                                           : mCoordinates.getScrollXPixInt() > maxThreshold;
+                boolean yCorrect = hugTop ? mCoordinates.getScrollYPixInt() < minThreshold
+                                          : mCoordinates.getScrollYPixInt() > maxThreshold;
                 return xCorrect && yCorrect;
             }
         });
@@ -125,7 +116,7 @@ public class ContentViewScrollingTest {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return mActivityTestRule.getContentViewCore().getLastFrameViewportWidthCss() != 0;
+                return mCoordinates.getLastFrameViewportWidthCss() != 0;
             }
         });
     }
@@ -179,10 +170,11 @@ public class ContentViewScrollingTest {
     public void setUp() throws Exception {
         mActivityTestRule.launchContentShellWithUrl(LARGE_PAGE);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
+        mCoordinates = mActivityTestRule.getRenderCoordinates();
         waitForViewportInitialization();
 
-        Assert.assertEquals(0, mActivityTestRule.getContentViewCore().getNativeScrollXForTest());
-        Assert.assertEquals(0, mActivityTestRule.getContentViewCore().getNativeScrollYForTest());
+        Assert.assertEquals(0, mCoordinates.getScrollXPixInt());
+        Assert.assertEquals(0, mCoordinates.getScrollYPixInt());
     }
 
     @Test
@@ -351,10 +343,8 @@ public class ContentViewScrollingTest {
     @Feature({"Main"})
     @RetryOnFailure
     public void testOnScrollChanged() throws Throwable {
-        final int scrollToX =
-                mActivityTestRule.getContentViewCore().getNativeScrollXForTest() + 2500;
-        final int scrollToY =
-                mActivityTestRule.getContentViewCore().getNativeScrollYForTest() + 2500;
+        final int scrollToX = mCoordinates.getScrollXPixInt() + 2500;
+        final int scrollToY = mCoordinates.getScrollYPixInt() + 2500;
         final TestInternalAccessDelegate containerViewInternals = new TestInternalAccessDelegate();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override

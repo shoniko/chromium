@@ -37,7 +37,7 @@
 
 namespace blink {
 
-InputTypeView::~InputTypeView() {}
+InputTypeView::~InputTypeView() = default;
 
 void InputTypeView::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
@@ -115,6 +115,10 @@ void InputTypeView::HandleFocusInEvent(Element*, WebFocusType) {}
 void InputTypeView::StartResourceLoading() {}
 
 void InputTypeView::ClosePopupView() {}
+
+bool InputTypeView::NeedsShadowSubtree() const {
+  return true;
+}
 
 void InputTypeView::CreateShadowSubtree() {}
 

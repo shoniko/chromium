@@ -48,7 +48,7 @@ class ImageDecoding(legacy_page_test.LegacyPageTest):
     tab.browser.platform.tracing_controller.StartTracing(config)
 
   def ValidateAndMeasurePage(self, page, tab, results):
-    timeline_data = tab.browser.platform.tracing_controller.StopTracing()
+    timeline_data = tab.browser.platform.tracing_controller.StopTracing()[0]
     timeline_model = model.TimelineModel(timeline_data)
     self._power_metric.Stop(page, tab)
     self._power_metric.AddResults(tab, results)

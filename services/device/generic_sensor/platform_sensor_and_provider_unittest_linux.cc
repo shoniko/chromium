@@ -54,7 +54,7 @@ void DeleteFile(const base::FilePath& file) {
 }
 
 void WriteValueToFile(const base::FilePath& path, double value) {
-  const std::string str = base::DoubleToString(value);
+  const std::string str = base::NumberToString(value);
   int bytes_written = base::WriteFile(path, str.data(), str.size());
   EXPECT_EQ(static_cast<size_t>(bytes_written), str.size());
 }
@@ -109,10 +109,10 @@ class MockSensorDeviceManager : public SensorDeviceManager {
 
 // Mock for PlatformSensor's client interface that is used to deliver
 // error and data changes notifications.
-class MockPlatformSensorClient : public PlatformSensor::Client {
+class LinuxMockPlatformSensorClient : public PlatformSensor::Client {
  public:
-  MockPlatformSensorClient() = default;
-  explicit MockPlatformSensorClient(scoped_refptr<PlatformSensor> sensor)
+  LinuxMockPlatformSensorClient() = default;
+  explicit LinuxMockPlatformSensorClient(scoped_refptr<PlatformSensor> sensor)
       : sensor_(sensor) {
     if (sensor_)
       sensor_->AddClient(this);
@@ -120,7 +120,7 @@ class MockPlatformSensorClient : public PlatformSensor::Client {
     ON_CALL(*this, IsSuspended()).WillByDefault(Return(false));
   }
 
-  ~MockPlatformSensorClient() override {
+  ~LinuxMockPlatformSensorClient() override {
     if (sensor_)
       sensor_->RemoveClient(this);
   }
@@ -133,7 +133,7 @@ class MockPlatformSensorClient : public PlatformSensor::Client {
  private:
   scoped_refptr<PlatformSensor> sensor_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockPlatformSensorClient);
+  DISALLOW_COPY_AND_ASSIGN(LinuxMockPlatformSensorClient);
 };
 
 class PlatformSensorAndProviderLinuxTest : public ::testing::Test {
@@ -142,7 +142,7 @@ class PlatformSensorAndProviderLinuxTest : public ::testing::Test {
     provider_ = PlatformSensorProviderLinux::GetInstance();
     provider_->SetFileTaskRunnerForTesting(message_loop_.task_runner());
 
-    auto manager = base::MakeUnique<NiceMock<MockSensorDeviceManager>>();
+    auto manager = std::make_unique<NiceMock<MockSensorDeviceManager>>();
     manager_ = manager.get();
     provider_->SetSensorDeviceManagerForTesting(std::move(manager));
 
@@ -168,7 +168,7 @@ class PlatformSensorAndProviderLinuxTest : public ::testing::Test {
   // Sensor creation is asynchronous, therefore inner loop is used to wait for
   // PlatformSensorProvider::CreateSensorCallback completion.
   scoped_refptr<PlatformSensor> CreateSensor(mojom::SensorType type) {
-    run_loop_ = base::MakeUnique<base::RunLoop>();
+    run_loop_ = std::make_unique<base::RunLoop>();
     provider_->CreateSensor(
         type, base::Bind(&PlatformSensorAndProviderLinuxTest::SensorCreated,
                          base::Unretained(this)));
@@ -253,9 +253,9 @@ class PlatformSensorAndProviderLinuxTest : public ::testing::Test {
   }
 
   // Waits before OnSensorReadingChanged is called.
-  void WaitOnSensorReadingChangedEvent(MockPlatformSensorClient* client,
+  void WaitOnSensorReadingChangedEvent(LinuxMockPlatformSensorClient* client,
                                        mojom::SensorType type) {
-    run_loop_ = base::MakeUnique<base::RunLoop>();
+    run_loop_ = std::make_unique<base::RunLoop>();
     EXPECT_CALL(*client, OnSensorReadingChanged(type))
         .WillOnce(
             Invoke([this](mojom::SensorType type) { run_loop_->Quit(); }));
@@ -264,8 +264,8 @@ class PlatformSensorAndProviderLinuxTest : public ::testing::Test {
   }
 
   // Waits before OnSensorError is called.
-  void WaitOnSensorErrorEvent(MockPlatformSensorClient* client) {
-    run_loop_ = base::MakeUnique<base::RunLoop>();
+  void WaitOnSensorErrorEvent(LinuxMockPlatformSensorClient* client) {
+    run_loop_ = std::make_unique<base::RunLoop>();
     EXPECT_CALL(*client, OnSensorError()).WillOnce(Invoke([this]() {
       run_loop_->Quit();
     }));
@@ -337,7 +337,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest, StartFails) {
   auto sensor = CreateSensor(SensorType::AMBIENT_LIGHT);
   EXPECT_TRUE(sensor);
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
   PlatformSensorConfiguration configuration(10);
   EXPECT_FALSE(sensor->StartListening(client.get(), configuration));
 }
@@ -354,7 +355,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest, SensorStarted) {
   auto sensor = CreateSensor(SensorType::AMBIENT_LIGHT);
   EXPECT_TRUE(sensor);
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
   PlatformSensorConfiguration configuration(5);
   EXPECT_TRUE(sensor->StartListening(client.get(), configuration));
   WaitOnSensorReadingChangedEvent(client.get(), sensor->GetType());
@@ -372,7 +374,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest, SensorRemoved) {
   auto sensor = CreateSensor(SensorType::AMBIENT_LIGHT);
   EXPECT_TRUE(sensor);
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
   PlatformSensorConfiguration configuration(5);
   EXPECT_TRUE(sensor->StartListening(client.get(), configuration));
   GenerateDeviceRemovedEvent(sensors_dir_.GetPath());
@@ -496,16 +499,18 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckAmbientLightReadings) {
   EXPECT_TRUE(sensor);
   EXPECT_EQ(sensor->GetReportingMode(), mojom::ReportingMode::ON_CHANGE);
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
   PlatformSensorConfiguration configuration(
       sensor->GetMaximumSupportedFrequency());
   EXPECT_TRUE(sensor->StartListening(client.get(), configuration));
   WaitOnSensorReadingChangedEvent(client.get(), sensor->GetType());
-  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 
   SensorReadingSharedBuffer* buffer =
       static_cast<SensorReadingSharedBuffer*>(mapping.get());
   EXPECT_THAT(buffer->reading.als.value, sensor_value[0]);
+
+  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 }
 
 // Tests that Accelerometer readings are correctly converted.
@@ -521,7 +526,7 @@ TEST_F(PlatformSensorAndProviderLinuxTest,
   // created to make the sensor device manager identify this sensor with
   // ON_CHANGE reporting mode. This can be done by sending |kZero| as a
   // frequency value, which means a file is not created.
-  // This will allow the MockPlatformSensorClient to
+  // This will allow the LinuxMockPlatformSensorClient to
   // receive a notification and test if reading values are right. Otherwise
   // the test will not know when data is ready.
   double sensor_values[3] = {4.5, -2.45, -3.29};
@@ -537,11 +542,11 @@ TEST_F(PlatformSensorAndProviderLinuxTest,
   // The reporting mode is ON_CHANGE only for this test.
   EXPECT_EQ(sensor->GetReportingMode(), mojom::ReportingMode::ON_CHANGE);
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
   PlatformSensorConfiguration configuration(10);
   EXPECT_TRUE(sensor->StartListening(client.get(), configuration));
   WaitOnSensorReadingChangedEvent(client.get(), sensor->GetType());
-  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 
   SensorReadingSharedBuffer* buffer =
       static_cast<SensorReadingSharedBuffer*>(mapping.get());
@@ -559,6 +564,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest,
   EXPECT_THAT(buffer->reading.accel.z,
               -scaling * (sensor_values[2] + kAccelerometerOffsetValue));
 #endif
+
+  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 }
 
 // Tests that LinearAcceleration sensor is successfully created and works.
@@ -584,7 +591,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckLinearAcceleration) {
   EXPECT_TRUE(sensor);
   EXPECT_EQ(sensor->GetReportingMode(), mojom::ReportingMode::CONTINUOUS);
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
   PlatformSensorConfiguration configuration(10);
   EXPECT_TRUE(sensor->StartListening(client.get(), configuration));
 
@@ -592,7 +600,6 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckLinearAcceleration) {
   // iterations to isolate gravity properly.
   int kApproximateExpectedAcceleration = 6;
   WaitOnSensorReadingChangedEvent(client.get(), sensor->GetType());
-  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 
   SensorReadingSharedBuffer* buffer =
       static_cast<SensorReadingSharedBuffer*>(mapping.get());
@@ -600,6 +607,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckLinearAcceleration) {
   EXPECT_THAT(buffer->reading.accel.y, 0.0);
   EXPECT_THAT(static_cast<int>(buffer->reading.accel.z),
               kApproximateExpectedAcceleration);
+
+  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 }
 
 // Tests that Gyroscope readings are correctly converted.
@@ -614,7 +623,7 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckGyroscopeReadingConversion) {
   // created to make the sensor device manager identify this sensor with
   // ON_CHANGE reporting mode. This can be done by sending |kZero| as a
   // frequency value, which means a file is not created.
-  // This will allow the MockPlatformSensorClient to
+  // This will allow the LinuxMockPlatformSensorClient to
   // receive a notification and test if reading values are right. Otherwise
   // the test will not know when data is ready.
   double sensor_values[3] = {2.2, -3.8, -108.7};
@@ -629,11 +638,11 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckGyroscopeReadingConversion) {
   // The reporting mode is ON_CHANGE only for this test.
   EXPECT_EQ(sensor->GetReportingMode(), mojom::ReportingMode::ON_CHANGE);
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
   PlatformSensorConfiguration configuration(10);
   EXPECT_TRUE(sensor->StartListening(client.get(), configuration));
   WaitOnSensorReadingChangedEvent(client.get(), sensor->GetType());
-  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 
   SensorReadingSharedBuffer* buffer =
       static_cast<SensorReadingSharedBuffer*>(mapping.get());
@@ -651,6 +660,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckGyroscopeReadingConversion) {
   EXPECT_THAT(buffer->reading.gyro.z,
               scaling * (sensor_values[2] + kGyroscopeOffsetValue));
 #endif
+
+  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 }
 
 // Tests that Magnetometer readings are correctly converted.
@@ -665,7 +676,7 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckMagnetometerReadingConversion) {
   // created to make the sensor device manager identify this sensor with
   // ON_CHANGE reporting mode. This can be done by sending |kZero| as a
   // frequency value, which means a file is not created.
-  // This will allow the MockPlatformSensorClient to
+  // This will allow the LinuxMockPlatformSensorClient to
   // receive a notification and test if reading values are right. Otherwise
   // the test will not know when data is ready.
   double sensor_values[3] = {2.2, -3.8, -108.7};
@@ -681,11 +692,11 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckMagnetometerReadingConversion) {
   // The reporting mode is ON_CHANGE only for this test.
   EXPECT_EQ(sensor->GetReportingMode(), mojom::ReportingMode::ON_CHANGE);
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
   PlatformSensorConfiguration configuration(10);
   EXPECT_TRUE(sensor->StartListening(client.get(), configuration));
   WaitOnSensorReadingChangedEvent(client.get(), sensor->GetType());
-  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 
   SensorReadingSharedBuffer* buffer =
       static_cast<SensorReadingSharedBuffer*>(mapping.get());
@@ -696,6 +707,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest, CheckMagnetometerReadingConversion) {
               scaling * (sensor_values[1] + kMagnetometerOffsetValue));
   EXPECT_THAT(buffer->reading.magn.z,
               scaling * (sensor_values[2] + kMagnetometerOffsetValue));
+
+  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 }
 
 // Tests that Ambient Light sensor client's OnSensorReadingChanged() is called
@@ -722,7 +735,8 @@ TEST_F(PlatformSensorAndProviderLinuxTest,
   EXPECT_TRUE(sensor);
   EXPECT_EQ(mojom::ReportingMode::CONTINUOUS, sensor->GetReportingMode());
 
-  auto client = base::MakeUnique<NiceMock<MockPlatformSensorClient>>(sensor);
+  auto client =
+      std::make_unique<NiceMock<LinuxMockPlatformSensorClient>>(sensor);
 
   PlatformSensorConfiguration configuration(
       sensor->GetMaximumSupportedFrequency());
@@ -730,11 +744,11 @@ TEST_F(PlatformSensorAndProviderLinuxTest,
 
   WaitOnSensorReadingChangedEvent(client.get(), sensor->GetType());
 
-  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
-
   SensorReadingSharedBuffer* buffer =
       static_cast<SensorReadingSharedBuffer*>(mapping.get());
   EXPECT_THAT(buffer->reading.als.value, sensor_value[0]);
+
+  EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 }
 
 }  // namespace device

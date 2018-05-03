@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/supports_user_data.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "components/offline_pages/core/offline_event_logger.h"
 #include "components/offline_pages/core/offline_page_archiver.h"
 #include "components/offline_pages/core/offline_page_model_query.h"
@@ -42,7 +43,7 @@ struct ClientId;
 //
 // TODO(fgorski): Things to describe:
 // * how to cancel requests and what to expect
-class OfflinePageModel : public base::SupportsUserData {
+class OfflinePageModel : public base::SupportsUserData, public KeyedService {
  public:
   // Describes the parameters to control how to save a page.
   struct SavePageParams {
@@ -106,8 +107,6 @@ class OfflinePageModel : public base::SupportsUserData {
     virtual ~Observer() = default;
   };
 
-  using CheckPagesExistOfflineResult =
-      offline_pages::CheckPagesExistOfflineResult;
   using MultipleOfflinePageItemResult =
       offline_pages::MultipleOfflinePageItemResult;
   using DeletePageResult = offline_pages::DeletePageResult;
@@ -191,12 +190,6 @@ class OfflinePageModel : public base::SupportsUserData {
       const std::string& request_origin,
       const MultipleOfflinePageItemCallback& callback) = 0;
 
-  // Returns via callback all GURLs in |urls| that are equal to the online URL
-  // of any offline page.
-  virtual void CheckPagesExistOffline(
-      const std::set<GURL>& urls,
-      const CheckPagesExistOfflineCallback& callback) = 0;
-
   // Gets all offline ids where the offline page has the matching client id.
   virtual void GetOfflineIdsForClientId(
       const ClientId& client_id,
@@ -206,11 +199,12 @@ class OfflinePageModel : public base::SupportsUserData {
   virtual ClientPolicyController* GetPolicyController() = 0;
 
   // Get the archive directory based on client policy of the namespace.
-  virtual const base::FilePath& GetArchiveDirectory(
+  virtual const base::FilePath& GetInternalArchiveDirectory(
       const std::string& name_space) const = 0;
 
-  // TODO(dougarnett): Remove this and its uses.
-  virtual bool is_loaded() const = 0;
+  // Returns whether given archive file is in the internal directory.
+  virtual bool IsArchiveInInternalDir(
+      const base::FilePath& file_path) const = 0;
 
   // Returns the logger. Ownership is retained by the model.
   virtual OfflineEventLogger* GetLogger() = 0;

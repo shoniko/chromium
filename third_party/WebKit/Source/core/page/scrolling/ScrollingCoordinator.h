@@ -27,6 +27,7 @@
 #define ScrollingCoordinator_h
 
 #include <memory>
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/paint/LayerHitTestRects.h"
 #include "platform/geometry/IntRect.h"
@@ -34,7 +35,6 @@
 #include "platform/heap/Handle.h"
 #include "platform/scroll/MainThreadScrollingReason.h"
 #include "platform/scroll/ScrollTypes.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebLayerScrollClient.h"
 
@@ -67,8 +67,6 @@ using ScrollbarId = uint64_t;
 class CORE_EXPORT ScrollingCoordinator final
     : public GarbageCollectedFinalized<ScrollingCoordinator>,
       public WebLayerScrollClient {
-  WTF_MAKE_NONCOPYABLE(ScrollingCoordinator);
-
  public:
   static ScrollingCoordinator* Create(Page*);
 
@@ -90,20 +88,11 @@ class CORE_EXPORT ScrollingCoordinator final
   bool CoordinatesScrollingForFrameView(LocalFrameView*) const;
 
   // Called when any frame has done its layout or compositing has changed.
-  void NotifyGeometryChanged();
-  // Called when any frame recalculates its overflows after style change.
-  void NotifyOverflowUpdated();
+  void NotifyGeometryChanged(LocalFrameView*);
   // Called when any layoutBox has transform changed
   void NotifyTransformChanged(const LayoutBox&);
 
-  void UpdateAfterCompositingChangeIfNeeded();
-
-  // Should be called whenever a frameview visibility is changed.
-  void FrameViewVisibilityDidChange();
-
-  // Should be called whenever a scrollable area is added or removed, or
-  // gains/loses a composited layer.
-  void ScrollableAreasDidChange();
+  void UpdateAfterCompositingChangeIfNeeded(LocalFrameView*);
 
   // Should be called whenever the slow repaint objects counter changes between
   // zero and one.
@@ -132,7 +121,6 @@ class CORE_EXPORT ScrollingCoordinator final
   bool ScrollableAreaScrollLayerDidChange(ScrollableArea*);
   void ScrollableAreaScrollbarLayerDidChange(ScrollableArea*,
                                              ScrollbarOrientation);
-  void SetLayerIsContainerForFixedPositionLayers(GraphicsLayer*, bool);
   void UpdateLayerPositionConstraint(PaintLayer*);
   void TouchEventTargetRectsDidChange();
   void WillDestroyLayer(PaintLayer*);
@@ -172,21 +160,15 @@ class CORE_EXPORT ScrollingCoordinator final
 
   // Dirty flags used to idenfity what really needs to be computed after
   // compositing is updated.
-  bool scroll_gesture_region_is_dirty_;
   bool touch_event_target_rects_are_dirty_;
   bool should_scroll_on_main_thread_dirty_;
 
  private:
-  bool ShouldUpdateAfterCompositingChange() const {
-    return scroll_gesture_region_is_dirty_ ||
-           touch_event_target_rects_are_dirty_ ||
-           should_scroll_on_main_thread_dirty_ || FrameScrollerIsDirty();
-  }
-
   void SetShouldUpdateScrollLayerPositionOnMainThread(
       MainThreadScrollingReasons);
 
-  void SetShouldHandleScrollGestureOnMainThreadRegion(const Region&);
+  void SetShouldHandleScrollGestureOnMainThreadRegion(const Region&,
+                                                      LocalFrameView*);
   void SetTouchEventTargetRects(LayerHitTestRects&);
   void ComputeTouchEventTargetRects(LayerHitTestRects&);
 
@@ -211,6 +193,7 @@ class CORE_EXPORT ScrollingCoordinator final
   bool was_frame_scrollable_;
 
   MainThreadScrollingReasons last_main_thread_scrolling_reasons_;
+  DISALLOW_COPY_AND_ASSIGN(ScrollingCoordinator);
 };
 
 }  // namespace blink

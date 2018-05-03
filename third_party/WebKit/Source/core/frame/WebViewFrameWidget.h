@@ -5,13 +5,13 @@
 #ifndef WebViewFrameWidget_h
 #define WebViewFrameWidget_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/frame/WebFrameWidgetBase.h"
 #include "core/frame/WebLocalFrameImpl.h"
 #include "platform/heap/Handle.h"
 #include "platform/heap/SelfKeepAlive.h"
-#include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -34,8 +34,6 @@ class WebWidgetClient;
 // A more detailed writeup of this transition can be read at
 // https://goo.gl/7yVrnb.
 class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
-  WTF_MAKE_NONCOPYABLE(WebViewFrameWidget);
-
  public:
   explicit WebViewFrameWidget(WebWidgetClient&,
                               WebViewImpl&,
@@ -51,7 +49,7 @@ class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
   void DidExitFullscreen() override;
   void SetSuppressFrameRequestsWorkaroundFor704763Only(bool) final;
   void BeginFrame(double last_frame_time_monotonic) override;
-  void UpdateAllLifecyclePhases() override;
+  void UpdateLifecycle(LifecycleUpdate requested_update) override;
   void Paint(WebCanvas*, const WebRect& view_port) override;
   void LayoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) override;
   void CompositeAndReadbackAsync(
@@ -59,7 +57,6 @@ class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
   void ThemeChanged() override;
   WebInputEventResult HandleInputEvent(const WebCoalescedInputEvent&) override;
   void SetCursorVisibilityState(bool is_visible) override;
-  bool HasTouchEventHandlersAt(const WebPoint&) override;
   void ApplyViewportDeltas(const WebFloatSize& visual_viewport_delta,
                            const WebFloatSize& layout_viewport_delta,
                            const WebFloatSize& elastic_overscroll_delta,
@@ -69,12 +66,7 @@ class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
                                          bool has_scrolled_by_touch) override;
   void MouseCaptureLost() override;
   void SetFocus(bool) override;
-  WebRange CompositionRange() override;
   bool SelectionBounds(WebRect& anchor, WebRect& focus) const override;
-  bool SelectionTextDirection(WebTextDirection& start,
-                              WebTextDirection& end) const override;
-  bool IsSelectionAnchorFirst() const override;
-  void SetTextDirection(WebTextDirection) override;
   bool IsAcceleratedCompositingActive() const override;
   bool IsWebView() const override { return false; }
   bool IsPagePopup() const override { return false; }
@@ -85,7 +77,7 @@ class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
   void UpdateBrowserControlsState(WebBrowserControlsState constraints,
                                   WebBrowserControlsState current,
                                   bool animate) override;
-  void SetVisibilityState(WebPageVisibilityState) override;
+  void SetVisibilityState(mojom::PageVisibilityState) override;
   void SetBackgroundColorOverride(WebColor) override;
   void ClearBackgroundColorOverride() override;
   void SetBaseBackgroundColorOverride(WebColor) override;
@@ -117,6 +109,8 @@ class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
   Member<WebLocalFrameImpl> main_frame_;
 
   SelfKeepAlive<WebViewFrameWidget> self_keep_alive_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebViewFrameWidget);
 };
 
 }  // namespace blink

@@ -83,7 +83,8 @@ class InlineFlowBox : public InlineBox {
 #endif
 
 #ifndef NDEBUG
-  void ShowLineTreeAndMark(const InlineBox* = nullptr,
+  void DumpLineTreeAndMark(StringBuilder&,
+                           const InlineBox* = nullptr,
                            const char* = nullptr,
                            const InlineBox* = nullptr,
                            const char* = nullptr,
@@ -110,7 +111,8 @@ class InlineFlowBox : public InlineBox {
       Vector<InlineBox*>::iterator last);
   void CollectLeafBoxesInLogicalOrder(
       Vector<InlineBox*>&,
-      CustomInlineBoxRangeReverse custom_reverse_implementation = 0) const;
+      CustomInlineBoxRangeReverse custom_reverse_implementation =
+          nullptr) const;
 
   DISABLE_CFI_PERF
   void SetConstructed() final {

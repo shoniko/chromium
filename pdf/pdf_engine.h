@@ -14,6 +14,7 @@
 #endif
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -68,6 +69,7 @@ class PDFEngine {
     kCount = 4,
   };
 
+  // Features in a document that are relevant to measure.
   struct DocumentFeatures {
     // Number of pages in document.
     size_t page_count = 0;
@@ -81,6 +83,22 @@ class PDFEngine {
     bool is_tagged = false;
     // What type of form the document contains.
     FormType form_type = FormType::kNone;
+  };
+
+  // Features in a page that are relevant to measure.
+  struct PageFeatures {
+    PageFeatures();
+    PageFeatures(const PageFeatures& other);
+    ~PageFeatures();
+
+    // Whether the instance has been initialized and filled.
+    bool IsInitialized() const;
+
+    // 0-based page index in the document. < 0 when uninitialized.
+    int index = -1;
+
+    // Set of annotation types found in page.
+    std::set<int> annotation_types;
   };
 
   // The interface that's provided to the rendering engine.
@@ -128,6 +146,10 @@ class PDFEngine {
 
     // Updates the index of the currently selected search item.
     virtual void NotifySelectedFindResultChanged(int current_find_index) = 0;
+
+    // Notifies a page became visible.
+    virtual void NotifyPageBecameVisible(
+        const PDFEngine::PageFeatures* page_features) = 0;
 
     // Prompts the user for a password to open this document. The callback is
     // called when the password is retrieved.
@@ -223,6 +245,9 @@ class PDFEngine {
 
     virtual void SelectionChanged(const pp::Rect& left, const pp::Rect& right) {
     }
+
+    // Sets edit mode state.
+    virtual void IsEditModeChanged(bool is_edit_mode) {}
   };
 
   // Factory method to create an instance of the PDF Engine.
@@ -276,6 +301,10 @@ class PDFEngine {
   virtual int GetNumberOfPages() = 0;
   // Gets the 0-based page number of |destination|, or -1 if it does not exist.
   virtual int GetNamedDestinationPage(const std::string& destination) = 0;
+  // Transforms an (x, y) point in page coordinates to screen coordinates.
+  virtual std::pair<int, int> TransformPagePoint(
+      int page_index,
+      std::pair<int, int> page_xy) = 0;
   // Gets the index of the most visible page, or -1 if none are visible.
   virtual int GetMostVisiblePage() = 0;
   // Gets the rectangle of the page including shadow.
@@ -348,6 +377,9 @@ class PDFEngine {
   virtual void MoveRangeSelectionExtent(const pp::Point& extent) = 0;
   virtual void SetSelectionBounds(const pp::Point& base,
                                   const pp::Point& extent) = 0;
+
+  // Remove focus from form widgets, consolidating the user input.
+  virtual void KillFormFocus() = 0;
 };
 
 // Interface for exports that wrap the PDF engine.

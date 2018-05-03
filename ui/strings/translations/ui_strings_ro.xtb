@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">Punct</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 lună}few{# luni}other{# de luni}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>
+<translation id="1812519734428420144">Evaluare cu stele: <ph name="RATING_SCORE" /></translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{O oră și  }few{# ore și  }other{# de ore și  }}</translation>
 <translation id="1842960171412779397">selectează</translation>
 <translation id="1860796786778352021">Buton de închidere a notificării</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">Deschideți dosarul</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{Acum 1 an}few{Acum # ani}other{Acum # de ani}}</translation>
 <translation id="2931838996092594335">dă clic</translation>
-<translation id="2983818520079887040">Setări...</translation>
 <translation id="3036649622769666520">Deschide fișierele</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3087734570205094154">Jos</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">TOATE APLICAȚIILE</translation>
 <translation id="4320177379694898372">Fără conexiune la internet</translation>
 <translation id="4588090240171750605">Derulează spre dreapta</translation>
+<translation id="4724120544754982507">Centrul de notificări, <ph name="UNREAD_NOTIFICATION_COUNT" /> notificări necitite</translation>
 <translation id="4730374152663651037">FOLOSITE FRECVENT</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{1 lună rămasă}few{# luni rămase}other{# de luni rămase}}</translation>
 <translation id="4820616160060340806">Command+<ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">Minimizează</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{o oră}few{# ore}other{# de ore}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">Toate aplicațiile</translation>
 <translation id="6012623610530968780">Pagina <ph name="SELECTED_PAGE" /> din <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">Șterge textul din caseta de căutare</translation>
 <translation id="6040143037577758943">Închide</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">Virgulă</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{Acum o sec.}few{Acum # sec}other{Acum # sec}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{Acum 1 secundă}few{Acum # secunde}other{Acum # de secunde}}</translation>
+<translation id="654149438358937226">Blochează toate notificările</translation>
 <translation id="6567071839949112727">dă clic pe predecesor</translation>
 <translation id="6612467943526193239">Pentru a ieși din calibrare, apasă pe Esc.</translation>
 <translation id="6620110761915583480">Salvează fișierul</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">Anulează</translation>
 <translation id="7781829728241885113">Ieri</translation>
 <translation id="7814458197256864873">&amp;Copiază</translation>
+<translation id="7879499977785298635">Nu bloca</translation>
 <translation id="7907591526440419938">Deschide fișierul</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{Acum o oră}few{Acum # ore}other{Acum # de ore}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{O sec. rămasă}few{# sec. rămase}other{# sec. rămase}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{1 an}few{# ani}other{# de ani}}</translation>
 <translation id="8371695176452482769">Rostește acum</translation>
 <translation id="838869780401515933">bifează</translation>
+<translation id="8393700583063109961">Trimite un mesaj</translation>
 <translation id="8394908167088220973">Redați/întrerupeți conținutul media</translation>
 <translation id="8400147561352026160">Shift+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 an}few{# ani}other{# ani}}</translation>
 <translation id="8602707065186045623">Fișier <ph name="SAVEAS_EXTENSION_TYPE" /> (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KO/s</translation>
 <translation id="8725488761726303204">Peste <ph name="NUMBER" /></translation>
+<translation id="8730621377337864115">Terminat</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{1 h}few{# h}other{# h}}</translation>
 <translation id="8806053966018712535">Dosarul <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">Adnotează imaginea</translation>

@@ -56,9 +56,10 @@ SubresourceFilterSafeBrowsingActivationThrottle::
   // The last check could be ongoing when the navigation is cancelled.
   if (check_results_.empty() || !check_results_.back().finished)
     return;
+  bool warning = false;
   ActivationList matched_list = GetListForThreatTypeAndMetadata(
-      check_results_.back().threat_type, check_results_.back().threat_metadata);
-
+      check_results_.back().threat_type, check_results_.back().threat_metadata,
+      &warning);
   // TODO(csharrison): Log more metrics based on check_results_.
   UMA_HISTOGRAM_ENUMERATION("SubresourceFilter.PageLoad.ActivationList",
                             matched_list,
@@ -88,18 +89,6 @@ SubresourceFilterSafeBrowsingActivationThrottle::
       UMA_HISTOGRAM_COUNTS(
           "SubresourceFilter.PageLoad.RedirectChainLength."
           "BetterAds",
-          chain_size);
-      break;
-    case ActivationList::ABUSIVE_ADS:
-      UMA_HISTOGRAM_COUNTS(
-          "SubresourceFilter.PageLoad.RedirectChainLength."
-          "AbusiveAds",
-          chain_size);
-      break;
-    case ActivationList::ALL_ADS:
-      UMA_HISTOGRAM_COUNTS(
-          "SubresourceFilter.PageLoad.RedirectChainLength."
-          "AllAds",
           chain_size);
       break;
     default:
@@ -146,10 +135,14 @@ void SubresourceFilterSafeBrowsingActivationThrottle::OnCheckUrlResultOnUI(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   size_t request_id = result.request_id;
   DCHECK_LT(request_id, check_results_.size());
+  DCHECK_LT(request_id, check_start_times_.size());
 
   auto& stored_result = check_results_.at(request_id);
   CHECK(!stored_result.finished);
   stored_result = result;
+
+  UMA_HISTOGRAM_TIMES("SubresourceFilter.SafeBrowsing.TotalCheckTime",
+                      base::TimeTicks::Now() - check_start_times_[request_id]);
   if (deferring_ && request_id == check_results_.size() - 1) {
     NotifyResult();
 
@@ -161,6 +154,7 @@ void SubresourceFilterSafeBrowsingActivationThrottle::OnCheckUrlResultOnUI(
 void SubresourceFilterSafeBrowsingActivationThrottle::CheckCurrentUrl() {
   if (!database_client_)
     return;
+  check_start_times_.push_back(base::TimeTicks::Now());
   check_results_.emplace_back();
   size_t id = check_results_.size() - 1;
   io_task_runner_->PostTask(
@@ -190,14 +184,7 @@ void SubresourceFilterSafeBrowsingActivationThrottle::NotifyResult() {
     const auto& check_result = check_results_.back();
     DCHECK(check_result.finished);
     matched_list = GetListForThreatTypeAndMetadata(
-        check_result.threat_type, check_result.threat_metadata);
-    // TODO(shivanisha): For now warning is true if at least one matching list
-    // has warning mode set. This needs to change to be able to handle per-list
-    // enforcement level.
-    for (const auto& match :
-         check_result.threat_metadata.subresource_filter_match) {
-      warning |= (match.second == safe_browsing::SubresourceFilterLevel::WARN);
-    }
+        check_result.threat_type, check_result.threat_metadata, &warning);
     SubresourceFilterObserverManager::FromWebContents(
         navigation_handle()->GetWebContents())
         ->NotifySafeBrowsingCheckComplete(navigation_handle(),
@@ -223,8 +210,8 @@ void SubresourceFilterSafeBrowsingActivationThrottle::NotifyResult() {
   // activation.
   bool whitelisted = client_->OnPageActivationComputed(
       navigation_handle(),
-      matched_configuration.activation_options.activation_level ==
-          ActivationLevel::ENABLED,
+      !warning && matched_configuration.activation_options.activation_level ==
+                      ActivationLevel::ENABLED,
       matched_configuration.activation_options.should_suppress_notifications);
 
   // Only reset the activation decision reason if we would have activated.
@@ -278,7 +265,7 @@ SubresourceFilterSafeBrowsingActivationThrottle::ComputeActivation(
       "highest_priority_activated_config",
       has_activated_config
           ? highest_priority_activated_config->ToTracedValue()
-          : base::MakeUnique<base::trace_event::TracedValue>());
+          : std::make_unique<base::trace_event::TracedValue>());
 
   if (!has_activated_config)
     return ActivationDecision::ACTIVATION_CONDITIONS_NOT_MET;

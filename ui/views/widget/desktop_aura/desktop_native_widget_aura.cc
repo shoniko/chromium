@@ -62,8 +62,8 @@
 #include "ui/base/win/shell.h"
 #endif
 
-DECLARE_EXPORTED_UI_CLASS_PROPERTY_TYPE(VIEWS_EXPORT,
-                                      views::DesktopNativeWidgetAura*);
+DEFINE_EXPORTED_UI_CLASS_PROPERTY_TYPE(VIEWS_EXPORT,
+                                       views::DesktopNativeWidgetAura*);
 
 namespace views {
 
@@ -147,7 +147,8 @@ class DesktopNativeWidgetTopLevelHandler : public aura::WindowObserver {
 
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override {
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override {
     // The position of the window may have changed. Hence we use SetBounds in
     // place of SetSize. We need to pass the bounds in screen coordinates to
     // the Widget::SetBounds function.

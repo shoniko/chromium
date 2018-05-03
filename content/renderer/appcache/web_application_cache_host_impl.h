@@ -42,9 +42,9 @@ class WebApplicationCacheHostImpl : public blink::WebApplicationCacheHost {
 
   // blink::WebApplicationCacheHost:
   void WillStartMainResourceRequest(
-      blink::WebURLRequest&,
-      const blink::WebApplicationCacheHost*) override;
-  void WillStartSubResourceRequest(blink::WebURLRequest&) override;
+      const blink::WebURL& url,
+      const blink::WebString& method,
+      const WebApplicationCacheHost* spawning_host) override;
   void SelectCacheWithoutManifest() override;
   bool SelectCacheWithManifest(const blink::WebURL& manifestURL) override;
   void DidReceiveResponseForMainResource(const blink::WebURLResponse&) override;
@@ -57,11 +57,9 @@ class WebApplicationCacheHostImpl : public blink::WebApplicationCacheHost {
   void GetAssociatedCacheInfo(CacheInfo* info) override;
   int GetHostID() const override;
 
-  // In the network service world, the |loader_factory_pipe| parameter contains
-  // the message pipe for the URLLoaderFactory instance to be used for
-  // subresource requests.
+  // Set the URLLoaderFactory instance to be used for subresource requests.
   virtual void SetSubresourceFactory(
-      mojo::MessagePipeHandle loader_factory_pipe_handle) {}
+      network::mojom::URLLoaderFactoryPtr url_loader_factory) {}
 
  private:
   enum IsNewMasterEntry { MAYBE_NEW_ENTRY, NEW_ENTRY, OLD_ENTRY };

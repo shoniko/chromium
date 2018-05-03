@@ -254,9 +254,9 @@ static const char* GetIceGatheringStateString(
 static std::unique_ptr<base::DictionaryValue> GetDictValueStats(
     const StatsReport& report) {
   if (report.values().empty())
-    return NULL;
+    return nullptr;
 
-  auto values = base::MakeUnique<base::ListValue>();
+  auto values = std::make_unique<base::ListValue>();
 
   for (const auto& v : report.values()) {
     const StatsReport::ValuePtr& value = v.second;
@@ -286,7 +286,7 @@ static std::unique_ptr<base::DictionaryValue> GetDictValueStats(
     }
   }
 
-  auto dict = base::MakeUnique<base::DictionaryValue>();
+  auto dict = std::make_unique<base::DictionaryValue>();
   dict->SetDouble("timestamp", report.timestamp());
   dict->Set("values", std::move(values));
 
@@ -299,12 +299,12 @@ static std::unique_ptr<base::DictionaryValue> GetDictValue(
     const StatsReport& report) {
   std::unique_ptr<base::DictionaryValue> stats = GetDictValueStats(report);
   if (!stats)
-    return NULL;
+    return nullptr;
 
   // Note:
   // The format must be consistent with what webrtc_internals.js expects.
   // If you change it here, you must change webrtc_internals.js as well.
-  auto result = base::MakeUnique<base::DictionaryValue>();
+  auto result = std::make_unique<base::DictionaryValue>();
   result->Set("stats", std::move(stats));
   result->SetString("id", report.id()->ToString());
   result->SetString("type", report.TypeToString());
@@ -366,7 +366,10 @@ bool PeerConnectionTracker::OnControlMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(PeerConnectionTracker, message)
     IPC_MESSAGE_HANDLER(PeerConnectionTracker_GetAllStats, OnGetAllStats)
     IPC_MESSAGE_HANDLER(PeerConnectionTracker_OnSuspend, OnSuspend)
-    IPC_MESSAGE_HANDLER(PeerConnectionTracker_StartEventLog, OnStartEventLog)
+    IPC_MESSAGE_HANDLER(PeerConnectionTracker_StartEventLogFile,
+                        OnStartEventLogFile)
+    IPC_MESSAGE_HANDLER(PeerConnectionTracker_StartEventLogOutput,
+                        OnStartEventLogOutput)
     IPC_MESSAGE_HANDLER(PeerConnectionTracker_StopEventLog, OnStopEventLog)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -404,14 +407,15 @@ void PeerConnectionTracker::OnSuspend() {
   }
 }
 
-void PeerConnectionTracker::OnStartEventLog(int peer_connection_id,
-                                            IPC::PlatformFileForTransit file) {
+void PeerConnectionTracker::OnStartEventLogFile(
+    int peer_connection_id,
+    IPC::PlatformFileForTransit file) {
   DCHECK(main_thread_.CalledOnValidThread());
   for (auto& it : peer_connection_id_map_) {
     if (it.second == peer_connection_id) {
 #if defined(OS_ANDROID)
       // A lower maximum filesize is used on Android because storage space is
-      // more scarce on mobile. This upper limit applies to each peerconnection
+      // more scarce on mobile. This upper limit applies to each peer connection
       // individually, so the total amount of used storage can be a multiple of
       // this.
       const int64_t kMaxFilesizeBytes = 10000000;
@@ -419,6 +423,16 @@ void PeerConnectionTracker::OnStartEventLog(int peer_connection_id,
       const int64_t kMaxFilesizeBytes = 60000000;
 #endif
       it.first->StartEventLog(file, kMaxFilesizeBytes);
+      return;
+    }
+  }
+}
+
+void PeerConnectionTracker::OnStartEventLogOutput(int peer_connection_id) {
+  DCHECK(main_thread_.CalledOnValidThread());
+  for (auto& it : peer_connection_id_map_) {
+    if (it.second == peer_connection_id) {
+      it.first->StartEventLog();
       return;
     }
   }
@@ -550,18 +564,18 @@ void PeerConnectionTracker::TrackSetConfiguration(
 }
 
 void PeerConnectionTracker::TrackAddIceCandidate(
-      RTCPeerConnectionHandler* pc_handler,
-      const blink::WebRTCICECandidate& candidate,
-      Source source,
-      bool succeeded) {
+    RTCPeerConnectionHandler* pc_handler,
+    scoped_refptr<blink::WebRTCICECandidate> candidate,
+    Source source,
+    bool succeeded) {
   DCHECK(main_thread_.CalledOnValidThread());
   int id = GetLocalIDForHandler(pc_handler);
   if (id == -1)
     return;
   std::string value =
-      "sdpMid: " + candidate.SdpMid().Utf8() + ", " +
-      "sdpMLineIndex: " + base::UintToString(candidate.SdpMLineIndex()) + ", " +
-      "candidate: " + candidate.Candidate().Utf8();
+      "sdpMid: " + candidate->SdpMid().Utf8() + ", " +
+      "sdpMLineIndex: " + base::UintToString(candidate->SdpMLineIndex()) +
+      ", " + "candidate: " + candidate->Candidate().Utf8();
 
   // OnIceCandidate always succeeds as it's a callback from the browser.
   DCHECK(source != SOURCE_LOCAL || succeeded);
@@ -719,6 +733,17 @@ void PeerConnectionTracker::TrackGetUserMedia(
       user_media_request.Audio(), user_media_request.Video(),
       SerializeMediaConstraints(user_media_request.AudioConstraints()),
       SerializeMediaConstraints(user_media_request.VideoConstraints())));
+}
+
+void PeerConnectionTracker::TrackRtcEventLogWrite(
+    RTCPeerConnectionHandler* pc_handler,
+    const std::string& output) {
+  DCHECK(main_thread_.CalledOnValidThread());
+  int id = GetLocalIDForHandler(pc_handler);
+  if (id == -1)
+    return;
+  SendTarget()->Send(
+      new PeerConnectionTrackerHost_WebRtcEventLogWrite(id, output));
 }
 
 int PeerConnectionTracker::GetNextLocalID() {

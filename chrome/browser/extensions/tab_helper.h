@@ -16,6 +16,7 @@
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/extension_reenabler.h"
+#include "chrome/common/chrome_render_frame.mojom.h"
 #include "chrome/common/extensions/mojom/inline_install.mojom.h"
 #include "chrome/common/extensions/webstore_install_result.h"
 #include "chrome/common/web_application_info.h"
@@ -74,9 +75,6 @@ class TabHelper : public content::WebContentsObserver,
   // specified id.
   void SetExtensionAppById(const ExtensionId& extension_app_id);
 
-  // Set just the app icon, used by panels created by an extension.
-  void SetExtensionAppIconById(const ExtensionId& extension_app_id);
-
   const Extension* extension_app() const { return extension_app_; }
   bool is_app() const { return extension_app_ != NULL; }
   const WebApplicationInfo& web_app_info() const {
@@ -101,10 +99,6 @@ class TabHelper : public content::WebContentsObserver,
   ActiveTabPermissionGranter* active_tab_permission_granter() {
     return active_tab_permission_granter_.get();
   }
-
-  // Sets a non-extension app icon associated with WebContents and fires an
-  // INVALIDATE_TYPE_TITLE navigation state change to trigger repaint of title.
-  void SetAppIcon(const SkBitmap& app_icon);
 
   // Sets the factory used to create inline webstore item installers.
   // Used for testing. Takes ownership of the factory instance.
@@ -161,8 +155,9 @@ class TabHelper : public content::WebContentsObserver,
       DoInlineInstallCallback callback) override;
 
   // Message handlers.
-  void OnDidGetWebApplicationInfo(content::RenderFrameHost* sender,
-                                  const WebApplicationInfo& info);
+  void OnDidGetWebApplicationInfo(
+      chrome::mojom::ChromeRenderFrameAssociatedPtr chrome_render_frame,
+      const WebApplicationInfo& info);
   void OnGetAppInstallState(content::RenderFrameHost* host,
                             const GURL& requestor_url,
                             int return_route_id,

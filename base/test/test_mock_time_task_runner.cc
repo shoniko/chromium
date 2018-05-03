@@ -162,8 +162,8 @@ TestMockTimeTaskRunner::TestOrderedPendingTask::TestOrderedPendingTask(
                             nestability),
       ordinal(ordinal) {}
 
-TestMockTimeTaskRunner::TestOrderedPendingTask::~TestOrderedPendingTask() {
-}
+TestMockTimeTaskRunner::TestOrderedPendingTask::~TestOrderedPendingTask() =
+    default;
 
 TestMockTimeTaskRunner::TestOrderedPendingTask&
 TestMockTimeTaskRunner::TestOrderedPendingTask::operator=(
@@ -197,20 +197,19 @@ TestMockTimeTaskRunner::TestMockTimeTaskRunner(Time start_time,
                                                Type type)
     : now_(start_time), now_ticks_(start_ticks), tasks_lock_cv_(&tasks_lock_) {
   if (type == Type::kBoundToThread) {
-    run_loop_client_ = RunLoop::RegisterDelegateForCurrentThread(this);
+    RunLoop::RegisterDelegateForCurrentThread(this);
     thread_task_runner_handle_ = std::make_unique<ThreadTaskRunnerHandle>(
         MakeRefCounted<NonOwningProxyTaskRunner>(this));
   }
 }
 
-TestMockTimeTaskRunner::~TestMockTimeTaskRunner() {
-}
+TestMockTimeTaskRunner::~TestMockTimeTaskRunner() = default;
 
 void TestMockTimeTaskRunner::FastForwardBy(TimeDelta delta) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_GE(delta, TimeDelta());
 
-  const TimeTicks original_now_ticks = now_ticks_;
+  const TimeTicks original_now_ticks = NowTicks();
   ProcessAllTasksNoLaterThan(delta);
   ForwardClocksUntilTickTime(original_now_ticks + delta);
 }
@@ -233,12 +232,12 @@ void TestMockTimeTaskRunner::ClearPendingTasks() {
 }
 
 Time TestMockTimeTaskRunner::Now() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  AutoLock scoped_lock(tasks_lock_);
   return now_;
 }
 
 TimeTicks TestMockTimeTaskRunner::NowTicks() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  AutoLock scoped_lock(tasks_lock_);
   return now_ticks_;
 }
 
@@ -279,7 +278,7 @@ size_t TestMockTimeTaskRunner::GetPendingTaskCount() const {
 TimeDelta TestMockTimeTaskRunner::NextPendingTaskDelay() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return tasks_.empty() ? TimeDelta::Max()
-                        : tasks_.top().GetTimeToRun() - now_ticks_;
+                        : tasks_.top().GetTimeToRun() - NowTicks();
 }
 
 // TODO(gab): Combine |thread_checker_| with a SequenceToken to differentiate
@@ -331,7 +330,7 @@ void TestMockTimeTaskRunner::ProcessAllTasksNoLaterThan(TimeDelta max_delta) {
     undo_override = ThreadTaskRunnerHandle::OverrideForTesting(this);
   }
 
-  const TimeTicks original_now_ticks = now_ticks_;
+  const TimeTicks original_now_ticks = NowTicks();
   while (!quit_run_loop_) {
     OnBeforeSelectingTask();
     TestPendingTask task_info;
@@ -348,11 +347,14 @@ void TestMockTimeTaskRunner::ProcessAllTasksNoLaterThan(TimeDelta max_delta) {
 
 void TestMockTimeTaskRunner::ForwardClocksUntilTickTime(TimeTicks later_ticks) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (later_ticks <= now_ticks_)
-    return;
+  {
+    AutoLock scoped_lock(tasks_lock_);
+    if (later_ticks <= now_ticks_)
+      return;
 
-  now_ += later_ticks - now_ticks_;
-  now_ticks_ = later_ticks;
+    now_ += later_ticks - now_ticks_;
+    now_ticks_ = later_ticks;
+  }
   OnAfterTimePassed();
 }
 
@@ -372,20 +374,20 @@ bool TestMockTimeTaskRunner::DequeueNextTask(const TimeTicks& reference,
   return false;
 }
 
-void TestMockTimeTaskRunner::Run() {
+void TestMockTimeTaskRunner::Run(bool application_tasks_allowed) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Since TestMockTimeTaskRunner doesn't process system messages: there's no
-  // hope for anything but a chrome task to call Quit(). If this RunLoop can't
-  // process chrome tasks (i.e. disallowed by default in nested RunLoops), it's
-  // thereby guaranteed to hang...
-  DCHECK(run_loop_client_->ProcessingTasksAllowed())
+  // hope for anything but an application task to call Quit(). If this RunLoop
+  // can't process application tasks (i.e. disallowed by default in nested
+  // RunLoops) it's guaranteed to hang...
+  DCHECK(application_tasks_allowed)
       << "This is a nested RunLoop instance and needs to be of "
-         "Type::NESTABLE_TASKS_ALLOWED.";
+         "Type::kNestableTasksAllowed.";
 
   while (!quit_run_loop_) {
     RunUntilIdle();
-    if (quit_run_loop_ || run_loop_client_->ShouldQuitWhenIdle())
+    if (quit_run_loop_ || ShouldQuitWhenIdle())
       break;
 
     // Peek into |tasks_| to perform one of two things:

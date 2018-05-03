@@ -4,6 +4,8 @@
 
 #include "components/omnibox/browser/omnibox_client.h"
 
+#include <memory>
+
 #include "base/strings/string_util.h"
 #include "ui/gfx/image/image.h"
 
@@ -78,4 +80,10 @@ bool OmniboxClient::ProcessExtensionKeyword(
     WindowOpenDisposition disposition,
     OmniboxNavigationObserver* observer) {
   return false;
+}
+
+gfx::Image OmniboxClient::GetFaviconForPageUrl(
+    const GURL& page_url,
+    FaviconFetchedCallback on_favicon_fetched) {
+  return gfx::Image();
 }

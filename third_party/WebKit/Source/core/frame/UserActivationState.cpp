@@ -8,15 +8,16 @@
 
 namespace blink {
 
-// This is a tentative timespan, which is more than the current limit of 1
-// sec (in UGI) because we want a reasonable value that works even for a slow
-// network.
-constexpr TimeDelta kActivationLifespan = TimeDelta::FromSeconds(10);
+// This is a tentative timespan, which should be more than the current limit of
+// 1 sec (in UGI) because we want a reasonable value that works even for a slow
+// network.  Currently we are experimenting with a vary large value (eqvt to no
+// expiry): crbug.com/776404.
+constexpr TimeDelta kActivationLifespan = TimeDelta::FromSeconds(3600);
 
 void UserActivationState::Activate() {
   has_been_active_ = true;
   is_active_ = true;
-  activation_timestamp_ = TimeTicks::Now();
+  activation_timestamp_ = CurrentTimeTicks();
 }
 
 void UserActivationState::Clear() {
@@ -26,7 +27,7 @@ void UserActivationState::Clear() {
 
 bool UserActivationState::IsActive() {
   if (is_active_ &&
-      (TimeTicks::Now() - activation_timestamp_ > kActivationLifespan)) {
+      (CurrentTimeTicks() - activation_timestamp_ > kActivationLifespan)) {
     is_active_ = false;
   }
   return is_active_;

@@ -86,7 +86,6 @@ UIColor* BackgroundColorIncognito() {
 
 - (void)dealloc {
   self.tableView.delegate = nil;
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (UIScrollView*)scrollView {
@@ -151,6 +150,13 @@ UIColor* BackgroundColorIncognito() {
 
 - (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
   [self layoutRows];
+}
+
+#pragma mark - Properties accessors
+
+- (void)setIncognito:(BOOL)incognito {
+  DCHECK(!self.viewLoaded);
+  _incognito = incognito;
 }
 
 #pragma mark - AutocompleteResultConsumer
@@ -231,8 +237,10 @@ UIColor* BackgroundColorIncognito() {
   [detailTextLabel setTextAlignment:_alignment];
 
   // The width must be positive for CGContextRef to be valid.
+  UIEdgeInsets safeAreaInsets = SafeAreaInsetsForView(self.view);
+  CGRect rowBounds = UIEdgeInsetsInsetRect(self.view.bounds, safeAreaInsets);
   CGFloat labelWidth =
-      MAX(40, floorf(row.frame.size.width) - kTextCellLeadingPadding);
+      MAX(40, floorf(rowBounds.size.width) - kTextCellLeadingPadding);
   CGFloat labelHeight =
       match.hasAnswer ? kAnswerLabelHeight : kTextDetailLabelHeight;
   CGFloat answerImagePadding = kAnswerImageWidth + kAnswerImageRightPadding;
@@ -241,7 +249,7 @@ UIColor* BackgroundColorIncognito() {
       kTextCellLeadingPadding;
 
   LayoutRect detailTextLabelLayout =
-      LayoutRectMake(leadingPadding, CGRectGetWidth(self.view.bounds),
+      LayoutRectMake(leadingPadding, CGRectGetWidth(rowBounds),
                      kDetailCellTopPadding, labelWidth, labelHeight);
   detailTextLabel.frame = LayoutRectGetRect(detailTextLabelLayout);
 
@@ -257,8 +265,8 @@ UIColor* BackgroundColorIncognito() {
   OmniboxPopupTruncatingLabel* textLabel = row.textTruncatingLabel;
   [textLabel setTextAlignment:_alignment];
   LayoutRect textLabelLayout =
-      LayoutRectMake(kTextCellLeadingPadding, CGRectGetWidth(self.view.bounds),
-                     0, labelWidth, kTextLabelHeight);
+      LayoutRectMake(kTextCellLeadingPadding, CGRectGetWidth(rowBounds), 0,
+                     labelWidth, kTextLabelHeight);
   textLabel.frame = LayoutRectGetRect(textLabelLayout);
 
   // Set the text.
@@ -273,8 +281,6 @@ UIColor* BackgroundColorIncognito() {
     frame.origin.y = kTextCellTopPadding;
     textLabel.frame = frame;
   }
-  textLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-  [textLabel setNeedsDisplay];
 
   // The leading image (e.g. magnifying glass, star, clock) is only shown on
   // iPad.
@@ -318,6 +324,8 @@ UIColor* BackgroundColorIncognito() {
     frame.origin.x = kLTRTextInRTLLayoutLeftPadding;
     detailTextLabel.frame = frame;
   }
+
+  [textLabel setNeedsDisplay];
 }
 
 - (void)layoutRows {

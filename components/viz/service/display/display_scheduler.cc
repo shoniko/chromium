@@ -37,6 +37,13 @@ DisplayScheduler::DisplayScheduler(BeginFrameSource* begin_frame_source,
       weak_ptr_factory_(this) {
   begin_frame_deadline_closure_ = base::Bind(
       &DisplayScheduler::OnBeginFrameDeadline, weak_ptr_factory_.GetWeakPtr());
+
+  // The DisplayScheduler handles animate_only BeginFrames as if they were
+  // normal BeginFrames: Clients won't commit a CompositorFrame but will still
+  // acknowledge when they have completed the BeginFrame via BeginFrameAcks and
+  // the DisplayScheduler will still indicate when all clients have finished via
+  // DisplayObserver::OnDisplayDidFinishFrame.
+  wants_animate_only_begin_frames_ = true;
 }
 
 DisplayScheduler::~DisplayScheduler() {
@@ -156,7 +163,7 @@ bool DisplayScheduler::UpdateHasPendingSurfaces() {
     // Surface is ready if it hasn't received the current BeginFrame or receives
     // BeginFrames from a different source and thus likely belongs to a
     // different surface hierarchy.
-    uint32_t source_id = current_begin_frame_args_.source_id;
+    uint64_t source_id = current_begin_frame_args_.source_id;
     uint64_t sequence_number = current_begin_frame_args_.sequence_number;
     if (!state.last_args.IsValid() || state.last_args.source_id != source_id ||
         state.last_args.sequence_number != sequence_number) {
@@ -295,6 +302,8 @@ void DisplayScheduler::OnBeginFrameSourcePausedChanged(bool paused) {
     NOTIMPLEMENTED();
 }
 
+void DisplayScheduler::OnSurfaceCreated(const SurfaceId& surface_id) {}
+
 void DisplayScheduler::OnFirstSurfaceActivation(
     const SurfaceInfo& surface_info) {}
 
@@ -334,8 +343,6 @@ void DisplayScheduler::OnSurfaceDamageExpected(const SurfaceId& surface_id,
   if (UpdateHasPendingSurfaces())
     ScheduleBeginFrameDeadline();
 }
-
-void DisplayScheduler::OnSurfaceSubtreeDamaged(const SurfaceId& surface_id) {}
 
 base::TimeTicks DisplayScheduler::DesiredBeginFrameDeadlineTime() const {
   switch (AdjustedBeginFrameDeadlineMode()) {

@@ -4,9 +4,12 @@
 
 #include "core/css/cssom/ComputedStylePropertyMap.h"
 
+#include "core/css/CSSCustomPropertyDeclaration.h"
+#include "core/css/CSSVariableData.h"
 #include "core/css/ComputedStyleCSSValueMapping.h"
-#include "core/css/cssom/StyleValueFactory.h"
+#include "core/dom/Document.h"
 #include "core/dom/PseudoElement.h"
+#include "core/style/ComputedStyle.h"
 
 namespace blink {
 
@@ -45,37 +48,50 @@ const ComputedStyle* ComputedStylePropertyMap::UpdateStyle() {
   return style;
 }
 
-CSSStyleValueVector ComputedStylePropertyMap::GetAllInternal(
+const CSSValue* ComputedStylePropertyMap::GetProperty(
     CSSPropertyID property_id) {
   const ComputedStyle* style = UpdateStyle();
   if (!style)
-    return CSSStyleValueVector();
-  const CSSValue* css_value = ComputedStyleCSSValueMapping::Get(
-      property_id, *style, nullptr /* layout_object */);
-  if (!css_value)
-    return CSSStyleValueVector();
-  return StyleValueFactory::CssValueToStyleValueVector(property_id, *css_value);
+    return nullptr;
+  return CSSProperty::Get(property_id)
+      .CSSValueFromComputedStyle(*style, nullptr /* layout_object */,
+                                 StyledNode(), false);
 }
 
-CSSStyleValueVector ComputedStylePropertyMap::GetAllInternal(
-    AtomicString custom_property_name) {
+const CSSValue* ComputedStylePropertyMap::GetCustomProperty(
+    AtomicString property_name) {
   const ComputedStyle* style = UpdateStyle();
   if (!style)
-    return CSSStyleValueVector();
-  const CSSValue* css_value = ComputedStyleCSSValueMapping::Get(
-      custom_property_name, *style, node_->GetDocument().GetPropertyRegistry());
-  if (!css_value)
-    return CSSStyleValueVector();
-  return StyleValueFactory::CssValueToStyleValueVector(*css_value);
+    return nullptr;
+  return ComputedStyleCSSValueMapping::Get(
+      property_name, *style, node_->GetDocument().GetPropertyRegistry());
 }
 
-Vector<String> ComputedStylePropertyMap::getProperties() {
-  Vector<String> result;
-  for (CSSPropertyID property_id :
+void ComputedStylePropertyMap::ForEachProperty(
+    const IterationCallback& callback) {
+  const ComputedStyle* style = UpdateStyle();
+  if (!style)
+    return;
+
+  for (const CSSProperty* property :
        CSSComputedStyleDeclaration::ComputableProperties()) {
-    result.push_back(getPropertyNameString(property_id));
+    DCHECK(property);
+    DCHECK(!property->IDEquals(CSSPropertyVariable));
+    const CSSValue* value = property->CSSValueFromComputedStyle(
+        *style, nullptr /* layout_object */, StyledNode(), false);
+    if (value)
+      callback(property->GetPropertyName(), *value);
   }
-  return result;
+
+  const auto& variables = ComputedStyleCSSValueMapping::GetVariables(*style);
+  if (variables) {
+    for (const auto& name_value : *variables) {
+      if (name_value.value) {
+        callback(name_value.key, *CSSCustomPropertyDeclaration::Create(
+                                     name_value.key, name_value.value));
+      }
+    }
+  }
 }
 
 }  // namespace blink

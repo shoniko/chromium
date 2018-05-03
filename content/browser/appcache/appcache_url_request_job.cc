@@ -43,12 +43,12 @@ void AppCacheURLRequestJob::Kill() {
     handler_source_reader_.reset();
     if (storage_) {
       storage_->CancelDelegateCallbacks(this);
-      storage_ = NULL;
+      storage_ = nullptr;
     }
-    host_ = NULL;
-    info_ = NULL;
-    cache_ = NULL;
-    group_ = NULL;
+    host_ = nullptr;
+    info_ = nullptr;
+    cache_ = nullptr;
+    group_ = nullptr;
     range_response_info_.reset();
     net::URLRequestJob::Kill();
     weak_factory_.InvalidateWeakPtrs();
@@ -76,14 +76,14 @@ void AppCacheURLRequestJob::DeliverAppCachedResponse(const GURL& manifest_url,
 void AppCacheURLRequestJob::DeliverNetworkResponse() {
   DCHECK(!has_delivery_orders());
   delivery_type_ = NETWORK_DELIVERY;
-  storage_ = NULL;  // not needed
+  storage_ = nullptr;  // not needed
   MaybeBeginDelivery();
 }
 
 void AppCacheURLRequestJob::DeliverErrorResponse() {
   DCHECK(!has_delivery_orders());
   delivery_type_ = ERROR_DELIVERY;
-  storage_ = NULL;  // not needed
+  storage_ = nullptr;  // not needed
   MaybeBeginDelivery();
 }
 
@@ -157,10 +157,6 @@ void AppCacheURLRequestJob::BeginDelivery() {
       break;
 
     case APPCACHED_DELIVERY:
-      if (entry_.IsExecutable()) {
-        BeginExecutableHandlerDelivery();
-        return;
-      }
       AppCacheHistograms::AddAppCacheJobStartDelaySample(
           base::TimeTicks::Now() - start_time_tick_);
       request()->net_log().AddEvent(
@@ -176,133 +172,12 @@ void AppCacheURLRequestJob::BeginDelivery() {
   }
 }
 
-void AppCacheURLRequestJob::BeginExecutableHandlerDelivery() {
-  DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
-      kEnableExecutableHandlers));
-  if (!storage_->service()->handler_factory()) {
-    BeginErrorDelivery("missing handler factory");
-    return;
-  }
-
-  request()->net_log().AddEvent(
-      net::NetLogEventType::APPCACHE_DELIVERING_EXECUTABLE_RESPONSE);
-
-  // We defer job delivery until the executable handler is spun up and
-  // provides a response. The sequence goes like this...
-  //
-  // 1. First we load the cache.
-  // 2. Then if the handler is not spun up, we load the script resource which
-  //    is needed to spin it up.
-  // 3. Then we ask then we ask the handler to compute a response.
-  // 4. Finally we deilver that response to the caller.
-  storage_->LoadCache(cache_id_, this);
-}
-
-void AppCacheURLRequestJob::OnCacheLoaded(AppCache* cache, int64_t cache_id) {
-  DCHECK_EQ(cache_id_, cache_id);
-  DCHECK(!has_been_killed());
-
-  if (!cache) {
-    BeginErrorDelivery("cache load failed");
-    return;
-  }
-
-  // Keep references to ensure they don't go out of scope until job completion.
-  cache_ = cache;
-  group_ = cache->owning_group();
-
-  // If the handler is spun up, ask it to compute a response.
-  AppCacheExecutableHandler* handler =
-      cache->GetExecutableHandler(entry_.response_id());
-  if (handler) {
-    InvokeExecutableHandler(handler);
-    return;
-  }
-
-  // Handler is not spun up yet, load the script resource to do that.
-  // NOTE: This is not ideal since multiple jobs may be doing this,
-  // concurrently but close enough for now, the first to load the script
-  // will win.
-
-  // Read the script data, truncating if its too large.
-  // NOTE: we just issue one read and don't bother chaining if the resource
-  // is very (very) large, close enough for now.
-  const int64_t kLimit = 500 * 1000;
-  handler_source_buffer_ = new net::GrowableIOBuffer();
-  handler_source_buffer_->SetCapacity(kLimit);
-  handler_source_reader_.reset(
-      storage_->CreateResponseReader(manifest_url_, entry_.response_id()));
-  handler_source_reader_->ReadData(
-      handler_source_buffer_.get(),
-      kLimit,
-      base::Bind(&AppCacheURLRequestJob::OnExecutableSourceLoaded,
-                 base::Unretained(this)));
-}
-
-void AppCacheURLRequestJob::OnExecutableSourceLoaded(int result) {
-  DCHECK(!has_been_killed());
-  handler_source_reader_.reset();
-  if (result < 0) {
-    BeginErrorDelivery("script source load failed");
-    return;
-  }
-
-  handler_source_buffer_->SetCapacity(result);  // Free up some memory.
-
-  AppCacheExecutableHandler* handler = cache_->GetOrCreateExecutableHandler(
-      entry_.response_id(), handler_source_buffer_.get());
-  handler_source_buffer_ = NULL;  // not needed anymore
-  if (handler) {
-    InvokeExecutableHandler(handler);
-    return;
-  }
-
-  BeginErrorDelivery("factory failed to produce a handler");
-}
-
-void AppCacheURLRequestJob::InvokeExecutableHandler(
-    AppCacheExecutableHandler* handler) {
-  handler->HandleRequest(
-      request(),
-      base::Bind(&AppCacheURLRequestJob::OnExecutableResponseCallback,
-                 GetDerivedWeakPtr()));
-}
-
-void AppCacheURLRequestJob::OnExecutableResponseCallback(
-    const AppCacheExecutableHandler::Response& response) {
-  DCHECK(!has_been_killed());
-  if (response.use_network) {
-    delivery_type_ = NETWORK_DELIVERY;
-    storage_ = NULL;
-    BeginDelivery();
-    return;
-  }
-
-  if (!response.cached_resource_url.is_empty()) {
-    AppCacheEntry* entry_ptr = cache_->GetEntry(response.cached_resource_url);
-    if (entry_ptr && !entry_ptr->IsExecutable()) {
-      entry_ = *entry_ptr;
-      BeginDelivery();
-      return;
-    }
-  }
-
-  if (!response.redirect_url.is_empty()) {
-    // TODO(michaeln): playback a redirect
-    // response_headers_(new HttpResponseHeaders(response_headers)),
-    // fallthru for now to deliver an error
-  }
-
-  // Otherwise, return an error.
-  BeginErrorDelivery("handler returned an invalid response");
-}
-
 void AppCacheURLRequestJob::BeginErrorDelivery(const char* message) {
   if (host_)
     host_->frontend()->OnLogMessage(host_->host_id(), APPCACHE_LOG_ERROR,
                                     message);
   delivery_type_ = ERROR_DELIVERY;
-  storage_ = NULL;
+  storage_ = nullptr;
   BeginDelivery();
 }
 
@@ -344,7 +219,7 @@ void AppCacheURLRequestJob::OnResponseInfoLoaded(
 
 const net::HttpResponseInfo* AppCacheURLRequestJob::http_info() const {
   if (!info_.get())
-    return NULL;
+    return nullptr;
   if (range_response_info_)
     return range_response_info_.get();
   return info_->http_response_info();

@@ -7,19 +7,16 @@
 namespace blink {
 
 struct SameSizeAsDisplayItem {
-  virtual ~SameSizeAsDisplayItem() {}  // Allocate vtable pointer.
+  virtual ~SameSizeAsDisplayItem() = default;  // Allocate vtable pointer.
   void* pointer;
   LayoutRect rect;
   LayoutUnit outset;
   int i;
-#ifndef NDEBUG
-  WTF::String debug_string_;
-#endif
 };
 static_assert(sizeof(DisplayItem) == sizeof(SameSizeAsDisplayItem),
               "DisplayItem should stay small");
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 
 static WTF::String PaintPhaseAsDebugString(int paint_phase) {
   // Must be kept in sync with PaintPhase.
@@ -187,6 +184,8 @@ WTF::String DisplayItem::TypeAsDebugString(Type type) {
     return "End" + ClipTypeAsDebugString(endClipTypeToClipType(type));
 
   PAINT_PHASE_BASED_DEBUG_STRINGS(FloatClip);
+  if (type == kFloatClipClipPathBounds)
+    return "FloatClipClipPathBounds";
   if (IsEndFloatClipType(type))
     return "End" + TypeAsDebugString(endFloatClipTypeToFloatClipType(type));
 
@@ -194,6 +193,9 @@ WTF::String DisplayItem::TypeAsDebugString(Type type) {
     return ScrollTypeAsDebugString(type);
   if (IsEndScrollType(type))
     return "End" + ScrollTypeAsDebugString(endScrollTypeToScrollType(type));
+
+  PAINT_PHASE_BASED_DEBUG_STRINGS(SVGTransform);
+  PAINT_PHASE_BASED_DEBUG_STRINGS(SVGEffect);
 
   if (IsTransform3DType(type))
     return Transform3DTypeAsDebugString(type);
@@ -225,25 +227,27 @@ WTF::String DisplayItem::AsDebugString() const {
 }
 
 void DisplayItem::PropertiesAsJSON(JSONObject& json) const {
-  if (!HasValidClient()) {
-    json.SetBoolean("validClient", false);
-    json.SetString("originalDebugString", ClientDebugString());
-    return;
-  }
+  if (IsTombstone())
+    json.SetBoolean("ISTOMBSTONE", true);
 
-  json.SetString("client",
-                 ClientDebugString().IsEmpty()
-                     ? String::Format("%p", &Client())
-                     : String::Format("%p %s", &Client(),
-                                      ClientDebugString().Utf8().data()));
+  json.SetString("id", GetId().ToString());
   json.SetString("visualRect", VisualRect().ToString());
   if (OutsetForRasterEffects())
     json.SetDouble("outset", OutsetForRasterEffects().ToDouble());
-  json.SetString("type", TypeAsDebugString(GetType()));
   if (skipped_cache_)
     json.SetBoolean("skippedCache", true);
 }
 
 #endif
+
+String DisplayItem::Id::ToString() const {
+#if DCHECK_IS_ON()
+  return String::Format("%p:%s:%d", &client,
+                        DisplayItem::TypeAsDebugString(type).Ascii().data(),
+                        fragment);
+#else
+  return String::Format("%p:%d:%d", &client, static_cast<int>(type), fragment);
+#endif
+}
 
 }  // namespace blink

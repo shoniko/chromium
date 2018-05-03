@@ -4,13 +4,14 @@
 
 #include "modules/sensor/SensorProxy.h"
 
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/LocalFrame.h"
 #include "core/page/FocusController.h"
 #include "modules/sensor/SensorProviderProxy.h"
 #include "platform/mojo/MojoHelper.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "services/device/public/cpp/generic_sensor/sensor_traits.h"
+#include "third_party/WebKit/common/page/page_visibility_state.mojom-blink.h"
 
 namespace blink {
 
@@ -27,12 +28,12 @@ SensorProxy::SensorProxy(SensorType sensor_type,
       client_binding_(this),
       state_(SensorProxy::kUninitialized),
       suspended_(false),
-      polling_timer_(TaskRunnerHelper::Get(TaskType::kSensor,
-                                           provider->GetSupplementable()),
-                     this,
-                     &SensorProxy::OnPollingTimer) {}
+      polling_timer_(
+          provider->GetSupplementable()->GetTaskRunner(TaskType::kSensor),
+          this,
+          &SensorProxy::OnPollingTimer) {}
 
-SensorProxy::~SensorProxy() {}
+SensorProxy::~SensorProxy() = default;
 
 void SensorProxy::Dispose() {
   client_binding_.Close();
@@ -63,18 +64,16 @@ void SensorProxy::Initialize() {
   }
 
   state_ = kInitializing;
-  auto callback = ConvertToBaseCallback(
-      WTF::Bind(&SensorProxy::OnSensorCreated, WrapWeakPersistent(this)));
-  provider_->GetSensorProvider()->GetSensor(type_, mojo::MakeRequest(&sensor_),
-                                            callback);
+  auto callback =
+      WTF::Bind(&SensorProxy::OnSensorCreated, WrapWeakPersistent(this));
+  provider_->GetSensorProvider()->GetSensor(type_, std::move(callback));
 }
 
 void SensorProxy::AddConfiguration(SensorConfigurationPtr configuration,
-                                   Function<void(bool)> callback) {
+                                   base::OnceCallback<void(bool)> callback) {
   DCHECK(IsInitialized());
   AddActiveFrequency(configuration->frequency);
-  sensor_->AddConfiguration(std::move(configuration),
-                            ConvertToBaseCallback(std::move(callback)));
+  sensor_->AddConfiguration(std::move(configuration), std::move(callback));
 }
 
 void SensorProxy::RemoveConfiguration(SensorConfigurationPtr configuration) {
@@ -117,8 +116,13 @@ void SensorProxy::UpdateSensorReading() {
     return;
   }
 
-  if (reading_.timestamp() != reading_data.timestamp()) {
-    DCHECK_GT(reading_data.timestamp(), reading_.timestamp())
+  double latest_timestamp = reading_data.timestamp();
+  if (reading_.timestamp() != latest_timestamp &&
+      latest_timestamp != 0.0)  // The shared buffer is zeroed when
+                                // sensor is stopped, we skip this
+                                // reading.
+  {
+    DCHECK_GT(latest_timestamp, reading_.timestamp())
         << "Timestamps must increase monotonically";
     reading_ = reading_data;
     for (Observer* observer : observers_)
@@ -165,8 +169,7 @@ void SensorProxy::HandleSensorError() {
   }
 }
 
-void SensorProxy::OnSensorCreated(SensorInitParamsPtr params,
-                                  SensorClientRequest client_request) {
+void SensorProxy::OnSensorCreated(SensorInitParamsPtr params) {
   DCHECK_EQ(kInitializing, state_);
   if (!params) {
     HandleSensorError();
@@ -183,8 +186,8 @@ void SensorProxy::OnSensorCreated(SensorInitParamsPtr params,
     return;
   }
 
-  DCHECK(sensor_.is_bound());
-  client_binding_.Bind(std::move(client_request));
+  sensor_.Bind(std::move(params->sensor));
+  client_binding_.Bind(std::move(params->client_request));
 
   shared_buffer_handle_ = std::move(params->memory);
   DCHECK(!shared_buffer_);
@@ -210,8 +213,7 @@ void SensorProxy::OnSensorCreated(SensorInitParamsPtr params,
 
   auto error_callback =
       WTF::Bind(&SensorProxy::HandleSensorError, WrapWeakPersistent(this));
-  sensor_.set_connection_error_handler(
-      ConvertToBaseCallback(std::move(error_callback)));
+  sensor_.set_connection_error_handler(std::move(error_callback));
 
   state_ = kInitialized;
 
@@ -236,8 +238,9 @@ void SensorProxy::UpdatePollingStatus() {
   if (ShouldProcessReadings()) {
     // TODO(crbug/721297) : We need to find out an algorithm for resulting
     // polling frequency.
-    polling_timer_.StartRepeating(1 / active_frequencies_.back(),
-                                  BLINK_FROM_HERE);
+    polling_timer_.StartRepeating(
+        WTF::TimeDelta::FromSecondsD(1 / active_frequencies_.back()),
+        FROM_HERE);
   } else {
     polling_timer_.Stop();
   }
@@ -248,7 +251,7 @@ void SensorProxy::UpdateSuspendedStatus() {
     return;
 
   bool page_visible =
-      GetPage()->VisibilityState() == kPageVisibilityStateVisible;
+      GetPage()->VisibilityState() == mojom::PageVisibilityState::kVisible;
 
   LocalFrame* focused_frame = GetPage()->GetFocusController().FocusedFrame();
   bool main_frame_focused =
@@ -272,6 +275,9 @@ void SensorProxy::RemoveActiveFrequency(double frequency) {
 
   active_frequencies_.erase(it);
   UpdatePollingStatus();
+
+  if (active_frequencies_.IsEmpty())
+    reading_ = device::SensorReading();
 }
 
 void SensorProxy::AddActiveFrequency(double frequency) {

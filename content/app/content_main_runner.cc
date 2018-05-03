@@ -29,7 +29,6 @@
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_base.h"
-#include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/memory.h"
@@ -169,6 +168,7 @@ void InitializeFieldTrialAndFeatureList(
   base::FeatureList::SetInstance(std::move(feature_list));
 }
 
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
 void LoadV8ContextSnapshotFile() {
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   base::FileDescriptorStore& file_descriptor_store =
@@ -181,14 +181,13 @@ void LoadV8ContextSnapshotFile() {
                                                     region.size);
     return;
   }
-#endif  // OS
+#endif  // OS_POSIX && !OS_MACOSX
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
   gin::V8Initializer::LoadV8ContextSnapshot();
-#endif
+#endif  // !CHROME_MULTIPLE_DLL_BROWSER
 }
 
 void LoadV8SnapshotFile() {
-#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   base::FileDescriptorStore& file_descriptor_store =
       base::FileDescriptorStore::GetInstance();
@@ -203,12 +202,10 @@ void LoadV8SnapshotFile() {
 #endif  // OS_POSIX && !OS_MACOSX
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
   gin::V8Initializer::LoadV8Snapshot();
-#endif
-#endif  // V8_USE_EXTERNAL_STARTUP_DATA
+#endif  // !CHROME_MULTIPLE_DLL_BROWSER
 }
 
 void LoadV8NativesFile() {
-#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   base::FileDescriptorStore& file_descriptor_store =
       base::FileDescriptorStore::GetInstance();
@@ -223,18 +220,20 @@ void LoadV8NativesFile() {
 #endif  // OS_POSIX && !OS_MACOSX
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
   gin::V8Initializer::LoadV8Natives();
-#endif
-#endif  // V8_USE_EXTERNAL_STARTUP_DATA
+#endif  // !CHROME_MULTIPLE_DLL_BROWSER
 }
+#endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
 void InitializeV8IfNeeded(const base::CommandLine& command_line,
                           const std::string& process_type) {
   if (process_type == switches::kGpuProcess)
     return;
 
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
   LoadV8SnapshotFile();
   LoadV8NativesFile();
   LoadV8ContextSnapshotFile();
+#endif  // V8_USE_EXTERNAL_STARTUP_DATA
 }
 
 }  // namespace
@@ -305,8 +304,7 @@ struct MainFunction {
   int (*function)(const MainFunctionParams&);
 };
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID) && \
-    !defined(OS_FUCHSIA)
+#if defined(OS_LINUX)
 // On platforms that use the zygote, we have a special subset of
 // subprocesses that are launched via the zygote.  This function
 // fills in some process-launching bits around ZygoteMain().
@@ -363,8 +361,7 @@ int RunZygote(const MainFunctionParams& main_function_params,
   NOTREACHED() << "Unknown zygote process type: " << process_type;
   return 1;
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID) && \
-//         !defined(OS_FUCHSIA)
+#endif  // defined(OS_LINUX)
 
 static void RegisterMainThreadFactories() {
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER) && !defined(CHROME_MULTIPLE_DLL_CHILD)
@@ -448,12 +445,7 @@ int RunNamedProcessTypeMain(
 
 class ContentMainRunnerImpl : public ContentMainRunner {
  public:
-  ContentMainRunnerImpl()
-      : is_initialized_(false),
-        is_shutdown_(false),
-        completed_basic_startup_(false),
-        delegate_(NULL),
-        ui_task_(NULL) {
+  ContentMainRunnerImpl() {
 #if defined(OS_WIN)
     memset(&sandbox_info_, 0, sizeof(sandbox_info_));
 #endif
@@ -464,8 +456,17 @@ class ContentMainRunnerImpl : public ContentMainRunner {
       Shutdown();
   }
 
+  int TerminateForFatalInitializationError() {
+    if (delegate_)
+      return delegate_->TerminateForFatalInitializationError();
+
+    CHECK(false);
+    return 0;
+  }
+
   int Initialize(const ContentMainParams& params) override {
     ui_task_ = params.ui_task;
+    created_main_parts_closure_ = params.created_main_parts_closure;
 
     create_discardable_memory_ = params.create_discardable_memory;
 
@@ -622,16 +623,17 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     int icudata_fd = g_fds->MaybeGet(kAndroidICUDataDescriptor);
     if (icudata_fd != -1) {
       auto icudata_region = g_fds->GetRegion(kAndroidICUDataDescriptor);
-      CHECK(base::i18n::InitializeICUWithFileDescriptor(icudata_fd,
-                                                        icudata_region));
+      if (!base::i18n::InitializeICUWithFileDescriptor(icudata_fd,
+                                                       icudata_region))
+        return TerminateForFatalInitializationError();
     } else {
-      CHECK(base::i18n::InitializeICU());
+      if (!base::i18n::InitializeICU())
+        return TerminateForFatalInitializationError();
     }
 #else
-    CHECK(base::i18n::InitializeICU());
+    if (!base::i18n::InitializeICU())
+      return TerminateForFatalInitializationError();
 #endif  // OS_ANDROID && (ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE)
-
-    base::StatisticsRecorder::Initialize();
 
     InitializeV8IfNeeded(command_line, process_type);
 
@@ -657,17 +659,24 @@ class ContentMainRunnerImpl : public ContentMainRunner {
       delegate_->PreSandboxStartup();
 
 #if defined(OS_WIN)
-    CHECK(InitializeSandbox(
-        service_manager::SandboxTypeFromCommandLine(command_line),
-        params.sandbox_info));
+    if (!InitializeSandbox(
+            service_manager::SandboxTypeFromCommandLine(command_line),
+            params.sandbox_info))
+      return TerminateForFatalInitializationError();
 #elif defined(OS_MACOSX)
+    // Do not initialize the sandbox at this point if the V2
+    // sandbox is enabled for the process type.
+    bool v2_enabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableV2Sandbox);
+
     if (process_type == switches::kRendererProcess ||
-        process_type == switches::kPpapiPluginProcess ||
+        process_type == switches::kPpapiPluginProcess || v2_enabled ||
         (delegate_ && delegate_->DelaySandboxInitialization(process_type))) {
       // On OS X the renderer sandbox needs to be initialized later in the
       // startup sequence in RendererMainPlatformDelegate::EnableSandbox().
     } else {
-      CHECK(InitializeSandbox());
+      if (!InitializeSandbox())
+        return TerminateForFatalInitializationError();
     }
 #endif
 
@@ -694,6 +703,7 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 
     MainFunctionParams main_params(command_line);
     main_params.ui_task = ui_task_;
+    main_params.created_main_parts_closure = created_main_parts_closure_;
 #if defined(OS_WIN)
     main_params.sandbox_info = &sandbox_info_;
 #elif defined(OS_MACOSX)
@@ -726,27 +736,27 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #endif  // _CRTDBG_MAP_ALLOC
 #endif  // OS_WIN
 
-    exit_manager_.reset(NULL);
+    exit_manager_.reset(nullptr);
 
-    delegate_ = NULL;
+    delegate_ = nullptr;
     is_shutdown_ = true;
   }
 
  private:
   // True if the runner has been initialized.
-  bool is_initialized_;
+  bool is_initialized_ = false;
 
   // True if the runner has been shut down.
-  bool is_shutdown_;
+  bool is_shutdown_ = false;
 
   // True if basic startup was completed.
-  bool completed_basic_startup_;
+  bool completed_basic_startup_ = false;
 
   // Used if the embedder doesn't set one.
   ContentClient empty_content_client_;
 
   // The delegate will outlive this object.
-  ContentMainDelegate* delegate_;
+  ContentMainDelegate* delegate_ = nullptr;
 
   std::unique_ptr<base::AtExitManager> exit_manager_;
 #if defined(OS_WIN)
@@ -755,7 +765,9 @@ class ContentMainRunnerImpl : public ContentMainRunner {
   base::mac::ScopedNSAutoreleasePool* autorelease_pool_ = nullptr;
 #endif
 
-  base::Closure* ui_task_;
+  base::Closure* ui_task_ = nullptr;
+
+  CreatedMainPartsClosure* created_main_parts_closure_ = nullptr;
 
 #if defined(USE_AURA)
   aura::Env::Mode env_mode_ = aura::Env::Mode::LOCAL;

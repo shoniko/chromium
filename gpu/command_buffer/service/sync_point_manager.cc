@@ -42,7 +42,7 @@ SyncPointOrderData::OrderFence::OrderFence(
 
 SyncPointOrderData::OrderFence::OrderFence(const OrderFence& other) = default;
 
-SyncPointOrderData::OrderFence::~OrderFence() {}
+SyncPointOrderData::OrderFence::~OrderFence() = default;
 
 SyncPointOrderData::SyncPointOrderData(SyncPointManager* sync_point_manager,
                                        SequenceId sequence_id)
@@ -185,7 +185,7 @@ SyncPointClientState::ReleaseCallback::ReleaseCallback(
 SyncPointClientState::ReleaseCallback::ReleaseCallback(
     const ReleaseCallback& other) = default;
 
-SyncPointClientState::ReleaseCallback::~ReleaseCallback() {}
+SyncPointClientState::ReleaseCallback::~ReleaseCallback() = default;
 
 SyncPointClientState::SyncPointClientState(
     SyncPointManager* sync_point_manager,
@@ -450,14 +450,6 @@ bool SyncPointManager::WaitOutOfOrder(const SyncToken& trusted_sync_token,
   // order numbers to be executed. Null sequence id will be ignored for the
   // deadlock early out check.
   return Wait(trusted_sync_token, SequenceId(), UINT32_MAX, callback);
-}
-
-bool SyncPointManager::WaitOutOfOrderNonThreadSafe(
-    const SyncToken& trusted_sync_token,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    const base::Closure& callback) {
-  return WaitOutOfOrder(trusted_sync_token,
-                        base::Bind(&RunOnThread, task_runner, callback));
 }
 
 uint32_t SyncPointManager::GenerateOrderNumber() {

@@ -41,8 +41,7 @@ import java.util.Set;
  * Integration tests for ClearBrowsingDataPreferencesBasic.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ClearBrowsingDataPreferencesBasicTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -71,6 +70,7 @@ public class ClearBrowsingDataPreferencesBasicTest {
             mSyncable = syncable;
         }
 
+        @Override
         public Set<Integer> getActiveDataTypes() {
             if (mSyncable) {
                 return CollectionUtil.newHashSet(ModelType.HISTORY_DELETE_DIRECTIVES);

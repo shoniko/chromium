@@ -4,7 +4,8 @@
 
 #include "chrome/browser/predictors/loading_stats_collector.h"
 
-#include "base/memory/ptr_util.h"
+#include <vector>
+
 #include "base/test/histogram_tester.h"
 #include "chrome/browser/predictors/loading_test_util.h"
 #include "chrome/browser/predictors/preconnect_manager.h"
@@ -52,19 +53,19 @@ class LoadingStatsCollectorTest : public testing::Test {
 };
 
 LoadingStatsCollectorTest::LoadingStatsCollectorTest()
-    : profile_(base::MakeUnique<TestingProfile>()) {}
+    : profile_(std::make_unique<TestingProfile>()) {}
 
 LoadingStatsCollectorTest::~LoadingStatsCollectorTest() = default;
 
 void LoadingStatsCollectorTest::SetUp() {
   LoadingPredictorConfig config;
   PopulateTestConfig(&config);
-  profile_ = base::MakeUnique<TestingProfile>();
-  mock_predictor_ = base::MakeUnique<StrictMock<MockResourcePrefetchPredictor>>(
+  profile_ = std::make_unique<TestingProfile>();
+  mock_predictor_ = std::make_unique<StrictMock<MockResourcePrefetchPredictor>>(
       config, profile_.get());
   stats_collector_ =
-      base::MakeUnique<LoadingStatsCollector>(mock_predictor_.get(), config);
-  histogram_tester_ = base::MakeUnique<base::HistogramTester>();
+      std::make_unique<LoadingStatsCollector>(mock_predictor_.get(), config);
+  histogram_tester_ = std::make_unique<base::HistogramTester>();
   content::RunAllTasksUntilIdle();
 }
 
@@ -87,7 +88,7 @@ void LoadingStatsCollectorTest::TestRedirectStatusHistogram(
   {
     PreconnectPrediction prediction = CreatePreconnectPrediction(
         GURL(prediction_url).host(), initial_url != prediction_url,
-        {GURL(script_url).GetOrigin()}, {});
+        {{GURL(script_url).GetOrigin(), 1}});
     EXPECT_CALL(*mock_predictor_,
                 PredictPreconnectOrigins(GURL(initial_url), _))
         .WillOnce(DoAll(SetArgPointee<1>(prediction), Return(true)));
@@ -149,11 +150,12 @@ TEST_F(LoadingStatsCollectorTest, TestPreconnectPrecisionRecallHistograms) {
   };
 
   // Predicts 4 origins: 2 useful, 2 useless.
-  PreconnectPrediction prediction = CreatePreconnectPrediction(
-      GURL(main_frame_url).host(), false,
-      {GURL(main_frame_url).GetOrigin(), GURL(gen(1)).GetOrigin(),
-       GURL(gen(2)).GetOrigin()},
-      {GURL(gen(3)).GetOrigin()});
+  PreconnectPrediction prediction =
+      CreatePreconnectPrediction(GURL(main_frame_url).host(), false,
+                                 {{GURL(main_frame_url).GetOrigin(), 1},
+                                  {GURL(gen(1)).GetOrigin(), 1},
+                                  {GURL(gen(2)).GetOrigin(), 1},
+                                  {GURL(gen(3)).GetOrigin(), 0}});
   EXPECT_CALL(*mock_predictor_,
               PredictPreconnectOrigins(GURL(main_frame_url), _))
       .WillOnce(DoAll(SetArgPointee<1>(prediction), Return(true)));
@@ -220,7 +222,7 @@ TEST_F(LoadingStatsCollectorTest, TestPrefetchHitsMissesHistograms) {
     PrefetchedRequestStats script2(GURL(script_url + "2"), true, 8 * 1024);
     PrefetchedRequestStats script3(GURL(script_url + "3"), false, 2 * 1024);
     PrefetchedRequestStats script4(GURL(script_url + "4"), true, 3 * 1024);
-    auto stats = base::MakeUnique<PrefetcherStats>(GURL(main_frame_url));
+    auto stats = std::make_unique<PrefetcherStats>(GURL(main_frame_url));
     stats->requests_stats = {script1, script2, script3, script4};
 
     stats_collector_->RecordPrefetcherStats(std::move(stats));
@@ -275,7 +277,7 @@ TEST_F(LoadingStatsCollectorTest, TestPreconnectHistograms) {
     PreconnectedRequestStats origin3(GURL(gen(3)).GetOrigin(), false, false);
     PreconnectedRequestStats origin4(GURL(gen(4)).GetOrigin(), true, true);
 
-    auto stats = base::MakeUnique<PreconnectStats>(GURL(main_frame_url));
+    auto stats = std::make_unique<PreconnectStats>(GURL(main_frame_url));
     stats->requests_stats = {origin1, origin2, origin3, origin4};
 
     stats_collector_->RecordPreconnectStats(std::move(stats));
@@ -309,7 +311,7 @@ TEST_F(LoadingStatsCollectorTest, TestPreconnectHistograms) {
 // empty.
 TEST_F(LoadingStatsCollectorTest, TestPreconnectHistogramsEmpty) {
   const std::string main_frame_url = "http://google.com";
-  auto stats = base::MakeUnique<PreconnectStats>(GURL(main_frame_url));
+  auto stats = std::make_unique<PreconnectStats>(GURL(main_frame_url));
   stats_collector_->RecordPreconnectStats(std::move(stats));
 
   EXPECT_CALL(*mock_predictor_, GetPrefetchData(GURL(main_frame_url), _))
@@ -359,7 +361,7 @@ TEST_F(LoadingStatsCollectorTest, TestPreconnectHistogramsPreresolvesOnly) {
     PreconnectedRequestStats origin3(GURL(gen(3)).GetOrigin(), false, false);
     PreconnectedRequestStats origin4(GURL(gen(4)).GetOrigin(), true, false);
 
-    auto stats = base::MakeUnique<PreconnectStats>(GURL(main_frame_url));
+    auto stats = std::make_unique<PreconnectStats>(GURL(main_frame_url));
     stats->requests_stats = {origin1, origin2, origin3, origin4};
 
     stats_collector_->RecordPreconnectStats(std::move(stats));

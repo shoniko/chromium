@@ -39,8 +39,7 @@
 #include "public/platform/modules/serviceworker/WebServiceWorkerClientsInfo.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerSkipWaitingCallbacks.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerStreamHandle.h"
-#include "public/platform/modules/serviceworker/service_worker_event_status.mojom-shared.h"
-#include "public/web/WebDevToolsAgentClient.h"
+#include "third_party/WebKit/common/service_worker/service_worker_event_status.mojom-shared.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -64,13 +63,7 @@ class WebString;
 // thread.
 class WebServiceWorkerContextClient {
  public:
-  virtual ~WebServiceWorkerContextClient() {}
-
-  // Returns the scope of the service worker's registration. Currently
-  // only used by InstallEvent#registerForeignFetch().
-  // TODO(falken): Figure out why registerForeignFetch() can't just use
-  // self.registration.scope.
-  virtual WebURL Scope() const { return WebURL(); }
+  virtual ~WebServiceWorkerContextClient() = default;
 
   // For Clients#get(id). Requests the embedder to return the specified Client.
   virtual void GetClient(const WebString& client_id,
@@ -87,7 +80,7 @@ class WebServiceWorkerContextClient {
                           std::unique_ptr<WebServiceWorkerClientCallbacks>) = 0;
 
   // Similar to OpenNewTab above. For PaymentRequestEvent#openWindow().
-  virtual void OpenNewPopup(
+  virtual void OpenPaymentHandlerWindow(
       const WebURL&,
       std::unique_ptr<WebServiceWorkerClientCallbacks>) = 0;
 
@@ -157,18 +150,6 @@ class WebServiceWorkerContextClient {
                                     const WebString& message,
                                     int line_number,
                                     const WebString& source_url) {}
-
-  // Inspector related messages.
-  virtual void SendDevToolsMessage(int session_id,
-                                   int call_id,
-                                   const WebString& message,
-                                   const WebString& state) {}
-
-  // Message loop for debugging.
-  virtual WebDevToolsAgentClient::WebKitClientMessageLoop*
-  CreateDevToolsMessageLoop() {
-    return nullptr;
-  }
 
   // Called after an 'activate' event completed.
   virtual void DidHandleActivateEvent(int event_id,
@@ -299,7 +280,7 @@ class WebServiceWorkerContextClient {
   CreateServiceWorkerNetworkProvider() = 0;
 
   // Creates a WebWorkerFetchContext for a service worker. This is called on the
-  // main thread. This is used only when off-main-thread-fetch is enabled.
+  // main thread.
   virtual std::unique_ptr<blink::WebWorkerFetchContext>
   CreateServiceWorkerFetchContext() {
     return nullptr;
@@ -332,13 +313,6 @@ class WebServiceWorkerContextClient {
   // For Clients#claim().
   virtual void Claim(
       std::unique_ptr<WebServiceWorkerClientsClaimCallbacks>) = 0;
-
-  // Called when the worker wants to register subscopes to handle via foreign
-  // fetch. Will only be called while an install event is in progress.
-  virtual void RegisterForeignFetchScopes(
-      int install_event_id,
-      const WebVector<WebURL>& sub_scopes,
-      const WebVector<WebSecurityOrigin>& origins) = 0;
 };
 
 }  // namespace blink

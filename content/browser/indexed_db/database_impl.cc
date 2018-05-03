@@ -18,6 +18,7 @@
 #include "content/browser/indexed_db/indexed_db_value.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
+#include "third_party/WebKit/common/quota/quota_types.mojom.h"
 #include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBDatabaseException.h"
 
 using std::swap;
@@ -130,7 +131,7 @@ class DatabaseImpl::IDBSequenceHelper {
                       const IndexedDBDatabaseError& error);
   void Commit(int64_t transaction_id);
   void OnGotUsageAndQuotaForCommit(int64_t transaction_id,
-                                   storage::QuotaStatusCode status,
+                                   blink::mojom::QuotaStatusCode status,
                                    int64_t usage,
                                    int64_t quota);
   void AckReceivedBlobs(const std::vector<std::string>& uuids);
@@ -631,7 +632,7 @@ void DatabaseImpl::IDBSequenceHelper::Get(
     return;
 
   connection_->database()->Get(transaction, object_store_id, index_id,
-                               base::MakeUnique<IndexedDBKeyRange>(key_range),
+                               std::make_unique<IndexedDBKeyRange>(key_range),
                                key_only, callbacks);
 }
 
@@ -654,7 +655,7 @@ void DatabaseImpl::IDBSequenceHelper::GetAll(
 
   connection_->database()->GetAll(
       transaction, object_store_id, index_id,
-      base::MakeUnique<IndexedDBKeyRange>(key_range), key_only, max_count,
+      std::make_unique<IndexedDBKeyRange>(key_range), key_only, max_count,
       std::move(callbacks));
 }
 
@@ -687,7 +688,7 @@ void DatabaseImpl::IDBSequenceHelper::Put(
   swap(value.bits, mojo_value->bits);
   swap(value.blob_info, blob_info);
   connection_->database()->Put(transaction, object_store_id, &value, &handles,
-                               base::MakeUnique<IndexedDBKey>(key), mode,
+                               std::make_unique<IndexedDBKey>(key), mode,
                                std::move(callbacks), index_keys);
 
   // Size can't be big enough to overflow because it represents the
@@ -710,7 +711,7 @@ void DatabaseImpl::IDBSequenceHelper::SetIndexKeys(
     return;
 
   connection_->database()->SetIndexKeys(
-      transaction, object_store_id, base::MakeUnique<IndexedDBKey>(primary_key),
+      transaction, object_store_id, std::make_unique<IndexedDBKey>(primary_key),
       index_keys);
 }
 
@@ -751,7 +752,7 @@ void DatabaseImpl::IDBSequenceHelper::OpenCursor(
 
   connection_->database()->OpenCursor(
       transaction, object_store_id, index_id,
-      base::MakeUnique<IndexedDBKeyRange>(key_range), direction, key_only,
+      std::make_unique<IndexedDBKeyRange>(key_range), direction, key_only,
       task_type, std::move(callbacks));
 }
 
@@ -771,7 +772,7 @@ void DatabaseImpl::IDBSequenceHelper::Count(
     return;
 
   connection_->database()->Count(transaction, object_store_id, index_id,
-                                 base::MakeUnique<IndexedDBKeyRange>(key_range),
+                                 std::make_unique<IndexedDBKeyRange>(key_range),
                                  std::move(callbacks));
 }
 
@@ -790,7 +791,7 @@ void DatabaseImpl::IDBSequenceHelper::DeleteRange(
 
   connection_->database()->DeleteRange(
       transaction, object_store_id,
-      base::MakeUnique<IndexedDBKeyRange>(key_range), std::move(callbacks));
+      std::make_unique<IndexedDBKeyRange>(key_range), std::move(callbacks));
 }
 
 void DatabaseImpl::IDBSequenceHelper::Clear(
@@ -916,14 +917,14 @@ void DatabaseImpl::IDBSequenceHelper::Commit(int64_t transaction_id) {
 
   indexed_db_context_->quota_manager_proxy()->GetUsageAndQuota(
       indexed_db_context_->TaskRunner(), origin_.GetURL(),
-      storage::kStorageTypeTemporary,
+      blink::mojom::StorageType::kTemporary,
       base::Bind(&IDBSequenceHelper::OnGotUsageAndQuotaForCommit,
                  weak_factory_.GetWeakPtr(), transaction_id));
 }
 
 void DatabaseImpl::IDBSequenceHelper::OnGotUsageAndQuotaForCommit(
     int64_t transaction_id,
-    storage::QuotaStatusCode status,
+    blink::mojom::QuotaStatusCode status,
     int64_t usage,
     int64_t quota) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -936,7 +937,7 @@ void DatabaseImpl::IDBSequenceHelper::OnGotUsageAndQuotaForCommit(
   if (!transaction)
     return;
 
-  if (status == storage::kQuotaStatusOk &&
+  if (status == blink::mojom::QuotaStatusCode::kOk &&
       usage + transaction->size() <= quota) {
     connection_->database()->Commit(transaction);
   } else {

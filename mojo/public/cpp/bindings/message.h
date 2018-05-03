@@ -27,7 +27,8 @@ namespace mojo {
 
 class AssociatedGroupController;
 
-using ReportBadMessageCallback = base::Callback<void(const std::string& error)>;
+using ReportBadMessageCallback =
+    base::OnceCallback<void(const std::string& error)>;
 
 // Message is a holder for the data and handles to be sent over a MessagePipe.
 // Message owns its data and handles, but a consumer of Message is free to
@@ -266,12 +267,13 @@ class MessageReceiverWithStatus : public MessageReceiver {
 
   // Returns |true| if this MessageReceiver is currently bound to a MessagePipe,
   // the pipe has not been closed, and the pipe has not encountered an error.
-  virtual bool IsValid() = 0;
+  virtual bool IsConnected() = 0;
 
-  // DCHECKs if this MessageReceiver is currently bound to a MessagePipe, the
-  // pipe has not been closed, and the pipe has not encountered an error.
-  // This function may be called on any thread.
-  virtual void DCheckInvalid(const std::string& message) = 0;
+  // Determines if this MessageReceiver is still bound to a message pipe and has
+  // not encountered any errors. This is asynchronous but may be called from any
+  // sequence. |callback| is eventually invoked from an arbitrary sequence with
+  // the result of the query.
+  virtual void IsConnectedAsync(base::OnceCallback<void(bool)> callback) = 0;
 };
 
 // An alternative to MessageReceiverWithResponder for cases in which it
@@ -328,14 +330,13 @@ class MOJO_CPP_BINDINGS_EXPORT SyncMessageResponseContext {
 
   void ReportBadMessage(const std::string& error);
 
-  const ReportBadMessageCallback& GetBadMessageCallback();
+  ReportBadMessageCallback GetBadMessageCallback();
 
  private:
   friend class internal::SyncMessageResponseSetup;
 
   SyncMessageResponseContext* outer_context_;
   Message response_;
-  ReportBadMessageCallback bad_message_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncMessageResponseContext);
 };

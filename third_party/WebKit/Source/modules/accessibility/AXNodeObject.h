@@ -29,9 +29,9 @@
 #ifndef AXNodeObject_h
 #define AXNodeObject_h
 
+#include "base/macros.h"
 #include "modules/ModulesExport.h"
 #include "modules/accessibility/AXObject.h"
-#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -41,8 +41,6 @@ class HTMLLabelElement;
 class Node;
 
 class MODULES_EXPORT AXNodeObject : public AXObject {
-  WTF_MAKE_NONCOPYABLE(AXNodeObject);
-
  protected:
   AXNodeObject(Node*, AXObjectCacheImpl&);
 
@@ -63,7 +61,7 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   virtual AccessibilityRole NativeAccessibilityRoleIgnoringAria() const;
   String AccessibilityDescriptionForElements(
       HeapVector<Member<Element>>& elements) const;
-  void AlterSliderValue(bool increase);
+  void AlterSliderOrSpinButtonValue(bool increase);
   AXObject* ActiveDescendant() override;
   String AriaAccessibilityDescription() const;
   String AriaAutoComplete() const;
@@ -97,6 +95,7 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   bool IsControllingVideoElement() const;
   bool IsMultiline() const override;
   bool IsEditable() const override { return IsNativeTextControl(); }
+  bool ComputeIsEditableRoot() const override;
   bool IsEmbeddedObject() const final;
   bool IsFieldset() const final;
   bool IsHeading() const final;
@@ -117,7 +116,9 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   bool IsProgressIndicator() const override;
   bool IsRichlyEditable() const override;
   bool IsSlider() const override;
+  bool IsSpinButton() const override;
   bool IsNativeSlider() const override;
+  bool IsNativeSpinButton() const override;
   bool IsMoveableSplitter() const override;
 
   // Check object state.
@@ -151,6 +152,7 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   bool ValueForRange(float* out_value) const override;
   bool MaxValueForRange(float* out_value) const override;
   bool MinValueForRange(float* out_value) const override;
+  bool StepValueForRange(float* out_value) const override;
   String StringValue() const override;
 
   // ARIA attributes.
@@ -176,7 +178,8 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   // Location
   void GetRelativeBounds(AXObject** out_container,
                          FloatRect& out_bounds_in_container,
-                         SkMatrix44& out_container_transform) const override;
+                         SkMatrix44& out_container_transform,
+                         bool* clips_children = nullptr) const override;
 
   // High-level accessibility tree access.
   AXObject* ComputeParent() const override;
@@ -231,9 +234,10 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
                                AXRelatedObjectVector*,
                                NameSources*,
                                bool* found_text_alternative) const;
-  float StepValueForRange() const;
   bool IsDescendantOfElementType(HashSet<QualifiedName>& tag_names) const;
   String PlaceholderFromNativeAttribute() const;
+
+  DISALLOW_COPY_AND_ASSIGN(AXNodeObject);
 };
 
 }  // namespace blink

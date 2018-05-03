@@ -88,8 +88,8 @@ class TestablePictureLayerTiling : public PictureLayerTiling {
 
 class PictureLayerTilingIteratorTest : public testing::Test {
  public:
-  PictureLayerTilingIteratorTest() {}
-  ~PictureLayerTilingIteratorTest() override {}
+  PictureLayerTilingIteratorTest() = default;
+  ~PictureLayerTilingIteratorTest() override = default;
 
   void Initialize(const gfx::Size& tile_size,
                   float contents_scale,
@@ -413,6 +413,40 @@ TEST_F(PictureLayerTilingIteratorTest, ResizeLiveTileRectOverTileBorders) {
   EXPECT_TRUE(tiling_->TileAt(2, 0));
 }
 
+TEST_F(PictureLayerTilingIteratorTest, ShrinkWidthExpandHeightTilingRect) {
+  Initialize(gfx::Size(100, 100), 1.f, gfx::Size(450, 296));
+  EXPECT_EQ(5, tiling_->TilingDataForTesting().num_tiles_x());
+  EXPECT_EQ(3, tiling_->TilingDataForTesting().num_tiles_y());
+
+  SetLiveRectAndVerifyTiles(gfx::Rect(450, 296));
+
+  // Tiles in the rightmost column exist and tiles in the third row does
+  // not exist yet.
+  EXPECT_TRUE(tiling_->TileAt(4, 0));
+  EXPECT_TRUE(tiling_->TileAt(4, 1));
+  EXPECT_TRUE(tiling_->TileAt(4, 2));
+  EXPECT_FALSE(tiling_->TileAt(0, 3));
+  EXPECT_FALSE(tiling_->TileAt(1, 3));
+  EXPECT_FALSE(tiling_->TileAt(2, 3));
+  EXPECT_FALSE(tiling_->TileAt(3, 3));
+
+  scoped_refptr<FakeRasterSource> raster_source =
+      FakeRasterSource::CreateFilled(gfx::Size(310, 310));
+  tiling_->SetRasterSourceAndResize(raster_source);
+  EXPECT_EQ(4, tiling_->TilingDataForTesting().num_tiles_x());
+  EXPECT_EQ(4, tiling_->TilingDataForTesting().num_tiles_y());
+
+  // Tiles in the rightmost column for the original size was removed and
+  // tiles in the bottom row was created.
+  EXPECT_FALSE(tiling_->TileAt(4, 0));
+  EXPECT_FALSE(tiling_->TileAt(4, 1));
+  EXPECT_FALSE(tiling_->TileAt(4, 2));
+  EXPECT_TRUE(tiling_->TileAt(0, 3));
+  EXPECT_TRUE(tiling_->TileAt(1, 3));
+  EXPECT_TRUE(tiling_->TileAt(2, 3));
+  EXPECT_TRUE(tiling_->TileAt(3, 3));
+}
+
 TEST_F(PictureLayerTilingIteratorTest, ResizeLiveTileRectOverSameTiles) {
   // The tiling has four rows and three columns.
   Initialize(gfx::Size(100, 100), 1.f, gfx::Size(250, 350));
@@ -639,7 +673,7 @@ TEST_F(PictureLayerTilingIteratorTest, NonContainedDestRect) {
 
 static void TileExists(bool exists, Tile* tile,
                        const gfx::Rect& geometry_rect) {
-  EXPECT_EQ(exists, tile != NULL) << geometry_rect.ToString();
+  EXPECT_EQ(exists, tile != nullptr) << geometry_rect.ToString();
 }
 
 TEST_F(PictureLayerTilingIteratorTest, TilesExist) {
@@ -712,7 +746,7 @@ static void TilesIntersectingRectExist(const gfx::Rect& rect,
                                        const gfx::Rect& geometry_rect) {
   bool intersects = rect.Intersects(geometry_rect);
   bool expected_exists = intersect_exists ? intersects : !intersects;
-  EXPECT_EQ(expected_exists, tile != NULL)
+  EXPECT_EQ(expected_exists, tile != nullptr)
       << "Rects intersecting " << rect.ToString() << " should exist. "
       << "Current tile rect is " << geometry_rect.ToString();
 }
@@ -960,8 +994,8 @@ TEST(PictureLayerTilingTest, RecycledTilesClearedOnReset) {
                                            Occlusion());
 
   // Set the second tiling as recycled.
-  active_client.set_twin_tiling(NULL);
-  recycle_client.set_twin_tiling(NULL);
+  active_client.set_twin_tiling(nullptr);
+  recycle_client.set_twin_tiling(nullptr);
 
   EXPECT_TRUE(active_tiling->TileAt(0, 0));
   EXPECT_FALSE(recycle_tiling->TileAt(0, 0));

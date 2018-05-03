@@ -19,13 +19,13 @@ HTMLImportTreeRoot::HTMLImportTreeRoot(Document* document)
     : HTMLImport(HTMLImport::kSync),
       document_(document),
       recalc_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, document->GetFrame()),
+          document->GetFrame()->GetTaskRunner(TaskType::kUnspecedTimer),
           this,
           &HTMLImportTreeRoot::RecalcTimerFired) {
   ScheduleRecalcState();  // This recomputes initial state.
 }
 
-HTMLImportTreeRoot::~HTMLImportTreeRoot() {}
+HTMLImportTreeRoot::~HTMLImportTreeRoot() = default;
 
 void HTMLImportTreeRoot::Dispose() {
   for (const auto& import_child : imports_)
@@ -59,7 +59,7 @@ void HTMLImportTreeRoot::ScheduleRecalcState() {
   DCHECK(document_);
   if (recalc_timer_.IsActive() || !document_->IsActive())
     return;
-  recalc_timer_.StartOneShot(0, BLINK_FROM_HERE);
+  recalc_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 HTMLImportChild* HTMLImportTreeRoot::Add(HTMLImportChild* child) {

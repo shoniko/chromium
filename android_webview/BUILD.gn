@@ -16,10 +16,6 @@ declare_args() {
   system_webview_package_name = "com.android.webview"
 }
 
-if (!defined(use_unpublished_apis)) {
-  use_unpublished_apis = false
-}
-
 if (enable_resource_whitelist_generation) {
   system_webview_pak_whitelist =
       "$target_gen_dir/system_webview_pak_whitelist.txt"
@@ -29,7 +25,7 @@ system_webview_android_manifest =
     "$target_gen_dir/system_webview_apk/AndroidManifest.xml"
 
 group("android_webview") {
-  if (!use_unpublished_apis) {
+  if (public_android_sdk) {
     deps = [
       ":system_webview_apk",
     ]
@@ -61,6 +57,7 @@ generate_jni("native_jni") {
     "java/src/org/chromium/android_webview/AwResource.java",
     "java/src/org/chromium/android_webview/AwSettings.java",
     "java/src/org/chromium/android_webview/AwTokenBindingManager.java",
+    "java/src/org/chromium/android_webview/AwTracingController.java",
     "java/src/org/chromium/android_webview/AwWebContentsDelegate.java",
     "java/src/org/chromium/android_webview/AwWebResourceResponse.java",
     "java/src/org/chromium/android_webview/InputStreamUtil.java",
@@ -107,7 +104,10 @@ java_cpp_enum("aw_safe_browsing_action") {
 jinja_template("system_webview_manifest") {
   input = "apk/java/AndroidManifest.xml"
   output = system_webview_android_manifest
-  variables = [ "package=$system_webview_package_name" ]
+  variables = [
+    "package=$system_webview_package_name",
+    "sandboxed_service_extra_flags=android:visibleToInstantApps=\"true\"",
+  ]
 }
 
 webview_repack_locales("repack_locales") {
@@ -130,6 +130,7 @@ android_assets("locale_pak_assets") {
     renaming_sources += [ "$root_out_dir/android_webview/locales/$_locale.pak" ]
     renaming_destinations += [ "stored-locales/$_locale.pak" ]
   }
+  treat_as_locale_paks = true
   deps = [
     ":repack_locales",
   ]
@@ -203,7 +204,7 @@ android_assets("monochrome_webview_assets") {
   }
 }
 
-android_assets("assets") {
+java_group("assets") {
   deps = [
     ":license_assets",
     ":locale_pak_assets",
@@ -411,6 +412,9 @@ if (android_64bit_target_cpu) {
     ]
     configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
     configs += [ "//build/config/android:hide_all_but_jni" ]
+    if (use_lld) {
+      configs += [ "//build/config/android:lld_pack_relocations" ]
+    }
   }
 }
 
@@ -426,10 +430,6 @@ if (enable_resource_whitelist_generation) {
 
 source_set("common") {
   sources = [
-    "browser/address_parser.cc",
-    "browser/address_parser.h",
-    "browser/address_parser_internal.cc",
-    "browser/address_parser_internal.h",
     "browser/android_protocol_handler.cc",
     "browser/android_protocol_handler.h",
     "browser/aw_autofill_client.cc",
@@ -617,6 +617,10 @@ source_set("common") {
     "browser/surfaces_instance.cc",
     "browser/surfaces_instance.h",
     "browser/token_binding_manager_bridge.cc",
+    "browser/tracing/aw_trace_event_args_whitelist.cc",
+    "browser/tracing/aw_trace_event_args_whitelist.h",
+    "browser/tracing/aw_tracing_controller.cc",
+    "browser/tracing/aw_tracing_controller.h",
     "browser/tracing/aw_tracing_delegate.cc",
     "browser/tracing/aw_tracing_delegate.h",
     "common/android_webview_message_generator.cc",
@@ -665,6 +669,8 @@ source_set("common") {
     "renderer/aw_render_thread_observer.h",
     "renderer/aw_render_view_ext.cc",
     "renderer/aw_render_view_ext.h",
+    "renderer/aw_url_loader_throttle_provider.cc",
+    "renderer/aw_url_loader_throttle_provider.h",
     "renderer/print_render_frame_observer.cc",
     "renderer/print_render_frame_observer.h",
   ]
@@ -685,6 +691,7 @@ source_set("common") {
     "//components/crash/content/app",
     "//components/crash/content/browser",
     "//components/google/core/browser",
+    "//components/keyed_service/content",
     "//components/metrics",
     "//components/metrics:gpu",
     "//components/metrics:net",
@@ -692,15 +699,17 @@ source_set("common") {
     "//components/navigation_interception",
     "//components/network_session_configurator/common",
     "//components/policy:generated",
+    "//components/policy/content/",
     "//components/policy/core/browser",
+    "//components/policy/core/common",
     "//components/prefs",
     "//components/printing/browser",
     "//components/printing/common",
     "//components/printing/renderer",
     "//components/safe_browsing",
+    "//components/safe_browsing/android:safe_browsing_mobile",
     "//components/safe_browsing/browser",
     "//components/safe_browsing/common",
-    "//components/safe_browsing/db:safe_browsing_mobile",
     "//components/safe_browsing/renderer:throttles",
     "//components/safe_browsing/triggers",
     "//components/safe_browsing/web_ui",
@@ -724,9 +733,7 @@ source_set("common") {
     "//gin",
     "//gpu/command_buffer/client:gles2_c_lib",
     "//gpu/command_buffer/client:gles2_implementation",
-    "//gpu/command_buffer/common:gles2_utils",
     "//gpu/command_buffer/service",
-    "//gpu/config:crash_keys",
     "//gpu/ipc:gl_in_process_context",
     "//gpu/skia_bindings",
     "//media",
@@ -808,6 +815,7 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/AwSettings.java",
     "java/src/org/chromium/android_webview/AwSwitches.java",
     "java/src/org/chromium/android_webview/AwTokenBindingManager.java",
+    "java/src/org/chromium/android_webview/AwTracingController.java",
     "java/src/org/chromium/android_webview/AwViewMethods.java",
     "java/src/org/chromium/android_webview/AwViewAndroidDelegate.java",
     "java/src/org/chromium/android_webview/AwWebContentsDelegate.java",
@@ -819,6 +827,7 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/ClientCertLookupTable.java",
     "java/src/org/chromium/android_webview/DefaultVideoPosterRequestHandler.java",
     "java/src/org/chromium/android_webview/ErrorCodeConversionHelper.java",
+    "java/src/org/chromium/android_webview/FindAddress.java",
     "java/src/org/chromium/android_webview/FullScreenView.java",
     "java/src/org/chromium/android_webview/HttpAuthDatabase.java",
     "java/src/org/chromium/android_webview/InputStreamUtil.java",
@@ -832,6 +841,7 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/ResourcesContextWrapperFactory.java",
     "java/src/org/chromium/android_webview/ScrollAccessibilityHelper.java",
     "java/src/org/chromium/android_webview/SslUtil.java",
+    "java/src/org/chromium/android_webview/WebViewChromiumRunQueue.java",
     "java/src/org/chromium/android_webview/permission/AwGeolocationCallback.java",
     "java/src/org/chromium/android_webview/permission/AwPermissionRequest.java",
     "java/src/org/chromium/android_webview/policy/AwPolicyProvider.java",
@@ -880,8 +890,7 @@ android_library("android_webview_java") {
     "//components/safe_browsing/db:sb_threat_values",
   ]
 
-  # Manifest used for linting (determining unused resources).
-  android_manifest = system_webview_android_manifest
+  android_manifest_for_lint = system_webview_android_manifest
 }
 
 java_strings_grd("strings_grd") {
@@ -942,11 +951,14 @@ android_library("android_webview_platform_services_java") {
 
   deps = [
     "//base:base_java",
+    "//third_party/android_tools:android_support_annotations_java",
   ]
 }
 
 android_library("android_webview_commandline_java") {
-  java_files = [ "java/src/org/chromium/android_webview/command_line/CommandLineUtil.java" ]
+  java_files = [
+    "java/src/org/chromium/android_webview/command_line/CommandLineUtil.java",
+  ]
 
   deps = [
     "//base:base_java",
@@ -979,7 +991,7 @@ android_aidl("crash_receiver_aidl") {
   ]
 }
 
-if (!use_unpublished_apis) {
+if (public_android_sdk) {
   system_webview_apk_tmpl("system_webview_apk") {
     android_manifest = system_webview_android_manifest
     android_manifest_dep = ":system_webview_manifest"

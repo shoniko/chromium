@@ -12,6 +12,7 @@
 #include "base/bind.h"
 #include "base/i18n/number_formatting.h"
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -44,7 +45,7 @@
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "storage/browser/quota/quota_manager.h"
-#include "storage/common/quota/quota_status_code.h"
+#include "third_party/WebKit/common/quota/quota_types.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
 
@@ -213,7 +214,7 @@ void SiteSettingsHandler::OnJavascriptAllowed() {
                          base::Unretained(this)));
 
 #if defined(OS_CHROMEOS)
-  pref_change_registrar_ = base::MakeUnique<PrefChangeRegistrar>();
+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
   pref_change_registrar_->Init(profile_->GetPrefs());
   pref_change_registrar_->Add(
       prefs::kEnableDRM,
@@ -241,14 +242,15 @@ void SiteSettingsHandler::OnGetUsageInfo(
       CallJavascriptFunction("settings.WebsiteUsagePrivateApi.returnUsageTotal",
                              base::Value(entry.host),
                              base::Value(ui::FormatBytes(entry.usage)),
-                             base::Value(entry.type));
+                             base::Value(static_cast<int>(entry.type)));
       return;
     }
   }
 }
 
-void SiteSettingsHandler::OnUsageInfoCleared(storage::QuotaStatusCode code) {
-  if (code == storage::kQuotaStatusOk) {
+void SiteSettingsHandler::OnUsageInfoCleared(
+    blink::mojom::QuotaStatusCode code) {
+  if (code == blink::mojom::QuotaStatusCode::kOk) {
     CallJavascriptFunction("settings.WebsiteUsagePrivateApi.onUsageCleared",
                            base::Value(clearing_origin_));
   }
@@ -358,9 +360,9 @@ void SiteSettingsHandler::HandleClearUsage(
         = new StorageInfoFetcher(profile_);
     storage_info_fetcher->ClearStorage(
         url.host(),
-        static_cast<storage::StorageType>(static_cast<int>(storage_type)),
+        static_cast<blink::mojom::StorageType>(static_cast<int>(storage_type)),
         base::Bind(&SiteSettingsHandler::OnUsageInfoCleared,
-            base::Unretained(this)));
+                   base::Unretained(this)));
 
     // Also clear the *local* storage data.
     scoped_refptr<BrowsingDataLocalStorageHelper> local_storage_helper =
@@ -417,6 +419,8 @@ void SiteSettingsHandler::HandleSetDefaultValueForContentType(
   CHECK(args->GetString(1, &setting));
   ContentSetting default_setting;
   CHECK(content_settings::ContentSettingFromString(setting, &default_setting));
+  ContentSettingsType type =
+      site_settings::ContentSettingsTypeFromGroupName(content_type);
 
   Profile* profile = profile_;
 #if defined(OS_CHROMEOS)
@@ -427,9 +431,20 @@ void SiteSettingsHandler::HandleSetDefaultValueForContentType(
 #endif
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile);
-  map->SetDefaultContentSetting(
-      site_settings::ContentSettingsTypeFromGroupName(content_type),
-      default_setting);
+  ContentSetting previous_setting =
+      map->GetDefaultContentSetting(type, nullptr);
+  map->SetDefaultContentSetting(type, default_setting);
+
+  if (type == CONTENT_SETTINGS_TYPE_SOUND &&
+      previous_setting != default_setting) {
+    if (default_setting == CONTENT_SETTING_BLOCK) {
+      base::RecordAction(
+          base::UserMetricsAction("SoundContentSetting.MuteBy.DefaultSwitch"));
+    } else {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.UnmuteBy.DefaultSwitch"));
+    }
+  }
 }
 
 void SiteSettingsHandler::HandleGetDefaultValueForContentType(
@@ -504,7 +519,7 @@ void SiteSettingsHandler::HandleGetOriginPermissions(
 
   // Note: Invalid URLs will just result in default settings being shown.
   const GURL origin_url(origin);
-  auto exceptions = base::MakeUnique<base::ListValue>();
+  auto exceptions = std::make_unique<base::ListValue>();
   for (size_t i = 0; i < types->GetSize(); ++i) {
     std::string type;
     types->GetString(i, &type);
@@ -522,7 +537,7 @@ void SiteSettingsHandler::HandleGetOriginPermissions(
     std::string content_setting_string =
         content_settings::ContentSettingToString(content_setting);
 
-    auto raw_site_exception = base::MakeUnique<base::DictionaryValue>();
+    auto raw_site_exception = std::make_unique<base::DictionaryValue>();
     raw_site_exception->SetString(site_settings::kEmbeddingOrigin, origin);
     raw_site_exception->SetBoolean(site_settings::kIncognito,
                                    profile_->IsOffTheRecord());
@@ -573,6 +588,20 @@ void SiteSettingsHandler::HandleSetOriginPermissions(
     }
     map->SetContentSettingDefaultScope(origin, origin, content_type,
                                        std::string(), setting);
+    if (content_type == CONTENT_SETTINGS_TYPE_SOUND) {
+      ContentSetting default_setting =
+          map->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SOUND, nullptr);
+      bool mute = (setting == CONTENT_SETTING_BLOCK) ||
+                  (setting == CONTENT_SETTING_DEFAULT &&
+                   default_setting == CONTENT_SETTING_BLOCK);
+      if (mute) {
+        base::RecordAction(
+            base::UserMetricsAction("SoundContentSetting.MuteBy.SiteSettings"));
+      } else {
+        base::RecordAction(base::UserMetricsAction(
+            "SoundContentSetting.UnmuteBy.SiteSettings"));
+      }
+    }
     WebSiteSettingsUmaUtil::LogPermissionChange(content_type, setting);
   }
 
@@ -632,6 +661,17 @@ void SiteSettingsHandler::HandleResetCategoryPermissionForPattern(
   map->SetContentSettingCustomScope(primary_pattern, secondary_pattern,
                                     content_type, "", CONTENT_SETTING_DEFAULT);
 
+  if (content_type == CONTENT_SETTINGS_TYPE_SOUND) {
+    ContentSetting default_setting =
+        map->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SOUND, nullptr);
+    if (default_setting == CONTENT_SETTING_BLOCK) {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.MuteBy.PatternException"));
+    } else {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.UnmuteBy.PatternException"));
+    }
+  }
   WebSiteSettingsUmaUtil::LogPermissionChange(
       content_type, ContentSetting::CONTENT_SETTING_DEFAULT);
 }
@@ -682,6 +722,20 @@ void SiteSettingsHandler::HandleSetCategoryPermissionForPattern(
   map->SetContentSettingCustomScope(primary_pattern, secondary_pattern,
                                     content_type, "", setting);
 
+  if (content_type == CONTENT_SETTINGS_TYPE_SOUND) {
+    ContentSetting default_setting =
+        map->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SOUND, nullptr);
+    bool mute = (setting == CONTENT_SETTING_BLOCK) ||
+                (setting == CONTENT_SETTING_DEFAULT &&
+                 default_setting == CONTENT_SETTING_BLOCK);
+    if (mute) {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.MuteBy.PatternException"));
+    } else {
+      base::RecordAction(base::UserMetricsAction(
+          "SoundContentSetting.UnmuteBy.PatternException"));
+    }
+  }
   WebSiteSettingsUmaUtil::LogPermissionChange(content_type, setting);
 }
 

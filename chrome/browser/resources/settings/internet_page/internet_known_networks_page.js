@@ -54,40 +54,13 @@ Polymer({
     enableForget_: Boolean,
   },
 
+  listeners: {'network-list-changed': 'refreshNetworks_'},
+
   /** @private {string} */
   selectedGuid_: '',
 
-  /**
-   * Listener function for chrome.networkingPrivate.onNetworksChanged event.
-   * @type {function(!Array<string>)}
-   * @private
-   */
-  networksChangedListener_: function() {},
-
-  /** @override */
-  attached: function() {
-    this.networksChangedListener_ = this.onNetworksChangedEvent_.bind(this);
-    this.networkingPrivate.onNetworksChanged.addListener(
-        this.networksChangedListener_);
-  },
-
-  /** @override */
-  detached: function() {
-    this.networkingPrivate.onNetworksChanged.removeListener(
-        this.networksChangedListener_);
-  },
-
   /** @private */
   networkTypeChanged_: function() {
-    this.refreshNetworks_();
-  },
-
-  /**
-   * networkingPrivate.onNetworksChanged event callback.
-   * @param {!Array<string>} networkIds The list of changed network GUIDs.
-   * @private
-   */
-  onNetworksChangedEvent_: function(networkIds) {
     this.refreshNetworks_();
   },
 
@@ -99,7 +72,7 @@ Polymer({
   refreshNetworks_: function() {
     if (!this.networkType)
       return;
-    var filter = {
+    const filter = {
       networkType: this.networkType,
       visible: false,
       configured: true
@@ -151,7 +124,7 @@ Polymer({
    * @private
    */
   onMenuButtonTap_: function(event) {
-    var button = /** @type {!HTMLElement} */ (event.target);
+    const button = /** @type {!HTMLElement} */ (event.target);
     this.selectedGuid_ =
         /** @type {!{model: !{item: !CrOnc.NetworkStateProperties}}} */ (event)
             .model.item.GUID;
@@ -165,7 +138,7 @@ Polymer({
                 'Unexpected error: ' + chrome.runtime.lastError.message);
             return;
           }
-          var preferred = button.hasAttribute('preferred');
+          const preferred = button.hasAttribute('preferred');
           if (this.isNetworkPolicyEnforced(properties.Priority)) {
             this.showAddPreferred_ = false;
             this.showRemovePreferred_ = false;
@@ -204,7 +177,7 @@ Polymer({
    * @private
    */
   fireShowDetails_: function(event) {
-    var state =
+    const state =
         /** @type {!{model: !{item: !CrOnc.NetworkStateProperties}}} */ (event)
             .model.item;
     this.fire('show-detail', state);

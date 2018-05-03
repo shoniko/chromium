@@ -15,6 +15,7 @@
 #include "components/cast_channel/cast_transport.h"
 #include "components/cast_channel/proto/cast_channel.pb.h"
 #include "net/base/ip_endpoint.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace cast_channel {
@@ -27,9 +28,11 @@ class MockCastTransport : public CastTransport {
   void SetReadDelegate(
       std::unique_ptr<CastTransport::Delegate> delegate) override;
 
-  MOCK_METHOD2(SendMessage,
-               void(const CastMessage& message,
-                    const net::CompletionCallback& callback));
+  MOCK_METHOD3(
+      SendMessage,
+      void(const CastMessage& message,
+           const net::CompletionCallback& callback,
+           const net::NetworkTrafficAnnotationTag& traffic_annotation));
 
   MOCK_METHOD0(Start, void(void));
 
@@ -67,22 +70,22 @@ class MockCastSocketObserver : public CastSocket::Observer {
 
 class MockCastSocketService : public CastSocketService {
  public:
-  MockCastSocketService();
+  explicit MockCastSocketService(
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
   ~MockCastSocketService() override;
 
-  int OpenSocket(const CastSocketOpenParams& open_params,
-                 CastSocket::OnOpenCallback open_cb) override {
+  void OpenSocket(const CastSocketOpenParams& open_params,
+                  CastSocket::OnOpenCallback open_cb) override {
     // Unit test should not call |open_cb| more than once. Just use
     // base::AdaptCallbackForRepeating to pass |open_cb| to a mock method.
-    return OpenSocketInternal(
-        open_params.ip_endpoint, open_params.net_log,
-        base::AdaptCallbackForRepeating(std::move(open_cb)));
+    OpenSocketInternal(open_params.ip_endpoint, open_params.net_log,
+                       base::AdaptCallbackForRepeating(std::move(open_cb)));
   }
 
   MOCK_METHOD3(OpenSocketInternal,
-               int(const net::IPEndPoint& ip_endpoint,
-                   net::NetLog* net_log,
-                   const base::Callback<void(CastSocket*)>& open_cb));
+               void(const net::IPEndPoint& ip_endpoint,
+                    net::NetLog* net_log,
+                    const base::Callback<void(CastSocket*)>& open_cb));
   MOCK_CONST_METHOD1(GetSocket, CastSocket*(int channel_id));
 };
 

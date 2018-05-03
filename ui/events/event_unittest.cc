@@ -21,8 +21,8 @@
 #include "ui/gfx/transform.h"
 
 #if defined(USE_X11)
-#include <X11/Xlib.h>
 #include "ui/events/test/events_test_utils_x11.h"
+#include "ui/gfx/x/x11.h"        // nogncheck
 #include "ui/gfx/x/x11_types.h"  // nogncheck
 #endif
 
@@ -428,8 +428,9 @@ TEST(EventTest, KeyEventCode) {
 #endif  // OS_WIN
 }
 
-namespace {
 #if defined(USE_X11)
+namespace {
+
 void SetKeyEventTimestamp(XEvent* event, int64_t time) {
   event->xkey.time = time & UINT32_MAX;
 }
@@ -438,24 +439,13 @@ void AdvanceKeyEventTimestamp(XEvent* event) {
   event->xkey.time++;
 }
 
-#elif defined(OS_WIN)
-void SetKeyEventTimestamp(MSG& msg, int64_t time) {
-  msg.time = static_cast<long>(time);
-}
-
-void AdvanceKeyEventTimestamp(MSG& msg) {
-  msg.time++;
-}
-#endif
 }  // namespace
 
-#if defined(USE_X11) || defined(OS_WIN)
 TEST(EventTest, AutoRepeat) {
   const uint16_t kNativeCodeA =
       ui::KeycodeConverter::DomCodeToNativeKeycode(DomCode::US_A);
   const uint16_t kNativeCodeB =
       ui::KeycodeConverter::DomCodeToNativeKeycode(DomCode::US_B);
-#if defined(USE_X11)
 
   ScopedXI2Event native_event_a_pressed;
   native_event_a_pressed.InitKeyEvent(ET_KEY_PRESSED, VKEY_A, kNativeCodeA);
@@ -476,15 +466,7 @@ TEST(EventTest, AutoRepeat) {
   // IBUS-GTK uses the mask (1 << 25) to detect reposted event.
   static_cast<XEvent*>(native_event_a_pressed_nonstandard_state)->xkey.state |=
       1 << 25;
-#elif defined(OS_WIN)
-  const LPARAM lParam_a = GetLParamFromScanCode(kNativeCodeA);
-  const LPARAM lParam_b = GetLParamFromScanCode(kNativeCodeB);
-  MSG native_event_a_pressed = { NULL, WM_KEYDOWN, VKEY_A, lParam_a };
-  MSG native_event_a_pressed_1500 = { NULL, WM_KEYDOWN, VKEY_A, lParam_a };
-  MSG native_event_a_pressed_3000 = { NULL, WM_KEYDOWN, VKEY_A, lParam_a };
-  MSG native_event_a_released = { NULL, WM_KEYUP, VKEY_A, lParam_a };
-  MSG native_event_b_pressed = { NULL, WM_KEYUP, VKEY_B, lParam_b };
-#endif
+
   int64_t ticks_base =
       (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds() - 5000;
   SetKeyEventTimestamp(native_event_a_pressed, ticks_base);
@@ -548,7 +530,6 @@ TEST(EventTest, AutoRepeat) {
     EXPECT_FALSE(key_a4_released.is_repeat());
   }
 
-#if defined(USE_X11)
   {
     KeyEvent key_a4_pressed(native_event_a_pressed);
     EXPECT_FALSE(key_a4_pressed.is_repeat());
@@ -565,9 +546,8 @@ TEST(EventTest, AutoRepeat) {
     KeyEvent key_a1_with_same_event(native_event_a_pressed);
     EXPECT_FALSE(key_a1_with_same_event.is_repeat());
   }
-#endif
 }
-#endif  // USE_X11 || OS_WIN
+#endif  // USE_X11
 
 TEST(EventTest, TouchEventRadiusDefaultsToOtherAxis) {
   const base::TimeTicks time = base::TimeTicks();
@@ -605,7 +585,7 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
                                     /* pointer_id*/ 0, radius_x, radius_y,
                                     /* force */ 0),
                      0, angle_in_range);
-    EXPECT_FLOAT_EQ(angle_in_range, event.rotation_angle());
+    EXPECT_FLOAT_EQ(angle_in_range, event.ComputeRotationAngle());
   }
 
   {
@@ -615,7 +595,7 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
                                     /* pointer_id*/ 0, radius_x, radius_y,
                                     /* force */ 0),
                      0, angle_in_range);
-    EXPECT_FLOAT_EQ(angle_in_range, event.rotation_angle());
+    EXPECT_FLOAT_EQ(angle_in_range, event.ComputeRotationAngle());
   }
 
   {
@@ -625,7 +605,7 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
                                     /* pointer_id*/ 0, radius_x, radius_y,
                                     /* force */ 0),
                      0, angle_negative);
-    EXPECT_FLOAT_EQ(180 - 0.1f, event.rotation_angle());
+    EXPECT_FLOAT_EQ(180 - 0.1f, event.ComputeRotationAngle());
   }
 
   {
@@ -635,7 +615,7 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
                                     /* pointer_id*/ 0, radius_x, radius_y,
                                     /* force */ 0),
                      0, angle_negative);
-    EXPECT_FLOAT_EQ(360 - 200, event.rotation_angle());
+    EXPECT_FLOAT_EQ(360 - 200, event.ComputeRotationAngle());
   }
 
   {
@@ -645,7 +625,7 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
                                     /* pointer_id*/ 0, radius_x, radius_y,
                                     /* force */ 0),
                      0, angle_too_big);
-    EXPECT_FLOAT_EQ(0, event.rotation_angle());
+    EXPECT_FLOAT_EQ(0, event.ComputeRotationAngle());
   }
 
   {
@@ -655,7 +635,7 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
                                     /* pointer_id*/ 0, radius_x, radius_y,
                                     /* force */ 0),
                      0, angle_too_big);
-    EXPECT_FLOAT_EQ(400 - 360, event.rotation_angle());
+    EXPECT_FLOAT_EQ(400 - 360, event.ComputeRotationAngle());
   }
 }
 
@@ -715,10 +695,10 @@ TEST(EventTest, PointerDetailsStylus) {
                                      /* radius_x */ 0.0f,
                                      /* radius_y */ 0.0f,
                                      /* force */ 21.0f,
+                                     /* twist */ 196,
                                      /* tilt_x */ 45.0f,
                                      /* tilt_y */ -45.0f,
-                                     /* tangential_pressure */ 0.7f,
-                                     /* twist */ 196);
+                                     /* tangential_pressure */ 0.7f);
 
   ui::MouseEvent stylus_event(ET_MOUSE_PRESSED, gfx::Point(0, 0),
                               gfx::Point(0, 0), ui::EventTimeForNow(), 0, 0,
@@ -756,11 +736,11 @@ TEST(EventTest, PointerDetailsCustomTouch) {
                                      /* radius_x */ 5.0f,
                                      /* radius_y */ 6.0f,
                                      /* force */ 21.0f,
+                                     /* twist */ 196,
                                      /* tilt_x */ 45.0f,
                                      /* tilt_y */ -45.0f,
-                                     /* tangential_pressure */ 0.7f,
-                                     /* twist */ 196);
-  touch_event.set_pointer_details(pointer_details);
+                                     /* tangential_pressure */ 0.7f);
+  touch_event.SetPointerDetailsForTest(pointer_details);
 
   EXPECT_EQ(EventPointerType::POINTER_TYPE_PEN,
             touch_event.pointer_details().pointer_type);

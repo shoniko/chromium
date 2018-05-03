@@ -41,11 +41,24 @@ class HistoryQuickProvider : public HistoryProvider {
   friend class HistoryQuickProviderTest;
   FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, Spans);
   FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, Relevance);
+  FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, DoTrimHttpScheme);
+  FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest,
+                           DontTrimHttpSchemeIfInputHasScheme);
+  FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest,
+                           DontTrimHttpSchemeIfInputMatches);
+  FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, DontTrimHttpsScheme);
+  FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest,
+                           DontTrimHttpsSchemeDespiteFlag);
+  FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, DoTrimHttpsSchemeIfFlag);
 
   ~HistoryQuickProvider() override;
 
   // Performs the autocomplete matching and scoring.
   void DoAutocomplete();
+
+  // Calculates the initial max match score for applying to matches, lowering
+  // it if we believe that there will be a URL-what-you-typed match.
+  int FindMaxMatchScore(const ScoredHistoryMatches& matches);
 
   // Creates an AutocompleteMatch from |history_match|, assigning it
   // the score |score|.

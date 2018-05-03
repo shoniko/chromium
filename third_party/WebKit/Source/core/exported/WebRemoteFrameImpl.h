@@ -21,7 +21,7 @@ class RemoteFrameClientImpl;
 enum class WebFrameLoadType;
 class WebView;
 struct WebRect;
-struct WebRemoteScrollProperties;
+struct WebScrollIntoViewParams;
 
 class CORE_EXPORT WebRemoteFrameImpl final
     : public GarbageCollectedFinalized<WebRemoteFrameImpl>,
@@ -47,36 +47,41 @@ class CORE_EXPORT WebRemoteFrameImpl final
                                   WebFrameClient*,
                                   blink::InterfaceRegistry*,
                                   WebFrame* previous_sibling,
-                                  const WebParsedFeaturePolicy&,
+                                  const ParsedFeaturePolicy&,
                                   const WebFrameOwnerProperties&,
                                   WebFrame* opener) override;
   WebRemoteFrame* CreateRemoteChild(WebTreeScopeType,
                                     const WebString& name,
                                     WebSandboxFlags,
-                                    const WebParsedFeaturePolicy&,
+                                    const ParsedFeaturePolicy&,
                                     WebRemoteFrameClient*,
                                     WebFrame* opener) override;
   void SetWebLayer(WebLayer*) override;
-  void SetReplicatedOrigin(const WebSecurityOrigin&) override;
+  void SetReplicatedOrigin(
+      const WebSecurityOrigin&,
+      bool is_potentially_trustworthy_unique_origin) override;
   void SetReplicatedSandboxFlags(WebSandboxFlags) override;
   void SetReplicatedName(const WebString&) override;
   void SetReplicatedFeaturePolicyHeader(
-      const WebParsedFeaturePolicy& parsed_header) override;
+      const ParsedFeaturePolicy& parsed_header) override;
   void AddReplicatedContentSecurityPolicyHeader(
       const WebString& header_value,
       WebContentSecurityPolicyType,
       WebContentSecurityPolicySource) override;
   void ResetReplicatedContentSecurityPolicy() override;
   void SetReplicatedInsecureRequestPolicy(WebInsecureRequestPolicy) override;
-  void SetReplicatedPotentiallyTrustworthyUniqueOrigin(bool) override;
-  void DispatchLoadEventOnFrameOwner() override;
+  void SetReplicatedInsecureNavigationsSet(
+      const std::vector<unsigned>&) override;
+  void ForwardResourceTimingToParent(const WebResourceTimingInfo&) override;
+  void DispatchLoadEventForFrameOwner() override;
   void DidStartLoading() override;
   void DidStopLoading() override;
   bool IsIgnoredForHitTest() const override;
   void WillEnterFullscreen() override;
   void SetHasReceivedUserGesture() override;
   void ScrollRectToVisible(const WebRect&,
-                           const WebRemoteScrollProperties&) override;
+                           const WebScrollIntoViewParams&) override;
+  void SetHasReceivedUserGestureBeforeNavigation(bool value) override;
   v8::Local<v8::Object> GlobalProxy() const override;
 
   void InitializeCoreFrame(Page&, FrameOwner*, const AtomicString& name);

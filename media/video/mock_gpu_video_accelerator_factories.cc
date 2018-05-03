@@ -4,6 +4,8 @@
 
 #include "media/video/mock_gpu_video_accelerator_factories.h"
 
+#include <memory>
+
 #include "base/memory/ptr_util.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -82,7 +84,7 @@ MockGpuVideoAcceleratorFactories::MockGpuVideoAcceleratorFactories(
     gpu::gles2::GLES2Interface* gles2)
     : gles2_(gles2) {}
 
-MockGpuVideoAcceleratorFactories::~MockGpuVideoAcceleratorFactories() {}
+MockGpuVideoAcceleratorFactories::~MockGpuVideoAcceleratorFactories() = default;
 
 bool MockGpuVideoAcceleratorFactories::IsGpuVideoAcceleratorEnabled() {
   return true;
@@ -95,7 +97,7 @@ MockGpuVideoAcceleratorFactories::CreateGpuMemoryBuffer(
     gfx::BufferUsage /* usage */) {
   if (fail_to_allocate_gpu_memory_buffer_)
     return nullptr;
-  return base::MakeUnique<GpuMemoryBufferImpl>(size, format);
+  return std::make_unique<GpuMemoryBufferImpl>(size, format);
 }
 
 std::unique_ptr<base::SharedMemory>
@@ -144,7 +146,7 @@ class ScopedGLContextLockImpl
 std::unique_ptr<GpuVideoAcceleratorFactories::ScopedGLContextLock>
 MockGpuVideoAcceleratorFactories::GetGLContextLock() {
   DCHECK(gles2_);
-  return base::MakeUnique<ScopedGLContextLockImpl>(this);
+  return std::make_unique<ScopedGLContextLockImpl>(this);
 }
 
 }  // namespace media

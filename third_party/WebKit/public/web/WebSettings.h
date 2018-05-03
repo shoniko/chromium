@@ -31,11 +31,13 @@
 #ifndef WebSettings_h
 #define WebSettings_h
 
+#include <unicode/uscript.h>
+
 #include "public/platform/PointerProperties.h"
 #include "public/platform/WebCommon.h"
+#include "public/platform/WebEffectiveConnectionType.h"
 #include "public/platform/WebSize.h"
 #include "public/platform/WebViewportStyle.h"
-#include <unicode/uscript.h>
 
 namespace blink {
 
@@ -65,13 +67,6 @@ class WebSettings {
     kV8CacheOptionsNone,
     kV8CacheOptionsParse,
     kV8CacheOptionsCode,
-  };
-
-  enum class V8CacheStrategiesForCacheStorage {
-    kDefault,
-    kNone,
-    kNormal,
-    kAggressive,
   };
 
   enum class ProgressBarCompletion {
@@ -169,7 +164,6 @@ class WebSettings {
   virtual void SetCursiveFontFamily(const WebString&,
                                     UScriptCode = USCRIPT_COMMON) = 0;
   virtual void SetDNSPrefetchingEnabled(bool) = 0;
-  virtual void SetDataSaverEnabled(bool) = 0;
   virtual void SetDOMPasteAllowed(bool) = 0;
   virtual void SetDefaultFixedFontSize(int) = 0;
   virtual void SetDefaultFontSize(int) = 0;
@@ -230,7 +224,6 @@ class WebSettings {
   virtual void SetPictographFontFamily(const WebString&,
                                        UScriptCode = USCRIPT_COMMON) = 0;
   virtual void SetPluginsEnabled(bool) = 0;
-  virtual void SetEncryptedMediaEnabled(bool) = 0;
   virtual void SetPresentationReceiver(bool) = 0;
   virtual void SetAvailablePointerTypes(int) = 0;
   virtual void SetPrimaryPointerType(PointerType) = 0;
@@ -293,8 +286,6 @@ class WebSettings {
   virtual void SetUseSolidColorScrollbars(bool) = 0;
   virtual void SetUseWideViewport(bool) = 0;
   virtual void SetV8CacheOptions(V8CacheOptions) = 0;
-  virtual void SetV8CacheStrategiesForCacheStorage(
-      V8CacheStrategiesForCacheStorage) = 0;
   virtual void SetValidationMessageTimerMagnification(int) = 0;
   virtual void SetViewportEnabled(bool) = 0;
   virtual void SetViewportMetaEnabled(bool) = 0;
@@ -309,9 +300,10 @@ class WebSettings {
   virtual void SetMediaControlsEnabled(bool) = 0;
   virtual void SetDoNotUpdateSelectionOnMutatingSelectionRange(bool) = 0;
   virtual void SetMediaDownloadInProductHelpEnabled(bool) = 0;
+  virtual void SetLowPriorityIframesThreshold(WebEffectiveConnectionType) = 0;
 
  protected:
-  ~WebSettings() {}
+  ~WebSettings() = default;
 };
 
 }  // namespace blink

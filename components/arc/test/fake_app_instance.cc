@@ -10,11 +10,14 @@
 #include <utility>
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "components/arc/app/arc_playstore_search_request_state.h"
 
 namespace mojo {
 
@@ -42,10 +45,16 @@ FakeAppInstance::FakeAppInstance(mojom::AppHost* app_host)
     : app_host_(app_host) {}
 FakeAppInstance::~FakeAppInstance() {}
 
-void FakeAppInstance::Init(mojom::AppHostPtr host_ptr) {
+void FakeAppInstance::InitDeprecated(mojom::AppHostPtr host_ptr) {
+  Init(std::move(host_ptr), base::BindOnce(&base::DoNothing));
+}
+
+void FakeAppInstance::Init(mojom::AppHostPtr host_ptr, InitCallback callback) {
   // ARC app instance calls RefreshAppList after Init() successfully. Call
   // RefreshAppList() here to keep the same behavior.
   RefreshAppList();
+  host_ = std::move(host_ptr);
+  std::move(callback).Run();
 }
 
 void FakeAppInstance::RefreshAppList() {
@@ -328,7 +337,7 @@ void FakeAppInstance::GetRecentAndSuggestedAppsFromPlayStore(
         fake_icon_png_data,                             // icon_png_data
         base::StringPrintf("test.package.%d", i)));     // package_name
   }
-  std::move(callback).Run(arc::mojom::AppDiscoveryRequestState::SUCCESS,
+  std::move(callback).Run(ArcPlayStoreSearchRequestState::SUCCESS,
                           std::move(fake_apps));
 }
 

@@ -26,14 +26,14 @@ VideoCaptureDeviceFactory::CreateFactory(
   if (command_line->HasSwitch(switches::kUseFakeDeviceForMediaStream)) {
     if (command_line->HasSwitch(switches::kUseFileForFakeVideoCapture)) {
       return std::unique_ptr<VideoCaptureDeviceFactory>(
-          new media::FileVideoCaptureDeviceFactory());
+          new FileVideoCaptureDeviceFactory());
     } else {
       std::vector<FakeVideoCaptureDeviceSettings> config;
       FakeVideoCaptureDeviceFactory::ParseFakeDevicesConfigFromOptionsString(
           command_line->GetSwitchValueASCII(
               switches::kUseFakeDeviceForMediaStream),
           &config);
-      auto result = base::MakeUnique<media::FakeVideoCaptureDeviceFactory>();
+      auto result = std::make_unique<FakeVideoCaptureDeviceFactory>();
       result->SetToCustomDevicesConfig(config);
       return std::move(result);
     }
@@ -49,7 +49,7 @@ VideoCaptureDeviceFactory::VideoCaptureDeviceFactory() {
   thread_checker_.DetachFromThread();
 }
 
-VideoCaptureDeviceFactory::~VideoCaptureDeviceFactory() {}
+VideoCaptureDeviceFactory::~VideoCaptureDeviceFactory() = default;
 
 #if !defined(OS_MACOSX) && !defined(OS_LINUX) && !defined(OS_ANDROID) && \
     !defined(OS_WIN)

@@ -32,7 +32,7 @@ TeleportWarningDialog::TeleportWarningDialog(OnAcceptCallback callback)
   never_show_again_checkbox_->SetChecked(true);
 }
 
-TeleportWarningDialog::~TeleportWarningDialog() {}
+TeleportWarningDialog::~TeleportWarningDialog() = default;
 
 // static
 void TeleportWarningDialog::Show(OnAcceptCallback callback) {
@@ -78,7 +78,7 @@ void TeleportWarningDialog::InitDialog() {
   SetBorder(
       views::CreateEmptyBorder(views::LayoutProvider::Get()->GetInsetsMetric(
           views::INSETS_DIALOG_TITLE)));
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
   // Explanation string
   views::Label* label = new views::Label(

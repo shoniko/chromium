@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">Zeitraum</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 Monat}other{# Monate}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>
+<translation id="1812519734428420144">Bewertung <ph name="RATING_SCORE" /></translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{1 Stunde und  }other{# Stunden und  }}</translation>
 <translation id="1842960171412779397">auswählen</translation>
 <translation id="1860796786778352021">Benachrichtigung schließen</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">Ordner öffnen</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{vor 1 Jahr}other{vor # Jahren}}</translation>
 <translation id="2931838996092594335">Klicken</translation>
-<translation id="2983818520079887040">Einstellungen...</translation>
 <translation id="3036649622769666520">Dateien öffnen</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3087734570205094154">Unten</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">ALLE APPS</translation>
 <translation id="4320177379694898372">Keine Internetverbindung</translation>
 <translation id="4588090240171750605">Nach rechts blättern</translation>
+<translation id="4724120544754982507">Benachrichtigungscenter, <ph name="UNREAD_NOTIFICATION_COUNT" /> ungelesene Benachrichtigungen</translation>
 <translation id="4730374152663651037">HÄUFIG VERWENDET</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{noch 1 Monat}other{noch # Monate}}</translation>
 <translation id="4820616160060340806">Befehltaste+<ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">Verkleinern</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 Stunde}other{# Stunden}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">Alle Apps</translation>
 <translation id="6012623610530968780">Seite <ph name="SELECTED_PAGE" /> von <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">Text im Suchfeld löschen</translation>
 <translation id="6040143037577758943">Schließen</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">Komma</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{1 Sek. her}other{# Sek. her}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{Vor 1 Sekunde}other{Vor # Sekunden}}</translation>
+<translation id="654149438358937226">Alle Benachrichtigungen blockieren</translation>
 <translation id="6567071839949112727">Auf Vorgängerelement klicken</translation>
 <translation id="6612467943526193239">Zum Abbrechen der Kalibrierung ESC drücken.</translation>
 <translation id="6620110761915583480">Datei speichern</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">Abbrechen</translation>
 <translation id="7781829728241885113">Gestern</translation>
 <translation id="7814458197256864873">&amp;Kopieren</translation>
+<translation id="7879499977785298635">Nicht blockieren</translation>
 <translation id="7907591526440419938">Datei öffnen</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{1 Stunde her}other{# Stunden her}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{1 Sek. übrig}other{# Sek. übrig}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{1 Jahr}other{# Jahre}}</translation>
 <translation id="8371695176452482769">Jetzt sprechen</translation>
 <translation id="838869780401515933">auswählen</translation>
+<translation id="8393700583063109961">Nachricht senden</translation>
 <translation id="8394908167088220973">Medien – Wiedergabe/Pause</translation>
 <translation id="8400147561352026160">Umschalt+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 Jahr}other{# Jahre}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" />-Datei (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s</translation>
 <translation id="8725488761726303204">+<ph name="NUMBER" /> weitere</translation>
+<translation id="8730621377337864115">Fertig</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{1 h}other{# h}}</translation>
 <translation id="8806053966018712535">Ordner <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">Bild mit Anmerkung versehen</translation>

@@ -13,18 +13,19 @@ AvailabilityCallbackWrapper::AvailabilityCallbackWrapper(
     V8RemotePlaybackAvailabilityCallback* callback)
     : bindings_cb_(callback) {}
 
-AvailabilityCallbackWrapper::AvailabilityCallbackWrapper(WTF::Closure callback)
+AvailabilityCallbackWrapper::AvailabilityCallbackWrapper(
+    base::RepeatingClosure callback)
     : internal_cb_(std::move(callback)) {}
 
 void AvailabilityCallbackWrapper::Run(RemotePlayback* remote_playback,
                                       bool new_availability) {
   if (internal_cb_) {
     DCHECK(!bindings_cb_);
-    internal_cb_();
+    internal_cb_.Run();
     return;
   }
 
-  bindings_cb_->call(remote_playback, new_availability);
+  bindings_cb_->InvokeAndReportException(remote_playback, new_availability);
 }
 
 void AvailabilityCallbackWrapper::Trace(blink::Visitor* visitor) {

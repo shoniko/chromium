@@ -33,6 +33,7 @@
 #include "net/test/cert_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -186,8 +187,9 @@ void SpdyProxyClientSocketTest::Initialize(MockRead* reads,
   session_deps_.socket_factory->AddSocketDataProvider(data_.get());
 
   SSLSocketDataProvider ssl(SYNCHRONOUS, OK);
-  ssl.cert = ImportCertFromFile(GetTestCertsDirectory(), "spdy_pooling.pem");
-  ASSERT_TRUE(ssl.cert);
+  ssl.ssl_info.cert =
+      ImportCertFromFile(GetTestCertsDirectory(), "spdy_pooling.pem");
+  ASSERT_TRUE(ssl.ssl_info.cert);
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl);
 
   session_deps_.host_resolver->set_synchronous_mode(true);
@@ -285,8 +287,8 @@ void SpdyProxyClientSocketTest::AssertWriteReturns(const char* data,
                                                    int len,
                                                    int rv) {
   scoped_refptr<IOBufferWithSize> buf(CreateBuffer(data, len));
-  EXPECT_EQ(rv,
-            sock_->Write(buf.get(), buf->size(), write_callback_.callback()));
+  EXPECT_EQ(rv, sock_->Write(buf.get(), buf->size(), write_callback_.callback(),
+                             TRAFFIC_ANNOTATION_FOR_TESTS));
 }
 
 void SpdyProxyClientSocketTest::AssertWriteLength(int len) {
@@ -589,7 +591,8 @@ TEST_F(SpdyProxyClientSocketTest, WriteSplitsLargeDataIntoMultipleFrames) {
                                                    big_data.length()));
 
   EXPECT_EQ(ERR_IO_PENDING,
-            sock_->Write(buf.get(), buf->size(), write_callback_.callback()));
+            sock_->Write(buf.get(), buf->size(), write_callback_.callback(),
+                         TRAFFIC_ANNOTATION_FOR_TESTS));
   EXPECT_EQ(buf->size(), write_callback_.WaitForResult());
 }
 
@@ -1054,7 +1057,8 @@ TEST_F(SpdyProxyClientSocketTest, WriteOnClosedStream) {
   ResumeAndRun();
   scoped_refptr<IOBufferWithSize> buf(CreateBuffer(kMsg1, kLen1));
   EXPECT_EQ(ERR_SOCKET_NOT_CONNECTED,
-            sock_->Write(buf.get(), buf->size(), CompletionCallback()));
+            sock_->Write(buf.get(), buf->size(), CompletionCallback(),
+                         TRAFFIC_ANNOTATION_FOR_TESTS));
 }
 
 // Calling Write() on a disconnected socket is an error.
@@ -1080,7 +1084,8 @@ TEST_F(SpdyProxyClientSocketTest, WriteOnDisconnectedSocket) {
 
   scoped_refptr<IOBufferWithSize> buf(CreateBuffer(kMsg1, kLen1));
   EXPECT_EQ(ERR_SOCKET_NOT_CONNECTED,
-            sock_->Write(buf.get(), buf->size(), CompletionCallback()));
+            sock_->Write(buf.get(), buf->size(), CompletionCallback(),
+                         TRAFFIC_ANNOTATION_FOR_TESTS));
 
   // Let the RST_STREAM write while |rst| is in-scope.
   base::RunLoop().RunUntilIdle();
@@ -1108,7 +1113,8 @@ TEST_F(SpdyProxyClientSocketTest, WritePendingOnClose) {
 
   scoped_refptr<IOBufferWithSize> buf(CreateBuffer(kMsg1, kLen1));
   EXPECT_EQ(ERR_IO_PENDING,
-            sock_->Write(buf.get(), buf->size(), write_callback_.callback()));
+            sock_->Write(buf.get(), buf->size(), write_callback_.callback(),
+                         TRAFFIC_ANNOTATION_FOR_TESTS));
   // Make sure the write actually starts.
   base::RunLoop().RunUntilIdle();
 
@@ -1140,7 +1146,8 @@ TEST_F(SpdyProxyClientSocketTest, DisconnectWithWritePending) {
 
   scoped_refptr<IOBufferWithSize> buf(CreateBuffer(kMsg1, kLen1));
   EXPECT_EQ(ERR_IO_PENDING,
-            sock_->Write(buf.get(), buf->size(), write_callback_.callback()));
+            sock_->Write(buf.get(), buf->size(), write_callback_.callback(),
+                         TRAFFIC_ANNOTATION_FOR_TESTS));
 
   sock_->Disconnect();
 
@@ -1212,10 +1219,9 @@ TEST_F(SpdyProxyClientSocketTest, RstWithReadAndWritePending) {
             sock_->Read(read_buf.get(), kLen1, read_callback_.callback()));
 
   scoped_refptr<IOBufferWithSize> write_buf(CreateBuffer(kMsg1, kLen1));
-  EXPECT_EQ(
-      ERR_IO_PENDING,
-      sock_->Write(
-          write_buf.get(), write_buf->size(), write_callback_.callback()));
+  EXPECT_EQ(ERR_IO_PENDING, sock_->Write(write_buf.get(), write_buf->size(),
+                                         write_callback_.callback(),
+                                         TRAFFIC_ANNOTATION_FOR_TESTS));
 
   ResumeAndRun();
 
@@ -1298,7 +1304,7 @@ class DeleteSockCallback : public TestCompletionCallbackBase {
         callback_(base::Bind(&DeleteSockCallback::OnComplete,
                              base::Unretained(this))) {}
 
-  ~DeleteSockCallback() override {}
+  ~DeleteSockCallback() override = default;
 
   const CompletionCallback& callback() const { return callback_; }
 
@@ -1344,10 +1350,9 @@ TEST_F(SpdyProxyClientSocketTest, RstWithReadAndWritePendingDelete) {
             sock_->Read(read_buf.get(), kLen1, read_callback.callback()));
 
   scoped_refptr<IOBufferWithSize> write_buf(CreateBuffer(kMsg1, kLen1));
-  EXPECT_EQ(
-      ERR_IO_PENDING,
-      sock_->Write(
-          write_buf.get(), write_buf->size(), write_callback_.callback()));
+  EXPECT_EQ(ERR_IO_PENDING, sock_->Write(write_buf.get(), write_buf->size(),
+                                         write_callback_.callback(),
+                                         TRAFFIC_ANNOTATION_FOR_TESTS));
 
   ResumeAndRun();
 

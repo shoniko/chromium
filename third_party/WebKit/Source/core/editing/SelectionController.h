@@ -27,6 +27,7 @@
 #ifndef SelectionController_h
 #define SelectionController_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/DocumentShutdownObserver.h"
 #include "core/editing/FrameSelection.h"
@@ -43,7 +44,6 @@ class LocalFrame;
 class CORE_EXPORT SelectionController final
     : public GarbageCollectedFinalized<SelectionController>,
       public DocumentShutdownObserver {
-  WTF_MAKE_NONCOPYABLE(SelectionController);
   USING_GARBAGE_COLLECTED_MIXIN(SelectionController);
 
  public:
@@ -107,15 +107,13 @@ class CORE_EXPORT SelectionController final
   void SelectClosestWordOrLinkFromMouseEvent(
       const MouseEventWithHitTestResults&);
   void SetNonDirectionalSelectionIfNeeded(const SelectionInFlatTree&,
-                                          TextGranularity,
-                                          EndPointsAdjustmentMode,
-                                          HandleVisibility);
+                                          const SetSelectionOptions&,
+                                          EndPointsAdjustmentMode);
   void SetCaretAtHitTestResult(const HitTestResult&);
   bool UpdateSelectionForMouseDownDispatchingSelectStart(
       Node*,
       const SelectionInFlatTree&,
-      TextGranularity,
-      HandleVisibility);
+      const SetSelectionOptions&);
 
   FrameSelection& Selection() const;
 
@@ -143,11 +141,14 @@ class CORE_EXPORT SelectionController final
     kExtendedSelection
   };
   SelectionState selection_state_;
+
+  DISALLOW_COPY_AND_ASSIGN(SelectionController);
 };
 
 bool IsLinkSelection(const MouseEventWithHitTestResults&);
 bool IsExtendingSelection(const MouseEventWithHitTestResults&);
-
+CORE_EXPORT SelectionInFlatTree
+AdjustSelectionWithTrailingWhitespace(const SelectionInFlatTree&);
 }  // namespace blink
 
 #endif  // SelectionController_h

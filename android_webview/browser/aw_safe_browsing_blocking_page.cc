@@ -4,9 +4,12 @@
 
 #include "android_webview/browser/aw_safe_browsing_blocking_page.h"
 
+#include <memory>
+
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_safe_browsing_ui_manager.h"
 #include "android_webview/browser/net/aw_url_request_context_getter.h"
+#include "base/metrics/histogram_macros.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/browser/threat_details.h"
 #include "components/safe_browsing/triggers/trigger_manager.h"
@@ -41,9 +44,11 @@ AwSafeBrowsingBlockingPage::AwSafeBrowsingBlockingPage(
                        std::move(controller_client),
                        display_options),
       threat_details_in_progress_(false) {
+  UMA_HISTOGRAM_ENUMERATION("SafeBrowsing.Interstitial.Type", errorUiType,
+                            ErrorUiType::COUNT);
   if (errorUiType == ErrorUiType::QUIET_SMALL ||
       errorUiType == ErrorUiType::QUIET_GIANT) {
-    set_sb_error_ui(base::MakeUnique<SafeBrowsingQuietErrorUI>(
+    set_sb_error_ui(std::make_unique<SafeBrowsingQuietErrorUI>(
         unsafe_resources[0].url, main_frame_url,
         GetInterstitialReason(unsafe_resources), display_options,
         ui_manager->app_locale(), base::Time::NowFromSystemTime(), controller(),

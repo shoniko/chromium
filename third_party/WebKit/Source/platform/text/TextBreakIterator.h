@@ -22,6 +22,7 @@
 #ifndef TextBreakIterator_h
 #define TextBreakIterator_h
 
+#include "base/macros.h"
 #include "platform/PlatformExport.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "platform/wtf/text/CharacterNames.h"
@@ -63,6 +64,9 @@ PLATFORM_EXPORT void ReleaseLineBreakIterator(TextBreakIterator*);
 PLATFORM_EXPORT TextBreakIterator* SentenceBreakIterator(const UChar*,
                                                          int length);
 
+// Before calling this, check if the iterator is not at the end. Otherwise,
+// it may not work as expected.
+// See https://ssl.icu-project.org/trac/ticket/13447 .
 PLATFORM_EXPORT bool IsWordTextBreak(TextBreakIterator*);
 
 const int kTextBreakDone = -1;
@@ -89,22 +93,23 @@ enum class LineBreakType {
 // Determines break opportunities around collapsible space characters (space,
 // newline, and tabulation characters.)
 enum class BreakSpaceType {
-  // Break before collapsible space characters.
+  // Break before every collapsible space character.
   // This is a specialized optimization for CSS, where leading/trailing spaces
   // in each line are removed, and thus breaking before spaces can save
   // computing hanging spaces.
-  kBefore,
+  // Callers are expected to handle spaces by themselves. Because a run of
+  // spaces can include different types of spaces, break opportunity is given
+  // for every space character.
+  // Pre-LayoutNG line breaker uses this type.
+  kBeforeEverySpace,
 
-  // Break before space characters, but after newline and tabulation characters.
-  // This is for CSS line breaking as in |kBefore|, but when whitespace
-  // collapsing is already applied to the target string.
-  kBeforeSpace,
-
-  // Break after collapsible space characters.
-  // When 'white-space:pre-wrap', or when in editing, leaging/trailing spaces
-  // need to be preserved, and that the |kBefore| optimization cannot work.
-  // This mode is compatible with UAX#14/ICU. http://unicode.org/reports/tr14/
-  kAfter,
+  // Break before a run of white space characters.
+  // This is for CSS line breaking as in |kBeforeEverySpace|, but when
+  // whitespace collapsing is already applied to the target string. In this
+  // case, a run of white spaces are preserved spaces. There should not be break
+  // opportunities between white spaces.
+  // LayoutNG line breaker uses this type.
+  kBeforeSpaceRun,
 };
 
 PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, LineBreakType);
@@ -115,8 +120,8 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
 
  public:
   LazyLineBreakIterator()
-      : iterator_(0),
-        cached_prior_context_(0),
+      : iterator_(nullptr),
+        cached_prior_context_(nullptr),
         cached_prior_context_length_(0),
         break_type_(LineBreakType::kNormal) {
     ResetPriorContext();
@@ -127,8 +132,8 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
                         LineBreakType break_type = LineBreakType::kNormal)
       : string_(string),
         locale_(locale),
-        iterator_(0),
-        cached_prior_context_(0),
+        iterator_(nullptr),
+        cached_prior_context_(nullptr),
         cached_prior_context_length_(0),
         break_type_(break_type) {
     ResetPriorContext();
@@ -195,7 +200,7 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
     const UChar* prior_context =
         prior_context_length
             ? &prior_context_[kPriorContextCapacity - prior_context_length]
-            : 0;
+            : nullptr;
     if (!iterator_) {
       if (string_.Is8Bit())
         iterator_ = AcquireLineBreakIterator(
@@ -268,8 +273,8 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
   void ReleaseIterator() const {
     if (iterator_)
       ReleaseLineBreakIterator(iterator_);
-    iterator_ = 0;
-    cached_prior_context_ = 0;
+    iterator_ = nullptr;
+    cached_prior_context_ = nullptr;
     cached_prior_context_length_ = 0;
   }
 
@@ -290,7 +295,7 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
   mutable const UChar* cached_prior_context_;
   mutable unsigned cached_prior_context_length_;
   LineBreakType break_type_;
-  BreakSpaceType break_space_ = BreakSpaceType::kBefore;
+  BreakSpaceType break_space_ = BreakSpaceType::kBeforeEverySpace;
 };
 
 // Iterates over "extended grapheme clusters", as defined in UAX #29.
@@ -300,7 +305,6 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
 
 class PLATFORM_EXPORT NonSharedCharacterBreakIterator final {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(NonSharedCharacterBreakIterator);
 
  public:
   explicit NonSharedCharacterBreakIterator(const String&);
@@ -346,12 +350,17 @@ class PLATFORM_EXPORT NonSharedCharacterBreakIterator final {
 
   // For 16 bit strings, we use a TextBreakIterator.
   TextBreakIterator* iterator_;
+
+  DISALLOW_COPY_AND_ASSIGN(NonSharedCharacterBreakIterator);
 };
 
 // Counts the number of grapheme clusters. A surrogate pair or a sequence
 // of a non-combining character and following combining characters is
 // counted as 1 grapheme cluster.
 PLATFORM_EXPORT unsigned NumGraphemeClusters(const String&);
+
+// Returns the number of code units that the next grapheme cluster is made of.
+PLATFORM_EXPORT unsigned LengthOfGraphemeCluster(const String&, unsigned = 0);
 
 }  // namespace blink
 

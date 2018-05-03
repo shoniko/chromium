@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/tabs/alert_indicator_button.h"
 
+#include <utility>
+
 #include "chrome/browser/ui/views/tabs/fake_base_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
@@ -83,7 +85,7 @@ TEST_F(AlertIndicatorButtonTest, ButtonUpdateOnAudioStateAnimation) {
 
   TabRendererData start_media;
   start_media.alert_state = TabAlertState::AUDIO_PLAYING;
-  media_tab->SetData(start_media);
+  media_tab->SetData(std::move(start_media));
 
   // When audio starts, pinned inactive tab shows indicator.
   EXPECT_FALSE(showing_icon(media_tab));
@@ -92,7 +94,7 @@ TEST_F(AlertIndicatorButtonTest, ButtonUpdateOnAudioStateAnimation) {
 
   TabRendererData stop_media;
   stop_media.alert_state = TabAlertState::NONE;
-  media_tab->SetData(stop_media);
+  media_tab->SetData(std::move(stop_media));
 
   // When audio ends, pinned inactive tab fades out indicator.
   EXPECT_FALSE(showing_icon(media_tab));

@@ -24,7 +24,7 @@
 #include "core/layout/svg/LayoutSVGInlineText.h"
 
 #include "core/css/CSSFontSelector.h"
-#include "core/css/FontSize.h"
+#include "core/css/FontSizeFunctions.h"
 #include "core/css/StyleEngine.h"
 #include "core/editing/TextAffinity.h"
 #include "core/frame/LocalFrameView.h"
@@ -164,7 +164,7 @@ PositionWithAffinity LayoutSVGInlineText::PositionForPoint(
       font_data ? font_data->GetFontMetrics().FloatAscent() / scaling_factor_
                 : 0;
 
-  LayoutBlock* containing_block = this->ContainingBlock();
+  LayoutBlock* containing_block = ContainingBlock();
   DCHECK(containing_block);
 
   // Map local point to absolute point, as the character origins stored in the
@@ -203,7 +203,7 @@ PositionWithAffinity LayoutSVGInlineText::PositionForPoint(
 
   int offset = closest_distance_box->OffsetForPositionInFragment(
       *closest_distance_fragment,
-      LayoutUnit(absolute_point.X() - closest_distance_position), true);
+      absolute_point.X() - closest_distance_position);
   return CreatePositionWithAffinity(offset + closest_distance_box->Start(),
                                     offset > 0
                                         ? TextAffinity::kUpstreamIfPossible
@@ -400,7 +400,7 @@ void LayoutSVGInlineText::ComputeNewScaledFontForStyle(
     scaling_factor = 1;
 
   Document& document = layout_object.GetDocument();
-  float scaled_font_size = FontSize::GetComputedSizeFromSpecifiedSize(
+  float scaled_font_size = FontSizeFunctions::GetComputedSizeFromSpecifiedSize(
       &document, scaling_factor, unscaled_font_description.IsAbsoluteSize(),
       unscaled_font_description.SpecifiedSize(), kDoNotApplyMinimumForFontSize);
   if (scaled_font_size == unscaled_font_description.ComputedSize()) {

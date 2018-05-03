@@ -42,7 +42,8 @@ bool ProgramCacheControlExtensionAvailable() {
 PassthroughProgramCache::PassthroughProgramCache(
     size_t max_cache_size_bytes,
     bool disable_gpu_shader_disk_cache)
-    : disable_gpu_shader_disk_cache_(disable_gpu_shader_disk_cache) {
+    : ProgramCache(max_cache_size_bytes),
+      disable_gpu_shader_disk_cache_(disable_gpu_shader_disk_cache) {
   if (!CacheEnabled()) {
     return;
   }
@@ -74,7 +75,7 @@ ProgramCache::ProgramLoadResult PassthroughProgramCache::LoadLinkedProgram(
     const LocationMap* bind_attrib_location_map,
     const std::vector<std::string>& transform_feedback_varyings,
     GLenum transform_feedback_buffer_mode,
-    GLES2DecoderClient* client) {
+    DecoderClient* client) {
   NOTREACHED();
   return PROGRAM_LOAD_FAILURE;
 }
@@ -86,7 +87,7 @@ void PassthroughProgramCache::SaveLinkedProgram(
     const LocationMap* bind_attrib_location_map,
     const std::vector<std::string>& transform_feedback_varyings,
     GLenum transform_feedback_buffer_mode,
-    GLES2DecoderClient* client) {
+    DecoderClient* client) {
   NOTREACHED();
 }
 

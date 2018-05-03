@@ -53,7 +53,8 @@ class CatalogViewerContents : public views::WidgetDelegateView,
     SetBorder(views::CreateEmptyBorder(gfx::Insets(kPadding)));
     SetBackground(views::CreateStandardPanelBackground());
 
-    views::GridLayout* layout = views::GridLayout::CreateAndInstall(this);
+    views::GridLayout* layout =
+        SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
     views::ColumnSet* columns = layout->AddColumnSet(0);
     columns->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 0,
@@ -210,7 +211,7 @@ CatalogViewer::CatalogViewer() {
   registry_.AddInterface<mojom::Launchable>(
       base::Bind(&CatalogViewer::Create, base::Unretained(this)));
 }
-CatalogViewer::~CatalogViewer() {}
+CatalogViewer::~CatalogViewer() = default;
 
 void CatalogViewer::RemoveWindow(views::Widget* window) {
   auto it = std::find(windows_.begin(), windows_.end(), window);

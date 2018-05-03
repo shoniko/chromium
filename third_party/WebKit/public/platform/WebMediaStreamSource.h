@@ -34,9 +34,7 @@
 #include "WebCommon.h"
 #include "WebMediaStreamTrack.h"
 
-#include "WebNonCopyable.h"
 #include "WebPrivatePtr.h"
-#include "WebVector.h"
 #if INSIDE_BLINK
 #include "platform/heap/Handle.h"
 #endif
@@ -53,7 +51,7 @@ class WebMediaStreamSource {
   class ExtraData {
    public:
     ExtraData() : owner_(0) {}
-    virtual ~ExtraData() {}
+    virtual ~ExtraData() = default;
 
     BLINK_PLATFORM_EXPORT WebMediaStreamSource Owner();
 #if INSIDE_BLINK
@@ -75,7 +73,7 @@ class WebMediaStreamSource {
     kReadyStateEnded = 2
   };
 
-  WebMediaStreamSource() {}
+  WebMediaStreamSource() = default;
   WebMediaStreamSource(const WebMediaStreamSource& other) { Assign(other); }
   ~WebMediaStreamSource() { Reset(); }
 
@@ -125,7 +123,7 @@ class WebMediaStreamSource {
 #if INSIDE_BLINK
   BLINK_PLATFORM_EXPORT WebMediaStreamSource(MediaStreamSource*);
   BLINK_PLATFORM_EXPORT WebMediaStreamSource& operator=(MediaStreamSource*);
-  BLINK_PLATFORM_EXPORT operator WTF::RefPtr<MediaStreamSource>() const;
+  BLINK_PLATFORM_EXPORT operator scoped_refptr<MediaStreamSource>() const;
   BLINK_PLATFORM_EXPORT operator MediaStreamSource*() const;
 #endif
 

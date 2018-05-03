@@ -27,8 +27,7 @@ class MediaCaptureObserver {
 // Provides the MediaController interface to the outside world. This lets a
 // consumer of ash provide a MediaClient, which we will dispatch to if one has
 // been provided to us.
-class MediaController : public mojom::MediaController,
-                        public mojom::MediaClient {
+class MediaController : public mojom::MediaController {
  public:
   MediaController();
   ~MediaController() override;
@@ -43,16 +42,17 @@ class MediaController : public mojom::MediaController,
   void NotifyCaptureState(
       const std::vector<mojom::MediaCaptureState>& capture_states) override;
 
-  // mojom::MediaClient:
-  void HandleMediaNextTrack() override;
-  void HandleMediaPlayPause() override;
-  void HandleMediaPrevTrack() override;
-  void RequestCaptureState() override;
-  void SuspendMediaSessions() override;
+  // Methods that forward to |client_|.
+  void HandleMediaNextTrack();
+  void HandleMediaPlayPause();
+  void HandleMediaPrevTrack();
+  void RequestCaptureState();
+  void SuspendMediaSessions();
 
  private:
   friend class MultiProfileMediaTrayItemTest;
 
+  // Bindings for users of the mojo interface.
   mojo::BindingSet<mojom::MediaController> bindings_;
 
   mojom::MediaClientAssociatedPtr client_;

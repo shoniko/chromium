@@ -15,7 +15,6 @@
 #include "cc/debug/rendering_stats_instrumentation.h"
 #include "cc/layers/recording_source.h"
 #include "cc/paint/image_id.h"
-#include "skia/ext/analysis_canvas.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "ui/gfx/color_space.h"
 
@@ -38,6 +37,7 @@ class CC_EXPORT RasterSource : public base::RefCountedThreadSafe<RasterSource> {
 
     // If set to true, we should use LCD text.
     bool use_lcd_text = true;
+    bool clear_canvas_before_raster = true;
 
     // The ImageProvider used to replace images during playback.
     ImageProvider* image_provider = nullptr;
@@ -111,6 +111,8 @@ class CC_EXPORT RasterSource : public base::RefCountedThreadSafe<RasterSource> {
     return display_list_;
   }
 
+  float recording_scale_factor() const { return recording_scale_factor_; }
+
   SkColor background_color() const { return background_color_; }
 
   base::flat_map<PaintImage::Id, PaintImage::DecodingMode>
@@ -140,8 +142,7 @@ class CC_EXPORT RasterSource : public base::RefCountedThreadSafe<RasterSource> {
 
  private:
   void RasterCommon(SkCanvas* canvas,
-                    ImageProvider* image_provider = nullptr,
-                    SkPicture::AbortCallback* callback = nullptr) const;
+                    ImageProvider* image_provider = nullptr) const;
 
   void ClearCanvasForPlayback(SkCanvas* canvas) const;
 

@@ -49,7 +49,7 @@ class TextTrackCue : public EventTargetWithInlineData {
     return cue;
   }
 
-  ~TextTrackCue() override {}
+  ~TextTrackCue() override = default;
 
   TextTrack* track() const;
   void SetTrack(TextTrack*);
@@ -102,8 +102,13 @@ class TextTrackCue : public EventTargetWithInlineData {
  protected:
   TextTrackCue(double start, double end);
 
+  enum CueMutationAffectsOrder {
+    kCueMutationDoesNotAffectOrder,
+    kCueMutationAffectsOrder
+  };
   void CueWillChange();
-  virtual void CueDidChange();
+  virtual void CueDidChange(
+      CueMutationAffectsOrder = kCueMutationDoesNotAffectOrder);
   DispatchEventResult DispatchEventInternal(Event*) override;
 
  private:

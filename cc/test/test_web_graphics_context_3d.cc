@@ -31,7 +31,7 @@ static base::LazyInstance<base::Lock>::Leaky
     g_shared_namespace_lock = LAZY_INSTANCE_INITIALIZER;
 
 TestWebGraphicsContext3D::Namespace*
-    TestWebGraphicsContext3D::shared_namespace_ = NULL;
+    TestWebGraphicsContext3D::shared_namespace_ = nullptr;
 
 TestWebGraphicsContext3D::Namespace::Namespace()
     : next_buffer_id(1),
@@ -43,7 +43,7 @@ TestWebGraphicsContext3D::Namespace::Namespace()
 TestWebGraphicsContext3D::Namespace::~Namespace() {
   g_shared_namespace_lock.Get().AssertAcquired();
   if (shared_namespace_ == this)
-    shared_namespace_ = NULL;
+    shared_namespace_ = nullptr;
 }
 
 // static
@@ -66,11 +66,10 @@ TestWebGraphicsContext3D::TestWebGraphicsContext3D()
       width_(0),
       height_(0),
       scale_factor_(-1.f),
-      test_support_(NULL),
+      test_support_(nullptr),
       last_update_type_(NO_UPDATE),
       next_insert_fence_sync_(1),
       unpack_alignment_(4),
-      bound_buffer_(0),
       weak_ptr_factory_(this) {
   CreateNamespace();
   set_have_extension_egl_image(true);  // For stream textures.
@@ -78,7 +77,7 @@ TestWebGraphicsContext3D::TestWebGraphicsContext3D()
 
 TestWebGraphicsContext3D::~TestWebGraphicsContext3D() {
   base::AutoLock lock(g_shared_namespace_lock.Get());
-  namespace_ = NULL;
+  namespace_ = nullptr;
 }
 
 void TestWebGraphicsContext3D::CreateNamespace() {
@@ -477,7 +476,6 @@ void TestWebGraphicsContext3D::genMailboxCHROMIUM(GLbyte* mailbox) {
 }
 
 GLuint TestWebGraphicsContext3D::createAndConsumeTextureCHROMIUM(
-    GLenum target,
     const GLbyte* mailbox) {
   return createTexture();
 }
@@ -516,8 +514,8 @@ GLenum TestWebGraphicsContext3D::getError() { return GL_NO_ERROR; }
 
 void TestWebGraphicsContext3D::bindBuffer(GLenum target,
                                           GLuint buffer) {
-  bound_buffer_ = buffer;
-  if (!bound_buffer_)
+  bound_buffer_[target] = buffer;
+  if (!buffer)
     return;
   unsigned context_id = buffer >> 16;
   unsigned buffer_id = buffer & 0xffff;
@@ -528,10 +526,10 @@ void TestWebGraphicsContext3D::bindBuffer(GLenum target,
 
   std::unordered_map<unsigned, std::unique_ptr<Buffer>>& buffers =
       namespace_->buffers;
-  if (buffers.count(bound_buffer_) == 0)
-    buffers[bound_buffer_] = base::WrapUnique(new Buffer);
+  if (buffers.count(bound_buffer_[target]) == 0)
+    buffers[bound_buffer_[target]] = base::WrapUnique(new Buffer);
 
-  buffers[bound_buffer_]->target = target;
+  buffers[bound_buffer_[target]]->target = target;
 }
 
 void TestWebGraphicsContext3D::bufferData(GLenum target,
@@ -541,9 +539,10 @@ void TestWebGraphicsContext3D::bufferData(GLenum target,
   base::AutoLock lock(namespace_->lock);
   std::unordered_map<unsigned, std::unique_ptr<Buffer>>& buffers =
       namespace_->buffers;
-  DCHECK_GT(buffers.count(bound_buffer_), 0u);
-  DCHECK_EQ(target, buffers[bound_buffer_]->target);
-  Buffer* buffer = buffers[bound_buffer_].get();
+  DCHECK_GT(bound_buffer_.count(target), 0u);
+  DCHECK_GT(buffers.count(bound_buffer_[target]), 0u);
+  DCHECK_EQ(target, buffers[bound_buffer_[target]]->target);
+  Buffer* buffer = buffers[bound_buffer_[target]].get();
   if (context_lost_) {
     buffer->pixels = nullptr;
     return;
@@ -582,16 +581,17 @@ void* TestWebGraphicsContext3D::mapBufferCHROMIUM(GLenum target,
   base::AutoLock lock(namespace_->lock);
   std::unordered_map<unsigned, std::unique_ptr<Buffer>>& buffers =
       namespace_->buffers;
-  DCHECK_GT(buffers.count(bound_buffer_), 0u);
-  DCHECK_EQ(target, buffers[bound_buffer_]->target);
+  DCHECK_GT(bound_buffer_.count(target), 0u);
+  DCHECK_GT(buffers.count(bound_buffer_[target]), 0u);
+  DCHECK_EQ(target, buffers[bound_buffer_[target]]->target);
   if (times_map_buffer_chromium_succeeds_ >= 0) {
     if (!times_map_buffer_chromium_succeeds_) {
-      return NULL;
+      return nullptr;
     }
     --times_map_buffer_chromium_succeeds_;
   }
 
-  return buffers[bound_buffer_]->pixels.get();
+  return buffers[bound_buffer_[target]]->pixels.get();
 }
 
 GLboolean TestWebGraphicsContext3D::unmapBufferCHROMIUM(
@@ -599,9 +599,10 @@ GLboolean TestWebGraphicsContext3D::unmapBufferCHROMIUM(
   base::AutoLock lock(namespace_->lock);
   std::unordered_map<unsigned, std::unique_ptr<Buffer>>& buffers =
       namespace_->buffers;
-  DCHECK_GT(buffers.count(bound_buffer_), 0u);
-  DCHECK_EQ(target, buffers[bound_buffer_]->target);
-  buffers[bound_buffer_]->pixels = nullptr;
+  DCHECK_GT(bound_buffer_.count(target), 0u);
+  DCHECK_GT(buffers.count(bound_buffer_[target]), 0u);
+  DCHECK_EQ(target, buffers[bound_buffer_[target]]->target);
+  buffers[bound_buffer_[target]]->pixels = nullptr;
   return true;
 }
 
@@ -609,7 +610,9 @@ GLuint TestWebGraphicsContext3D::createImageCHROMIUM(ClientBuffer buffer,
                                                      GLsizei width,
                                                      GLsizei height,
                                                      GLenum internalformat) {
-  DCHECK(internalformat == GL_RGB || internalformat == GL_RGBA);
+  DCHECK(internalformat == GL_RGB || internalformat == GL_RGBA ||
+         (test_capabilities_.texture_format_bgra8888 &&
+          internalformat == GL_BGRA_EXT));
   GLuint image_id = NextImageId();
   base::AutoLock lock(namespace_->lock);
   std::unordered_set<unsigned>& images = namespace_->images;
@@ -632,7 +635,9 @@ GLuint TestWebGraphicsContext3D::createGpuMemoryBufferImageCHROMIUM(
     GLsizei height,
     GLenum internalformat,
     GLenum usage) {
-  DCHECK(internalformat == GL_RGB || internalformat == GL_RGBA);
+  DCHECK(internalformat == GL_RGB || internalformat == GL_RGBA ||
+         (test_capabilities_.texture_format_bgra8888 &&
+          internalformat == GL_BGRA_EXT));
   GLuint image_id = NextImageId();
   base::AutoLock lock(namespace_->lock);
   std::unordered_set<unsigned>& images = namespace_->images;
@@ -640,18 +645,14 @@ GLuint TestWebGraphicsContext3D::createGpuMemoryBufferImageCHROMIUM(
   return image_id;
 }
 
-GLuint64 TestWebGraphicsContext3D::insertFenceSync() {
-  return next_insert_fence_sync_++;
-}
-
-void TestWebGraphicsContext3D::genSyncToken(GLuint64 fence_sync,
-                                            GLbyte* sync_token) {
+void TestWebGraphicsContext3D::genSyncToken(GLbyte* sync_token) {
   // Don't return a valid sync token if context is lost. This matches behavior
   // of CommandBufferProxyImpl.
   if (context_lost_)
     return;
-  gpu::SyncToken sync_token_data(gpu::CommandBufferNamespace::GPU_IO, 0,
-                                 gpu::CommandBufferId(), fence_sync);
+  gpu::SyncToken sync_token_data(gpu::CommandBufferNamespace::GPU_IO,
+                                 gpu::CommandBufferId(),
+                                 next_insert_fence_sync_++);
   sync_token_data.SetVerifyFlush();
   memcpy(sync_token, &sync_token_data, sizeof(sync_token_data));
 }
@@ -771,6 +772,16 @@ void TestWebGraphicsContext3D::SetMaxSamples(int max_samples) {
   test_capabilities_.max_samples = max_samples;
 }
 
+size_t TestWebGraphicsContext3D::NumFramebuffers() const {
+  base::AutoLock lock_for_framebuffer_access(namespace_->lock);
+  return framebuffer_set_.size();
+}
+
+size_t TestWebGraphicsContext3D::NumRenderbuffers() const {
+  base::AutoLock lock_for_renderbuffer_access(namespace_->lock);
+  return namespace_->renderbuffer_set.size();
+}
+
 TestWebGraphicsContext3D::TextureTargets::TextureTargets() {
   // Initialize default bindings.
   bound_textures_[GL_TEXTURE_2D] = 0;
@@ -778,7 +789,7 @@ TestWebGraphicsContext3D::TextureTargets::TextureTargets() {
   bound_textures_[GL_TEXTURE_RECTANGLE_ARB] = 0;
 }
 
-TestWebGraphicsContext3D::TextureTargets::~TextureTargets() {}
+TestWebGraphicsContext3D::TextureTargets::~TextureTargets() = default;
 
 void TestWebGraphicsContext3D::TextureTargets::BindTexture(
     GLenum target,
@@ -829,10 +840,10 @@ GLuint TestWebGraphicsContext3D::TextureTargets::BoundTexture(
 
 TestWebGraphicsContext3D::Buffer::Buffer() : target(0), size(0) {}
 
-TestWebGraphicsContext3D::Buffer::~Buffer() {}
+TestWebGraphicsContext3D::Buffer::~Buffer() = default;
 
-TestWebGraphicsContext3D::Image::Image() {}
+TestWebGraphicsContext3D::Image::Image() = default;
 
-TestWebGraphicsContext3D::Image::~Image() {}
+TestWebGraphicsContext3D::Image::~Image() = default;
 
 }  // namespace cc

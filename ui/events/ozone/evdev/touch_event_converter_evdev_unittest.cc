@@ -15,6 +15,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/files/scoped_file.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/posix/eintr_wrapper.h"
@@ -30,6 +31,7 @@
 #include "ui/events/ozone/evdev/touch_filter/touch_filter.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/events/platform/platform_event_source.h"
+#include "ui/events/test/scoped_event_test_tick_clock.h"
 
 namespace ui {
 
@@ -86,7 +88,7 @@ struct GenericEventParams {
 
 class MockTouchEventConverterEvdev : public TouchEventConverterEvdev {
  public:
-  MockTouchEventConverterEvdev(ScopedInputDevice fd,
+  MockTouchEventConverterEvdev(base::ScopedFD fd,
                                base::FilePath path,
                                const EventDeviceInfo& devinfo,
                                DeviceEventDispatcherEvdev* dispatcher);
@@ -170,7 +172,7 @@ class MockDeviceEventDispatcherEvdev : public DeviceEventDispatcherEvdev {
 };
 
 MockTouchEventConverterEvdev::MockTouchEventConverterEvdev(
-    ScopedInputDevice fd,
+    base::ScopedFD fd,
     base::FilePath path,
     const EventDeviceInfo& devinfo,
     DeviceEventDispatcherEvdev* dispatcher)
@@ -219,7 +221,7 @@ class TouchEventConverterEvdevTest : public testing::Test {
     int evdev_io[2];
     if (pipe(evdev_io))
       PLOG(FATAL) << "failed pipe";
-    ScopedInputDevice events_in(evdev_io[0]);
+    base::ScopedFD events_in(evdev_io[0]);
     events_out_.reset(evdev_io[1]);
 
     // Device creation happens on a worker thread since it may involve blocking
@@ -235,6 +237,7 @@ class TouchEventConverterEvdevTest : public testing::Test {
     device_->Initialize(devinfo);
     loop_ = new base::MessageLoopForUI;
 
+    test_clock_.reset(new ui::test::ScopedEventTestTickClock());
     ui::DeviceDataManager::CreateInstance();
   }
 
@@ -268,12 +271,20 @@ class TouchEventConverterEvdevTest : public testing::Test {
 
   void DestroyDevice() { device_.reset(); }
 
+  void SetTestNowTime(timeval time) {
+    base::TimeTicks ticks = base::TimeTicks() +
+                            base::TimeDelta::FromSeconds(time.tv_sec) +
+                            base::TimeDelta::FromMicroseconds(time.tv_usec);
+    test_clock_->SetNowTicks(ticks);
+  }
+
  private:
   base::MessageLoop* loop_;
   std::unique_ptr<ui::MockTouchEventConverterEvdev> device_;
   std::unique_ptr<ui::MockDeviceEventDispatcherEvdev> dispatcher_;
+  std::unique_ptr<ui::test::ScopedEventTestTickClock> test_clock_;
 
-  ScopedInputDevice events_out_;
+  base::ScopedFD events_out_;
 
   void DispatchCallback(const GenericEventParams& params) {
     dispatched_events_.push_back(params);
@@ -327,6 +338,9 @@ TEST_F(TouchEventConverterEvdevTest, TouchMove) {
       {time, EV_ABS, ABS_PRESSURE, 0},
       {time, EV_SYN, SYN_REPORT, 0},
   };
+
+  // Set test time to ensure above timestamps are strictly in the past.
+  SetTestNowTime(time);
 
   // Press.
   dev->ConfigureReadMock(mock_kernel_queue_press,
@@ -601,6 +615,9 @@ TEST_F(TouchEventConverterEvdevTest, ShouldReleaseContactsOnStop) {
       {time, EV_SYN, SYN_REPORT, 0},
   };
 
+  // Set test now time to ensure above timestamps are in the past.
+  SetTestNowTime(time);
+
   dev->ConfigureReadMock(mock_kernel_queue_press,
                          arraysize(mock_kernel_queue_press), 0);
   dev->ReadNow();
@@ -639,6 +656,9 @@ TEST_F(TouchEventConverterEvdevTest, ShouldRemoveContactsWhenDisabled) {
       {time, EV_ABS, ABS_PRESSURE, 50},
       {time, EV_SYN, SYN_REPORT, 0},
   };
+
+  // Set test now time to ensure above timestamps are in the past.
+  SetTestNowTime(time);
 
   // Initialize the device.
   dev->Initialize(devinfo);
@@ -744,6 +764,9 @@ TEST_F(TouchEventConverterEvdevTest, PalmShouldCancelTouch) {
       {time, EV_ABS, ABS_MT_TRACKING_ID, -1},
       {time, EV_SYN, SYN_REPORT, 0},
   };
+
+  // Set test now time to ensure above timestamps are in the past.
+  SetTestNowTime(time);
 
   // Initialize the device.
   dev->Initialize(devinfo);
@@ -903,6 +926,9 @@ TEST_F(TouchEventConverterEvdevTest, TrackingIdShouldNotResetCancelByPalm) {
       {time, EV_SYN, SYN_REPORT, 0},
   };
 
+  // Set test now time to ensure above timestamps are in the past.
+  SetTestNowTime(time);
+
   // Initialize the device.
   dev->Initialize(devinfo);
 
@@ -1001,6 +1027,9 @@ TEST_F(TouchEventConverterEvdevTest, ShouldUseLeftButtonIfNoTouchButton) {
       {time, EV_ABS, ABS_MISC, 0},
       {time, EV_SYN, SYN_REPORT, 0},
   };
+
+  // Set test now time to ensure above timestamps are in the past.
+  SetTestNowTime(time);
 
   // Press.
   dev->ConfigureReadMock(mock_kernel_queue_press,
@@ -1535,6 +1564,8 @@ TEST_F(TouchEventConverterEvdevTest, FingerSizeWithResolution) {
       {time, EV_MSC, MSC_TIMESTAMP, 0},
       {time, EV_SYN, SYN_REPORT, 0},
   };
+  // Set test now time to ensure above timestamps are in the past.
+  SetTestNowTime(time);
 
   // Finger pressed with major/minor reported.
   dev->ConfigureReadMock(mock_kernel_queue, arraysize(mock_kernel_queue), 0);

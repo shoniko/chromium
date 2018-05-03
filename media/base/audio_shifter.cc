@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
+#include "base/trace_event/trace_event.h"
 #include "media/base/audio_bus.h"
 
 namespace media {
@@ -85,7 +86,7 @@ AudioShifter::AudioQueueEntry::AudioQueueEntry(
 AudioShifter::AudioQueueEntry::AudioQueueEntry(const AudioQueueEntry& other) =
     default;
 
-AudioShifter::AudioQueueEntry::~AudioQueueEntry() {}
+AudioShifter::AudioQueueEntry::~AudioQueueEntry() = default;
 
 AudioShifter::AudioShifter(base::TimeDelta max_buffer_size,
                            base::TimeDelta clock_accuracy,
@@ -109,10 +110,12 @@ AudioShifter::AudioShifter(base::TimeDelta max_buffer_size,
           base::Bind(&AudioShifter::ResamplerCallback, base::Unretained(this))),
       current_ratio_(1.0) {}
 
-AudioShifter::~AudioShifter() {}
+AudioShifter::~AudioShifter() = default;
 
 void AudioShifter::Push(std::unique_ptr<AudioBus> input,
                         base::TimeTicks playout_time) {
+  TRACE_EVENT1("audio", "AudioShifter::Push", "time (ms)",
+               (playout_time - base::TimeTicks()).InMillisecondsF());
   if (!queue_.empty()) {
     playout_time = input_clock_smoother_->Smooth(
         playout_time,
@@ -130,6 +133,8 @@ void AudioShifter::Push(std::unique_ptr<AudioBus> input,
 
 void AudioShifter::Pull(AudioBus* output,
                         base::TimeTicks playout_time) {
+  TRACE_EVENT1("audio", "AudioShifter::Pull", "time (ms)",
+               (playout_time - base::TimeTicks()).InMillisecondsF());
   // Add the kernel size since we incur some internal delay in
   // resampling. All resamplers incur some delay, and for the
   // SincResampler (used by MultiChannelResampler), this is

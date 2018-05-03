@@ -12,7 +12,8 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "components/arc/arc_bridge_service.h"
-#include "components/arc/instance_holder.h"
+#include "components/arc/connection_holder.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_notifications_instance.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/arc/notification/arc_notification_manager.h"
@@ -57,20 +58,6 @@ class MockMessageCenter : public message_center::FakeMessageCenter {
       owned_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(MockMessageCenter);
-};
-
-class NotificationsObserver
-    : public InstanceHolder<mojom::NotificationsInstance>::Observer {
- public:
-  NotificationsObserver() = default;
-  void OnInstanceReady() override { ready_ = true; }
-
-  bool IsReady() { return ready_; }
-
- private:
-  bool ready_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationsObserver);
 };
 
 }  // anonymous namespace
@@ -122,14 +109,8 @@ class ArcNotificationManagerTest : public testing::Test {
     arc_notification_manager_ = ArcNotificationManager::CreateForTesting(
         service_.get(), EmptyAccountId(), message_center_.get());
 
-    NotificationsObserver observer;
-    service_->notifications()->AddObserver(&observer);
     service_->notifications()->SetInstance(arc_notifications_instance_.get());
-
-    while (!observer.IsReady())
-      base::RunLoop().RunUntilIdle();
-
-    service_->notifications()->RemoveObserver(&observer);
+    WaitForInstanceReady(service_->notifications());
   }
 
   void TearDown() override {
@@ -177,7 +158,7 @@ TEST_F(ArcNotificationManagerTest, NotificationRemovedByConnectionClose) {
   CreateNotificationWithKey("notification3");
   EXPECT_EQ(3u, message_center()->GetVisibleNotifications().size());
 
-  arc_notification_manager()->OnInstanceClosed();
+  arc_notification_manager()->OnConnectionClosed();
 
   EXPECT_EQ(0u, message_center()->GetVisibleNotifications().size());
 }

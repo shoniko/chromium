@@ -105,7 +105,7 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
   const TransformationMatrix& Matrix() const { return *matrix_; }
 
  protected:
-  DOMMatrixReadOnly() {}
+  DOMMatrixReadOnly() = default;
   DOMMatrixReadOnly(const String&, ExceptionState&);
   DOMMatrixReadOnly(const TransformationMatrix&, bool is2d = true);
 
@@ -128,7 +128,9 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
     }
   }
 
-  void SetMatrixValueFromString(const String&, ExceptionState&);
+  void SetMatrixValueFromString(const ExecutionContext*,
+                                const String&,
+                                ExceptionState&);
 
   static bool ValidateAndFixup2D(DOMMatrix2DInit&, ExceptionState&);
   static bool ValidateAndFixup(DOMMatrixInit&, ExceptionState&);

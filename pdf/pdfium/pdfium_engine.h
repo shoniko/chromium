@@ -80,6 +80,8 @@ class PDFiumEngine : public PDFEngine,
   int GetNumberOfPages() override;
   pp::VarArray GetBookmarks() override;
   int GetNamedDestinationPage(const std::string& destination) override;
+  std::pair<int, int> TransformPagePoint(int page_index,
+                                         std::pair<int, int> page_xy) override;
   int GetMostVisiblePage() override;
   pp::Rect GetPageRect(int index) override;
   pp::Rect GetPageBoundsRect(int index) override;
@@ -120,6 +122,7 @@ class PDFiumEngine : public PDFEngine,
   void OnDocumentComplete() override;
   void OnDocumentCanceled() override;
   void CancelBrowserDownload() override;
+  void KillFormFocus() override;
 
   void UnsupportedFeature(int type);
   void FontSubstituted();
@@ -333,7 +336,6 @@ class PDFiumEngine : public PDFEngine,
   void FitContentsToPrintableAreaIfRequired(
       FPDF_DOCUMENT doc,
       const PP_PrintSettings_Dev& print_settings);
-  void SaveSelectedFormForPrint();
 
   // Checks if |page| has selected text in a form element. If so, sets that as
   // the plugin's text selection.
@@ -488,6 +490,9 @@ class PDFiumEngine : public PDFEngine,
   // Note that the "root" bookmark contains no useful information.
   pp::VarDictionary TraverseBookmarks(FPDF_BOOKMARK bookmark,
                                       unsigned int depth);
+
+  // Set if the document has any local edits.
+  void SetEditMode(bool edit_mode);
 
   // FPDF_FORMFILLINFO callbacks.
   static void Form_Invalidate(FPDF_FORMFILLINFO* param,
@@ -811,6 +816,8 @@ class PDFiumEngine : public PDFEngine,
       RangeSelectionDirection::Right;
 
   pp::Point range_selection_base_;
+
+  bool edit_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(PDFiumEngine);
 };

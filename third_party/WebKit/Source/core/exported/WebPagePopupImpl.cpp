@@ -29,6 +29,8 @@
 
 #include "core/exported/WebPagePopupImpl.h"
 
+#include <memory>
+
 #include "core/dom/AXObjectCacheBase.h"
 #include "core/dom/ContextFeatures.h"
 #include "core/events/MessageEvent.h"
@@ -42,8 +44,7 @@
 #include "core/frame/VisualViewport.h"
 #include "core/frame/WebLocalFrameImpl.h"
 #include "core/input/EventHandler.h"
-#include "core/layout/api/LayoutAPIShim.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/EmptyClients.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/FocusController.h"
@@ -298,7 +299,7 @@ bool WebPagePopupImpl::InitializePage() {
   page_->GetSettings().SetPrimaryPointerType(
       main_settings.GetPrimaryPointerType());
 
-  ProvideContextFeaturesTo(*page_, WTF::MakeUnique<PagePopupFeaturesClient>());
+  ProvideContextFeaturesTo(*page_, std::make_unique<PagePopupFeaturesClient>());
   DEFINE_STATIC_LOCAL(LocalFrameClient, empty_local_frame_client,
                       (EmptyLocalFrameClient::Create()));
   LocalFrame* frame =
@@ -326,7 +327,7 @@ bool WebPagePopupImpl::InitializePage() {
   return true;
 }
 
-void WebPagePopupImpl::PostMessage(const String& message) {
+void WebPagePopupImpl::PostMessageToPopup(const String& message) {
   if (!page_)
     return;
   ScriptForbiddenScope::AllowUserAgentScript allow_script;
@@ -348,10 +349,9 @@ AXObject* WebPagePopupImpl::RootAXObject() {
   Document* document = ToLocalFrame(page_->MainFrame())->GetDocument();
   if (!document)
     return nullptr;
-  AXObjectCache* cache = document->AxObjectCache();
+  AXObjectCache* cache = document->GetOrCreateAXObjectCache();
   DCHECK(cache);
-  return ToAXObjectCacheBase(cache)->GetOrCreate(ToLayoutView(
-      LayoutAPIShim::LayoutObjectFrom(document->GetLayoutViewItem())));
+  return ToAXObjectCacheBase(cache)->GetOrCreate(document->GetLayoutView());
 }
 
 void WebPagePopupImpl::SetWindowRect(const IntRect& rect_in_screen) {
@@ -377,7 +377,7 @@ void WebPagePopupImpl::InitializeLayerTreeView() {
   layer_tree_view_ = widget_client_->InitializeLayerTreeView();
   if (layer_tree_view_) {
     layer_tree_view_->SetVisible(true);
-    animation_host_ = WTF::MakeUnique<CompositorAnimationHost>(
+    animation_host_ = std::make_unique<CompositorAnimationHost>(
         layer_tree_view_->CompositorAnimationHost());
     page_->LayerTreeViewInitialized(*layer_tree_view_, nullptr);
   } else {
@@ -397,7 +397,7 @@ void WebPagePopupImpl::BeginFrame(double last_frame_time_monotonic) {
     return;
   // FIXME: This should use lastFrameTimeMonotonic but doing so
   // breaks tests.
-  PageWidgetDelegate::Animate(*page_, MonotonicallyIncreasingTime());
+  PageWidgetDelegate::Animate(*page_, CurrentTimeTicksInSeconds());
 }
 
 void WebPagePopupImpl::WillCloseLayerTreeView() {
@@ -409,11 +409,11 @@ void WebPagePopupImpl::WillCloseLayerTreeView() {
   animation_host_ = nullptr;
 }
 
-void WebPagePopupImpl::UpdateAllLifecyclePhases() {
+void WebPagePopupImpl::UpdateLifecycle(LifecycleUpdate requested_update) {
   if (!page_)
     return;
-  PageWidgetDelegate::UpdateAllLifecyclePhases(
-      *page_, *page_->DeprecatedLocalMainFrame());
+  PageWidgetDelegate::UpdateLifecycle(
+      *page_, *page_->DeprecatedLocalMainFrame(), requested_update);
 }
 
 void WebPagePopupImpl::Paint(WebCanvas* canvas, const WebRect& rect) {
@@ -501,10 +501,24 @@ bool WebPagePopupImpl::IsViewportPointInWindow(int x, int y) {
       .Contains(IntPoint(point_in_window.x, point_in_window.y));
 }
 
+WebInputEventResult WebPagePopupImpl::DispatchBufferedTouchEvents() {
+  if (closing_)
+    return WebInputEventResult::kNotHandled;
+  return page_->DeprecatedLocalMainFrame()
+      ->GetEventHandler()
+      .DispatchBufferedTouchEvents();
+}
+
 WebInputEventResult WebPagePopupImpl::HandleInputEvent(
+    const WebCoalescedInputEvent& coalesced_event) {
+  return HandleInputEventIncludingTouch(coalesced_event);
+}
+
+WebInputEventResult WebPagePopupImpl::HandleInputEventInternal(
     const WebCoalescedInputEvent& event) {
   if (closing_)
     return WebInputEventResult::kNotHandled;
+  DCHECK(!WebInputEvent::IsTouchEventType(event.Event().GetType()));
   return PageWidgetDelegate::HandleInputEvent(
       *this, event, page_->DeprecatedLocalMainFrame());
 }
@@ -593,7 +607,7 @@ WebPagePopup* WebPagePopup::Create(WebWidgetClient* client) {
   //    WebPagePopupImpl to close.
   // We need them because the closing operation is asynchronous and the widget
   // can be closed while the WebViewImpl is unaware of it.
-  auto popup = WTF::AdoptRef(new WebPagePopupImpl(client));
+  auto popup = base::AdoptRef(new WebPagePopupImpl(client));
   popup->AddRef();
   return popup.get();
 }

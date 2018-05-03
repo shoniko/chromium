@@ -4,6 +4,7 @@
 
 module payments.mojom;
 
+import "components/payments/mojom/payment_request_data.mojom";
 import "mojo/common/time.mojom";
 import "third_party/WebKit/public/platform/modules/manifest/manifest.mojom";
 import "third_party/WebKit/public/platform/modules/payments/payment_request.mojom";
@@ -26,6 +27,11 @@ struct PaymentInstrument {
   array<blink.mojom.ManifestIcon> icons;
   array<string> enabled_methods;
   string stringified_capabilities;
+
+  // Parsed basic-card specific capabilities.
+  // Below arrays are non-empty only if enabled_methods contains "basic-card".
+  array<BasicCardNetwork> supported_networks;
+  array<BasicCardType> supported_types;
 };
 
 // This interface provides implementation of PaymentInstruments.idl

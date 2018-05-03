@@ -52,8 +52,8 @@ class MODULES_EXPORT ServiceWorkerClient : public ScriptWrappable {
  private:
   String uuid_;
   String url_;
-  WebServiceWorkerClientType type_;
-  WebURLRequest::FrameType frame_type_;
+  mojom::ServiceWorkerClientType type_;
+  network::mojom::RequestContextFrameType frame_type_;
 };
 
 }  // namespace blink

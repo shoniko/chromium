@@ -48,10 +48,12 @@ class DEVICE_VR_EXPORT VRDisplayImpl : public mojom::VRMagicWindowProvider {
 
   void RequestPresent(mojom::VRSubmitFrameClientPtr submit_client,
                       mojom::VRPresentationProviderRequest request,
+                      mojom::VRRequestPresentOptionsPtr options,
                       mojom::VRDisplayHost::RequestPresentCallback callback);
   void ExitPresent();
 
  private:
+  // mojom::VRMagicWindowProvider
   void GetPose(GetPoseCallback callback) override;
 
   mojo::Binding<mojom::VRMagicWindowProvider> binding_;

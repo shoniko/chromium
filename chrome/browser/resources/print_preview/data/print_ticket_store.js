@@ -47,6 +47,12 @@ cr.define('print_preview', function() {
       this.documentInfo_ = documentInfo;
 
       /**
+       * The destination that capabilities were last received for.
+       * @private {?print_preview.Destination}
+       */
+      this.destination_ = null;
+
+      /**
        * Printing capabilities of Chromium and the currently selected
        * destination.
        * @type {!print_preview.CapabilitiesHolder}
@@ -426,7 +432,8 @@ cr.define('print_preview', function() {
         cjt.print.collate = {collate: this.collate.getValue()};
       }
       if (this.color.isCapabilityAvailable() && this.color.isUserEdited()) {
-        const selectedOption = this.color.getSelectedOption();
+        const selectedOption =
+            destination.getSelectedColorOption(this.color.getValue());
         if (!selectedOption) {
           console.error('Could not find correct color option');
         } else {
@@ -435,7 +442,20 @@ cr.define('print_preview', function() {
             cjt.print.color.vendor_id = selectedOption.vendor_id;
           }
         }
+      } else {
+        // Always try setting the color in the print ticket, otherwise a
+        // reasonable reader of the ticket will have to do more work, or process
+        // the ticket sub-optimally, in order to safely handle the lack of a
+        // color ticket item.
+        const defaultOption = destination.defaultColorOption;
+        if (defaultOption) {
+          cjt.print.color = {type: defaultOption.type};
+          if (defaultOption.hasOwnProperty('vendor_id')) {
+            cjt.print.color.vendor_id = defaultOption.vendor_id;
+          }
+        }
       }
+
       if (this.copies.isCapabilityAvailable() && this.copies.isUserEdited()) {
         cjt.print.copies = {copies: this.copies.getValueAsNumber()};
       }
@@ -517,7 +537,11 @@ cr.define('print_preview', function() {
      * @private
      */
     onSelectedDestinationCapabilitiesReady_() {
-      if (this.capabilitiesHolder_.get() != null) {
+      const selectedDestination = this.destinationStore_.selectedDestination;
+      const isFirstUpdate = this.capabilitiesHolder_.get() == null;
+      // Only clear the ticket items if the user selected a new destination
+      // and this is not the first update.
+      if (!isFirstUpdate && this.destination_ != selectedDestination) {
         this.customMargins_.updateValue(null);
         if (this.marginsType_.getValue() ==
             print_preview.ticket_items.MarginsTypeValue.CUSTOM) {
@@ -526,10 +550,9 @@ cr.define('print_preview', function() {
         }
         this.vendorItems_.updateValue({});
       }
-      const caps =
-          assert(this.destinationStore_.selectedDestination.capabilities);
-      const isFirstUpdate = this.capabilitiesHolder_.get() == null;
+      const caps = assert(selectedDestination.capabilities);
       this.capabilitiesHolder_.set(caps);
+      this.destination_ = selectedDestination;
       if (isFirstUpdate) {
         this.isInitialized_ = true;
         cr.dispatchSimpleEvent(this, PrintTicketStore.EventType.INITIALIZE);

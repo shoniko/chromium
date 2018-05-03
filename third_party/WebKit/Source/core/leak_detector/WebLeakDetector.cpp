@@ -30,6 +30,7 @@
 
 #include "public/web/WebLeakDetector.h"
 
+#include "base/macros.h"
 #include "core/frame/WebLocalFrameImpl.h"
 #include "core/leak_detector/BlinkLeakDetector.h"
 #include "core/leak_detector/BlinkLeakDetectorClient.h"
@@ -42,7 +43,6 @@ namespace {
 
 class WebLeakDetectorImpl final : public WebLeakDetector,
                                   public BlinkLeakDetectorClient {
-  WTF_MAKE_NONCOPYABLE(WebLeakDetectorImpl);
 
  public:
   explicit WebLeakDetectorImpl(WebLeakDetectorClient* client)
@@ -50,7 +50,7 @@ class WebLeakDetectorImpl final : public WebLeakDetector,
     DCHECK(client_);
   }
 
-  ~WebLeakDetectorImpl() override {}
+  ~WebLeakDetectorImpl() override = default;
 
   void PrepareForLeakDetection(WebFrame*) override;
   void CollectGarbageAndReport() override;
@@ -61,6 +61,7 @@ class WebLeakDetectorImpl final : public WebLeakDetector,
  private:
   WebLeakDetectorClient* client_;
   std::unique_ptr<BlinkLeakDetector> detector_;
+  DISALLOW_COPY_AND_ASSIGN(WebLeakDetectorImpl);
 };
 
 void WebLeakDetectorImpl::PrepareForLeakDetection(WebFrame* frame) {
@@ -86,8 +87,8 @@ void WebLeakDetectorImpl::OnLeakDetectionComplete() {
       InstanceCounters::CounterValue(InstanceCounters::kLayoutObjectCounter);
   result.number_of_live_resources =
       InstanceCounters::CounterValue(InstanceCounters::kResourceCounter);
-  result.number_of_live_suspendable_objects = InstanceCounters::CounterValue(
-      InstanceCounters::kSuspendableObjectCounter);
+  result.number_of_live_pausable_objects =
+      InstanceCounters::CounterValue(InstanceCounters::kPausableObjectCounter);
   result.number_of_live_script_promises =
       InstanceCounters::CounterValue(InstanceCounters::kScriptPromiseCounter);
   result.number_of_live_frames =

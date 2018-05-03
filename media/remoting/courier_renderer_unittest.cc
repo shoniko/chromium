@@ -4,7 +4,8 @@
 
 #include "media/remoting/courier_renderer.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -50,11 +51,6 @@ PipelineStatistics DefaultStats() {
   return stats;
 }
 
-bool IsDefaultStats(const PipelineStatistics& stats) {
-  const PipelineStatistics default_stats = DefaultStats();
-  return memcmp(&stats, &default_stats, sizeof(PipelineStatistics)) == 0;
-}
-
 class RendererClientImpl final : public RendererClient {
  public:
   RendererClientImpl() {
@@ -83,7 +79,7 @@ class RendererClientImpl final : public RendererClient {
         .WillByDefault(
             Invoke(this, &RendererClientImpl::DelegateOnDurationChange));
   }
-  ~RendererClientImpl() {}
+  ~RendererClientImpl() = default;
 
   // RendererClient implementation.
   void OnError(PipelineStatus status) override {}
@@ -283,7 +279,7 @@ class CourierRendererTest : public testing::Test {
   }
 
   void SetUp() override {
-    controller_ = base::MakeUnique<RendererController>(
+    controller_ = std::make_unique<RendererController>(
         FakeRemoterFactory::CreateSharedSession(false));
     controller_->OnMetadataChanged(DefaultMetadata());
 
@@ -293,9 +289,8 @@ class CourierRendererTest : public testing::Test {
 
     renderer_.reset(new CourierRenderer(base::ThreadTaskRunnerHandle::Get(),
                                         controller_->GetWeakPtr(), nullptr));
-    clock_ = new base::SimpleTestTickClock();
-    renderer_->clock_.reset(clock_);
-    clock_->Advance(base::TimeDelta::FromSeconds(1));
+    renderer_->clock_ = &clock_;
+    clock_.Advance(base::TimeDelta::FromSeconds(1));
 
     RunPendingTasks();
   }
@@ -333,6 +328,19 @@ class CourierRendererTest : public testing::Test {
     time_message->set_max_time_usec(max_media_time.InMicroseconds());
     OnReceivedRpc(std::move(rpc));
     RunPendingTasks();
+  }
+
+  // Verifies no error reported and issues a series of time updates RPC
+  // messages. No verification after the last message is issued.
+  void VerifyAndReportTimeUpdates(int start_serial_number,
+                                  int end_serial_number) {
+    for (int i = start_serial_number; i < end_serial_number; ++i) {
+      ASSERT_FALSE(DidEncounterFatalError());
+      IssueTimeUpdateRpc(base::TimeDelta::FromMilliseconds(100 + i * 800),
+                         base::TimeDelta::FromSeconds(100));
+      clock_.Advance(base::TimeDelta::FromSeconds(1));
+      RunPendingTasks();
+    }
   }
 
   // Issues RPC_RC_ONSTATISTICSUPDATE RPC message with DefaultStats().
@@ -376,7 +384,7 @@ class CourierRendererTest : public testing::Test {
   std::unique_ptr<RendererClientImpl> render_client_;
   std::unique_ptr<FakeMediaResource> media_resource_;
   std::unique_ptr<CourierRenderer> renderer_;
-  base::SimpleTestTickClock* clock_;  // Owned by |renderer_|;
+  base::SimpleTestTickClock clock_;
 
   // RPC handles.
   const int receiver_renderer_handle_;
@@ -638,9 +646,9 @@ TEST_F(CourierRendererTest, OnVideoOpacityChange) {
 
 TEST_F(CourierRendererTest, OnStatisticsUpdate) {
   InitializeRenderer();
-  ASSERT_FALSE(IsDefaultStats(render_client_->stats()));
+  EXPECT_NE(DefaultStats(), render_client_->stats());
   IssueStatisticsUpdateRpc();
-  ASSERT_TRUE(IsDefaultStats(render_client_->stats()));
+  EXPECT_EQ(DefaultStats(), render_client_->stats());
 }
 
 TEST_F(CourierRendererTest, OnDurationChange) {
@@ -678,42 +686,23 @@ TEST_F(CourierRendererTest, OnPacingTooSlowly) {
 
   controller_->GetRpcBroker()->SetMessageCallbackForTesting(base::Bind(
       &CourierRendererTest::OnSendMessageToSink, base::Unretained(this)));
+
   // There should be no error reported with this playback rate.
   renderer_->SetPlaybackRate(0.8);
   RunPendingTasks();
+  EXPECT_CALL(*render_client_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
+      .Times(1);
   IssuesBufferingStateRpc(BufferingState::BUFFERING_HAVE_ENOUGH);
-  clock_->Advance(base::TimeDelta::FromSeconds(3));
-  for (int i = 0; i < 8; ++i) {
-    ASSERT_FALSE(DidEncounterFatalError());
-    IssueTimeUpdateRpc(base::TimeDelta::FromMilliseconds(100 + i * 800),
-                       base::TimeDelta::FromSeconds(16));
-    clock_->Advance(base::TimeDelta::FromSeconds(1));
-    RunPendingTasks();
-  }
-  ASSERT_FALSE(DidEncounterFatalError());  // No delay at this playback rate.
+  clock_.Advance(base::TimeDelta::FromSeconds(3));
+  VerifyAndReportTimeUpdates(0, 15);
+  ASSERT_FALSE(DidEncounterFatalError());
 
-  // Change playback rate. Pacing keeps same as above. Should report error.
+  // Change playback rate. Pacing keeps same as above. Should report error when
+  // playback was continuously delayed for 10 times.
   renderer_->SetPlaybackRate(1);
   RunPendingTasks();
-  clock_->Advance(base::TimeDelta::FromSeconds(3));
-
-  for (int i = 8; i < 13; ++i) {
-    ASSERT_FALSE(DidEncounterFatalError());  // Not enough measurements.
-    IssueTimeUpdateRpc(base::TimeDelta::FromMilliseconds(100 + i * 800),
-                       base::TimeDelta::FromSeconds(16));
-    clock_->Advance(base::TimeDelta::FromSeconds(1));
-    RunPendingTasks();
-  }
-
-  for (int i = 13; i < 16; ++i) {
-    // Don't report error at the first and second time that encounters delay.
-    ASSERT_FALSE(DidEncounterFatalError());
-    IssueTimeUpdateRpc(base::TimeDelta::FromMilliseconds(100 + i * 800),
-                       base::TimeDelta::FromSeconds(16));
-    clock_->Advance(base::TimeDelta::FromSeconds(1));
-    RunPendingTasks();
-  }
-  // Reports error when encounters delay continuously for 3 times.
+  clock_.Advance(base::TimeDelta::FromSeconds(3));
+  VerifyAndReportTimeUpdates(15, 30);
   ASSERT_TRUE(DidEncounterFatalError());
 }
 
@@ -723,7 +712,7 @@ TEST_F(CourierRendererTest, OnFrameDropRateHigh) {
   for (int i = 0; i < 7; ++i) {
     ASSERT_FALSE(DidEncounterFatalError());  // Not enough measurements.
     IssueStatisticsUpdateRpc();
-    clock_->Advance(base::TimeDelta::FromSeconds(1));
+    clock_.Advance(base::TimeDelta::FromSeconds(1));
     RunPendingTasks();
   }
   ASSERT_TRUE(DidEncounterFatalError());

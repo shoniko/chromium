@@ -55,7 +55,7 @@
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/mock_location_settings.h"
-#include "chrome/browser/android/search_geolocation/search_geolocation_service.h"
+#include "chrome/browser/android/search_permissions/search_permissions_service.h"
 #include "chrome/browser/geolocation/geolocation_permission_context_android.h"
 #include "components/location/android/location_settings_dialog_outcome.h"
 #include "components/prefs/pref_service.h"
@@ -73,7 +73,7 @@ using content::MockRenderProcessHost;
 #if defined(OS_ANDROID)
 // TestSearchEngineDelegate
 class TestSearchEngineDelegate
-    : public SearchGeolocationService::SearchEngineDelegate {
+    : public SearchPermissionsService::SearchEngineDelegate {
  public:
   base::string16 GetDSEName() override { return base::string16(); }
 
@@ -81,9 +81,16 @@ class TestSearchEngineDelegate
     return url::Origin::Create(GURL(kDSETestUrl));
   }
 
-  void SetDSEChangedCallback(const base::Closure& callback) override {}
+  void SetDSEChangedCallback(const base::Closure& callback) override {
+    dse_changed_callback_ = callback;
+  }
+
+  void UpdateDSEOrigin() { dse_changed_callback_.Run(); }
 
   static const char kDSETestUrl[];
+
+ private:
+  base::Closure dse_changed_callback_;
 };
 
 const char TestSearchEngineDelegate::kDSETestUrl[] = "https://www.dsetest.com";
@@ -1110,26 +1117,26 @@ TEST_F(GeolocationPermissionContextTests, TabDestroyed) {
 #if defined(OS_ANDROID)
 TEST_F(GeolocationPermissionContextTests, SearchGeolocationInIncognito) {
   GURL requesting_frame(TestSearchEngineDelegate::kDSETestUrl);
-  // The DSE Geolocation setting should be used in incognito if it is BLOCK,
-  // but not if it is ALLOW.
-  SearchGeolocationService* geo_service =
-      SearchGeolocationService::Factory::GetForBrowserContext(profile());
-  geo_service->SetSearchEngineDelegateForTest(
-      base::MakeUnique<TestSearchEngineDelegate>());
 
-  Profile* otr_profile = profile()->GetOffTheRecordProfile();
+  SearchPermissionsService* service =
+      SearchPermissionsService::Factory::GetForBrowserContext(profile());
+  std::unique_ptr<TestSearchEngineDelegate> delegate =
+      base::MakeUnique<TestSearchEngineDelegate>();
+  TestSearchEngineDelegate* delegate_ptr = delegate.get();
+  service->SetSearchEngineDelegateForTest(std::move(delegate));
+  delegate_ptr->UpdateDSEOrigin();
 
-  // A DSE setting of ALLOW should not flow through to incognito.
-  geo_service->SetDSEGeolocationSetting(true);
-  ASSERT_EQ(CONTENT_SETTING_ASK,
-            PermissionManager::Get(otr_profile)
+  // The DSE should be auto-granted geolocation.
+  ASSERT_EQ(CONTENT_SETTING_ALLOW,
+            PermissionManager::Get(profile())
                 ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_GEOLOCATION,
                                       requesting_frame, requesting_frame)
                 .content_setting);
 
-  // Changing the setting to BLOCK should flow through to incognito.
-  geo_service->SetDSEGeolocationSetting(false);
-  ASSERT_EQ(CONTENT_SETTING_BLOCK,
+  Profile* otr_profile = profile()->GetOffTheRecordProfile();
+
+  // A DSE setting of ALLOW should not flow through to incognito.
+  ASSERT_EQ(CONTENT_SETTING_ASK,
             PermissionManager::Get(otr_profile)
                 ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_GEOLOCATION,
                                       requesting_frame, requesting_frame)

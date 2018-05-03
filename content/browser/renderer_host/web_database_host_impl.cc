@@ -18,13 +18,12 @@
 #include "storage/browser/quota/quota_manager.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/common/database/database_identifier.h"
-#include "storage/common/quota/quota_status_code.h"
+#include "third_party/WebKit/common/quota/quota_types.mojom.h"
 #include "third_party/sqlite/sqlite3.h"
 
 using storage::DatabaseUtil;
 using storage::VfsBackend;
 using storage::QuotaManager;
-using storage::QuotaStatusCode;
 
 namespace content {
 namespace {
@@ -69,10 +68,10 @@ WebDatabaseHostImpl::~WebDatabaseHostImpl() {
 void WebDatabaseHostImpl::Create(
     int process_id,
     scoped_refptr<storage::DatabaseTracker> db_tracker,
-    content::mojom::WebDatabaseHostRequest request) {
+    blink::mojom::WebDatabaseHostRequest request) {
   DCHECK(db_tracker->task_runner()->RunsTasksInCurrentSequence());
   mojo::MakeStrongBinding(
-      base::MakeUnique<WebDatabaseHostImpl>(process_id, std::move(db_tracker)),
+      std::make_unique<WebDatabaseHostImpl>(process_id, std::move(db_tracker)),
       std::move(request));
 }
 
@@ -186,12 +185,14 @@ void WebDatabaseHostImpl::GetSpaceAvailable(
 
   db_tracker_->quota_manager_proxy()->GetUsageAndQuota(
       db_tracker_->task_runner(), origin.GetURL(),
-      storage::kStorageTypeTemporary,
+      blink::mojom::StorageType::kTemporary,
       base::Bind(
           [](GetSpaceAvailableCallback callback,
-             storage::QuotaStatusCode status, int64_t usage, int64_t quota) {
+             blink::mojom::QuotaStatusCode status, int64_t usage,
+             int64_t quota) {
             int64_t available = 0;
-            if ((status == storage::kQuotaStatusOk) && (usage < quota)) {
+            if ((status == blink::mojom::QuotaStatusCode::kOk) &&
+                (usage < quota)) {
               available = quota - usage;
             }
             std::move(callback).Run(available);
@@ -351,7 +352,7 @@ void WebDatabaseHostImpl::OnDatabaseScheduledForDeletion(
       database_name);
 }
 
-content::mojom::WebDatabase& WebDatabaseHostImpl::GetWebDatabase() {
+blink::mojom::WebDatabase& WebDatabaseHostImpl::GetWebDatabase() {
   DCHECK(db_tracker_->task_runner()->RunsTasksInCurrentSequence());
   if (!database_provider_) {
     // The interface binding needs to occur on the UI thread, as we can
@@ -359,7 +360,7 @@ content::mojom::WebDatabase& WebDatabaseHostImpl::GetWebDatabase() {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::BindOnce(
-            [](int process_id, content::mojom::WebDatabaseRequest request) {
+            [](int process_id, blink::mojom::WebDatabaseRequest request) {
               RenderProcessHost* host = RenderProcessHost::FromID(process_id);
               if (host) {
                 content::BindInterface(host, std::move(request));

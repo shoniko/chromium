@@ -50,7 +50,7 @@ LayoutMenuList::LayoutMenuList(Element* element)
   DCHECK(IsHTMLSelectElement(element));
 }
 
-LayoutMenuList::~LayoutMenuList() {}
+LayoutMenuList::~LayoutMenuList() = default;
 
 // FIXME: Instead of this hack we should add a ShadowRoot to <select> with no
 // insertion point to prevent children from rendering.
@@ -91,10 +91,10 @@ void LayoutMenuList::AdjustInnerStyle() {
   // when the content overflows, treat it the same as align-items: flex-start.
   // But we only do that for the cases where html.css would otherwise use
   // center.
-  if (Style()->AlignItemsPosition() == kItemPositionCenter) {
+  if (Style()->AlignItemsPosition() == ItemPosition::kCenter) {
     inner_style.SetMarginTop(Length());
     inner_style.SetMarginBottom(Length());
-    inner_style.SetAlignSelfPosition(kItemPositionFlexStart);
+    inner_style.SetAlignSelfPosition(ItemPosition::kFlexStart);
   }
 
   Length padding_start = Length(
@@ -177,7 +177,7 @@ void LayoutMenuList::UpdateInnerBlockHeight() {
 void LayoutMenuList::UpdateOptionsWidth() const {
   float max_option_width = 0;
 
-  for (const auto& option : SelectElement()->GetOptionList()) {
+  for (auto* const option : SelectElement()->GetOptionList()) {
     String text = option->TextIndentedToRespectGroupLabel();
     const ComputedStyle* item_style =
         option->GetComputedStyle() ? option->GetComputedStyle() : Style();
@@ -200,7 +200,7 @@ void LayoutMenuList::UpdateFromElement() {
   if (select->IsMultiple()) {
     unsigned selected_count = 0;
     HTMLOptionElement* selected_option_element = nullptr;
-    for (const auto& option : select->GetOptionList()) {
+    for (auto* const option : select->GetOptionList()) {
       if (option->Selected()) {
         if (++selected_count == 1)
           selected_option_element = option;

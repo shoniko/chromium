@@ -65,7 +65,7 @@ inline bool MatchesBMPSignature(const char* contents) {
 static constexpr size_t kLongestSignatureLength = sizeof("RIFF????WEBPVP") - 1;
 
 std::unique_ptr<ImageDecoder> ImageDecoder::Create(
-    RefPtr<SegmentReader> data,
+    scoped_refptr<SegmentReader> data,
     bool data_complete,
     AlphaOption alpha_option,
     const ColorBehavior& color_behavior,
@@ -81,8 +81,7 @@ std::unique_ptr<ImageDecoder> ImageDecoder::Create(
     static const size_t kBytesPerPixels = 4;
     size_t requested_decoded_bytes =
         kBytesPerPixels * desired_size.width() * desired_size.height();
-    DCHECK(requested_decoded_bytes <= max_decoded_bytes);
-    max_decoded_bytes = requested_decoded_bytes;
+    max_decoded_bytes = std::min(requested_decoded_bytes, max_decoded_bytes);
   }
 
   // Access the first kLongestSignatureLength chars to sniff the signature.
@@ -485,14 +484,6 @@ size_t ImagePlanes::RowBytes(int i) const {
   DCHECK_GE(i, 0);
   DCHECK_LT(i, 3);
   return row_bytes_[i];
-}
-
-void ImageDecoder::SetEmbeddedColorProfile(const char* icc_data,
-                                           unsigned icc_length) {
-  sk_sp<SkColorSpace> color_space = SkColorSpace::MakeICC(icc_data, icc_length);
-  if (!color_space)
-    DLOG(ERROR) << "Failed to parse image ICC profile";
-  SetEmbeddedColorSpace(std::move(color_space));
 }
 
 void ImageDecoder::SetEmbeddedColorSpace(sk_sp<SkColorSpace> color_space) {

@@ -46,7 +46,14 @@ class V8TestInterface5 {
   }
   static void legacyCallCustom(const v8::FunctionCallbackInfo<v8::Value>&);
   static const int internalFieldCount = kV8DefaultWrapperInternalFieldCount;
-  MODULES_EXPORT static void preparePrototypeAndInterfaceObject(v8::Local<v8::Context>, const DOMWrapperWorld&, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate);
+
+  MODULES_EXPORT static void InstallConditionalFeatures(
+      v8::Local<v8::Context>,
+      const DOMWrapperWorld&,
+      v8::Local<v8::Object> instanceObject,
+      v8::Local<v8::Object> prototypeObject,
+      v8::Local<v8::Function> interfaceObject,
+      v8::Local<v8::FunctionTemplate> interfaceTemplate);
 
   // Callback functions
 
@@ -107,6 +114,7 @@ class V8TestInterface5 {
 template <>
 struct NativeValueTraits<TestInterface5Implementation> : public NativeValueTraitsBase<TestInterface5Implementation> {
   MODULES_EXPORT static TestInterface5Implementation* NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+  MODULES_EXPORT static TestInterface5Implementation* NullValue() { return nullptr; }
 };
 
 template <>

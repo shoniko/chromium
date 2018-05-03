@@ -32,7 +32,6 @@
 #include <vector>
 
 #include "base/base_export.h"
-#include "base/compiler_specific.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/span.h"
 #include "base/macros.h"
@@ -82,7 +81,7 @@ class Value;
 class BASE_EXPORT Value {
  public:
   using BlobStorage = std::vector<char>;
-  using DictStorage = base::flat_map<std::string, std::unique_ptr<Value>>;
+  using DictStorage = flat_map<std::string, std::unique_ptr<Value>>;
   using ListStorage = std::vector<Value>;
 
   enum class Type {
@@ -148,11 +147,9 @@ class BASE_EXPORT Value {
   static const char* GetTypeName(Type type);
 
   // Returns the type of the value stored by the current Value object.
-  Type GetType() const { return type_; }  // DEPRECATED, use type().
   Type type() const { return type_; }
 
   // Returns true if the current object represents a given type.
-  bool IsType(Type type) const { return type == type_; }
   bool is_none() const { return type() == Type::NONE; }
   bool is_bool() const { return type() == Type::BOOLEAN; }
   bool is_int() const { return type() == Type::INTEGER; }
@@ -234,13 +231,18 @@ class BASE_EXPORT Value {
   //
   //   std::vector<StringPiece> components = ...
   //   auto* found = FindPath(components);
+  //
+  // Note: If there is only one component in the path, use FindKey() instead.
   Value* FindPath(std::initializer_list<StringPiece> path);
   Value* FindPath(span<const StringPiece> path);
   const Value* FindPath(std::initializer_list<StringPiece> path) const;
   const Value* FindPath(span<const StringPiece> path) const;
 
-  // Like FindPath but will only return the value if the leaf Value type
+  // Like FindPath() but will only return the value if the leaf Value type
   // matches the given type. Will return nullptr otherwise.
+  //
+  // Note: If there is only one component in the path, use FindKeyOfType()
+  // instead.
   Value* FindPathOfType(std::initializer_list<StringPiece> path, Type type);
   Value* FindPathOfType(span<const StringPiece> path, Type type);
   const Value* FindPathOfType(std::initializer_list<StringPiece> path,
@@ -261,6 +263,8 @@ class BASE_EXPORT Value {
   //
   //   std::vector<StringPiece> components = ...
   //   value.SetPath(components, std::move(myvalue));
+  //
+  // Note: If there is only one component in the path, use SetKey() instead.
   Value* SetPath(std::initializer_list<StringPiece> path, Value value);
   Value* SetPath(span<const StringPiece> path, Value value);
 
@@ -276,6 +280,8 @@ class BASE_EXPORT Value {
   //
   //   std::vector<StringPiece> components = ...
   //   bool success = value.RemovePath(components);
+  //
+  // Note: If there is only one component in the path, use RemoveKey() instead.
   bool RemovePath(std::initializer_list<StringPiece> path);
   bool RemovePath(span<const StringPiece> path);
 
@@ -338,6 +344,10 @@ class BASE_EXPORT Value {
   // DEPRECATED, use operator==(const Value& lhs, const Value& rhs) instead.
   // TODO(crbug.com/646113): Delete this and migrate callsites.
   bool Equals(const Value* other) const;
+
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  size_t EstimateMemoryUsage() const;
 
  protected:
   // TODO(crbug.com/646113): Make these private once DictionaryValue and
@@ -423,15 +433,6 @@ class BASE_EXPORT DictionaryValue : public Value {
   // DEPRECATED, use Value::SetKey(key, value) instead.
   Value* SetWithoutPathExpansion(StringPiece key,
                                  std::unique_ptr<Value> in_value);
-
-  // Convenience forms of SetWithoutPathExpansion().
-  // DEPRECATED, use Value::SetKey(key, Value(Type::DICTIONARY)) instead.
-  DictionaryValue* SetDictionaryWithoutPathExpansion(
-      StringPiece path,
-      std::unique_ptr<DictionaryValue> in_value);
-  // DEPRECATED, use Value::SetKey(key, Value(Type::LIST)) instead.
-  ListValue* SetListWithoutPathExpansion(StringPiece path,
-                                         std::unique_ptr<ListValue> in_value);
 
   // Gets the Value associated with the given path starting from this object.
   // A path has the form "<key>" or "<key>.<key>.[...]", where "." indexes
@@ -603,10 +604,6 @@ class BASE_EXPORT ListValue : public Value {
   // DEPRECATED, use GetList()::size() instead.
   size_t GetSize() const { return list_.size(); }
 
-  // Returns the capacity of storage for Values in this list.
-  // DEPRECATED, use GetList()::capacity() instead.
-  size_t capacity() const { return list_.capacity(); }
-
   // Returns whether the list is empty.
   // DEPRECATED, use GetList()::empty() instead.
   bool empty() const { return list_.empty(); }
@@ -646,9 +643,6 @@ class BASE_EXPORT ListValue : public Value {
   // DEPRECATED, use GetList()::operator[]::GetString() instead.
   bool GetString(size_t index, std::string* out_value) const;
   bool GetString(size_t index, string16* out_value) const;
-  // DEPRECATED, use GetList()::operator[]::GetBlob() instead.
-  bool GetBinary(size_t index, const Value** out_value) const;
-  bool GetBinary(size_t index, Value** out_value);
 
   bool GetDictionary(size_t index, const DictionaryValue** out_value) const;
   bool GetDictionary(size_t index, DictionaryValue** out_value);

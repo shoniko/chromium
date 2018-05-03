@@ -41,9 +41,7 @@ class APIEventHandler {
                           bool update_lazy_listeners,
                           v8::Local<v8::Context>)>;
 
-  APIEventHandler(const binding::RunJSFunction& call_js,
-                  const binding::RunJSFunctionSync& call_js_sync,
-                  const EventListenersChangedMethod& listeners_changed,
+  APIEventHandler(const EventListenersChangedMethod& listeners_changed,
                   ExceptionHandler* exception_handler);
   ~APIEventHandler();
 
@@ -71,6 +69,8 @@ class APIEventHandler {
 
   // Notifies all listeners of the event with the given |event_name| in the
   // specified |context|, sending the included |arguments|.
+  // Warning: This runs arbitrary JS code, so the |context| may be invalidated
+  // after this!
   void FireEventInContext(const std::string& event_name,
                           v8::Local<v8::Context> context,
                           const base::ListValue& arguments,
@@ -78,7 +78,8 @@ class APIEventHandler {
   void FireEventInContext(const std::string& event_name,
                           v8::Local<v8::Context> context,
                           std::vector<v8::Local<v8::Value>>* arguments,
-                          const EventFilteringInfo* filter);
+                          const EventFilteringInfo* filter,
+                          JSRunner::ResultCallback callback);
 
   // Registers a |function| to serve as an "argument massager" for the given
   // |event_name|, mutating the original arguments.
@@ -106,10 +107,6 @@ class APIEventHandler {
                                         v8::Local<v8::Context> context);
 
  private:
-  // Method to run a given v8::Function. Curried in for testing.
-  binding::RunJSFunction call_js_;
-  binding::RunJSFunctionSync call_js_sync_;
-
   EventListenersChangedMethod listeners_changed_;
 
   // The associated EventFilter; shared across all contexts and events.

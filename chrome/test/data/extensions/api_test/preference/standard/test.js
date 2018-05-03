@@ -24,6 +24,7 @@ var preferences_to_test = [
       thirdPartyCookiesAllowed: false,
       hyperlinkAuditingEnabled: false,
       referrersEnabled: false,
+      doNotTrackEnabled: false,
       protectedContentEnabled: true,
     }
   },
@@ -32,7 +33,6 @@ var preferences_to_test = [
     preferences: {
       alternateErrorPagesEnabled: false,
       autofillEnabled: false,
-      hotwordSearchEnabled: false,
       passwordSavingEnabled: false,
       safeBrowsingEnabled: false,
       safeBrowsingExtendedReportingEnabled: false,

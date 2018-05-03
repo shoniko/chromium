@@ -53,8 +53,7 @@ class ClientCertIdentityNSS : public ClientCertIdentity {
         FROM_HERE,
         {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
         base::Bind(&FetchClientCertPrivateKey, base::Unretained(certificate()),
-                   cert_certificate_.get(),
-                   base::Unretained(password_delegate_.get())),
+                   cert_certificate_.get(), password_delegate_),
         private_key_callback);
   }
 
@@ -70,7 +69,7 @@ ClientCertStoreNSS::ClientCertStoreNSS(
     const PasswordDelegateFactory& password_delegate_factory)
     : password_delegate_factory_(password_delegate_factory) {}
 
-ClientCertStoreNSS::~ClientCertStoreNSS() {}
+ClientCertStoreNSS::~ClientCertStoreNSS() = default;
 
 void ClientCertStoreNSS::GetClientCerts(
     const SSLCertRequestInfo& request,
@@ -116,30 +115,22 @@ void ClientCertStoreNSS::FilterCertsOnWorkerThread(
       continue;
     }
 
-    X509Certificate::OSCertHandles intermediates_raw;
-    intermediates_raw.reserve(nss_intermediates.size());
-#if BUILDFLAG(USE_BYTE_CERTS)
     std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
     intermediates.reserve(nss_intermediates.size());
     for (const ScopedCERTCertificate& nss_intermediate : nss_intermediates) {
       bssl::UniquePtr<CRYPTO_BUFFER> intermediate_cert_handle(
-          X509Certificate::CreateOSCertHandleFromBytes(
+          X509Certificate::CreateCertBufferFromBytes(
               reinterpret_cast<const char*>(nss_intermediate->derCert.data),
               nss_intermediate->derCert.len));
       if (!intermediate_cert_handle)
         break;
-      intermediates_raw.push_back(intermediate_cert_handle.get());
       intermediates.push_back(std::move(intermediate_cert_handle));
     }
-#else
-    for (const ScopedCERTCertificate& nss_intermediate : nss_intermediates)
-      intermediates_raw.push_back(nss_intermediate.get());
-#endif
 
     // Retain a copy of the intermediates. Some deployments expect the client to
     // supply intermediates out of the local store. See
     // https://crbug.com/548631.
-    (*examine_iter)->SetIntermediates(intermediates_raw);
+    (*examine_iter)->SetIntermediates(std::move(intermediates));
 
     if (examine_iter == keep_iter)
       ++keep_iter;

@@ -17,10 +17,10 @@
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_tray.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_list.h"
 #include "ui/message_center/public/cpp/message_center_constants.h"
+#include "ui/message_center/ui_controller.h"
 #include "ui/message_center/views/message_view.h"
 #include "ui/message_center/views/message_view_context_menu_controller.h"
 #include "ui/message_center/views/message_view_factory.h"
@@ -43,27 +43,24 @@ const int kMouseExitedDeferTimeoutMs = 200;
 
 // The margin between messages (and between the anchor unless
 // first_item_has_no_margin was specified).
-const int kToastMarginY = kMarginBetweenItems;
+const int kToastMarginY = kMarginBetweenPopups;
 
 }  // namespace.
 
 MessagePopupCollection::MessagePopupCollection(
     MessageCenter* message_center,
-    MessageCenterTray* tray,
+    UiController* tray,
     PopupAlignmentDelegate* alignment_delegate)
     : message_center_(message_center),
       tray_(tray),
-      alignment_delegate_(alignment_delegate),
-      defer_counter_(0),
-      latest_toast_entered_(NULL),
-      user_is_closing_toasts_by_clicking_(false),
-      target_top_edge_(0),
-      context_menu_controller_(new MessageViewContextMenuController(this)),
-      weak_factory_(this) {
+      alignment_delegate_(alignment_delegate) {
   DCHECK(message_center_);
   defer_timer_.reset(new base::OneShotTimer);
   message_center_->AddObserver(this);
   alignment_delegate_->set_collection(this);
+#if !defined(OS_CHROMEOS)
+  context_menu_controller_.reset(new MessageViewContextMenuController());
+#endif
 }
 
 MessagePopupCollection::~MessagePopupCollection() {
@@ -74,54 +71,14 @@ MessagePopupCollection::~MessagePopupCollection() {
   CloseAllWidgets();
 }
 
-void MessagePopupCollection::ClickOnNotification(
-    const std::string& notification_id) {
-  message_center_->ClickOnNotification(notification_id);
+void MessagePopupCollection::OnViewPreferredSizeChanged(
+    views::View* observed_view) {
+  OnNotificationUpdated(
+      static_cast<MessageView*>(observed_view)->notification_id());
 }
 
-void MessagePopupCollection::RemoveNotification(
-    const std::string& notification_id,
-    bool by_user) {
-  NotificationList::PopupNotifications notifications =
-      message_center_->GetPopupNotifications();
-  for (NotificationList::PopupNotifications::iterator iter =
-           notifications.begin();
-       iter != notifications.end(); ++iter) {
-    Notification* notification = *iter;
-    DCHECK(notification);
-
-    if (notification->id() != notification_id)
-      continue;
-
-    // Don't remove the notification only when it's not pinned.
-    if (!notification->pinned())
-      message_center_->RemoveNotification(notification_id, by_user);
-    else
-      message_center_->MarkSinglePopupAsShown(notification_id, true /* read */);
-
-    break;
-  }
-}
-
-std::unique_ptr<ui::MenuModel> MessagePopupCollection::CreateMenuModel(
-    const Notification& notification) {
-  return tray_->CreateNotificationMenuModel(notification);
-}
-
-void MessagePopupCollection::ClickOnNotificationButton(
-    const std::string& notification_id,
-    int button_index) {
-  message_center_->ClickOnNotificationButton(notification_id, button_index);
-}
-
-void MessagePopupCollection::ClickOnSettingsButton(
-    const std::string& notification_id) {
-  message_center_->ClickOnSettingsButton(notification_id);
-}
-
-void MessagePopupCollection::UpdateNotificationSize(
-    const std::string& notification_id) {
-  OnNotificationUpdated(notification_id);
+void MessagePopupCollection::OnViewIsDeleting(views::View* observed_view) {
+  observed_views_.Remove(observed_view);
 }
 
 void MessagePopupCollection::MarkAllPopupsShown() {
@@ -191,20 +148,17 @@ void MessagePopupCollection::UpdateWidgets() {
 #endif
 
     // Create top-level notification.
-    MessageView* view = MessageViewFactory::Create(nullptr, notification, true);
+    MessageView* view = MessageViewFactory::Create(notification, true);
+    observed_views_.Add(view);
 #if defined(OS_CHROMEOS)
     // Disable pinned feature since this is a popup.
     view->set_force_disable_pinned();
 #endif  // defined(OS_CHROMEOS)
     view->SetExpanded(true);
 
-    // TODO(yoshiki): Temporary disable context menu on custom notifications.
-    // See crbug.com/750307 for detail.
-    if (notification.type() != NOTIFICATION_TYPE_CUSTOM &&
-        notification.delegate() &&
-        notification.delegate()->ShouldDisplaySettingsButton()) {
-      view->set_context_menu_controller(context_menu_controller_.get());
-    }
+#if !defined(OS_CHROMEOS)
+    view->set_context_menu_controller(context_menu_controller_.get());
+#endif
 
     int view_height = ToastContentsView::GetToastSizeForView(view).height();
     int height_available =
@@ -221,7 +175,6 @@ void MessagePopupCollection::UpdateWidgets() {
     // There will be no contents already since this is a new ToastContentsView.
     toast->SetContents(view, /*a11y_feedback_for_updates=*/false);
     toasts_.push_back(toast);
-    view->set_controller(toast);
 
     gfx::Size preferred_size = toast->GetPreferredSize();
     gfx::Point origin(

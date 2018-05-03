@@ -95,7 +95,7 @@ class ModelTypeWorker : public UpdateHandler,
 
   // An alternative way to drive sending data to the processor, that should be
   // called when a new encryption mechanism is ready.
-  void EncryptionAcceptedApplyUpdates();
+  void EncryptionAcceptedMaybeApplyUpdates();
 
   // Callback for when our contribution gets a response.
   void OnCommitResponse(CommitResponseDataList* response_list);
@@ -131,11 +131,6 @@ class ModelTypeWorker : public UpdateHandler,
   // Returns true if this type should stop communicating because of outstanding
   // encryption issues and must wait for keys to be updated.
   bool BlockForEncryption() const;
-
-  // Takes |commit_entity| populated from fields of WorkerEntityTracker and
-  // adjusts some fields before committing to server. Adjustments include
-  // generating client-assigned ID, encrypting data, etc.
-  void AdjustCommitProto(sync_pb::SyncEntity* commit_entity);
 
   // Updates the encryption key name stored in |model_type_state_| if it differs
   // from the default encryption key name in |cryptographer_|. Returns whether

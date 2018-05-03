@@ -8,7 +8,6 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/stl_util.h"
-#include "chrome/browser/android/search_geolocation/search_geolocation_service.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
@@ -30,10 +29,11 @@ using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
 
 // static
-static jlong Init(JNIEnv* env,
-                  const JavaParamRef<jclass>& clazz,
-                  const JavaParamRef<jobject>& obj,
-                  const JavaParamRef<jobject>& java_web_contents) {
+static jlong JNI_PageInfoPopup_Init(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& java_web_contents) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(java_web_contents);
 
@@ -43,8 +43,7 @@ static jlong Init(JNIEnv* env,
 
 PageInfoPopupAndroid::PageInfoPopupAndroid(JNIEnv* env,
                                            jobject java_page_info_pop,
-                                           content::WebContents* web_contents)
-    : search_geolocation_service_(nullptr) {
+                                           content::WebContents* web_contents) {
   // Important to use GetVisibleEntry to match what's showing in the omnibox.
   content::NavigationEntry* nav_entry =
       web_contents->GetController().GetVisibleEntry();
@@ -61,10 +60,6 @@ PageInfoPopupAndroid::PageInfoPopupAndroid(JNIEnv* env,
   DCHECK(helper);
   security_state::SecurityInfo security_info;
   helper->GetSecurityInfo(&security_info);
-
-  search_geolocation_service_ =
-      SearchGeolocationService::Factory::GetForBrowserContext(
-          web_contents->GetBrowserContext());
 
   presenter_.reset(new PageInfo(
       this, Profile::FromBrowserContext(web_contents->GetBrowserContext()),
@@ -171,24 +166,16 @@ base::Optional<ContentSetting> PageInfoPopupAndroid::GetSettingToDisplay(
 
   // Handle exceptions for permissions which need to be displayed even if they
   // are set to the default.
-  if (permission.type == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
-    if (search_geolocation_service_ &&
-        search_geolocation_service_->UseDSEGeolocationSetting(
-            url::Origin::Create(url_))) {
-      return search_geolocation_service_->GetDSEGeolocationSetting()
-                 ? CONTENT_SETTING_ALLOW
-                 : CONTENT_SETTING_BLOCK;
-    }
-  } else if (permission.type == CONTENT_SETTINGS_TYPE_ADS) {
+  if (permission.type == CONTENT_SETTINGS_TYPE_ADS) {
     // The subresource filter permission should always display the default
     // setting if it is showing up in Page Info. Logic for whether the
     // setting should show up in Page Info is in ShouldShowPermission in
     // page_info.cc.
     return permission.default_setting;
   } else if (permission.type == CONTENT_SETTINGS_TYPE_SOUND) {
-    // The sound content setting should always show up when the tab is playing
-    // audio or has recently played audio.
-    if (web_contents_->WasRecentlyAudible())
+    // The sound content setting should always show up when the tab has played
+    // audio since last navigation.
+    if (web_contents_->WasEverAudible())
       return permission.default_setting;
   }
   return base::Optional<ContentSetting>();

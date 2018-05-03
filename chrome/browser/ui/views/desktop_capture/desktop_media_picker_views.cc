@@ -64,7 +64,7 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
       pane_(new views::TabbedPane()) {
   const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
-  SetLayoutManager(new views::BoxLayout(
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical,
       provider->GetDialogInsetsForContentType(views::TEXT, views::CONTROL),
       provider->GetDistanceMetric(DISTANCE_RELATED_CONTROL_VERTICAL_SMALL)));
@@ -244,7 +244,7 @@ DesktopMediaPickerDialogView::~DesktopMediaPickerDialogView() {}
 void DesktopMediaPickerDialogView::TabSelectedAt(int index) {
   OnSourceTypeSwitched(index);
   list_views_[index]->RequestFocus();
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
 }
 
 void DesktopMediaPickerDialogView::OnSourceTypeSwitched(int index) {
@@ -358,7 +358,7 @@ void DesktopMediaPickerDialogView::DeleteDelegate() {
 }
 
 void DesktopMediaPickerDialogView::OnSelectionChanged() {
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
 }
 
 void DesktopMediaPickerDialogView::OnDoubleClick() {

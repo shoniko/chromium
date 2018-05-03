@@ -4,34 +4,15 @@
 
 /** @fileoverview Suite of tests for extension-toolbar. */
 cr.define('extension_toolbar_tests', function() {
-  /**
-   * A mock delegate for the toolbar.
-   * @constructor
-   * @implements {extensions.ToolbarDelegate}
-   * @extends {extension_test_util.ClickMock}
-   */
-  function MockDelegate() {}
-
-  MockDelegate.prototype = {
-    __proto__: extension_test_util.ClickMock.prototype,
-
-    /** @override */
-    setProfileInDevMode: function(inDevMode) {},
-
-    /** @override */
-    loadUnpacked: function() {},
-
-    /** @override */
-    updateAllExtensions: function() {},
-  };
-
   /** @enum {string} */
   var TestNames = {
     Layout: 'layout',
     ClickHandlers: 'click handlers',
+    DevModeToggle: 'dev mode toggle',
   };
 
-  suite('ExtensionToolbarTest', function() {
+  var suiteName = 'ExtensionToolbarTest';
+  suite(suiteName, function() {
     /** @type {MockDelegate} */
     var mockDelegate;
 
@@ -39,8 +20,9 @@ cr.define('extension_toolbar_tests', function() {
     var toolbar;
 
     setup(function() {
-      toolbar = document.querySelector('extensions-manager').toolbar;
-      mockDelegate = new MockDelegate();
+      toolbar = document.querySelector('extensions-manager').$$(
+          'extensions-toolbar');
+      mockDelegate = new extensions.TestService();
       toolbar.set('delegate', mockDelegate);
     });
 
@@ -49,6 +31,7 @@ cr.define('extension_toolbar_tests', function() {
 
       var testVisible = extension_test_util.testVisible.bind(null, toolbar);
       testVisible('#dev-mode', true);
+      assertEquals(toolbar.$$('#dev-mode').disabled, false);
       testVisible('#load-unpacked', false);
       testVisible('#pack-extensions', false);
       testVisible('#update-now', false);
@@ -57,32 +40,67 @@ cr.define('extension_toolbar_tests', function() {
       Polymer.dom.flush();
 
       testVisible('#dev-mode', true);
+      assertEquals(toolbar.$$('#dev-mode').disabled, false);
       testVisible('#load-unpacked', true);
       testVisible('#pack-extensions', true);
       testVisible('#update-now', true);
+
+      toolbar.set('canLoadUnpacked', false);
+      Polymer.dom.flush();
+
+      testVisible('#dev-mode', true);
+      testVisible('#load-unpacked', false);
+      testVisible('#pack-extensions', true);
+      testVisible('#update-now', true);
+    });
+
+    test(assert(TestNames.DevModeToggle), function() {
+      const toggle = toolbar.$$('#dev-mode');
+      assertFalse(toggle.disabled);
+
+      // Test that the dev-mode toggle is disabled when a policy exists.
+      toolbar.set('devModeControlledByPolicy', true);
+      Polymer.dom.flush();
+      assertTrue(toggle.disabled);
+
+      toolbar.set('devModeControlledByPolicy', false);
+      Polymer.dom.flush();
+      assertFalse(toggle.disabled);
+
+      // Test that the dev-mode toggle is disabled when the user is supervised.
+      toolbar.set('isSupervised', true);
+      Polymer.dom.flush();
+      assertTrue(toggle.disabled);
     });
 
     test(assert(TestNames.ClickHandlers), function() {
       toolbar.set('inDevMode', true);
       Polymer.dom.flush();
 
-      mockDelegate.testClickingCalls(
-          toolbar.$['dev-mode'], 'setProfileInDevMode', [false]);
-      mockDelegate.testClickingCalls(
-          toolbar.$['dev-mode'], 'setProfileInDevMode', [true]);
-      mockDelegate.testClickingCalls(
-          toolbar.$$('#load-unpacked'), 'loadUnpacked', []);
-      mockDelegate.testClickingCalls(
-          toolbar.$$('#update-now'), 'updateAllExtensions', []);
-
-      var listener = new extension_test_util.ListenerMock();
-      listener.addListener(toolbar, 'pack-tap');
-      MockInteractions.tap(toolbar.$$('#pack-extensions'));
-      listener.verify();
+      MockInteractions.tap(toolbar.$['dev-mode']);
+      return mockDelegate.whenCalled('setProfileInDevMode').then(function(arg) {
+        assertFalse(arg);
+        mockDelegate.reset();
+        MockInteractions.tap(toolbar.$['dev-mode']);
+        return mockDelegate.whenCalled('setProfileInDevMode');
+      }).then(function(arg) {
+        assertTrue(arg);
+        MockInteractions.tap(toolbar.$$('#load-unpacked'));
+        return mockDelegate.whenCalled('loadUnpacked');
+      }).then(function() {
+        MockInteractions.tap(toolbar.$$('#update-now'));
+        return mockDelegate.whenCalled('updateAllExtensions');
+      }).then(function() {
+        var listener = new extension_test_util.ListenerMock();
+        listener.addListener(toolbar, 'pack-tap');
+        MockInteractions.tap(toolbar.$$('#pack-extensions'));
+        listener.verify();
+      });
     });
   });
 
   return {
+    suiteName: suiteName,
     TestNames: TestNames,
   };
 });

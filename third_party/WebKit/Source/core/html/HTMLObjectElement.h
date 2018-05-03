@@ -63,6 +63,8 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
   bool IsEnumeratable() const override { return true; }
   bool IsInteractiveContent() const override;
 
+  bool ChildrenCanHaveStyle() const { return WillUseFallbackContentAtLayout(); }
+
   // Implementations of constraint validation API.
   // Note that the object elements are always barred from constraint validation.
   String validationMessage() const override { return String(); }
@@ -85,9 +87,10 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;

@@ -4,6 +4,7 @@
 
 #include "core/paint/ObjectPaintInvalidator.h"
 
+#include "core/editing/FrameSelection.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutTestHelper.h"
 #include "core/paint/PaintLayer.h"
@@ -21,27 +22,28 @@ TEST_F(ObjectPaintInvalidatorTest,
     return;
 
   EnableCompositing();
-  SetBodyInnerHTML(
-      "<style>div { width: 10px; height: 10px; background-color: green; "
-      "}</style>"
-      "<div id='container' style='position: fixed'>"
-      "  <div id='normal-child'></div>"
-      "  <div id='stacked-child' style='position: relative'></div>"
-      "  <div id='composited-stacking-context' style='will-change: transform'>"
-      "    <div id='normal-child-of-composited-stacking-context'></div>"
-      "    <div id='stacked-child-of-composited-stacking-context' "
-      "style='position: relative'></div>"
-      "  </div>"
-      "  <div id='composited-non-stacking-context' style='backface-visibility: "
-      "hidden'>"
-      "    <div id='normal-child-of-composited-non-stacking-context'></div>"
-      "    <div id='stacked-child-of-composited-non-stacking-context' "
-      "style='position: relative'></div>"
-      "    <div "
-      "id='non-stacked-layered-child-of-composited-non-stacking-context' "
-      "style='overflow: scroll'></div>"
-      "  </div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <style>div { width: 10px; height: 10px; background-color: green;
+    }</style>
+    <div id='container' style='position: fixed'>
+      <div id='normal-child'></div>
+      <div id='stacked-child' style='position: relative'></div>
+      <div id='composited-stacking-context' style='will-change: transform'>
+        <div id='normal-child-of-composited-stacking-context'></div>
+        <div id='stacked-child-of-composited-stacking-context'
+    style='position: relative'></div>
+      </div>
+      <div id='composited-non-stacking-context' style='backface-visibility:
+    hidden'>
+        <div id='normal-child-of-composited-non-stacking-context'></div>
+        <div id='stacked-child-of-composited-non-stacking-context'
+    style='position: relative'></div>
+        <div
+    id='non-stacked-layered-child-of-composited-non-stacking-context'
+    style='overflow: scroll'></div>
+      </div>
+    </div>
+  )HTML");
 
   GetDocument().View()->SetTracksPaintInvalidations(true);
   ObjectPaintInvalidator(*GetLayoutObjectByElementId("container"))
@@ -71,15 +73,16 @@ TEST_F(ObjectPaintInvalidatorTest, TraverseFloatUnderCompositedInline) {
     return;
 
   EnableCompositing();
-  SetBodyInnerHTML(
-      "<div id='compositedContainer' style='position: relative;"
-      "    will-change: transform'>"
-      "  <div id='containingBlock' style='position: relative'>"
-      "    <span id='span' style='position: relative; will-change: transform'>"
-      "      <div id='target' style='float: right'></div>"
-      "    </span>"
-      "  </div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <div id='compositedContainer' style='position: relative;
+        will-change: transform'>
+      <div id='containingBlock' style='position: relative'>
+        <span id='span' style='position: relative; will-change: transform'>
+          <div id='target' style='float: right'></div>
+        </span>
+      </div>
+    </div>
+  )HTML");
 
   auto* target = GetLayoutObjectByElementId("target");
   auto* containing_block = GetLayoutObjectByElementId("containingBlock");
@@ -157,18 +160,19 @@ TEST_F(ObjectPaintInvalidatorTest,
     return;
 
   EnableCompositing();
-  SetBodyInnerHTML(
-      "<div id='compositedContainer' style='position: relative;"
-      "    will-change: transform'>"
-      "  <div id='containingBlock' style='position: relative; z-index: 0'>"
-      "    <span id='span' style='position: relative; will-change: transform'>"
-      "      <span id='innerSpan'"
-      "          style='position: relative; will-change: transform'>"
-      "        <div id='target' style='float: right'></div>"
-      "      </span>"
-      "    </span>"
-      "  </div>"
-      "</div>");
+  SetBodyInnerHTML(R"HTML(
+    <div id='compositedContainer' style='position: relative;
+        will-change: transform'>
+      <div id='containingBlock' style='position: relative; z-index: 0'>
+        <span id='span' style='position: relative; will-change: transform'>
+          <span id='innerSpan'
+              style='position: relative; will-change: transform'>
+            <div id='target' style='float: right'></div>
+          </span>
+        </span>
+      </div>
+    </div>
+  )HTML");
 
   auto* target = GetLayoutObjectByElementId("target");
   auto* containing_block = GetLayoutObjectByElementId("containingBlock");
@@ -224,10 +228,11 @@ TEST_F(ObjectPaintInvalidatorTest, TraverseStackedFloatUnderCompositedInline) {
     return;
 
   EnableCompositing();
-  SetBodyInnerHTML(
-      "<span id='span' style='position: relative; will-change: transform'>"
-      "  <div id='target' style='position: relative; float: right'></div>"
-      "</span>");
+  SetBodyInnerHTML(R"HTML(
+    <span id='span' style='position: relative; will-change: transform'>
+      <div id='target' style='position: relative; float: right'></div>
+    </span>
+  )HTML");
 
   auto* target = GetLayoutObjectByElementId("target");
   auto* target_layer = ToLayoutBoxModelObject(target)->Layer();
@@ -301,6 +306,48 @@ TEST_F(ObjectPaintInvalidatorTest, InvalidatePaintRectangle) {
   EXPECT_EQ(PaintInvalidationReason::kRectangle,
             raster_invalidations[0].reason);
 
+  GetDocument().View()->SetTracksPaintInvalidations(false);
+}
+
+TEST_F(ObjectPaintInvalidatorTest, Selection) {
+  EnableCompositing();
+  SetBodyInnerHTML("<img id='target' style='width: 100px; height: 100px'>");
+  auto* target = GetLayoutObjectByElementId("target");
+  EXPECT_EQ(LayoutRect(), target->SelectionVisualRect());
+
+  // Add selection.
+  GetDocument().View()->SetTracksPaintInvalidations(true);
+  GetDocument().GetFrame()->Selection().SelectAll();
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  const auto* graphics_layer = GetLayoutView().Layer()->GraphicsLayerBacking();
+  const auto* invalidations =
+      &graphics_layer->GetRasterInvalidationTracking()->Invalidations();
+  ASSERT_EQ(1u, invalidations->size());
+  EXPECT_EQ(IntRect(8, 8, 100, 100), (*invalidations)[0].rect);
+  EXPECT_EQ(PaintInvalidationReason::kSelection, (*invalidations)[0].reason);
+  EXPECT_EQ(LayoutRect(8, 8, 100, 100), target->SelectionVisualRect());
+  GetDocument().View()->SetTracksPaintInvalidations(false);
+
+  // Simulate a change without full invalidation or selection change.
+  GetDocument().View()->SetTracksPaintInvalidations(true);
+  target->SetMayNeedPaintInvalidation();
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  EXPECT_TRUE(graphics_layer->GetRasterInvalidationTracking()
+                  ->Invalidations()
+                  .IsEmpty());
+  EXPECT_EQ(LayoutRect(8, 8, 100, 100), target->SelectionVisualRect());
+  GetDocument().View()->SetTracksPaintInvalidations(false);
+
+  // Remove selection.
+  GetDocument().View()->SetTracksPaintInvalidations(true);
+  GetDocument().GetFrame()->Selection().Clear();
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  invalidations =
+      &graphics_layer->GetRasterInvalidationTracking()->Invalidations();
+  ASSERT_EQ(1u, invalidations->size());
+  EXPECT_EQ(IntRect(8, 8, 100, 100), (*invalidations)[0].rect);
+  EXPECT_EQ(PaintInvalidationReason::kSelection, (*invalidations)[0].reason);
+  EXPECT_EQ(LayoutRect(), target->SelectionVisualRect());
   GetDocument().View()->SetTracksPaintInvalidations(false);
 }
 

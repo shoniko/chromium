@@ -85,18 +85,18 @@ class InheritedScaleChecker
 
 class CSSScaleNonInterpolableValue : public NonInterpolableValue {
  public:
-  ~CSSScaleNonInterpolableValue() final {}
+  ~CSSScaleNonInterpolableValue() final = default;
 
   static scoped_refptr<CSSScaleNonInterpolableValue> Create(
       const Scale& scale) {
-    return WTF::AdoptRef(
+    return base::AdoptRef(
         new CSSScaleNonInterpolableValue(scale, scale, false, false));
   }
 
   static scoped_refptr<CSSScaleNonInterpolableValue> Merge(
       const CSSScaleNonInterpolableValue& start,
       const CSSScaleNonInterpolableValue& end) {
-    return WTF::AdoptRef(new CSSScaleNonInterpolableValue(
+    return base::AdoptRef(new CSSScaleNonInterpolableValue(
         start.Start(), end.end(), start.IsStartAdditive(),
         end.IsEndAdditive()));
   }

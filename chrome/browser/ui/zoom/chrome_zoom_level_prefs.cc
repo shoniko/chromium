@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/feature_list.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -35,7 +34,7 @@ namespace {
 
 std::string GetHash(const base::FilePath& relative_path) {
   size_t int_key = BASE_HASH_NAMESPACE::hash<base::FilePath>()(relative_path);
-  return base::SizeTToString(int_key);
+  return base::NumberToString(int_key);
 }
 
 std::string GetPartitionKey(const base::FilePath& relative_path) {
@@ -178,7 +177,7 @@ void ChromeZoomLevelPrefs::OnZoomLevelChanged(
   base::DictionaryValue* host_zoom_dictionary_weak = nullptr;
   if (!host_zoom_dictionaries->GetDictionary(partition_key_,
                                              &host_zoom_dictionary_weak)) {
-    auto host_zoom_dictionary = base::MakeUnique<base::DictionaryValue>();
+    auto host_zoom_dictionary = std::make_unique<base::DictionaryValue>();
     host_zoom_dictionary_weak = host_zoom_dictionary.get();
     host_zoom_dictionaries->Set(partition_key_,
                                 std::move(host_zoom_dictionary));
@@ -209,7 +208,7 @@ void ChromeZoomLevelPrefs::MigrateOldZoomPreferences(
   // ones (above), so that the precedence is: new settings, libc++
   // settings, libstdc++ settings.
   if (GetLibstdcppHashBytesFunction()) {
-    MigrateOldZoomPreferencesForKeys(base::SizeTToString(LibstdcppHashString(
+    MigrateOldZoomPreferencesForKeys(base::NumberToString(LibstdcppHashString(
                                          partition_relative_path.value())),
                                      GetPartitionKey(partition_relative_path));
   }
@@ -250,7 +249,7 @@ void ChromeZoomLevelPrefs::MigrateOldZoomPreferencesForKeys(
     base::DictionaryValue* new_host_zoom_dictionary = nullptr;
     if (!host_zoom_dictionaries->GetDictionary(new_key,
                                                &new_host_zoom_dictionary)) {
-      auto host_zoom_dictionary = base::MakeUnique<base::DictionaryValue>();
+      auto host_zoom_dictionary = std::make_unique<base::DictionaryValue>();
       new_host_zoom_dictionary = host_zoom_dictionary.get();
       host_zoom_dictionaries->Set(new_key, std::move(host_zoom_dictionary));
     }

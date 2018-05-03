@@ -5,7 +5,6 @@
 #include "ui/views/mus/desktop_window_tree_host_mus.h"
 
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/aura/client/aura_constants.h"
@@ -254,7 +253,7 @@ void DesktopWindowTreeHostMus::SendClientAreaToServer() {
 
 void DesktopWindowTreeHostMus::SendHitTestMaskToServer() {
   if (!native_widget_delegate_->HasHitTestMask()) {
-    SetHitTestMask(base::nullopt);
+    aura::WindowPortMus::Get(window())->SetHitTestMask(base::nullopt);
     return;
   }
 
@@ -263,7 +262,7 @@ void DesktopWindowTreeHostMus::SendHitTestMaskToServer() {
   // TODO(jamescook): Use the full path for the mask.
   gfx::Rect mask_rect =
       gfx::ToEnclosingRect(gfx::SkRectToRectF(mask_path.getBounds()));
-  SetHitTestMask(mask_rect);
+  aura::WindowPortMus::Get(window())->SetHitTestMask(mask_rect);
 }
 
 bool DesktopWindowTreeHostMus::IsFocusClientInstalledOnFocusSynchronizer()
@@ -662,9 +661,7 @@ Widget::MoveLoopResult DesktopWindowTreeHostMus::RunMoveLoop(
   static_cast<internal::NativeWidgetPrivate*>(
       desktop_native_widget_aura_)->ReleaseCapture();
 
-  base::MessageLoopForUI* loop = base::MessageLoopForUI::current();
-  base::MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
-  base::RunLoop run_loop;
+  base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
 
   ui::mojom::MoveLoopSource mus_source =
       source == Widget::MOVE_LOOP_SOURCE_MOUSE

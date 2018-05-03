@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -45,7 +45,7 @@ class CastMediaBlockerBrowserTest : public CastBrowserTest {
     web_contents_ = NavigateToURL(gurl);
     WaitForLoadStop(web_contents_);
 
-    blocker_ = base::MakeUnique<CastMediaBlocker>(
+    blocker_ = std::make_unique<CastMediaBlocker>(
         content::MediaSession::Get(web_contents_));
   }
 
@@ -54,12 +54,10 @@ class CastMediaBlockerBrowserTest : public CastBrowserTest {
 
     // Changing states is not instant, but should be timely (< 0.5s).
     for (size_t i = 0; i < 5; i++) {
-      base::RunLoop run_loop;
+      base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
       base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE, run_loop.QuitClosure(),
           base::TimeDelta::FromMilliseconds(50));
-      base::MessageLoop::ScopedNestableTaskAllower allow_nested(
-          base::MessageLoop::current());
       run_loop.Run();
 
       const std::string command =

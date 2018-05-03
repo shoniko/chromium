@@ -4,7 +4,8 @@
 
 #include "ios/web/public/test/test_web_thread_bundle.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
@@ -36,8 +37,6 @@ TestWebThreadBundle::~TestWebThreadBundle() {
   base::RunLoop().RunUntilIdle();
   io_thread_.reset();
   base::RunLoop().RunUntilIdle();
-  db_thread_.reset();
-  base::RunLoop().RunUntilIdle();
   // This is the point at which the cache pool is normally shut down. So flush
   // it again in case any shutdown tasks have been posted to the pool from the
   // threads above.
@@ -51,21 +50,13 @@ TestWebThreadBundle::~TestWebThreadBundle() {
 
 void TestWebThreadBundle::Init(int options) {
   scoped_task_environment_ =
-      base::MakeUnique<base::test::ScopedTaskEnvironment>(
+      std::make_unique<base::test::ScopedTaskEnvironment>(
           options & TestWebThreadBundle::IO_MAINLOOP
               ? base::test::ScopedTaskEnvironment::MainThreadType::IO
               : base::test::ScopedTaskEnvironment::MainThreadType::UI);
 
   ui_thread_.reset(
       new TestWebThread(WebThread::UI, base::MessageLoop::current()));
-
-  if (options & TestWebThreadBundle::REAL_DB_THREAD) {
-    db_thread_.reset(new TestWebThread(WebThread::DB));
-    db_thread_->Start();
-  } else {
-    db_thread_.reset(
-        new TestWebThread(WebThread::DB, base::MessageLoop::current()));
-  }
 
   if (options & TestWebThreadBundle::REAL_IO_THREAD) {
     io_thread_.reset(new TestWebThread(WebThread::IO));

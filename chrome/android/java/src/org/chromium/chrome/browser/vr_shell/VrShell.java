@@ -16,8 +16,8 @@ public interface VrShell {
     /**
      * Performs native VrShell initialization.
      */
-    void initializeNative(
-            Tab currentTab, boolean forWebVr, boolean webVrAutopresentationExpected, boolean inCct);
+    void initializeNative(Tab currentTab, boolean forWebVr, boolean webVrAutopresentationExpected,
+            boolean inCct, boolean browsingDisabled);
 
     /**
      * Pauses VrShell.
@@ -37,7 +37,8 @@ public interface VrShell {
     /**
      * Sets whether we're presenting WebVR content or not.
      */
-    // TODO: Refactor needed. See crbug.com/735169.
+    // TODO(bshe): Refactor needed. See https://crbug.com/735169.
+    // TODO(mthiesse, https://crbug.com/803236): Remove this showToast parameter.
     void setWebVrModeEnabled(boolean enabled, boolean showToast);
 
     /**
@@ -85,9 +86,4 @@ public interface VrShell {
      *  Triggers VrShell to navigate backward.
      */
     void navigateBack();
-
-    /**
-     * Should be called when the density changes. Updates UI in response to the new density.
-     */
-    void onDensityChanged(float oldDpi, float newDpi);
 }

@@ -31,6 +31,12 @@ public abstract class ChromeSwitches {
     /** Disable the First Run Experience. */
     public static final String DISABLE_FIRST_RUN_EXPERIENCE = "disable-fre";
 
+    /**
+     * Forces the First Run Experience (FRE) flow complete check to always return true.
+     */
+    public static final String FORCE_FIRST_RUN_FLOW_COMPLETE_FOR_TESTING =
+            "force-first-run-flow-complete";
+
     /** Force the crash dump to be uploaded regardless of preferences. */
     public static final String FORCE_CRASH_DUMP_UPLOAD = "force-dump-upload";
 
@@ -126,34 +132,6 @@ public abstract class ChromeSwitches {
     public static final String ENABLE_HUNG_RENDERER_INFOBAR = "enable-hung-renderer-infobar";
 
     /**
-     * Enables Web Notification custom layouts.
-     * Native switch - switches::kEnableWebNotificationCustomLayouts
-     */
-    public static final String ENABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS =
-            "enable-web-notification-custom-layouts";
-
-    /**
-     * Disables Web Notification custom layouts.
-     * Native switch - switches::kDisableWebNotificationCustomLayouts
-     */
-    public static final String DISABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS =
-            "disable-web-notification-custom-layouts";
-
-    /**
-     * Determines which of the Herb prototypes is being tested.
-     * See about:flags for descriptions.
-     */
-    public static final String HERB_FLAVOR_DISABLED_SWITCH =
-            "tab-management-experiment-type-disabled";
-    public static final String HERB_FLAVOR_ELDERBERRY_SWITCH =
-            "tab-management-experiment-type-elderberry";
-
-    public static final String HERB_FLAVOR_DEFAULT = "Default";
-    public static final String HERB_FLAVOR_CONTROL = "Control";
-    public static final String HERB_FLAVOR_DISABLED = "Disabled";
-    public static final String HERB_FLAVOR_ELDERBERRY = "Elderberry";
-
-    /**
      * Set the partner-defined homepage URL, for testing.
      */
     public static final String PARTNER_HOMEPAGE_FOR_TESTING = "partner-homepage-for-testing";
@@ -183,8 +161,27 @@ public abstract class ChromeSwitches {
     /** Switch for enabling "restricted area" swipe logic for Chrome Home. */
     public static final String CHROME_HOME_SWIPE_LOGIC_RESTRICT_AREA = "restrict-area";
 
-    /** Switch for enabling "button only" swipe logic for Chrome Home. */
-    public static final String CHROME_HOME_SWIPE_LOGIC_BUTTON_ONLY = "button-only";
+    /**
+     * Switch for enabling "velocity" swipe logic for Chrome Home. This means the flings will not
+     * open the sheet; the user must slide up the sheet relatively slowly.
+     */
+    public static final String CHROME_HOME_SWIPE_LOGIC_VELOCITY = "velocity";
+
+    /** Switch for enabling the Chrome Home Survey. */
+    public static final String CHROME_HOME_FORCE_ENABLE_SURVEY = "force-enable-chrome-home-survey";
+
+    /** Switch to enable incognito tabs to be seen in Android Recents. */
+    public static final String ENABLE_INCOGNITO_SNAPSHOTS_IN_ANDROID_RECENTS =
+            "enable-incognito-snapshots-in-android-recents";
+
+    /** Open all custom tabs in a new task. Used only for experimental purposes. */
+    public static final String OPEN_CUSTOM_TABS_IN_NEW_TASK = "open-custom-tabs-in-new-task";
+
+    /**
+     * Don't crash on undispatched VIEW intents sent to .Main.
+     * See ChromeTabbedActivity.maybeDispatchExplicitMainViewIntent() for more info.
+     */
+    public static final String DONT_CRASH_ON_VIEW_MAIN_INTENTS = "dont-crash-on-view-main-intents";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

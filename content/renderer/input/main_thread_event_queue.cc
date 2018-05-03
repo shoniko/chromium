@@ -16,7 +16,6 @@ namespace content {
 
 namespace {
 
-const size_t kTenSeconds = 10 * 1000 * 1000;
 constexpr base::TimeDelta kMaxRafDelay =
     base::TimeDelta::FromMilliseconds(5 * 1000);
 
@@ -100,23 +99,9 @@ class QueuedWebInputEvent : public ScopedWebInputEventWithLatencyInfo,
   void Dispatch(MainThreadEventQueue* queue) override {
     // Report the coalesced count only for continuous events; otherwise
     // the zero value would be dominated by non-continuous events.
-    base::TimeTicks now = base::TimeTicks::Now();
     if (IsContinuousEvent()) {
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Event.MainThreadEventQueue.Continuous.QueueingTime",
-          (now - creationTimestamp()).InMicroseconds(), 1, kTenSeconds, 50);
-
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Event.MainThreadEventQueue.Continuous.FreshnessTime",
-          (now - lastCoalescedTimestamp()).InMicroseconds(), 1, kTenSeconds,
-          50);
-
       UMA_HISTOGRAM_COUNTS_1000("Event.MainThreadEventQueue.CoalescedCount",
                                 coalescedCount());
-    } else {
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Event.MainThreadEventQueue.NonContinuous.QueueingTime",
-          (now - creationTimestamp()).InMicroseconds(), 1, kTenSeconds, 50);
     }
 
     HandledEventCallback callback =
@@ -238,10 +223,8 @@ MainThreadEventQueue::MainThreadEventQueue(
       enable_non_blocking_due_to_main_thread_responsiveness_flag_(
           base::FeatureList::IsEnabled(
               features::kMainThreadBusyScrollIntervention)),
-      handle_raf_aligned_mouse_input_(
-          allow_raf_aligned_input &&
-          base::FeatureList::IsEnabled(features::kRafAlignedMouseInputEvents)),
       needs_low_latency_(false),
+      allow_raf_aligned_input_(allow_raf_aligned_input),
       main_task_runner_(main_task_runner),
       renderer_scheduler_(renderer_scheduler),
       use_raf_fallback_timer_(true) {
@@ -523,9 +506,9 @@ bool MainThreadEventQueue::IsRafAlignedEvent(
   switch (event->event().GetType()) {
     case blink::WebInputEvent::kMouseMove:
     case blink::WebInputEvent::kMouseWheel:
-      return handle_raf_aligned_mouse_input_ && !needs_low_latency_;
     case blink::WebInputEvent::kTouchMove:
-      return !needs_low_latency_;
+      return allow_raf_aligned_input_ && !needs_low_latency_ &&
+             !needs_low_latency_until_pointer_up_;
     default:
       return false;
   }
@@ -537,6 +520,21 @@ void MainThreadEventQueue::HandleEventOnMainThread(
     HandledEventCallback handled_callback) {
   if (client_)
     client_->HandleInputEvent(event, latency, std::move(handled_callback));
+
+  if (needs_low_latency_until_pointer_up_) {
+    // Reset the needs low latency until pointer up mode if necessary.
+    switch (event.Event().GetType()) {
+      case blink::WebInputEvent::kMouseUp:
+      case blink::WebInputEvent::kTouchCancel:
+      case blink::WebInputEvent::kTouchEnd:
+      case blink::WebInputEvent::kPointerCancel:
+      case blink::WebInputEvent::kPointerUp:
+        needs_low_latency_until_pointer_up_ = false;
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 void MainThreadEventQueue::SetNeedsMainFrame() {
@@ -563,6 +561,10 @@ void MainThreadEventQueue::ClearClient() {
 
 void MainThreadEventQueue::SetNeedsLowLatency(bool low_latency) {
   needs_low_latency_ = low_latency;
+}
+
+void MainThreadEventQueue::RequestUnbufferedInputEvents() {
+  needs_low_latency_until_pointer_up_ = true;
 }
 
 }  // namespace content

@@ -58,12 +58,44 @@ class LoginPasswordViewTest : public LoginTestBase {
 
 }  // namespace
 
+// Verifies that the submit button updates its UI state.
+TEST_F(LoginPasswordViewTest, SubmitButtonUpdatesUiState) {
+  LoginPasswordView::TestApi test_api(view_);
+  ui::test::EventGenerator& generator = GetEventGenerator();
+
+  // The submit button starts with the disabled state.
+  EXPECT_TRUE(is_password_field_empty_);
+  EXPECT_FALSE(test_api.submit_button()->enabled());
+  // Enter 'a'. The submit button is enabled.
+  generator.PressKey(ui::KeyboardCode::VKEY_A, 0);
+  EXPECT_FALSE(is_password_field_empty_);
+  EXPECT_TRUE(test_api.submit_button()->enabled());
+  // Enter 'b'. The submit button stays enabled.
+  generator.PressKey(ui::KeyboardCode::VKEY_B, 0);
+  EXPECT_FALSE(is_password_field_empty_);
+  EXPECT_TRUE(test_api.submit_button()->enabled());
+
+  // Clear password. The submit button is disabled.
+  view_->Clear();
+  EXPECT_TRUE(is_password_field_empty_);
+  EXPECT_FALSE(test_api.submit_button()->enabled());
+
+  // Enter 'a'. The submit button is enabled.
+  generator.PressKey(ui::KeyboardCode::VKEY_A, 0);
+  EXPECT_FALSE(is_password_field_empty_);
+  EXPECT_TRUE(test_api.submit_button()->enabled());
+  // Set the text field to be read-only. The submit button is disabled.
+  view_->SetReadOnly(true);
+  EXPECT_FALSE(is_password_field_empty_);
+  EXPECT_FALSE(test_api.submit_button()->enabled());
+  // Set the text field to be not read-only. The submit button is enabled.
+  view_->SetReadOnly(false);
+  EXPECT_FALSE(is_password_field_empty_);
+  EXPECT_TRUE(test_api.submit_button()->enabled());
+}
+
 // Verifies that password submit works with 'Enter'.
 TEST_F(LoginPasswordViewTest, PasswordSubmitIncludesPasswordText) {
-  // TODO: Renable in mash once crbug.com/725257 is fixed.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   LoginPasswordView::TestApi test_api(view_);
 
   ui::test::EventGenerator& generator = GetEventGenerator();
@@ -79,10 +111,6 @@ TEST_F(LoginPasswordViewTest, PasswordSubmitIncludesPasswordText) {
 
 // Verifies that password submit works when clicking the submit button.
 TEST_F(LoginPasswordViewTest, PasswordSubmitViaButton) {
-  // TODO: Renable in mash once crbug.com/725257 is fixed.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   LoginPasswordView::TestApi test_api(view_);
 
   ui::test::EventGenerator& generator = GetEventGenerator();
@@ -98,12 +126,8 @@ TEST_F(LoginPasswordViewTest, PasswordSubmitViaButton) {
   EXPECT_EQ(base::ASCIIToUTF16("abc1"), *password_);
 }
 
-// Verifies that text is cleared after submitting a password.
+// Verifies that text is not cleared after submitting a password.
 TEST_F(LoginPasswordViewTest, PasswordSubmitClearsPassword) {
-  // TODO: Renable in mash once crbug.com/725257 is fixed.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   LoginPasswordView::TestApi test_api(view_);
   ui::test::EventGenerator& generator = GetEventGenerator();
 
@@ -112,17 +136,20 @@ TEST_F(LoginPasswordViewTest, PasswordSubmitClearsPassword) {
   generator.PressKey(ui::KeyboardCode::VKEY_A, 0);
   EXPECT_FALSE(is_password_field_empty_);
   generator.PressKey(ui::KeyboardCode::VKEY_RETURN, 0);
-  EXPECT_TRUE(is_password_field_empty_);
+  EXPECT_FALSE(is_password_field_empty_);
   EXPECT_TRUE(password_.has_value());
   EXPECT_EQ(base::ASCIIToUTF16("a"), *password_);
 
+  // Clear password.
   password_.reset();
+  view_->Clear();
+  EXPECT_TRUE(is_password_field_empty_);
 
   // Submit 'b' password.
   generator.PressKey(ui::KeyboardCode::VKEY_B, 0);
   EXPECT_FALSE(is_password_field_empty_);
   generator.PressKey(ui::KeyboardCode::VKEY_RETURN, 0);
-  EXPECT_TRUE(is_password_field_empty_);
+  EXPECT_FALSE(is_password_field_empty_);
   EXPECT_TRUE(password_.has_value());
   // The submitted password is 'b' instead of "ab".
   EXPECT_EQ(base::ASCIIToUTF16("b"), *password_);

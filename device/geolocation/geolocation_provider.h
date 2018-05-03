@@ -9,11 +9,10 @@
 
 #include "base/callback_list.h"
 #include "device/geolocation/geolocation_export.h"
+#include "device/geolocation/public/interfaces/geoposition.mojom.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace device {
-class GeolocationDelegate;
-struct Geoposition;
 
 // This is the main API to the geolocation subsystem. The application will hold
 // a single instance of this class and can register multiple clients to be
@@ -24,17 +23,16 @@ struct Geoposition;
 // must communicate with it on the same thread.
 // The underlying location arbitrator will only be enabled whilst there is at
 // least one registered observer or pending callback (and only after
-// UserDidOptIntoLocationServices). The arbitrator and the location providers it
-// uses run on a separate Geolocation thread.
+// mojom::UserDidOptIntoLocationServices() which is implemented by
+// GeolocationProviderImpl). The arbitrator and the location providers it uses
+// run on a separate Geolocation thread.
+// TODO(ke.he@intel.com): With the proceeding of the servicification of
+// geolocation, the geolocation core will be moved into //services/device and as
+// a internal part of Device Service. This geolocation_provider.h will also be
+// removed.
 class GeolocationProvider {
  public:
   DEVICE_GEOLOCATION_EXPORT static GeolocationProvider* GetInstance();
-
-  // Optional: provide a Delegate to override typical services.
-  // Call before using Init() on the singleton GetInstance(), and call no more
-  // than once.
-  DEVICE_GEOLOCATION_EXPORT static void SetGeolocationDelegate(
-      GeolocationDelegate* delegate);
 
   // Callback type for a function that asynchronously produces a
   // URLRequestContextGetter.
@@ -51,8 +49,9 @@ class GeolocationProvider {
   // Call before using Init() on the singleton GetInstance().
   DEVICE_GEOLOCATION_EXPORT static void SetApiKey(const std::string& api_key);
 
-  typedef base::Callback<void(const Geoposition&)> LocationUpdateCallback;
-  typedef base::CallbackList<void(const Geoposition&)>::Subscription
+  typedef base::Callback<void(const mojom::Geoposition&)>
+      LocationUpdateCallback;
+  typedef base::CallbackList<void(const mojom::Geoposition&)>::Subscription
       Subscription;
 
   // |enable_high_accuracy| is used as a 'hint' for the provider preferences for
@@ -61,12 +60,6 @@ class GeolocationProvider {
   virtual std::unique_ptr<Subscription> AddLocationUpdateCallback(
       const LocationUpdateCallback& callback,
       bool enable_high_accuracy) = 0;
-
-  // Calling this method indicates the user has opted into using location
-  // services, including sending network requests to [Google servers to] resolve
-  // the user's location. Use this method carefully, in line with the rules in
-  // go/chrome-privacy-doc.
-  virtual void UserDidOptIntoLocationServices() = 0;
 
   virtual bool HighAccuracyLocationInUse() = 0;
 
@@ -80,7 +73,8 @@ class GeolocationProvider {
   // singleton geolocation stack in the background and manipulates it to report
   // a fake location. Neither step can be undone, breaking unit test isolation
   // (crbug.com/125931).
-  virtual void OverrideLocationForTesting(const Geoposition& position) = 0;
+  virtual void OverrideLocationForTesting(
+      const mojom::Geoposition& position) = 0;
 
  protected:
   virtual ~GeolocationProvider() {}

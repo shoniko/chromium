@@ -14,7 +14,6 @@
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
@@ -135,7 +134,7 @@ class ObfuscatedFileEnumerator final
     recurse_queue_.push(record);
   }
 
-  ~ObfuscatedFileEnumerator() override {}
+  ~ObfuscatedFileEnumerator() override = default;
 
   base::FilePath Next() override {
     FileInfo file_info;
@@ -220,7 +219,7 @@ class ObfuscatedOriginEnumerator
       origin_database->ListAllOrigins(&origins_);
   }
 
-  ~ObfuscatedOriginEnumerator() override {}
+  ~ObfuscatedOriginEnumerator() override = default;
 
   // Returns the next origin.  Returns empty if there are no more origins.
   GURL Next() override {
@@ -973,7 +972,7 @@ void ObfuscatedFileUtil::MaybePrepopulateDatabase(
     if (error != base::File::FILE_OK)
       continue;
     std::unique_ptr<SandboxDirectoryDatabase> db =
-        base::MakeUnique<SandboxDirectoryDatabase>(path, env_override_);
+        std::make_unique<SandboxDirectoryDatabase>(path, env_override_);
     if (db->Init(SandboxDirectoryDatabase::FAIL_ON_CORRUPTION)) {
       directories_[GetDirectoryDatabaseKey(origin, type_string)] =
           std::move(db);
@@ -1187,7 +1186,7 @@ SandboxDirectoryDatabase* ObfuscatedFileUtil::GetDirectoryDatabase(
   }
   MarkUsed();
   directories_[key] =
-      base::MakeUnique<SandboxDirectoryDatabase>(path, env_override_);
+      std::make_unique<SandboxDirectoryDatabase>(path, env_override_);
   return directories_[key].get();
 }
 

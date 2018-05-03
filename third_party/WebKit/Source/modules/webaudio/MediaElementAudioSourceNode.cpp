@@ -26,7 +26,6 @@
 #include "modules/webaudio/MediaElementAudioSourceNode.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/html/media/HTMLMediaElement.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/webaudio/AudioNodeOutput.h"
@@ -36,7 +35,7 @@
 #include "platform/audio/AudioUtilities.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/Locker.h"
-#include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -58,13 +57,19 @@ MediaElementAudioSourceHandler::MediaElementAudioSourceHandler(
   // .src is set to.
   AddOutput(2);
 
+  if (Context()->GetExecutionContext()) {
+    task_runner_ = Context()->GetExecutionContext()->GetTaskRunner(
+        TaskType::kMediaElementEvent);
+  }
+
   Initialize();
 }
 
 scoped_refptr<MediaElementAudioSourceHandler>
 MediaElementAudioSourceHandler::Create(AudioNode& node,
                                        HTMLMediaElement& media_element) {
-  return WTF::AdoptRef(new MediaElementAudioSourceHandler(node, media_element));
+  return base::AdoptRef(
+      new MediaElementAudioSourceHandler(node, media_element));
 }
 
 MediaElementAudioSourceHandler::~MediaElementAudioSourceHandler() {
@@ -106,7 +111,7 @@ void MediaElementAudioSourceHandler::SetFormat(size_t number_of_channels,
 
     if (source_sample_rate != Context()->sampleRate()) {
       double scale_factor = source_sample_rate / Context()->sampleRate();
-      multi_channel_resampler_ = WTF::MakeUnique<MultiChannelResampler>(
+      multi_channel_resampler_ = std::make_unique<MultiChannelResampler>(
           scale_factor, number_of_channels);
     } else {
       // Bypass resampling.
@@ -198,14 +203,10 @@ void MediaElementAudioSourceHandler::Process(size_t number_of_frames) {
         // Print a CORS message, but just once for each change in the current
         // media element source, and only if we have a document to print to.
         maybe_print_cors_message_ = false;
-        if (Context()->GetExecutionContext()) {
-          TaskRunnerHelper::Get(TaskType::kMediaElementEvent,
-                                Context()->GetExecutionContext())
-              ->PostTask(BLINK_FROM_HERE,
-                         CrossThreadBind(
-                             &MediaElementAudioSourceHandler::PrintCORSMessage,
-                             WrapRefCounted(this), current_src_string_));
-        }
+        PostCrossThreadTask(
+            *task_runner_, FROM_HERE,
+            CrossThreadBind(&MediaElementAudioSourceHandler::PrintCORSMessage,
+                            WrapRefCounted(this), current_src_string_));
       }
       output_bus->Zero();
     }

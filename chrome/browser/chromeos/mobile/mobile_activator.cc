@@ -134,7 +134,7 @@ bool CellularConfigDocument::LoadFromFile(const base::FilePath& config_path) {
   std::unique_ptr<base::Value> root =
       base::JSONReader::Read(config, base::JSON_ALLOW_TRAILING_COMMAS);
   DCHECK(root.get() != NULL);
-  if (!root.get() || root->GetType() != base::Value::Type::DICTIONARY) {
+  if (!root.get() || !root->is_dict()) {
     LOG(WARNING) << "Bad cellular config file";
     return false;
   }
@@ -560,10 +560,9 @@ void MobileActivator::HandleOTASPTimeout() {
 
 void MobileActivator::ConnectNetwork(const NetworkState* network) {
   NetworkHandler::Get()->network_connection_handler()->ConnectToNetwork(
-      network->path(),
-      base::Bind(&base::DoNothing),
-      network_handler::ErrorCallback(),
-      false /* check_error_state */);
+      network->path(), base::Bind(&base::DoNothing),
+      network_handler::ErrorCallback(), false /* check_error_state */,
+      ConnectCallbackMode::ON_STARTED);
 }
 
 void MobileActivator::ForceReconnect(const NetworkState* network,

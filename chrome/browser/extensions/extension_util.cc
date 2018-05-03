@@ -12,6 +12,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/banners/app_banner_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
@@ -24,11 +25,11 @@
 #include "chrome/common/extensions/sync_helper.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/site_instance.h"
+#include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
-#include "extensions/common/disable_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
 #include "extensions/common/manifest.h"
@@ -176,7 +177,7 @@ void SetWasInstalledByCustodian(const std::string& extension_id,
 
   prefs->UpdateExtensionPref(
       extension_id, kWasInstalledByCustodianPrefName,
-      installed_by_custodian ? base::MakeUnique<base::Value>(true) : nullptr);
+      installed_by_custodian ? std::make_unique<base::Value>(true) : nullptr);
   ExtensionService* service =
       ExtensionSystem::Get(context)->extension_service();
 
@@ -307,7 +308,7 @@ bool IsNewBookmarkAppsEnabled() {
 #if defined(OS_MACOSX)
   return base::FeatureList::IsEnabled(features::kBookmarkApps) ||
          base::FeatureList::IsEnabled(features::kAppBanners) ||
-         base::FeatureList::IsEnabled(features::kExperimentalAppBanners);
+         banners::AppBannerManager::IsExperimentalAppBannersEnabled();
 #else
   return true;
 #endif

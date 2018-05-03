@@ -26,8 +26,6 @@ namespace vr {
 
 // The browser-side host for a device::VRDisplayImpl. Controls access to VR
 // APIs like poses and presentation.
-// TODO(mthiesse, crbug.com/768923): Move focus code from VrShellDelegate to
-// here.
 class VRDisplayHost : public device::mojom::VRDisplayHost {
  public:
   VRDisplayHost(device::VRDevice* device,
@@ -38,6 +36,7 @@ class VRDisplayHost : public device::mojom::VRDisplayHost {
 
   void RequestPresent(device::mojom::VRSubmitFrameClientPtr client,
                       device::mojom::VRPresentationProviderRequest request,
+                      device::mojom::VRRequestPresentOptionsPtr options,
                       RequestPresentCallback callback) override;
   void ExitPresent() override;
   void SetListeningForActivate(bool listening);

@@ -8,8 +8,9 @@
 #include <stdint.h>
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/time/tick_clock.h"
 #include "platform/PlatformExport.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 
 namespace base {
 class HistogramBase;
@@ -64,17 +65,15 @@ class PLATFORM_EXPORT LinearHistogram : public CustomCountHistogram {
 
 class PLATFORM_EXPORT ScopedUsHistogramTimer {
  public:
-  ScopedUsHistogramTimer(CustomCountHistogram& counter)
-      : start_time_(WTF::MonotonicallyIncreasingTime()), counter_(counter) {}
+  explicit ScopedUsHistogramTimer(CustomCountHistogram& counter)
+      : start_time_(CurrentTimeTicks()), counter_(counter) {}
 
   ~ScopedUsHistogramTimer() {
-    counter_.Count((WTF::MonotonicallyIncreasingTime() - start_time_) *
-                   base::Time::kMicrosecondsPerSecond);
+    counter_.Count((CurrentTimeTicks() - start_time_).InMicroseconds());
   }
 
  private:
-  // In seconds.
-  double start_time_;
+  TimeTicks start_time_;
   CustomCountHistogram& counter_;
 };
 

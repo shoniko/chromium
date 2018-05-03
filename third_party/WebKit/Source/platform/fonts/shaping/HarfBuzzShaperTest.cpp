@@ -392,6 +392,9 @@ TEST_P(ShapeParameterTest, ZeroWidthSpace) {
   scoped_refptr<ShapeResult> result = ShapeWithParameter(&shaper);
   EXPECT_EQ(0u, result->StartIndexForResult());
   EXPECT_EQ(length, result->EndIndexForResult());
+#if DCHECK_IS_ON()
+  result->CheckConsistency();
+#endif
 }
 
 TEST_F(HarfBuzzShaperTest, NegativeLetterSpacing) {
@@ -572,6 +575,17 @@ TEST_P(IncludePartialGlyphs, OffsetForPositionMatchesPositionForOffsetMixed) {
                                           include_partial_glyphs));
 }
 
+TEST_F(HarfBuzzShaperTest, PositionForOffsetMissingGlyph) {
+  String string(u"\u0633\u0644\u0627\u0645");
+  HarfBuzzShaper shaper(string.Characters16(), string.length());
+  scoped_refptr<ShapeResult> result = shaper.Shape(&font, TextDirection::kRtl);
+  // Because the offset 1 and 2 should form a ligature, SubRange(2, 4) creates a
+  // ShapeResult that does not have its first glyph.
+  result = result->SubRange(2, 4);
+  result->PositionForOffset(0);
+  // Pass if |PositionForOffset| does not crash.
+}
+
 static struct ShapeResultCopyRangeTestData {
   const char16_t* string;
   TextDirection direction;
@@ -582,6 +596,12 @@ static struct ShapeResultCopyRangeTestData {
     // These strings creates 3 runs. Split it in the middle of 2nd run.
     {u"\u65E5Hello\u65E5\u65E5", TextDirection::kLtr, 3},
     {u"\u0648\u0644\u064A AB \u0628\u062A", TextDirection::kRtl, 5}};
+
+std::ostream& operator<<(std::ostream& ostream,
+                         const ShapeResultCopyRangeTestData& data) {
+  return ostream << String(data.string) << " @ " << data.break_point << ", "
+                 << data.direction;
+}
 
 class ShapeResultCopyRangeTest
     : public HarfBuzzShaperTest,
@@ -604,9 +624,14 @@ TEST_P(ShapeResultCopyRangeTest, Split) {
   scoped_refptr<ShapeResult> result1 = ShapeResult::Create(&font, 0, direction);
   result->CopyRange(0, test_data.break_point, result1.get());
   EXPECT_EQ(test_data.break_point, result1->NumCharacters());
+  EXPECT_EQ(0u, result1->StartIndexForResult());
+  EXPECT_EQ(test_data.break_point, result1->EndIndexForResult());
+
   scoped_refptr<ShapeResult> result2 = ShapeResult::Create(&font, 0, direction);
   result->CopyRange(test_data.break_point, string.length(), result2.get());
   EXPECT_EQ(string.length() - test_data.break_point, result2->NumCharacters());
+  EXPECT_EQ(test_data.break_point, result2->StartIndexForResult());
+  EXPECT_EQ(string.length(), result2->EndIndexForResult());
 
   // Combine them.
   scoped_refptr<ShapeResult> composite_result =
@@ -760,6 +785,19 @@ TEST_F(HarfBuzzShaperTest, ShapeResultCopyRangeSegmentGlyphBoundingBox) {
 
   // Check width and bounds are not too much different. ".1" is heuristic.
   EXPECT_NEAR(result->Width(), result->Bounds().Width(), result->Width() * .1);
+}
+
+TEST_F(HarfBuzzShaperTest, SubRange) {
+  String string(u"Hello world");
+  TextDirection direction = TextDirection::kRtl;
+  HarfBuzzShaper shaper(string.Characters16(), string.length());
+  scoped_refptr<ShapeResult> result = shaper.Shape(&font, direction);
+
+  scoped_refptr<ShapeResult> sub_range = result->SubRange(4, 7);
+  DCHECK_EQ(4u, sub_range->StartIndexForResult());
+  DCHECK_EQ(7u, sub_range->EndIndexForResult());
+  DCHECK_EQ(3u, sub_range->NumCharacters());
+  DCHECK_EQ(result->Direction(), sub_range->Direction());
 }
 
 TEST_F(HarfBuzzShaperTest, SafeToBreakLatinCommonLigatures) {
@@ -932,5 +970,34 @@ TEST_F(HarfBuzzShaperTest, DISABLED_SafeToBreakArabicCommonLigatures) {
 
 // TODO(layout-dev): Expand RTL test coverage and add tests for mixed
 // directionality strings.
+
+// Test when some characters are missing in |runs_|.
+// RTL on Mac may not have runs for all characters. crbug.com/774034
+TEST_P(ShapeParameterTest, SafeToBreakMissingRun) {
+  TextDirection direction = GetParam();
+  scoped_refptr<ShapeResult> result = ShapeResult::Create(&font, 7, direction);
+  result->InsertRunForTesting(2, 1, direction, {0});
+  result->InsertRunForTesting(3, 3, direction, {0, 1});
+  // The character index 7 is missing.
+  result->InsertRunForTesting(8, 2, direction, {0});
+
+  EXPECT_EQ(2u, result->NextSafeToBreakOffset(2));
+  EXPECT_EQ(3u, result->NextSafeToBreakOffset(3));
+  EXPECT_EQ(4u, result->NextSafeToBreakOffset(4));
+  EXPECT_EQ(6u, result->NextSafeToBreakOffset(5));
+  EXPECT_EQ(6u, result->NextSafeToBreakOffset(6));
+  EXPECT_EQ(8u, result->NextSafeToBreakOffset(7));
+  EXPECT_EQ(8u, result->NextSafeToBreakOffset(8));
+  EXPECT_EQ(10u, result->NextSafeToBreakOffset(9));
+
+  EXPECT_EQ(2u, result->PreviousSafeToBreakOffset(2));
+  EXPECT_EQ(3u, result->PreviousSafeToBreakOffset(3));
+  EXPECT_EQ(4u, result->PreviousSafeToBreakOffset(4));
+  EXPECT_EQ(4u, result->PreviousSafeToBreakOffset(5));
+  EXPECT_EQ(6u, result->PreviousSafeToBreakOffset(6));
+  EXPECT_EQ(6u, result->PreviousSafeToBreakOffset(7));
+  EXPECT_EQ(8u, result->PreviousSafeToBreakOffset(8));
+  EXPECT_EQ(8u, result->PreviousSafeToBreakOffset(9));
+}
 
 }  // namespace blink

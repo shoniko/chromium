@@ -48,41 +48,41 @@ PlayerUtils.registerDefaultEventListeners = function(player) {
 // Returns a promise that resolves to the player.
 PlayerUtils.registerEMEEventListeners = function(player) {
   player.video.addEventListener('encrypted', function(message) {
-
     function addMediaKeySessionListeners(mediaKeySession) {
       mediaKeySession.addEventListener('message', function(message) {
+        Utils.timeLog('MediaKeyMessageEvent: ' + message.messageType);
         player.video.receivedKeyMessage = true;
-        if (Utils.isRenewalMessage(message)) {
-          Utils.timeLog('MediaKeySession onMessage - renewal', message);
-          player.video.receivedRenewalMessage = true;
+        if (message.messageType == 'license-request' ||
+            message.messageType == 'license-renewal' ||
+            message.messageType == 'individualization-request') {
+          player.video.receivedMessageTypes.add(message.messageType);
         } else {
-          if (message.messageType != 'license-request') {
-            Utils.failTest('Unexpected message type "' + message.messageType +
-                               '" received.',
-                           EME_MESSAGE_UNEXPECTED_TYPE);
-          }
+          Utils.failTest('Unexpected message type:' + message.messageType,
+                         EME_MESSAGE_UNEXPECTED_TYPE);
         }
         player.onMessage(message);
       });
     }
 
     function getStatusForHdcpPolicy(mediaKeys, hdcpVersion, expectedResult) {
-      var policy = new MediaKeysPolicy({minHdcpVersion: hdcpVersion});
-
-      return mediaKeys.getStatusForPolicy(policy).then(function(keyStatus) {
-        if (keyStatus == expectedResult) {
-          return Promise.resolve();
-        } else {
-          return Promise.reject(
-              "keyStatus " + keyStatus + " does not match " + expectedResult);
-        }
-      }, function(error) {
-        if (expectedResult == "rejected") {
-          return Promise.resolve();
-        } else {
-          return Promise.reject("Promise rejected unexpectedly.");
-        }
-      });
+      return mediaKeys.getStatusForPolicy({minHdcpVersion: hdcpVersion})
+          .then(
+              keyStatus => {
+                if (keyStatus == expectedResult) {
+                  return Promise.resolve();
+                } else {
+                  return Promise.reject(
+                      'keyStatus ' + keyStatus + ' does not match ' +
+                      expectedResult);
+                }
+              },
+              error => {
+                if (expectedResult == 'rejected') {
+                  return Promise.resolve();
+                } else {
+                  return Promise.reject("Promise rejected unexpectedly.");
+                }
+              });
     }
 
     function testGetStatusForHdcpPolicy(mediaKeys) {
@@ -178,7 +178,7 @@ PlayerUtils.registerEMEEventListeners = function(player) {
 
   this.registerDefaultEventListeners(player);
   player.video.receivedKeyMessage = false;
-  player.video.receivedRenewalMessage = false;
+  player.video.receivedMessageTypes = new Set();
   Utils.timeLog('Setting video media keys: ' + player.testConfig.keySystem);
 
   var config = {
@@ -288,7 +288,7 @@ PlayerUtils.createPlayer = function(video, testConfig) {
         return WidevinePlayer;
       case CLEARKEY:
       case EXTERNAL_CLEARKEY:
-      case EXTERNAL_CLEARKEY_RENEWAL:
+      case MESSAGE_TYPE_TEST_KEYSYSTEM:
       case CRASH_TEST_KEYSYSTEM:
         return ClearKeyPlayer;
       case FILE_IO_TEST_KEYSYSTEM:
@@ -296,6 +296,7 @@ PlayerUtils.createPlayer = function(video, testConfig) {
       case PLATFORM_VERIFICATION_TEST_KEYSYSTEM:
       case VERIFY_HOST_FILES_TEST_KEYSYSTEM:
       case STORAGE_ID_TEST_KEYSYSTEM:
+      case CDM_PROXY_TEST_KEYSYSTEM:
         return UnitTestPlayer;
       default:
         Utils.timeLog(keySystem + ' is not a known key system');

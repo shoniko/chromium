@@ -18,9 +18,10 @@
 #include "base/task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "components/machine_intelligence/proto/ranker_model.pb.h"
-#include "components/machine_intelligence/proto/translate_ranker_model.pb.h"
-#include "components/machine_intelligence/ranker_model.h"
+#include "components/assist_ranker/proto/ranker_model.pb.h"
+#include "components/assist_ranker/proto/translate_ranker_model.pb.h"
+#include "components/assist_ranker/ranker_model.h"
+#include "components/assist_ranker/ranker_model_loader_impl.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/common/translate_switches.h"
 #include "components/variations/variations_associated_data.h"
@@ -33,10 +34,10 @@ namespace translate {
 
 namespace {
 
-using machine_intelligence::RankerModel;
-using machine_intelligence::RankerModelProto;
-using machine_intelligence::TranslateRankerModel;
-using machine_intelligence::RankerModelStatus;
+using assist_ranker::RankerModel;
+using assist_ranker::RankerModelProto;
+using assist_ranker::RankerModelStatus;
+using assist_ranker::TranslateRankerModel;
 
 const double kTranslationOfferDefaultThreshold = 0.5;
 
@@ -65,7 +66,7 @@ RankerModelStatus ValidateModel(const RankerModel& model) {
     return RankerModelStatus::VALIDATION_FAILED;
 
   if (model.proto().translate().model_revision_case() !=
-      TranslateRankerModel::kLogisticRegressionModel) {
+      TranslateRankerModel::kTranslateLogisticRegressionModel) {
     return RankerModelStatus::INCOMPATIBLE;
   }
 
@@ -159,7 +160,7 @@ TranslateRankerImpl::TranslateRankerImpl(const base::FilePath& model_path,
               translate::kTranslateRankerPreviousLanguageMatchesOverride)),
       weak_ptr_factory_(this) {
   if (is_query_enabled_ || is_enforcement_enabled_) {
-    model_loader_ = base::MakeUnique<machine_intelligence::RankerModelLoader>(
+    model_loader_ = base::MakeUnique<assist_ranker::RankerModelLoaderImpl>(
         base::Bind(&ValidateModel),
         base::Bind(&TranslateRankerImpl::OnModelAvailable,
                    weak_ptr_factory_.GetWeakPtr()),
@@ -276,8 +277,8 @@ bool TranslateRankerImpl::GetModelDecision(
   // logic here.
   const TranslateRankerFeatures features(translate_event);
 
-  const TranslateRankerModel::LogisticRegressionModel& lr_model =
-      model_->proto().translate().logistic_regression_model();
+  const TranslateRankerModel::TranslateLogisticRegressionModel& lr_model =
+      model_->proto().translate().translate_logistic_regression_model();
 
   double dot_product =
       (features.accepted_count * lr_model.accept_count_weight()) +

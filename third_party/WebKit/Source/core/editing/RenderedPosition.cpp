@@ -30,15 +30,18 @@
 
 #include "core/editing/RenderedPosition.h"
 
+#include "core/editing/EditingUtilities.h"
+#include "core/editing/FrameSelection.h"
 #include "core/editing/InlineBoxPosition.h"
 #include "core/editing/InlineBoxTraversal.h"
 #include "core/editing/TextAffinity.h"
 #include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/html/forms/TextControlElement.h"
 #include "core/layout/api/LineLayoutAPIShim.h"
 #include "core/paint/PaintLayer.h"
-#include "core/paint/compositing/CompositedSelectionBound.h"
+#include "core/paint/compositing/CompositedSelection.h"
 
 namespace blink {
 
@@ -76,12 +79,15 @@ RenderedPosition::RenderedPosition(const VisiblePosition& position)
 RenderedPosition::RenderedPosition(const VisiblePositionInFlatTree& position)
     : RenderedPosition(position.DeepEquivalent(), position.Affinity()) {}
 
+// TODO(editing-dev): Stop duplicating code in the two constructors
+
 RenderedPosition::RenderedPosition(const Position& position,
                                    TextAffinity affinity)
     : layout_object_(nullptr), inline_box_(nullptr), offset_(0) {
   if (position.IsNull())
     return;
-  InlineBoxPosition box_position = ComputeInlineBoxPosition(position, affinity);
+  InlineBoxPosition box_position =
+      ComputeInlineBoxPosition(PositionWithAffinity(position, affinity));
   inline_box_ = box_position.inline_box;
   offset_ = box_position.offset_in_box;
   if (inline_box_)
@@ -96,7 +102,8 @@ RenderedPosition::RenderedPosition(const PositionInFlatTree& position,
     : layout_object_(nullptr), inline_box_(nullptr), offset_(0) {
   if (position.IsNull())
     return;
-  InlineBoxPosition box_position = ComputeInlineBoxPosition(position, affinity);
+  InlineBoxPosition box_position = ComputeInlineBoxPosition(
+      PositionInFlatTreeWithAffinity(position, affinity));
   inline_box_ = box_position.inline_box;
   offset_ = box_position.offset_in_box;
   if (inline_box_)
@@ -106,13 +113,13 @@ RenderedPosition::RenderedPosition(const PositionInFlatTree& position,
     layout_object_ = LayoutObjectFromPosition(position);
 }
 
-InlineBox* RenderedPosition::PrevLeafChild() const {
+const InlineBox* RenderedPosition::PrevLeafChild() const {
   if (!prev_leaf_child_.has_value())
     prev_leaf_child_ = inline_box_->PrevLeafChildIgnoringLineBreak();
   return prev_leaf_child_.value();
 }
 
-InlineBox* RenderedPosition::NextLeafChild() const {
+const InlineBox* RenderedPosition::NextLeafChild() const {
   if (!next_leaf_child_.has_value())
     next_leaf_child_ = inline_box_->NextLeafChildIgnoringLineBreak();
   return next_leaf_child_.value();
@@ -128,12 +135,14 @@ bool RenderedPosition::IsEquivalent(const RenderedPosition& other) const {
 }
 
 unsigned char RenderedPosition::BidiLevelOnLeft() const {
-  InlineBox* box = AtLeftmostOffsetInBox() ? PrevLeafChild() : inline_box_;
+  const InlineBox* box =
+      AtLeftmostOffsetInBox() ? PrevLeafChild() : inline_box_;
   return box ? box->BidiLevel() : 0;
 }
 
 unsigned char RenderedPosition::BidiLevelOnRight() const {
-  InlineBox* box = AtRightmostOffsetInBox() ? NextLeafChild() : inline_box_;
+  const InlineBox* box =
+      AtRightmostOffsetInBox() ? NextLeafChild() : inline_box_;
   return box ? box->BidiLevel() : 0;
 }
 
@@ -142,7 +151,7 @@ RenderedPosition RenderedPosition::LeftBoundaryOfBidiRun(
   if (!inline_box_ || bidi_level_of_run > inline_box_->BidiLevel())
     return RenderedPosition();
 
-  InlineBox* const box =
+  const InlineBox* const box =
       InlineBoxTraversal::FindLeftBoundaryOfEntireBidiRunIgnoringLineBreak(
           *inline_box_, bidi_level_of_run);
   return RenderedPosition(
@@ -155,7 +164,7 @@ RenderedPosition RenderedPosition::RightBoundaryOfBidiRun(
   if (!inline_box_ || bidi_level_of_run > inline_box_->BidiLevel())
     return RenderedPosition();
 
-  InlineBox* const box =
+  const InlineBox* const box =
       InlineBoxTraversal::FindRightBoundaryOfEntireBidiRunIgnoringLineBreak(
           *inline_box_, bidi_level_of_run);
   return RenderedPosition(
@@ -253,8 +262,7 @@ IntRect RenderedPosition::AbsoluteRect(
 // Convert a local point into the coordinate system of backing coordinates.
 // Also returns the backing layer if needed.
 FloatPoint RenderedPosition::LocalToInvalidationBackingPoint(
-    const LayoutPoint& local_point,
-    GraphicsLayer** graphics_layer_backing) const {
+    const LayoutPoint& local_point) const {
   const LayoutBoxModelObject& paint_invalidation_container =
       layout_object_->ContainerForPaintInvalidation();
   DCHECK(paint_invalidation_container.Layer());
@@ -276,29 +284,34 @@ FloatPoint RenderedPosition::LocalToInvalidationBackingPoint(
   // |paintInvalidationContainer|.
   if (GraphicsLayer* graphics_layer =
           paint_invalidation_container.Layer()->GraphicsLayerBacking(
-              &paint_invalidation_container)) {
-    if (graphics_layer_backing)
-      *graphics_layer_backing = graphics_layer;
-
+              &paint_invalidation_container))
     container_point.Move(-graphics_layer->OffsetFromLayoutObject());
-  }
 
   return container_point;
 }
 
-void RenderedPosition::GetLocalSelectionEndpoints(
-    bool selection_start,
-    LayoutPoint& edge_top_in_layer,
-    LayoutPoint& edge_bottom_in_layer,
-    bool& is_text_direction_rtl) const {
+static GraphicsLayer* GetGraphicsLayerBacking(
+    const LayoutObject& layout_object) {
+  const LayoutBoxModelObject& paint_invalidation_container =
+      layout_object.ContainerForPaintInvalidation();
+  DCHECK(paint_invalidation_container.Layer());
+  if (paint_invalidation_container.Layer()->GetCompositingState() ==
+      kNotComposited)
+    return nullptr;
+  return paint_invalidation_container.Layer()->GraphicsLayerBacking(
+      &paint_invalidation_container);
+}
+
+std::pair<LayoutPoint, LayoutPoint>
+RenderedPosition::GetLocalSelectionEndpoints(bool selection_start) const {
   const LayoutRect rect = layout_object_->LocalCaretRect(inline_box_, offset_);
   if (layout_object_->Style()->IsHorizontalWritingMode()) {
-    edge_top_in_layer = rect.MinXMinYCorner();
-    edge_bottom_in_layer = rect.MinXMaxYCorner();
-    return;
+    const LayoutPoint edge_top_in_layer = rect.MinXMinYCorner();
+    const LayoutPoint edge_bottom_in_layer = rect.MinXMaxYCorner();
+    return {edge_top_in_layer, edge_bottom_in_layer};
   }
-  edge_top_in_layer = rect.MinXMinYCorner();
-  edge_bottom_in_layer = rect.MaxXMinYCorner();
+  LayoutPoint edge_top_in_layer = rect.MinXMinYCorner();
+  LayoutPoint edge_bottom_in_layer = rect.MaxXMinYCorner();
 
   // When text is vertical, it looks better for the start handle baseline to
   // be at the starting edge, to enclose the selection fully between the
@@ -308,29 +321,29 @@ void RenderedPosition::GetLocalSelectionEndpoints(
     edge_bottom_in_layer.SetX(edge_top_in_layer.X());
     edge_top_in_layer.SetX(x_swap);
   }
-
-  // Flipped blocks writing mode is not only vertical but also right to left.
-  is_text_direction_rtl = layout_object_->HasFlippedBlocksWritingMode();
+  return {edge_top_in_layer, edge_bottom_in_layer};
 }
 
-void RenderedPosition::PositionInGraphicsLayerBacking(
-    CompositedSelectionBound& bound,
+CompositedSelectionBound RenderedPosition::PositionInGraphicsLayerBacking(
     bool selection_start) const {
-  bound.layer = nullptr;
-  bound.edge_top_in_layer = bound.edge_bottom_in_layer = FloatPoint();
-
   if (IsNull())
-    return;
+    return CompositedSelectionBound();
 
-  LayoutPoint edge_top_in_layer;
-  LayoutPoint edge_bottom_in_layer;
-  GetLocalSelectionEndpoints(selection_start, edge_top_in_layer,
-                             edge_bottom_in_layer, bound.is_text_direction_rtl);
+  CompositedSelectionBound bound;
+  // Flipped blocks writing mode is not only vertical but also right to left.
+  if (!layout_object_->Style()->IsHorizontalWritingMode()) {
+    bound.is_text_direction_rtl = layout_object_->HasFlippedBlocksWritingMode();
+  }
 
-  bound.edge_top_in_layer =
-      LocalToInvalidationBackingPoint(edge_top_in_layer, &bound.layer);
+  LayoutPoint edge_top_in_layer, edge_bottom_in_layer;
+  std::tie(edge_top_in_layer, edge_bottom_in_layer) =
+      GetLocalSelectionEndpoints(selection_start);
+  bound.edge_top_in_layer = LocalToInvalidationBackingPoint(edge_top_in_layer);
   bound.edge_bottom_in_layer =
-      LocalToInvalidationBackingPoint(edge_bottom_in_layer, nullptr);
+      LocalToInvalidationBackingPoint(edge_bottom_in_layer);
+  bound.layer = GetGraphicsLayerBacking(*layout_object_);
+  bound.hidden = !IsVisible(selection_start);
+  return bound;
 }
 
 LayoutPoint RenderedPosition::GetSamplePointForVisibility(
@@ -345,7 +358,7 @@ LayoutPoint RenderedPosition::GetSamplePointForVisibility(
   return sample_point;
 }
 
-bool RenderedPosition::IsVisible(bool selection_start) {
+bool RenderedPosition::IsVisible(bool selection_start) const {
   if (IsNull())
     return false;
 
@@ -362,11 +375,9 @@ bool RenderedPosition::IsVisible(bool selection_start) {
   if (!layout_object || !layout_object->IsBox())
     return true;
 
-  LayoutPoint edge_top_in_layer;
-  LayoutPoint edge_bottom_in_layer;
-  bool ignored2;
-  GetLocalSelectionEndpoints(selection_start, edge_top_in_layer,
-                             edge_bottom_in_layer, ignored2);
+  LayoutPoint edge_top_in_layer, edge_bottom_in_layer;
+  std::tie(edge_top_in_layer, edge_bottom_in_layer) =
+      GetLocalSelectionEndpoints(selection_start);
   LayoutPoint sample_point =
       GetSamplePointForVisibility(edge_top_in_layer, edge_bottom_in_layer);
 
@@ -389,6 +400,44 @@ bool LayoutObjectContainsPosition(LayoutObject* target,
       return true;
   }
   return false;
+}
+
+CompositedSelection RenderedPosition::ComputeCompositedSelection(
+    const FrameSelection& frame_selection) {
+  const VisibleSelection& visible_selection =
+      frame_selection.ComputeVisibleSelectionInDOMTree();
+  if (!frame_selection.IsHandleVisible() || frame_selection.IsHidden())
+    return {};
+
+  // Non-editable caret selections lack any kind of UI affordance, and
+  // needn't be tracked by the client.
+  if (visible_selection.IsCaret() && !visible_selection.IsContentEditable())
+    return {};
+
+  CompositedSelection selection;
+  VisiblePosition visible_start(visible_selection.VisibleStart());
+  RenderedPosition rendered_start(visible_start);
+  selection.start = rendered_start.PositionInGraphicsLayerBacking(true);
+  if (!selection.start.layer)
+    return {};
+
+  VisiblePosition visible_end(visible_selection.VisibleEnd());
+  RenderedPosition rendered_end(visible_end);
+  selection.end = rendered_end.PositionInGraphicsLayerBacking(false);
+  if (!selection.end.layer)
+    return {};
+
+  DCHECK(!visible_selection.IsNone());
+  selection.type =
+      visible_selection.IsRange() ? kRangeSelection : kCaretSelection;
+  selection.start.is_text_direction_rtl |=
+      PrimaryDirectionOf(*visible_selection.Start().AnchorNode()) ==
+      TextDirection::kRtl;
+  selection.end.is_text_direction_rtl |=
+      PrimaryDirectionOf(*visible_selection.End().AnchorNode()) ==
+      TextDirection::kRtl;
+
+  return selection;
 }
 
 }  // namespace blink

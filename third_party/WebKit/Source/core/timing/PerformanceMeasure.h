@@ -26,9 +26,9 @@
 #ifndef PerformanceMeasure_h
 #define PerformanceMeasure_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/timing/PerformanceEntry.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -50,7 +50,7 @@ class PerformanceMeasure final : public PerformanceEntry {
  private:
   PerformanceMeasure(const String& name, double start_time, double end_time)
       : PerformanceEntry(name, "measure", start_time, end_time) {}
-  ~PerformanceMeasure() override {}
+  ~PerformanceMeasure() override = default;
 };
 
 }  // namespace blink

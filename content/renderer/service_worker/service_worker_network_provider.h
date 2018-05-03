@@ -15,8 +15,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
+#include "content/common/service_worker/controller_service_worker.mojom.h"
 #include "content/common/service_worker/service_worker.mojom.h"
 #include "content/common/service_worker/service_worker_provider.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_provider_type.mojom.h"
 
 namespace blink {
 class WebLocalFrame;
@@ -32,23 +34,32 @@ class URLLoaderFactory;
 struct RequestNavigationParams;
 class ServiceWorkerProviderContext;
 class ChildURLLoaderFactoryGetter;
+class ThreadSafeSender;
 
-// A unique provider_id is generated for each instance.
-// Instantiated prior to the main resource load being started and remains
-// allocated until after the last subresource load has occurred.
-// This is used to track the lifetime of a Document to create
-// and dispose the ServiceWorkerProviderHost in the browser process
-// to match its lifetime. Each request coming from the Document is
-// tagged with this id in willSendRequest.
+// ServiceWorkerNetworkProvider enables the browser process to recognize
+// resource requests from Blink that should be handled by service worker
+// machinery rather than the usual network stack.
 //
-// Basically, it's a scoped integer that sends an ipc upon construction
-// and destruction.
+// All requests associated with a network provider are tagged with its
+// |provider_id| (from ServiceWorkerProviderContext). The browser
+// process can then route the request to this provider's corresponding
+// ServiceWorkerProviderHost.
+//
+// It is created for both service worker clients and execution contexts. It is
+// instantiated prior to the main resource load being started and remains
+// allocated until after the last subresource load has occurred. It is owned by
+// the appropriate DocumentLoader for the provider (i.e., the loader for a
+// document, or the shadow page's loader for a shared worker or service worker).
+// Each request coming from the DocumentLoader is tagged with the provider_id in
+// WillSendRequest.
 class CONTENT_EXPORT ServiceWorkerNetworkProvider {
  public:
   // Creates a ServiceWorkerNetworkProvider for navigation and wraps it
   // with WebServiceWorkerNetworkProvider to be owned by Blink.
   //
   // For S13nServiceWorker:
+  // |controller_info| contains the endpoint and object info that is needed to
+  // set up the controller service worker for the client.
   // |default_loader_factory_getter| contains a set of default loader
   // factories for the associated loading context, and is used when we
   // create a subresource loader for controllees. This is non-null only
@@ -60,19 +71,20 @@ class CONTENT_EXPORT ServiceWorkerNetworkProvider {
       const RequestNavigationParams& request_params,
       blink::WebLocalFrame* frame,
       bool content_initiated,
+      mojom::ControllerServiceWorkerInfoPtr controller_info,
       scoped_refptr<ChildURLLoaderFactoryGetter> default_loader_factory_getter);
 
   // Creates a ServiceWorkerNetworkProvider for a shared worker (as a
   // non-document service worker client).
   // TODO(kinuko): This should also take ChildURLLoaderFactoryGetter associated
   // with the SharedWorker.
-  static std::unique_ptr<ServiceWorkerNetworkProvider> CreateForSharedWorker(
-      int route_id);
+  static std::unique_ptr<ServiceWorkerNetworkProvider> CreateForSharedWorker();
 
   // Creates a ServiceWorkerNetworkProvider for a "controller" (i.e.
   // a service worker execution context).
   static std::unique_ptr<ServiceWorkerNetworkProvider> CreateForController(
-      mojom::ServiceWorkerProviderInfoForStartWorkerPtr info);
+      mojom::ServiceWorkerProviderInfoForStartWorkerPtr info,
+      scoped_refptr<ThreadSafeSender> sender);
 
   // Valid only for WebServiceWorkerNetworkProvider created by
   // CreateForNavigation.
@@ -84,7 +96,7 @@ class CONTENT_EXPORT ServiceWorkerNetworkProvider {
   int provider_id() const;
   ServiceWorkerProviderContext* context() const { return context_.get(); }
 
-  mojom::URLLoaderFactory* script_loader_factory() {
+  network::mojom::URLLoaderFactory* script_loader_factory() {
     return script_loader_factory_.get();
   }
 
@@ -101,25 +113,24 @@ class CONTENT_EXPORT ServiceWorkerNetworkProvider {
   // |is_parent_frame_secure| is only relevant when the |type| is WINDOW.
   //
   // For S13nServiceWorker:
-  // |default_loader_factory_getter| contains a set of default loader
-  // factories for the associated loading context, and is used when we
-  // create a subresource loader for controllees. This is non-null only
-  // if the provider is created for controllees, and if the loading context,
-  // e.g. a frame, provides the loading factory getter for default loaders.
+  // See the comment at CreateForNavigation() for |controller_info| and
+  // |default_loader_factory_getter|.
   ServiceWorkerNetworkProvider(
       int route_id,
-      ServiceWorkerProviderType type,
+      blink::mojom::ServiceWorkerProviderType type,
       int provider_id,
       bool is_parent_frame_secure,
+      mojom::ControllerServiceWorkerInfoPtr controller_info,
       scoped_refptr<ChildURLLoaderFactoryGetter> default_loader_factory_getter);
 
   // This is for controllers, used in CreateForController.
   explicit ServiceWorkerNetworkProvider(
-      mojom::ServiceWorkerProviderInfoForStartWorkerPtr info);
+      mojom::ServiceWorkerProviderInfoForStartWorkerPtr info,
+      scoped_refptr<ThreadSafeSender> sender);
 
   scoped_refptr<ServiceWorkerProviderContext> context_;
   mojom::ServiceWorkerDispatcherHostAssociatedPtr dispatcher_host_;
-  mojom::URLLoaderFactoryAssociatedPtr script_loader_factory_;
+  network::mojom::URLLoaderFactoryAssociatedPtr script_loader_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerNetworkProvider);
 };

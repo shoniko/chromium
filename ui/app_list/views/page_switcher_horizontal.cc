@@ -223,7 +223,7 @@ void PageSwitcherHorizontal::CalculateButtonWidthAndSpacing(
   button_width =
       std::min(kMaxButtonWidth, std::max(kMinButtonWidth, button_width));
 
-  buttons_->SetLayoutManager(new views::BoxLayout(
+  buttons_->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kHorizontal, gfx::Insets(0, kButtonStripPadding),
       button_spacing));
   for (int i = 0; i < button_count; ++i) {
@@ -280,5 +280,7 @@ void PageSwitcherHorizontal::TransitionChanged() {
   if (model_->is_valid_page(target_page))
     GetButtonByIndex(buttons_, target_page)->SetSelectedRange(progress);
 }
+
+void PageSwitcherHorizontal::TransitionEnded() {}
 
 }  // namespace app_list

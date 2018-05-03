@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+#include <string>
+#include <tuple>
+
 #include "ash/public/cpp/shelf_item_delegate.h"
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/shelf/shelf.h"
@@ -27,7 +31,10 @@
 #include "chrome/browser/ui/ash/launcher/arc_app_window_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_test_util.h"
+#include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_service_manager.h"
 #include "components/arc/arc_util.h"
+#include "components/arc/test/fake_app_instance.h"
 #include "content/public/test/browser_test_utils.h"
 #include "ui/app_list/app_list_features.h"
 #include "ui/display/types/display_constants.h"
@@ -253,12 +260,14 @@ class ArcAppLauncherBrowserTest : public ExtensionBrowserTest {
       arc_session_manager()->SetProfile(profile());
       arc::ArcServiceLauncher::Get()->OnPrimaryUserProfilePrepared(profile());
     }
-    app_instance_observer()->OnInstanceReady();
+    app_instance_ = std::make_unique<arc::FakeAppInstance>(app_host());
+    arc_brige_service()->app()->SetInstance(app_instance_.get());
   }
 
   void StopInstance() {
+    if (app_instance_)
+      arc_brige_service()->app()->CloseInstance(app_instance_.get());
     arc_session_manager()->Shutdown();
-    app_instance_observer()->OnInstanceClosed();
   }
 
   ash::ShelfItemDelegate* GetShelfItemDelegate(const std::string& id) {
@@ -274,8 +283,7 @@ class ArcAppLauncherBrowserTest : public ExtensionBrowserTest {
 
   // Returns as AppInstance observer interface in order to access to private
   // implementation of the interface.
-  arc::InstanceHolder<arc::mojom::AppInstance>::Observer*
-  app_instance_observer() {
+  arc::ConnectionObserver<arc::mojom::AppInstance>* app_connection_observer() {
     return app_prefs();
   }
 
@@ -283,7 +291,13 @@ class ArcAppLauncherBrowserTest : public ExtensionBrowserTest {
     return arc::ArcSessionManager::Get();
   }
 
+  arc::ArcBridgeService* arc_brige_service() {
+    return arc::ArcServiceManager::Get()->arc_bridge_service();
+  }
+
  private:
+  std::unique_ptr<arc::FakeAppInstance> app_instance_;
+
   DISALLOW_COPY_AND_ASSIGN(ArcAppLauncherBrowserTest);
 };
 
@@ -442,7 +456,8 @@ IN_PROC_BROWSER_TEST_F(ArcAppLauncherBrowserTest, PinOnPackageUpdateAndRemove) {
 
   // Make use app list sync service is started. Normally it is started when
   // sycing is initialized.
-  app_list::AppListSyncableServiceFactory::GetForProfile(profile())->GetModel();
+  app_list::AppListSyncableServiceFactory::GetForProfile(profile())
+      ->GetModelUpdater();
 
   InstallTestApps(kTestAppPackage, true);
   SendPackageAdded(kTestAppPackage, false);
@@ -593,6 +608,13 @@ IN_PROC_BROWSER_TEST_F(ArcAppLauncherBrowserTest, ShelfGroup) {
                             CreateIntentUriWithShelfGroup(kTestShelfGroup3));
 
   ASSERT_EQ(delegate3, GetShelfItemDelegate(shelf_id3));
+
+  ChromeLauncherController* controller = ChromeLauncherController::instance();
+  const ash::ShelfItem* item1 = controller->GetItem(ash::ShelfID(shelf_id1));
+  ASSERT_TRUE(item1);
+
+  // The shelf group item's title should be the title of the referenced ARC app.
+  EXPECT_EQ(base::UTF8ToUTF16(kTestAppName), item1->title);
 
   // Destroy task #0, this kills shelf group 1
   app_host()->OnTaskDestroyed(1);

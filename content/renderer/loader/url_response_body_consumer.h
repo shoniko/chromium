@@ -16,14 +16,17 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "content/common/content_export.h"
-#include "content/public/common/url_loader.mojom.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
+#include "services/network/public/interfaces/url_loader.mojom.h"
+
+namespace network {
+struct URLLoaderCompletionStatus;
+}  // namespace network
 
 namespace content {
 
 class ResourceDispatcher;
-struct ResourceRequestCompletionStatus;
 
 // This class pulls data from a data pipe and dispatches it to the
 // ResourceDispatcher. This class is used only for mojo-enabled requests.
@@ -41,7 +44,7 @@ class CONTENT_EXPORT URLResponseBodyConsumer final
   // ResourceDispatcher when the both following conditions hold:
   //  1) This function has been called and the completion status is set, and
   //  2) All data is read from the handle.
-  void OnComplete(const ResourceRequestCompletionStatus& status);
+  void OnComplete(const network::URLLoaderCompletionStatus& status);
 
   // Cancels watching the handle and dispatches an error to the
   // ResourceDispatcher. This function does nothing if the reading is already
@@ -76,7 +79,7 @@ class CONTENT_EXPORT URLResponseBodyConsumer final
   ResourceDispatcher* resource_dispatcher_;
   mojo::ScopedDataPipeConsumerHandle handle_;
   mojo::SimpleWatcher handle_watcher_;
-  ResourceRequestCompletionStatus completion_status_;
+  network::URLLoaderCompletionStatus status_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   bool has_received_completion_ = false;

@@ -25,15 +25,16 @@ import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.download.DownloadUpdate.PendingState;
 import org.chromium.chrome.browser.download.ui.BackendProvider;
 import org.chromium.chrome.browser.download.ui.DownloadHistoryAdapter;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
+import org.chromium.chrome.browser.media.MediaViewerUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.Tracker;
@@ -188,7 +189,6 @@ public class DownloadManagerService
     /**
      * Creates DownloadManagerService.
      */
-    @SuppressFBWarnings("LI_LAZY_INIT") // Findbugs doesn't see this is only UI thread.
     public static DownloadManagerService getDownloadManagerService() {
         ThreadUtils.assertOnUiThread();
         Context appContext = ContextUtils.getApplicationContext();
@@ -369,7 +369,7 @@ public class DownloadManagerService
         DownloadNotificationService.clearResumptionAttemptLeft();
 
         DownloadManagerService.getDownloadManagerService().checkForExternallyRemovedDownloads(
-                /*isOffRecord=*/false);
+                /*isOffTheRecord=*/false);
     }
 
     /**
@@ -452,7 +452,8 @@ public class DownloadManagerService
                 mDownloadNotifier.notifyDownloadCanceled(item.getContentId());
                 break;
             case DOWNLOAD_STATUS_INTERRUPTED:
-                mDownloadNotifier.notifyDownloadInterrupted(info, progress.mIsAutoResumable);
+                mDownloadNotifier.notifyDownloadInterrupted(
+                        info, progress.mIsAutoResumable, PendingState.PENDING_NETWORK);
                 removeFromDownloadProgressMap = !progress.mIsAutoResumable;
                 break;
             default:
@@ -770,10 +771,10 @@ public class DownloadManagerService
             // the real file path to the user instead of a content:// download ID.
             Uri fileUri = contentUri;
             if (filePath != null) fileUri = Uri.fromFile(new File(filePath));
-            return DownloadUtils.getMediaViewerIntentForDownloadItem(fileUri, contentUri, mimeType);
+            return MediaViewerUtils.getMediaViewerIntent(
+                    fileUri, contentUri, mimeType, true /* allowExternalAppHandlers */);
         }
-        return DownloadUtils.createViewIntentForDownloadItem(
-                contentUri, mimeType, originalUrl, referrer);
+        return MediaViewerUtils.createViewIntentForUri(contentUri, mimeType, originalUrl, referrer);
     }
 
     /**
@@ -981,15 +982,20 @@ public class DownloadManagerService
      * Removes a download from the list.
      * @param downloadGuid GUID of the download.
      * @param isOffTheRecord Whether the download is off the record.
+     * @param externallyRemoved If the file is externally removed by other applications.
      */
     @Override
-    public void removeDownload(final String downloadGuid, boolean isOffTheRecord) {
-        nativeRemoveDownload(getNativeDownloadManagerService(), downloadGuid, isOffTheRecord);
-        removeDownloadProgress(downloadGuid);
+    public void removeDownload(
+            final String downloadGuid, boolean isOffTheRecord, boolean externallyRemoved) {
+        mHandler.post(() -> {
+            nativeRemoveDownload(getNativeDownloadManagerService(), downloadGuid, isOffTheRecord);
+            removeDownloadProgress(downloadGuid);
+        });
+
         new AsyncTask<Void, Void, Void>() {
             @Override
             public Void doInBackground(Void... params) {
-                mDownloadManagerDelegate.removeCompletedDownload(downloadGuid);
+                mDownloadManagerDelegate.removeCompletedDownload(downloadGuid, externallyRemoved);
                 return null;
             }
         }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);

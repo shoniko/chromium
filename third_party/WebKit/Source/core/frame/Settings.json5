@@ -75,7 +75,7 @@
     // draw canvas in software.
     {
       name: "minimumAccelerated2dCanvasSize",
-      initial: "65*64",
+      initial: "129*128",
       type: "int",
     },
 
@@ -556,11 +556,6 @@
     },
 
     {
-      name: "encryptedMediaEnabled",
-      initial: true,
-    },
-
-    {
       name: "viewportEnabled",
       initial: false,
       invalidate: "ViewportDescription",
@@ -577,16 +572,17 @@
       invalidate: "DNSPrefetching",
     },
 
-    {
-      name: "dataSaverEnabled",
-      initial: false,
-    },
-
     // Clients that execute script should call ExecutionContext::canExecuteScripts()
     // instead of this function. ExecutionContext::canExecuteScripts() checks the
     // HTML sandbox, plugin sandboxing, and other important details.
     {
       name: "scriptEnabled",
+      initial: false,
+    },
+
+    // Forces Android Overlay Scrollbar for mobile emulator.
+    {
+      name: "forceAndroidOverlayScrollbar",
       initial: false,
     },
 
@@ -616,19 +612,6 @@
       type: "double",
     },
 
-    // This value indicates the maximum number of bytes a document is allowed to
-    // transmit in Beacons (via navigator.sendBeacon()) -- Beacons are intended to be
-    // smaller payloads transmitted as a page is unloading, not a general (one-way)
-    // network transmission API. The spec <https://w3c.github.io/beacon/> does not
-    // proscribe an upper limit, but allows for it -- the underlying API will return
-    // 'false' in that case. If the value is set to a negative value, no limit
-    // will be imposed.
-    {
-      name: "maxBeaconTransmission",
-      initial: 65536,
-      type: "int",
-    },
-
     // This value is set to false if the platform does not support fullscreen.
     // When set to false all the requests to enter fullscreen will return an error
     // (fullscreenerror or webkitfullscreenerror) as specified in the standard:
@@ -643,13 +626,6 @@
       name: "v8CacheOptions",
       initial: "kV8CacheOptionsDefault",
       type: "V8CacheOptions",
-    },
-
-    // V8 code cache for CacheStorage supports three types of strategies (none, normal and aggressive).
-    {
-      name: "v8CacheStrategiesForCacheStorage",
-      initial: "V8CacheStrategiesForCacheStorage::kDefault",
-      type: "V8CacheStrategiesForCacheStorage",
     },
 
     // These values are bit fields for the properties of available pointing devices
@@ -814,7 +790,7 @@
 
     {
       name: "progressBarCompletion",
-      initial: "ProgressBarCompletion::kLoadEvent",
+      initial: "ProgressBarCompletion::kResourcesBeforeDCL",
       type: "ProgressBarCompletion",
     },
 
@@ -895,6 +871,7 @@
     {
       name: "hideScrollbars",
       initial: false,
+      invalidate: "ViewportScrollbar",
     },
 
     // Spellchecking is enabled by default for elements that do not specify it explicitly
@@ -971,12 +948,13 @@
       initial: false,
     },
     {
-      name: "forceDisplayList2dCanvasEnabled",
-      initial: false,
-    },
-    {
       name: "navigatorPlatformOverride",
       type: "String",
+    },
+    {
+      name: "lowPriorityIframesThreshold",
+      initial: "WebEffectiveConnectionType::kTypeUnknown",
+      type: "WebEffectiveConnectionType",
     },
   ],
 }

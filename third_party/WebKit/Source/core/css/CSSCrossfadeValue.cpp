@@ -116,7 +116,7 @@ CSSCrossfadeValue::CSSCrossfadeValue(CSSValue* from_value,
       cached_to_image_(nullptr),
       crossfade_subimage_observer_(this) {}
 
-CSSCrossfadeValue::~CSSCrossfadeValue() {}
+CSSCrossfadeValue::~CSSCrossfadeValue() = default;
 
 void CSSCrossfadeValue::Dispose() {
   if (cached_from_image_) {
@@ -151,24 +151,26 @@ CSSCrossfadeValue* CSSCrossfadeValue::ValueWithURLsMadeAbsolute() {
   return CSSCrossfadeValue::Create(from_value, to_value, percentage_value_);
 }
 
-IntSize CSSCrossfadeValue::FixedSize(const Document& document,
-                                     const FloatSize& default_object_size) {
+FloatSize CSSCrossfadeValue::FixedSize(const Document& document,
+                                       const FloatSize& default_object_size) {
   Image* from_image = RenderableImageForCSSValue(from_value_.Get(), document);
   Image* to_image = RenderableImageForCSSValue(to_value_.Get(), document);
 
   if (!from_image || !to_image)
-    return IntSize();
+    return FloatSize();
 
-  IntSize from_image_size = from_image->Size();
-  IntSize to_image_size = to_image->Size();
+  FloatSize from_image_size(from_image->Size());
+  FloatSize to_image_size(to_image->Size());
 
-  if (from_image->IsSVGImage())
-    from_image_size = RoundedIntSize(
-        ToSVGImage(from_image)->ConcreteObjectSize(default_object_size));
+  if (from_image->IsSVGImage()) {
+    from_image_size =
+        ToSVGImage(from_image)->ConcreteObjectSize(default_object_size);
+  }
 
-  if (to_image->IsSVGImage())
-    to_image_size = RoundedIntSize(
-        ToSVGImage(to_image)->ConcreteObjectSize(default_object_size));
+  if (to_image->IsSVGImage()) {
+    to_image_size =
+        ToSVGImage(to_image)->ConcreteObjectSize(default_object_size);
+  }
 
   // Rounding issues can cause transitions between images of equal size to
   // return a different fixed size; avoid performing the interpolation if the
@@ -179,10 +181,10 @@ IntSize CSSCrossfadeValue::FixedSize(const Document& document,
   float percentage = percentage_value_->GetFloatValue();
   float inverse_percentage = 1 - percentage;
 
-  return IntSize(from_image_size.Width() * inverse_percentage +
-                     to_image_size.Width() * percentage,
-                 from_image_size.Height() * inverse_percentage +
-                     to_image_size.Height() * percentage);
+  return FloatSize(from_image_size.Width() * inverse_percentage +
+                       to_image_size.Width() * percentage,
+                   from_image_size.Height() * inverse_percentage +
+                       to_image_size.Height() * percentage);
 }
 
 bool CSSCrossfadeValue::IsPending() const {
@@ -224,7 +226,7 @@ scoped_refptr<Image> CSSCrossfadeValue::GetImage(
     const ImageResourceObserver& client,
     const Document& document,
     const ComputedStyle&,
-    const IntSize& size) {
+    const LayoutSize& size) {
   if (size.IsEmpty())
     return nullptr;
 
@@ -247,14 +249,16 @@ scoped_refptr<Image> CSSCrossfadeValue::GetImage(
 
   return CrossfadeGeneratedImage::Create(
       from_image_ref, to_image_ref, percentage_value_->GetFloatValue(),
-      FixedSize(document, FloatSize(size)), size);
+      FixedSize(document, FloatSize(size)), FloatSize(size));
 }
 
-void CSSCrossfadeValue::CrossfadeChanged(const IntRect&) {
+void CSSCrossfadeValue::CrossfadeChanged(
+    const IntRect&,
+    ImageResourceObserver::CanDeferInvalidation defer) {
   for (const auto& curr : Clients()) {
     ImageResourceObserver* client =
         const_cast<ImageResourceObserver*>(curr.key);
-    client->ImageChanged(static_cast<WrappedImagePtr>(this));
+    client->ImageChanged(static_cast<WrappedImagePtr>(this), defer);
   }
 }
 
@@ -268,9 +272,10 @@ bool CSSCrossfadeValue::WillRenderImage() const {
 
 void CSSCrossfadeValue::CrossfadeSubimageObserverProxy::ImageChanged(
     ImageResourceContent*,
+    CanDeferInvalidation defer,
     const IntRect* rect) {
   if (ready_)
-    owner_value_->CrossfadeChanged(*rect);
+    owner_value_->CrossfadeChanged(*rect, defer);
 }
 
 bool CSSCrossfadeValue::CrossfadeSubimageObserverProxy::WillRenderImage() {

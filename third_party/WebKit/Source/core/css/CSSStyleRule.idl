@@ -21,8 +21,9 @@
 // https://drafts.csswg.org/cssom/#the-cssstylerule-interface
 
 [
-    DependentLifetime
+    Exposed=Window
 ] interface CSSStyleRule : CSSRule {
-    attribute DOMString selectorText;
+    [SetterCallWith=ExecutionContext] attribute DOMString selectorText;
     [SameObject, PutForwards=cssText] readonly attribute CSSStyleDeclaration style;
+    [SameObject, RuntimeEnabled=CSSTypedOM, MeasureAs=CSSTypedOMStylePropertyMap] readonly attribute StylePropertyMap attributeStyleMap;
 };

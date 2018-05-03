@@ -48,9 +48,6 @@
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/skia/include/core/SkImageFilter.h"
-#include "third_party/skia/include/effects/SkOffsetImageFilter.h"
-#include "third_party/skia/include/effects/SkXfermodeImageFilter.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/gfx/transform.h"
@@ -60,8 +57,7 @@ namespace {
 
 class VerifyTreeCalcsLayerTreeSettings : public LayerTreeSettings {
  public:
-  VerifyTreeCalcsLayerTreeSettings() {
-  }
+  VerifyTreeCalcsLayerTreeSettings() = default;
 };
 
 class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
@@ -303,12 +299,12 @@ class LayerTreeHostCommonTest : public LayerTreeHostCommonTestBase,
 
 class LayerWithForcedDrawsContent : public Layer {
  public:
-  LayerWithForcedDrawsContent() {}
+  LayerWithForcedDrawsContent() = default;
 
   bool DrawsContent() const override { return true; }
 
  private:
-  ~LayerWithForcedDrawsContent() override {}
+  ~LayerWithForcedDrawsContent() override = default;
 };
 
 class LayerTreeSettingsScaleContent : public VerifyTreeCalcsLayerTreeSettings {
@@ -1504,7 +1500,7 @@ TEST_F(LayerTreeHostCommonTest, DrawableContentRectForReferenceFilter) {
   child->test_properties()->force_render_surface = true;
   FilterOperations filters;
   filters.Append(FilterOperation::CreateReferenceFilter(
-      SkOffsetImageFilter::Make(50, 50, nullptr)));
+      sk_make_sp<OffsetPaintFilter>(50, 50, nullptr)));
   child->test_properties()->filters = filters;
   ExecuteCalculateDrawProperties(root);
 
@@ -1529,7 +1525,7 @@ TEST_F(LayerTreeHostCommonTest, DrawableContentRectForReferenceFilterHighDpi) {
 
   FilterOperations filters;
   filters.Append(FilterOperation::CreateReferenceFilter(
-      SkOffsetImageFilter::Make(50, 50, nullptr)));
+      sk_make_sp<OffsetPaintFilter>(50, 50, nullptr)));
   child->test_properties()->filters = filters;
 
   ExecuteCalculateDrawProperties(root, device_scale_factor);
@@ -2683,12 +2679,12 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectWithClippingAndFilters) {
 
   gfx::Transform vertical_flip;
   vertical_flip.Scale(1, -1);
-  sk_sp<SkImageFilter> flip_filter = SkImageFilter::MakeMatrixFilter(
+  sk_sp<PaintFilter> flip_filter = sk_make_sp<MatrixPaintFilter>(
       vertical_flip.matrix(), kLow_SkFilterQuality, nullptr);
   FilterOperations reflection_filter;
   reflection_filter.Append(
-      FilterOperation::CreateReferenceFilter(SkXfermodeImageFilter::Make(
-          SkBlendMode::kSrcOver, std::move(flip_filter))));
+      FilterOperation::CreateReferenceFilter(sk_make_sp<XfermodePaintFilter>(
+          SkBlendMode::kSrcOver, std::move(flip_filter), nullptr)));
   filter->test_properties()->filters = reflection_filter;
   host_impl()->active_tree()->property_trees()->needs_rebuild = true;
 
@@ -2736,12 +2732,12 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectWithScalingClippingAndFilters) {
 
   gfx::Transform vertical_flip;
   vertical_flip.Scale(1, -1);
-  sk_sp<SkImageFilter> flip_filter = SkImageFilter::MakeMatrixFilter(
+  sk_sp<PaintFilter> flip_filter = sk_make_sp<MatrixPaintFilter>(
       vertical_flip.matrix(), kLow_SkFilterQuality, nullptr);
   FilterOperations reflection_filter;
   reflection_filter.Append(
-      FilterOperation::CreateReferenceFilter(SkXfermodeImageFilter::Make(
-          SkBlendMode::kSrcOver, std::move(flip_filter))));
+      FilterOperation::CreateReferenceFilter(sk_make_sp<XfermodePaintFilter>(
+          SkBlendMode::kSrcOver, std::move(flip_filter), nullptr)));
   filter->test_properties()->filters = reflection_filter;
   host_impl()->active_tree()->property_trees()->needs_rebuild = true;
 
@@ -7269,7 +7265,7 @@ class AnimationScaleFactorTrackingLayerImpl : public LayerImpl {
         new AnimationScaleFactorTrackingLayerImpl(tree_impl, id));
   }
 
-  ~AnimationScaleFactorTrackingLayerImpl() override {}
+  ~AnimationScaleFactorTrackingLayerImpl() override = default;
 
  private:
   explicit AnimationScaleFactorTrackingLayerImpl(LayerTreeImpl* tree_impl,

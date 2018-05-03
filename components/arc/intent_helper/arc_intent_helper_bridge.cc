@@ -4,25 +4,71 @@
 
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 
+#include <iterator>
 #include <utility>
 
 #include "ash/new_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/wallpaper/wallpaper_controller.h"
+#include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_util.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/audio/arc_audio_bridge.h"
+#include "components/url_formatter/url_fixer.h"
 #include "ui/base/layout.h"
-#include "url/gurl.h"
+#include "url/url_constants.h"
 
 namespace arc {
 namespace {
 
-constexpr char kChromeUIScheme[] = "chrome";
+constexpr std::pair<mojom::ChromePage, const char*> kMapping[] = {
+    {mojom::ChromePage::MULTIDEVICE, "multidevice"},
+    {mojom::ChromePage::MAIN, ""},
+    {mojom::ChromePage::POWER, "power"},
+    {mojom::ChromePage::BLUETOOTH, "bluetoothDevices"},
+    {mojom::ChromePage::DATETIME, "dateTime"},
+    {mojom::ChromePage::DISPLAY, "display"},
+    {mojom::ChromePage::WIFI, "networks/?type=WiFi"},
+    {mojom::ChromePage::PRIVACY, "privacy"},
+    {mojom::ChromePage::HELP, "help"},
+    {mojom::ChromePage::ACCOUNTS, "accounts"},
+    {mojom::ChromePage::APPEARANCE, "appearance"},
+    {mojom::ChromePage::AUTOFILL, "autofill"},
+    {mojom::ChromePage::BLUETOOTHDEVICES, "bluetoothDevices"},
+    {mojom::ChromePage::CHANGEPICTURE, "changePicture"},
+    {mojom::ChromePage::CLEARBROWSERDATA, "clearBrowserData"},
+    {mojom::ChromePage::CLOUDPRINTERS, "cloudPrinters"},
+    {mojom::ChromePage::CUPSPRINTERS, "cupsPrinters"},
+    {mojom::ChromePage::DOWNLOADS, "downloads"},
+    {mojom::ChromePage::KEYBOARDOVERLAY, "keyboard-overlay"},
+    {mojom::ChromePage::LANGUAGES, "languages"},
+    {mojom::ChromePage::LOCKSCREEN, "lockScreen"},
+    {mojom::ChromePage::MANAGEACCESSIBILITY, "manageAccessibility"},
+    {mojom::ChromePage::NETWORKSTYPEVPN, "networks?type=VPN"},
+    {mojom::ChromePage::ONSTARTUP, "onStartup"},
+    {mojom::ChromePage::PASSWORDS, "passwords"},
+    {mojom::ChromePage::POINTEROVERLAY, "pointer-overlay"},
+    {mojom::ChromePage::RESET, "reset"},
+    {mojom::ChromePage::SEARCH, "search"},
+    {mojom::ChromePage::STORAGE, "storage"},
+    {mojom::ChromePage::SYNCSETUP, "syncSetup"},
+    {mojom::ChromePage::ABOUTBLANK, url::kAboutBlankURL},
+    {mojom::ChromePage::ABOUTDOWNLOADS, "about:downloads"},
+    {mojom::ChromePage::ABOUTHISTORY, "about:history"}};
+
+constexpr const char* kArcSchemes[] = {url::kHttpScheme, url::kHttpsScheme,
+                                       url::kContentScheme, url::kFileScheme,
+                                       url::kMailToScheme};
+
+// mojom::ChromePage::LAST returns the ammout of valid entries - 1.
+static_assert(arraysize(kMapping) ==
+                  static_cast<size_t>(mojom::ChromePage::LAST) + 1,
+              "kMapping is out of sync");
 
 class OpenUrlDelegateImpl : public ArcIntentHelperBridge::OpenUrlDelegate {
  public:
@@ -57,15 +103,14 @@ class ArcIntentHelperBridgeFactory
   ~ArcIntentHelperBridgeFactory() override = default;
 };
 
+// Base URL for the Chrome settings pages.
+constexpr char kSettingsPageBaseUrl[] = "chrome://settings";
+
 }  // namespace
 
 // static
 const char ArcIntentHelperBridge::kArcIntentHelperPackageName[] =
     "org.chromium.arc.intent_helper";
-
-// static
-const char ArcIntentHelperBridge::kMultideviceSettingsUrl[] =
-    "chrome://settings/multidevice";
 
 // static
 ArcIntentHelperBridge* ArcIntentHelperBridge::GetForBrowserContext(
@@ -78,32 +123,25 @@ KeyedServiceBaseFactory* ArcIntentHelperBridge::GetFactory() {
   return ArcIntentHelperBridgeFactory::GetInstance();
 }
 
+// static
+std::string ArcIntentHelperBridge::AppendStringToIntentHelperPackageName(
+    const std::string& to_append) {
+  return base::JoinString({kArcIntentHelperPackageName, to_append}, ".");
+}
+
 ArcIntentHelperBridge::ArcIntentHelperBridge(content::BrowserContext* context,
                                              ArcBridgeService* bridge_service)
     : context_(context),
       arc_bridge_service_(bridge_service),
-      binding_(this),
-      open_url_delegate_(std::make_unique<OpenUrlDelegateImpl>()) {
-  arc_bridge_service_->intent_helper()->AddObserver(this);
+      open_url_delegate_(std::make_unique<OpenUrlDelegateImpl>()),
+      allowed_chrome_pages_map_(std::cbegin(kMapping), std::cend(kMapping)),
+      allowed_arc_schemes_(std::cbegin(kArcSchemes), std::cend(kArcSchemes)) {
+  arc_bridge_service_->intent_helper()->SetHost(this);
 }
 
 ArcIntentHelperBridge::~ArcIntentHelperBridge() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  arc_bridge_service_->intent_helper()->RemoveObserver(this);
-}
-
-void ArcIntentHelperBridge::OnInstanceReady() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  auto* instance =
-      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->intent_helper(), Init);
-  DCHECK(instance);
-  mojom::IntentHelperHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  instance->Init(std::move(host_proxy));
-}
-
-void ArcIntentHelperBridge::OnInstanceClosed() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  arc_bridge_service_->intent_helper()->SetHost(nullptr);
 }
 
 void ArcIntentHelperBridge::OnIconInvalidated(const std::string& package_name) {
@@ -124,16 +162,29 @@ void ArcIntentHelperBridge::OnOpenDownloads() {
 
 void ArcIntentHelperBridge::OnOpenUrl(const std::string& url) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  const GURL gurl(url);
-  // Disallow opening chrome:// URLs.
-  if (gurl.SchemeIs(kChromeUIScheme))
+  // Converts |url| to a fixed-up one and checks validity.
+  const GURL gurl(url_formatter::FixupURL(url, std::string()));
+  if (!gurl.is_valid())
     return;
-  open_url_delegate_->OpenUrl(gurl);
+
+  if (allowed_arc_schemes_.find(gurl.scheme()) != allowed_arc_schemes_.end())
+    open_url_delegate_->OpenUrl(gurl);
 }
 
-void ArcIntentHelperBridge::OnOpenChromeSettingsMultideviceUrl() {
+void ArcIntentHelperBridge::OnOpenChromePage(mojom::ChromePage page) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  open_url_delegate_->OpenUrl(GURL(kMultideviceSettingsUrl));
+  auto it = allowed_chrome_pages_map_.find(page);
+  if (it == allowed_chrome_pages_map_.end()) {
+    LOG(WARNING) << "The requested ChromePage is invalid: "
+                 << static_cast<int>(page);
+    return;
+  }
+
+  GURL page_gurl(it->second);
+  if (page_gurl.SchemeIs(url::kAboutScheme))
+    open_url_delegate_->OpenUrl(page_gurl);
+  else
+    open_url_delegate_->OpenUrl(GURL(kSettingsPageBaseUrl).Resolve(it->second));
 }
 
 void ArcIntentHelperBridge::OpenWallpaperPicker() {
@@ -157,9 +208,9 @@ void ArcIntentHelperBridge::OpenVolumeControl() {
 
 ArcIntentHelperBridge::GetResult ArcIntentHelperBridge::GetActivityIcons(
     const std::vector<ActivityName>& activities,
-    const OnIconsReadyCallback& callback) {
+    OnIconsReadyCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  return icon_loader_.GetActivityIcons(activities, callback);
+  return icon_loader_.GetActivityIcons(activities, std::move(callback));
 }
 
 bool ArcIntentHelperBridge::ShouldChromeHandleUrl(const GURL& url) {

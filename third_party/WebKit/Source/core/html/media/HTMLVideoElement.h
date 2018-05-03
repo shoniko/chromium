@@ -121,10 +121,9 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
   // CanvasImageSource implementation
   scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
                                                AccelerationHint,
-                                               SnapshotReason,
                                                const FloatSize&) override;
   bool IsVideoElement() const override { return true; }
-  bool WouldTaintOrigin(SecurityOrigin*) const override;
+  bool WouldTaintOrigin(const SecurityOrigin*) const override;
   FloatSize ElementSize(const FloatSize&) const override;
   const KURL& SourceURL() const override { return currentSrc(); }
   bool IsHTMLVideoElement() const override { return true; }
@@ -145,10 +144,9 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
   bool IsPersistent() const;
 
   bool IsRemotingInterstitialVisible() const;
-  void DisableMediaRemoting();
 
   void MediaRemotingStarted(const WebString& remote_device_friendly_name) final;
-  void MediaRemotingStopped() final;
+  void MediaRemotingStopped(WebLocalizedString::Name error_msg) final;
   WebMediaPlayer::DisplayType DisplayType() const final;
 
  private:
@@ -158,7 +156,7 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
 
   HTMLVideoElement(Document&);
 
-  // SuspendableObject functions.
+  // PausableObject functions.
   void ContextDestroyed(ExecutionContext*) final;
 
   bool LayoutObjectIsNeeded(const ComputedStyle&) override;
@@ -166,9 +164,10 @@ class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
   void AttachLayoutTree(AttachContext&) override;
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
   bool IsURLAttribute(const Attribute&) const override;
   const AtomicString ImageSourceURL() const override;
 

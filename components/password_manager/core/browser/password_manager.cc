@@ -32,6 +32,7 @@
 #include "components/password_manager/core/browser/password_manager_metrics_recorder.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
+#include "components/password_manager/core/browser/password_reuse_defines.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -346,8 +347,10 @@ void PasswordManager::SaveGenerationFieldDetectedByClassifier(
 void PasswordManager::ProvisionallySavePassword(
     const PasswordForm& form,
     const password_manager::PasswordManagerDriver* driver) {
-  bool is_saving_and_filling_enabled =
-      client_->IsSavingAndFillingEnabledForCurrentPage();
+  // If the form was declined by some heuristics, don't show automatic bubble
+  // for it, only fallback saving should be available.
+  if (form.only_for_fallback_saving)
+    return;
 
   std::unique_ptr<BrowserSavePasswordProgressLogger> logger;
   if (password_manager_util::IsLoggingActive(client_)) {
@@ -358,7 +361,7 @@ void PasswordManager::ProvisionallySavePassword(
                             form);
   }
 
-  if (!is_saving_and_filling_enabled) {
+  if (!client_->IsSavingAndFillingEnabledForCurrentPage()) {
     client_->GetMetricsRecorder().RecordProvisionalSaveFailure(
         PasswordManagerMetricsRecorder::SAVING_DISABLED, main_frame_url_,
         form.origin, logger.get());
@@ -469,6 +472,7 @@ void PasswordManager::RemoveObserver(LoginModelObserver* observer) {
 }
 
 void PasswordManager::DidNavigateMainFrame() {
+  entry_to_check_ = NavigationEntryToCheck::LAST_COMMITTED;
   pending_login_managers_.clear();
 }
 
@@ -481,6 +485,20 @@ void PasswordManager::OnPasswordFormSubmitted(
   }
 
   pending_login_managers_.clear();
+}
+
+void PasswordManager::OnPasswordFormSubmittedNoChecks(
+    password_manager::PasswordManagerDriver* driver,
+    const autofill::PasswordForm& password_form) {
+  if (password_manager_util::IsLoggingActive(client_)) {
+    BrowserSavePasswordProgressLogger logger(client_->GetLogManager());
+    logger.LogMessage(Logger::STRING_ON_IN_PAGE_NAVIGATION);
+  }
+
+  ProvisionallySavePassword(password_form, driver);
+
+  if (CanProvisionalManagerSave())
+    OnLoginSuccessful();
 }
 
 void PasswordManager::OnPasswordFormForceSaveRequested(
@@ -547,8 +565,46 @@ void PasswordManager::CreatePendingLoginManagers(
     logger->LogMessage(Logger::STRING_CREATE_LOGIN_MANAGERS_METHOD);
   }
 
+  const PasswordForm::Scheme effective_form_scheme =
+      forms.empty() ? PasswordForm::SCHEME_HTML : forms.front().scheme;
+  switch (effective_form_scheme) {
+    case PasswordForm::SCHEME_HTML:
+    case PasswordForm::SCHEME_OTHER:
+    case PasswordForm::SCHEME_USERNAME_ONLY:
+      entry_to_check_ = NavigationEntryToCheck::LAST_COMMITTED;
+      break;
+    case PasswordForm::SCHEME_BASIC:
+    case PasswordForm::SCHEME_DIGEST:
+      entry_to_check_ = NavigationEntryToCheck::VISIBLE;
+      break;
+  }
+
   // Record whether or not this top-level URL has at least one password field.
   client_->AnnotateNavigationEntry(!forms.empty());
+
+  // Only report SSL error status for cases where there are potentially forms to
+  // fill or save from.
+  if (!forms.empty()) {
+    metrics_util::CertificateError cert_error =
+        metrics_util::CertificateError::NONE;
+    const net::CertStatus cert_status = client_->GetMainFrameCertStatus();
+    // The order of the if statements matters -- if the status involves multiple
+    // errors, Chrome should report the one highest up in the list below.
+    if (cert_status & net::CERT_STATUS_AUTHORITY_INVALID)
+      cert_error = metrics_util::CertificateError::AUTHORITY_INVALID;
+    else if (cert_status & net::CERT_STATUS_COMMON_NAME_INVALID)
+      cert_error = metrics_util::CertificateError::COMMON_NAME_INVALID;
+    else if (cert_status & net::CERT_STATUS_WEAK_SIGNATURE_ALGORITHM)
+      cert_error = metrics_util::CertificateError::WEAK_SIGNATURE_ALGORITHM;
+    else if (cert_status & net::CERT_STATUS_DATE_INVALID)
+      cert_error = metrics_util::CertificateError::DATE_INVALID;
+    else if (net::IsCertStatusError(cert_status))
+      cert_error = metrics_util::CertificateError::OTHER;
+
+    UMA_HISTOGRAM_ENUMERATION(
+        "PasswordManager.CertificateErrorsWhileSeeingForms", cert_error,
+        metrics_util::CertificateError::COUNT);
+  }
 
   if (!client_->IsFillingEnabledForCurrentPage())
     return;
@@ -768,19 +824,7 @@ void PasswordManager::OnPasswordFormsRendered(
 void PasswordManager::OnInPageNavigation(
     password_manager::PasswordManagerDriver* driver,
     const PasswordForm& password_form) {
-  std::unique_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (password_manager_util::IsLoggingActive(client_)) {
-    logger.reset(
-        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
-    logger->LogMessage(Logger::STRING_ON_IN_PAGE_NAVIGATION);
-  }
-
-  ProvisionallySavePassword(password_form, driver);
-
-  if (!CanProvisionalManagerSave())
-    return;
-
-  OnLoginSuccessful();
+  OnPasswordFormSubmittedNoChecks(driver, password_form);
 }
 
 void PasswordManager::OnLoginSuccessful() {
@@ -802,46 +846,48 @@ void PasswordManager::OnLoginSuccessful() {
     }
   }
 
-  if (base::FeatureList::IsEnabled(features::kDropSyncCredential)) {
-    DCHECK(provisional_save_manager_->submitted_form());
-    if (!client_->GetStoreResultFilter()->ShouldSave(
-            *provisional_save_manager_->submitted_form())) {
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS)) || \
-    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
-      // When |username_value| is empty, it's not clear whether the submitted
-      // credentials are really sync credentials. Don't save sync password hash
-      // in that case.
-      if (!provisional_save_manager_->submitted_form()
-               ->username_value.empty()) {
-        password_manager::PasswordStore* store = client_->GetPasswordStore();
-        // May be null in tests.
-        if (store) {
-          bool is_sync_password_change =
-              !provisional_save_manager_->submitted_form()
-                   ->new_password_element.empty();
-          metrics_util::LogSyncPasswordHashChange(
-              is_sync_password_change ? metrics_util::SyncPasswordHashChange::
-                                            CHANGED_IN_CONTENT_AREA
-                                      : metrics_util::SyncPasswordHashChange::
-                                            SAVED_IN_CONTENT_AREA);
-          store->SaveSyncPasswordHash(
-              provisional_save_manager_->submitted_form()->password_value);
-        }
+  DCHECK(provisional_save_manager_->submitted_form());
+  if (!client_->GetStoreResultFilter()->ShouldSave(
+          *provisional_save_manager_->submitted_form(),
+          client_->GetMainFrameURL())) {
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
+    // When |username_value| is empty, it's not clear whether the submitted
+    // credentials are really sync credentials. Don't save sync password hash
+    // in that case.
+    if (!provisional_save_manager_->submitted_form()->username_value.empty()) {
+      password_manager::PasswordStore* store = client_->GetPasswordStore();
+      // May be null in tests.
+      if (store) {
+        bool is_sync_password_change =
+            !provisional_save_manager_->submitted_form()
+                 ->new_password_element.empty();
+        metrics_util::LogSyncPasswordHashChange(
+            is_sync_password_change
+                ? metrics_util::SyncPasswordHashChange::CHANGED_IN_CONTENT_AREA
+                : metrics_util::SyncPasswordHashChange::SAVED_IN_CONTENT_AREA);
+        store->SaveSyncPasswordHash(
+            is_sync_password_change
+                ? provisional_save_manager_->submitted_form()
+                      ->new_password_value
+                : provisional_save_manager_->submitted_form()->password_value);
       }
-#endif
-      provisional_save_manager_->WipeStoreCopyIfOutdated();
-      client_->GetMetricsRecorder().RecordProvisionalSaveFailure(
-          PasswordManagerMetricsRecorder::SYNC_CREDENTIAL, main_frame_url_,
-          provisional_save_manager_->observed_form().origin, logger.get());
-      provisional_save_manager_.reset();
-      return;
     }
+#endif
+    provisional_save_manager_->WipeStoreCopyIfOutdated();
+    client_->GetMetricsRecorder().RecordProvisionalSaveFailure(
+        PasswordManagerMetricsRecorder::SYNC_CREDENTIAL, main_frame_url_,
+        provisional_save_manager_->observed_form().origin, logger.get());
+    provisional_save_manager_.reset();
+    return;
   }
 
   provisional_save_manager_->LogSubmitPassed();
 
   RecordWhetherTargetDomainDiffers(main_frame_url_, client_->GetMainFrameURL());
 
+  // If the form is eligible only for saving fallback, it shouldn't go here.
+  DCHECK(!provisional_save_manager_->pending_credentials()
+              .only_for_fallback_saving);
   if (ShouldPromptUserToSavePassword()) {
     bool empty_password =
         provisional_save_manager_->pending_credentials().username_value.empty();

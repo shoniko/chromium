@@ -30,18 +30,18 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
   // This node is really a sentinel, and does not represent a real effect.
   static EffectPaintPropertyNode* Root();
 
-  static RefPtr<EffectPaintPropertyNode> Create(
-      RefPtr<const EffectPaintPropertyNode> parent,
-      RefPtr<const TransformPaintPropertyNode> local_transform_space,
-      RefPtr<const ClipPaintPropertyNode> output_clip,
+  static scoped_refptr<EffectPaintPropertyNode> Create(
+      scoped_refptr<const EffectPaintPropertyNode> parent,
+      scoped_refptr<const TransformPaintPropertyNode> local_transform_space,
+      scoped_refptr<const ClipPaintPropertyNode> output_clip,
       ColorFilter color_filter,
       CompositorFilterOperations filter,
       float opacity,
       SkBlendMode blend_mode,
-      CompositingReasons direct_compositing_reasons = kCompositingReasonNone,
+      CompositingReasons direct_compositing_reasons = CompositingReason::kNone,
       const CompositorElementId& compositor_element_id = CompositorElementId(),
       const FloatPoint& paint_offset = FloatPoint()) {
-    return WTF::AdoptRef(new EffectPaintPropertyNode(
+    return base::AdoptRef(new EffectPaintPropertyNode(
         std::move(parent), std::move(local_transform_space),
         std::move(output_clip), color_filter, std::move(filter), opacity,
         blend_mode, direct_compositing_reasons, compositor_element_id,
@@ -49,14 +49,14 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
   }
 
   bool Update(
-      RefPtr<const EffectPaintPropertyNode> parent,
-      RefPtr<const TransformPaintPropertyNode> local_transform_space,
-      RefPtr<const ClipPaintPropertyNode> output_clip,
+      scoped_refptr<const EffectPaintPropertyNode> parent,
+      scoped_refptr<const TransformPaintPropertyNode> local_transform_space,
+      scoped_refptr<const ClipPaintPropertyNode> output_clip,
       ColorFilter color_filter,
       CompositorFilterOperations filter,
       float opacity,
       SkBlendMode blend_mode,
-      CompositingReasons direct_compositing_reasons = kCompositingReasonNone,
+      CompositingReasons direct_compositing_reasons = CompositingReason::kNone,
       const CompositorElementId& compositor_element_id = CompositorElementId(),
       const FloatPoint& paint_offset = FloatPoint()) {
     bool parent_changed = PaintPropertyNode::Update(std::move(parent));
@@ -105,8 +105,8 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
 #if DCHECK_IS_ON()
   // The clone function is used by FindPropertiesNeedingUpdate.h for recording
   // an effect node before it has been updated, to later detect changes.
-  RefPtr<EffectPaintPropertyNode> Clone() const {
-    return WTF::AdoptRef(new EffectPaintPropertyNode(
+  scoped_refptr<EffectPaintPropertyNode> Clone() const {
+    return base::AdoptRef(new EffectPaintPropertyNode(
         Parent(), local_transform_space_, output_clip_, color_filter_, filter_,
         opacity_, blend_mode_, direct_compositing_reasons_,
         compositor_element_id_, paint_offset_));
@@ -119,8 +119,8 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
     return Parent() == o.Parent() &&
            local_transform_space_ == o.local_transform_space_ &&
            output_clip_ == o.output_clip_ && color_filter_ == o.color_filter_ &&
-           filter_.EqualsIgnoringReferenceFilters(o.filter_) &&
-           opacity_ == o.opacity_ && blend_mode_ == o.blend_mode_ &&
+           filter_ == o.filter_ && opacity_ == o.opacity_ &&
+           blend_mode_ == o.blend_mode_ &&
            direct_compositing_reasons_ == o.direct_compositing_reasons_ &&
            compositor_element_id_ == o.compositor_element_id_ &&
            paint_offset_ == o.paint_offset_;
@@ -132,11 +132,12 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
   std::unique_ptr<JSONObject> ToJSON() const;
 
   bool HasDirectCompositingReasons() const {
-    return direct_compositing_reasons_ != kCompositingReasonNone;
+    return direct_compositing_reasons_ != CompositingReason::kNone;
   }
 
   bool RequiresCompositingForAnimation() const {
-    return direct_compositing_reasons_ & kCompositingReasonActiveAnimation;
+    return direct_compositing_reasons_ &
+           CompositingReason::kComboActiveAnimation;
   }
 
   const CompositorElementId& GetCompositorElementId() const {
@@ -145,9 +146,9 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
 
  private:
   EffectPaintPropertyNode(
-      RefPtr<const EffectPaintPropertyNode> parent,
-      RefPtr<const TransformPaintPropertyNode> local_transform_space,
-      RefPtr<const ClipPaintPropertyNode> output_clip,
+      scoped_refptr<const EffectPaintPropertyNode> parent,
+      scoped_refptr<const TransformPaintPropertyNode> local_transform_space,
+      scoped_refptr<const ClipPaintPropertyNode> output_clip,
       ColorFilter color_filter,
       CompositorFilterOperations filter,
       float opacity,
@@ -171,10 +172,10 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
   //    and effects under the same parent.
   // 2. Some effects are spatial (namely blur filter and reflection), the
   //    effect parameters will be specified in the local space.
-  RefPtr<const TransformPaintPropertyNode> local_transform_space_;
+  scoped_refptr<const TransformPaintPropertyNode> local_transform_space_;
   // The output of the effect can be optionally clipped when composited onto
   // the current backdrop.
-  RefPtr<const ClipPaintPropertyNode> output_clip_;
+  scoped_refptr<const ClipPaintPropertyNode> output_clip_;
 
   // Optionally a number of effects can be applied to the composited output.
   // The chain of effects will be applied in the following order:

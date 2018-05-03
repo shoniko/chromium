@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/task_scheduler/post_task.h"
 #include "chrome/browser/ssl/ssl_error_handler.h"
 #include "content/public/browser/browser_thread.h"
@@ -24,7 +24,7 @@ const base::FilePath::CharType kConfigBinaryPbFileName[] =
 
 // The SHA256 of the SubjectPublicKeyInfo used to sign the extension.
 // The extension id is: giekcmmlnklenlaomppkphknjmnnpneh
-const uint8_t kPublicKeySHA256[32] = {
+const uint8_t kSslErrorAssistantPublicKeySHA256[32] = {
     0x68, 0x4a, 0x2c, 0xcb, 0xda, 0xb4, 0xdb, 0x0e, 0xcf, 0xfa, 0xf7,
     0xad, 0x9c, 0xdd, 0xfd, 0x47, 0x97, 0xe4, 0x73, 0x24, 0x67, 0x93,
     0x9c, 0xb1, 0x14, 0xcd, 0x3f, 0x54, 0x66, 0x25, 0x99, 0x3f};
@@ -40,15 +40,15 @@ void LoadProtoFromDisk(const base::FilePath& pb_path) {
     DVLOG(1) << "Failed reading from " << pb_path.value();
     return;
   }
-  auto proto = base::MakeUnique<chrome_browser_ssl::SSLErrorAssistantConfig>();
+  auto proto = std::make_unique<chrome_browser_ssl::SSLErrorAssistantConfig>();
   if (!proto->ParseFromString(binary_pb)) {
     DVLOG(1) << "Failed parsing proto " << pb_path.value();
     return;
   }
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::BindOnce(&SSLErrorHandler::SetErrorAssistantProto,
-                     base::Passed(std::move(proto))));
+  content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI)
+      ->PostTask(FROM_HERE,
+                 base::BindOnce(&SSLErrorHandler::SetErrorAssistantProto,
+                                base::Passed(std::move(proto))));
 }
 
 }  // namespace
@@ -71,6 +71,8 @@ SSLErrorAssistantComponentInstallerPolicy::OnCustomInstall(
     const base::FilePath& install_dir) {
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
+
+void SSLErrorAssistantComponentInstallerPolicy::OnCustomUninstall() {}
 
 base::FilePath SSLErrorAssistantComponentInstallerPolicy::GetInstalledPath(
     const base::FilePath& base) {
@@ -105,8 +107,9 @@ SSLErrorAssistantComponentInstallerPolicy::GetRelativeInstallDir() const {
 
 void SSLErrorAssistantComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(kPublicKeySHA256,
-               kPublicKeySHA256 + arraysize(kPublicKeySHA256));
+  hash->assign(kSslErrorAssistantPublicKeySHA256,
+               kSslErrorAssistantPublicKeySHA256 +
+                   arraysize(kSslErrorAssistantPublicKeySHA256));
 }
 
 std::string SSLErrorAssistantComponentInstallerPolicy::GetName() const {
@@ -127,11 +130,9 @@ void RegisterSSLErrorAssistantComponent(ComponentUpdateService* cus,
                                         const base::FilePath& user_data_dir) {
   DVLOG(1) << "Registering SSL Error Assistant component.";
 
-  std::unique_ptr<ComponentInstallerPolicy> policy(
-      new SSLErrorAssistantComponentInstallerPolicy());
-  // |cus| takes ownership of |installer|.
-  ComponentInstaller* installer = new ComponentInstaller(std::move(policy));
-  installer->Register(cus, base::Closure());
+  auto installer = base::MakeRefCounted<ComponentInstaller>(
+      std::make_unique<SSLErrorAssistantComponentInstallerPolicy>());
+  installer->Register(cus, base::OnceClosure());
 }
 
 }  // namespace component_updater

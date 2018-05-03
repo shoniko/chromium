@@ -9,8 +9,8 @@
 #include "core/layout/MinMaxSize.h"
 #include "core/layout/ng/geometry/ng_box_strut.h"
 #include "core/layout/ng/geometry/ng_logical_size.h"
-#include "core/layout/ng/ng_writing_mode.h"
 #include "platform/text/TextDirection.h"
+#include "platform/text/WritingMode.h"
 #include "platform/wtf/Optional.h"
 
 namespace blink {
@@ -124,6 +124,10 @@ ComputeMarginsForVisualContainer(const NGConstraintSpace&,
 CORE_EXPORT NGBoxStrut ComputeMarginsForSelf(const NGConstraintSpace&,
                                              const ComputedStyle&);
 
+// Compute margins for a child during the min-max size calculation.
+CORE_EXPORT NGBoxStrut ComputeMinMaxMargins(const ComputedStyle& parent_style,
+                                            NGLayoutInputNode child);
+
 CORE_EXPORT NGBoxStrut ComputeBorders(const NGConstraintSpace& constraint_space,
                                       const ComputedStyle&);
 
@@ -135,6 +139,7 @@ CORE_EXPORT NGBoxStrut ComputePadding(const NGConstraintSpace&,
 // compute the margins that are auto, if any, and adjusts
 // the given NGBoxStrut accordingly.
 CORE_EXPORT void ApplyAutoMargins(const ComputedStyle& child_style,
+                                  const ComputedStyle& containing_block_style,
                                   LayoutUnit available_inline_size,
                                   LayoutUnit inline_size,
                                   NGBoxStrut* margins);

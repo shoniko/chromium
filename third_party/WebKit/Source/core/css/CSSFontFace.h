@@ -26,15 +26,17 @@
 #ifndef CSSFontFace_h
 #define CSSFontFace_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSFontFaceSource.h"
 #include "core/css/CSSSegmentedFontFace.h"
 #include "core/css/FontFace.h"
+#include "core/css/FontFaceSource.h"
 #include "platform/fonts/SegmentedFontData.h"
 #include "platform/fonts/UnicodeRangeSet.h"
 #include "platform/wtf/Deque.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -45,11 +47,10 @@ class SimpleFontData;
 
 class CORE_EXPORT CSSFontFace final
     : public GarbageCollectedFinalized<CSSFontFace> {
-  WTF_MAKE_NONCOPYABLE(CSSFontFace);
 
  public:
   CSSFontFace(FontFace* font_face, Vector<UnicodeRange>& ranges)
-      : ranges_(WTF::AdoptRef(new UnicodeRangeSet(ranges))),
+      : ranges_(base::AdoptRef(new UnicodeRangeSet(ranges))),
         segmented_font_face_(nullptr),
         font_face_(font_face) {
     DCHECK(font_face_);
@@ -66,11 +67,11 @@ class CORE_EXPORT CSSFontFace final
   size_t ApproximateBlankCharacterCount() const;
 
   void AddSource(CSSFontFaceSource*);
+  void SetDisplay(FontDisplay);
 
   void DidBeginLoad();
-  enum class LoadFinishReason { WasCancelled, NormalFinish };
-  bool FontLoaded(RemoteFontFaceSource*, LoadFinishReason);
-  bool DidBecomeVisibleFallback(RemoteFontFaceSource*);
+  bool FontLoaded(RemoteFontFaceSource*);
+  bool FallbackVisibilityChanged(RemoteFontFaceSource*);
 
   scoped_refptr<SimpleFontData> GetFontData(const FontDescription&);
 
@@ -93,6 +94,7 @@ class CORE_EXPORT CSSFontFace final
   Member<CSSSegmentedFontFace> segmented_font_face_;
   HeapDeque<Member<CSSFontFaceSource>> sources_;
   Member<FontFace> font_face_;
+  DISALLOW_COPY_AND_ASSIGN(CSSFontFace);
 };
 
 }  // namespace blink

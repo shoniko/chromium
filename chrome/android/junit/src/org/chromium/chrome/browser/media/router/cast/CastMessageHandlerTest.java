@@ -60,7 +60,7 @@ public class CastMessageHandlerTest {
     private static final String INVALID_CLIENT_ID = "xxxxxxxxxxxxxxxxx";
     private static final String NAMESPACE1 = "namespace1";
     private static final String NAMESPACE2 = "namespace2";
-    private static final String MEDIA_NAMESPACE = CastMessageHandler.MEDIA_NAMESPACE;
+    private static final String MEDIA_NAMESPACE = CastSessionUtil.MEDIA_NAMESPACE;
     private static final int SEQUENCE_NUMBER1 = 1;
     private static final int SEQUENCE_NUMBER2 = 2;
     private static final int REQUEST_ID1 = 1;
@@ -88,11 +88,13 @@ public class CastMessageHandlerTest {
         clientIds.add(CLIENT_ID1);
         clientIds.add(CLIENT_ID2);
         doAnswer(new Answer() {
-                public Object answer(InvocationOnMock invocation) {
-                    return clientIds;
-                }
-            })
-                .when(mRouteProvider).getClients();
+            @Override
+            public Object answer(InvocationOnMock invocation) {
+                return clientIds;
+            }
+        })
+                .when(mRouteProvider)
+                .getClients();
         doNothing().when(mRouteProvider).onMessage(anyString(), anyString());
         doNothing().when(mRouteProvider).onMessageSentResult(anyBoolean(), anyInt());
     }
@@ -278,10 +280,10 @@ public class CastMessageHandlerTest {
             } else {
                 expected.put("type", messageType);
             }
-            verify(mMessageHandler).sendJsonCastMessage(
-                    argThat(new JSONObjectLike(expected)),
-                    eq(CastMessageHandler.MEDIA_NAMESPACE),
-                    eq(CLIENT_ID1), eq(SEQUENCE_NUMBER1));
+            verify(mMessageHandler)
+                    .sendJsonCastMessage(argThat(new JSONObjectLike(expected)),
+                            eq(CastSessionUtil.MEDIA_NAMESPACE), eq(CLIENT_ID1),
+                            eq(SEQUENCE_NUMBER1));
         }
     }
 

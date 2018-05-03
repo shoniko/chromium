@@ -66,12 +66,10 @@ const int kMaxAgcSegmentDiffMs =
   200;
 #endif
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_MACOSX)
 #define MAYBE_WebRtcAudioQualityBrowserTest WebRtcAudioQualityBrowserTest
 #else
 // Not implemented on Android, ChromeOS etc.
-// Also disabled on Windows due to
-// https://bugs.chromium.org/p/chromium/issues/detail?id=677256
 #define MAYBE_WebRtcAudioQualityBrowserTest DISABLED_WebRtcAudioQualityBrowserTest
 #endif
 
@@ -411,8 +409,15 @@ class MAYBE_WebRtcAudioQualityBrowserTest : public WebRtcTestBase {
                              "score", true);
     }
 
-    DeleteFileUnlessTestFailed(trimmed_reference, false);
-    DeleteFileUnlessTestFailed(trimmed_recording, false);
+    if (CanParseAsFloat(mos_lqo) && atof(mos_lqo.c_str()) < 3.0f) {
+      // If we keep the recordings, it's possible for the WebRTC bot recipes to
+      // upload them and make them available on the build.
+      printf("Suspiciously low MOS-LQO score: keeping recordings...\n");
+      return;
+    } else {
+      DeleteFileUnlessTestFailed(trimmed_reference, false);
+      DeleteFileUnlessTestFailed(trimmed_recording, false);
+    }
   }
 
   bool CanParseAsFloat(const std::string& value) {
@@ -464,7 +469,7 @@ class MAYBE_WebRtcAudioQualityBrowserTest : public WebRtcTestBase {
     if (anchor_pos == std::string::npos) {
       LOG(ERROR)
           << "PESQ was not able to compute a score; we probably recorded "
-          << "only silence. Please check the output/input volume levels.";
+          << "only silence.";
       return false;
     }
 
@@ -751,6 +756,8 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
   base::FilePath reference_file =
       test::GetReferenceFilesDir().Append(kReferenceFile);
   ComputeAndPrintPesqResults(reference_file, recording, "_webaudio");
+
+  DeleteFileUnlessTestFailed(recording, false);
 }
 
 /**
@@ -828,8 +835,11 @@ void MAYBE_WebRtcAudioQualityBrowserTest::TestAutoGainControl(
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
                        MANUAL_TestAutoGainControlOnLowAudio) {
   base::ScopedAllowBlockingForTesting allow_blocking;
+  // Disables AEC, but leaves AGC on.
+  const char* kAudioCallWithoutEchoCancellation =
+      "{audio: { mandatory: { googEchoCancellation: false } } }";
   ASSERT_NO_FATAL_FAILURE(TestAutoGainControl(
-      kReferenceFile, kAudioOnlyCallConstraints, "_with_agc"));
+      kReferenceFile, kAudioCallWithoutEchoCancellation, "_with_agc"));
 }
 
 // Since the AGC is off here there should be no gain at all.

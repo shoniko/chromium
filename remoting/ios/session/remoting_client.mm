@@ -11,13 +11,13 @@
 #include <memory>
 
 #import "base/mac/bind_objc_block.h"
-#import "ios/third_party/material_components_ios/src/components/Dialogs/src/MaterialDialogs.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
 #import "remoting/ios/audio/audio_player_ios.h"
 #import "remoting/ios/display/gl_display_handler.h"
 #import "remoting/ios/domain/client_session_details.h"
 #import "remoting/ios/domain/host_info.h"
 #import "remoting/ios/keychain_wrapper.h"
+#import "remoting/ios/persistence/remoting_preferences.h"
 
 #include "base/strings/sys_string_conversions.h"
 #include "remoting/client/chromoting_client_runtime.h"
@@ -112,9 +112,12 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
     info.pairing_secret = "";
   }
 
-  // TODO(nicholss): I am not sure about the following fields yet.
-  // info.capabilities =
-  // info.flags =
+  info.capabilities = "";
+  if ([RemotingPreferences.instance boolForFlag:RemotingFlagUseWebRTC]) {
+    info.flags = "useWebrtc";
+    [MDCSnackbarManager
+        showMessage:[MDCSnackbarMessage messageWithText:@"Using WebRTC"]];
+  }
 
   remoting::protocol::ClientAuthenticationConfig client_auth_config;
   client_auth_config.host_id = info.host_id;
@@ -322,12 +325,10 @@ NSString* const kHostSessionPin = @"kHostSessionPin";
                           clientId:(NSString*)clientId
                              scope:(NSString*)scope {
   // Not supported for iOS yet.
-  _sessionDetails.state = SessionCancelled;
-  [self disconnectFromHost];
-  NSString* message = [NSString
-      stringWithFormat:@"[ThirdPartyAuth] Unable to authenticate with %@.",
-                       _sessionDetails.hostInfo.hostName];
-  [MDCSnackbarManager showMessage:[MDCSnackbarMessage messageWithText:message]];
+  _sessionDetails.state = SessionFailed;
+  _sessionDetails.error = SessionErrorThirdPartyAuthNotSupported;
+  _session->DisconnectForReason(
+      remoting::protocol::ErrorCode::AUTHENTICATION_FAILED);
   [[NSNotificationCenter defaultCenter]
       postNotificationName:kHostSessionStatusChanged
                     object:self

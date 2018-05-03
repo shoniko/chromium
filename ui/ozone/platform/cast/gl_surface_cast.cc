@@ -6,7 +6,9 @@
 
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "chromecast/base/cast_features.h"
+#include "chromecast/base/chromecast_switches.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/ozone/common/egl_util.h"
 #include "ui/ozone/platform/cast/gl_ozone_egl_cast.h"
@@ -17,10 +19,20 @@ namespace {
 // or make it dynamic that throttles framerate if device is overheating.
 base::TimeDelta GetVSyncInterval() {
   if (base::FeatureList::IsEnabled(chromecast::kTripleBuffer720)) {
-    return base::TimeDelta::FromSeconds(1) / 59.9;
-  } else {
-    return base::TimeDelta::FromSeconds(2) / 59.9;
+    return base::TimeDelta::FromSeconds(1) / 59.94;
   }
+
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kVSyncInterval)) {
+    const std::string interval_str =
+        command_line->GetSwitchValueASCII(switches::kVSyncInterval);
+    double interval = 0;
+    if (base::StringToDouble(interval_str, &interval) && interval > 0) {
+      return base::TimeDelta::FromSeconds(1) / interval;
+    }
+  }
+
+  return base::TimeDelta::FromSeconds(2) / 59.94;
 }
 
 }  // namespace
@@ -45,8 +57,9 @@ bool GLSurfaceCast::SupportsSwapBuffersWithBounds() {
   return supports_swap_buffer_with_bounds_;
 }
 
-gfx::SwapResult GLSurfaceCast::SwapBuffers() {
-  gfx::SwapResult result = NativeViewGLSurfaceEGL::SwapBuffers();
+gfx::SwapResult GLSurfaceCast::SwapBuffers(
+    const PresentationCallback& callback) {
+  gfx::SwapResult result = NativeViewGLSurfaceEGL::SwapBuffers(callback);
   if (result == gfx::SwapResult::SWAP_ACK)
     parent_->OnSwapBuffers();
 
@@ -54,7 +67,8 @@ gfx::SwapResult GLSurfaceCast::SwapBuffers() {
 }
 
 gfx::SwapResult GLSurfaceCast::SwapBuffersWithBounds(
-    const std::vector<gfx::Rect>& rects) {
+    const std::vector<gfx::Rect>& rects,
+    const PresentationCallback& callback) {
   DCHECK(supports_swap_buffer_with_bounds_);
 
   // TODO(halliwell): Request new EGL extension so we're not abusing
@@ -67,7 +81,7 @@ gfx::SwapResult GLSurfaceCast::SwapBuffersWithBounds(
     rects_data[i * 4 + 3] = rects[i].height();
   }
   gfx::SwapResult result =
-      NativeViewGLSurfaceEGL::SwapBuffersWithDamage(rects_data);
+      NativeViewGLSurfaceEGL::SwapBuffersWithDamage(rects_data, callback);
   if (result == gfx::SwapResult::SWAP_ACK)
     parent_->OnSwapBuffers();
   return result;
@@ -115,7 +129,6 @@ EGLConfig GLSurfaceCast::GetConfig() {
 
 GLSurfaceCast::~GLSurfaceCast() {
   Destroy();
-  parent_->ChildDestroyed();
 }
 
 }  // namespace ui

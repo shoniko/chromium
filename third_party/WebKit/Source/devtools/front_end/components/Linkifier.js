@@ -490,7 +490,7 @@ Components.Linkifier = class {
   static _handleClick(event) {
     var link = /** @type {!Element} */ (event.currentTarget);
     event.consume(true);
-    if (UI.isBeingEdited(/** @type {!Node} */ (event.target)))
+    if (UI.isBeingEdited(/** @type {!Node} */ (event.target)) || link.hasSelection())
       return;
     var actions = Components.Linkifier._linkActions(link);
     if (actions.length)
@@ -526,6 +526,15 @@ Components.Linkifier = class {
   }
 
   /**
+   * @param {!Element} link
+   * @return {?Workspace.UILocation}
+   */
+  static uiLocation(link) {
+    var info = Components.Linkifier._linkInfo(link);
+    return info ? info.uiLocation : null;
+  }
+
+  /**
    * @param {?Element} link
    * @return {!Array<{title: string, handler: function()}>}
    */
@@ -542,30 +551,50 @@ Components.Linkifier = class {
       url = uiLocation.uiSourceCode.contentURL();
     } else if (info.url) {
       url = info.url;
-      var uiSourceCode = Workspace.workspace.uiSourceCodeForURL(url);
+      var uiSourceCode = Workspace.workspace.uiSourceCodeForURL(url) ||
+          Workspace.workspace.uiSourceCodeForURL(Common.ParsedURL.urlWithoutHash(url));
       uiLocation = uiSourceCode ? uiSourceCode.uiLocation(info.lineNumber || 0, info.columnNumber || 0) : null;
     }
     var resource = url ? Bindings.resourceForURL(url) : null;
     var request = url ? NetworkLog.networkLog.requestForURL(url) : null;
     var contentProvider = uiLocation ? uiLocation.uiSourceCode : resource;
 
-    if (info.revealable)
-      result.push({title: Common.UIString('Reveal'), handler: () => Common.Revealer.reveal(info.revealable)});
-    if (uiLocation)
-      result.push({title: Common.UIString('Open in Sources panel'), handler: () => Common.Revealer.reveal(uiLocation)});
+    if (info.revealable) {
+      result.push({
+        section: 'reveal',
+        title: Common.UIString('Reveal'),
+        handler: () => Common.Revealer.reveal(info.revealable)
+      });
+    }
+    if (uiLocation) {
+      result.push({
+        section: 'reveal',
+        title: Common.UIString('Open in Sources panel'),
+        handler: () => Common.Revealer.reveal(uiLocation)
+      });
+    }
 
     if (resource) {
-      result.push(
-          {title: Common.UIString('Open in Application panel'), handler: () => Common.Revealer.reveal(resource)});
+      result.push({
+        section: 'reveal',
+        title: Common.UIString('Open in Application panel'),
+        handler: () => Common.Revealer.reveal(resource)
+      });
     }
-    if (request)
-      result.push({title: Common.UIString('Open in Network panel'), handler: () => Common.Revealer.reveal(request)});
+    if (request) {
+      result.push({
+        section: 'reveal',
+        title: Common.UIString('Open in Network panel'),
+        handler: () => Common.Revealer.reveal(request)
+      });
+    }
 
     if (contentProvider) {
       var lineNumber = uiLocation ? uiLocation.lineNumber : info.lineNumber || 0;
       for (var title of Components.Linkifier._linkHandlers.keys()) {
         var handler = Components.Linkifier._linkHandlers.get(title);
         var action = {
+          section: 'reveal',
           title: Common.UIString('Open using %s', title),
           handler: handler.bind(null, contentProvider, lineNumber)
         };
@@ -576,8 +605,13 @@ Components.Linkifier = class {
       }
     }
     if (resource || info.url) {
-      result.push({title: UI.openLinkExternallyLabel(), handler: () => InspectorFrontendHost.openInNewTab(url)});
-      result.push({title: UI.copyLinkAddressLabel(), handler: () => InspectorFrontendHost.copyText(url)});
+      result.push({
+        section: 'reveal',
+        title: UI.openLinkExternallyLabel(),
+        handler: () => InspectorFrontendHost.openInNewTab(url)
+      });
+      result.push(
+          {section: 'clipboard', title: UI.copyLinkAddressLabel(), handler: () => InspectorFrontendHost.copyText(url)});
     }
     return result;
   }
@@ -670,7 +704,7 @@ Components.Linkifier.LinkContextMenuProvider = class {
     var link = /** @type {?Element} */ (targetNode);
     var actions = Components.Linkifier._linkActions(link);
     for (var action of actions)
-      contextMenu.appendItem(action.title, action.handler);
+      contextMenu.section(action.section).appendItem(action.title, action.handler);
   }
 };
 
@@ -731,16 +765,17 @@ Components.Linkifier.ContentProviderContextMenuProvider = class {
     if (!contentProvider.contentURL())
       return;
 
-    contextMenu.appendItem(
+    contextMenu.revealSection().appendItem(
         UI.openLinkExternallyLabel(), () => InspectorFrontendHost.openInNewTab(contentProvider.contentURL()));
     for (var title of Components.Linkifier._linkHandlers.keys()) {
       var handler = Components.Linkifier._linkHandlers.get(title);
-      contextMenu.appendItem(Common.UIString('Open using %s', title), handler.bind(null, contentProvider, 0));
+      contextMenu.revealSection().appendItem(
+          Common.UIString('Open using %s', title), handler.bind(null, contentProvider, 0));
     }
     if (contentProvider instanceof SDK.NetworkRequest)
       return;
 
-    contextMenu.appendItem(
+    contextMenu.clipboardSection().appendItem(
         UI.copyLinkAddressLabel(), () => InspectorFrontendHost.copyText(contentProvider.contentURL()));
   }
 };

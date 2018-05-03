@@ -15,7 +15,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_types.h"
-#include "ui/message_center/notifier_settings.h"
+#include "ui/message_center/notifier_id.h"
 #include "ui/message_center/public/cpp/message_center_constants.h"
 
 namespace arc {
@@ -85,9 +85,13 @@ void ArcNotificationItemImpl::OnUpdatedFromAndroid(
         base::ASCIIToUTF16("\n"));
   }
   rich_data.accessible_name = accessible_name_;
+  if (IsOpeningSettingsSupported()) {
+    rich_data.settings_button_handler =
+        message_center::SettingsButtonHandler::DELEGATE;
+  }
 
   message_center::NotifierId notifier_id(
-      message_center::NotifierId::SYSTEM_COMPONENT, kNotifierId);
+      message_center::NotifierId::ARC_APPLICATION, kNotifierId);
   notifier_id.profile_id = profile_id_.GetUserEmail();
 
   auto notification = std::make_unique<message_center::Notification>(
@@ -102,6 +106,12 @@ void ArcNotificationItemImpl::OnUpdatedFromAndroid(
 
   expand_state_ = data->expand_state;
   shown_contents_ = data->shown_contents;
+  swipe_input_rect_ =
+      data->swipe_input_rect ? *data->swipe_input_rect : gfx::Rect();
+
+  notification->set_never_timeout(
+      data->remote_input_state ==
+      mojom::ArcNotificationRemoteInputState::OPENED);
 
   if (!data->snapshot_image || data->snapshot_image->isNull()) {
     snapshot_ = gfx::ImageSkia();
@@ -186,6 +196,10 @@ mojom::ArcNotificationExpandState ArcNotificationItemImpl::GetExpandState()
 mojom::ArcNotificationShownContents ArcNotificationItemImpl::GetShownContents()
     const {
   return shown_contents_;
+}
+
+gfx::Rect ArcNotificationItemImpl::GetSwipeInputRect() const {
+  return swipe_input_rect_;
 }
 
 const std::string& ArcNotificationItemImpl::GetNotificationKey() const {

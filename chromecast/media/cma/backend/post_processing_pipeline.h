@@ -8,6 +8,8 @@
 #include <memory>
 #include <vector>
 
+#include "chromecast/public/volume_control.h"
+
 namespace base {
 class ListValue;
 }  // namespace base
@@ -22,10 +24,15 @@ class PostProcessingPipeline {
                             int num_frames,
                             float current_multiplier,
                             bool is_silence) = 0;
+  virtual float* GetOutputBuffer() = 0;
+  virtual int NumOutputChannels() = 0;
+
   virtual bool SetSampleRate(int sample_rate) = 0;
   virtual bool IsRinging() = 0;
   virtual void SetPostProcessorConfig(const std::string& name,
                                       const std::string& config) = 0;
+  virtual void SetContentType(AudioContentType content_type) = 0;
+  virtual void UpdatePlayoutChannel(int channel) = 0;
 };
 
 class PostProcessingPipelineFactory {

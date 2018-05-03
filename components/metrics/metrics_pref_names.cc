@@ -84,6 +84,11 @@ const char kStabilityChildProcessCrashCount[] =
 const char kStabilityCrashCount[] =
     "user_experience_metrics.stability.crash_count";
 
+// Number of times the application exited uncleanly since the last report
+// without gms core update.
+const char kStabilityCrashCountWithoutGmsCoreUpdate[] =
+    "user_experience_metrics.stability.crash_count_without_gms_core_update";
+
 // Number of times the initial stability log upload was deferred to the next
 // startup.
 const char kStabilityDeferredCount[] =
@@ -123,6 +128,10 @@ const char kStabilityExtensionRendererFailedLaunchCount[] =
 // last report.
 const char kStabilityExtensionRendererLaunchCount[] =
     "user_experience_metrics.stability.extension_renderer_launch_count";
+
+// The GMS core version used in Chrome.
+const char kStabilityGmsCoreVersion[] =
+    "user_experience_metrics.stability.gms_core_version";
 
 // Number of times the session end did not complete.
 const char kStabilityIncompleteSessionEndCount[] =
@@ -201,21 +210,6 @@ const char kUmaCellDataUse[] = "user_experience_metrics.uma_cell_datause";
 // Dictionary for measuring cellular data used by user including chrome services
 // per day.
 const char kUserCellDataUse[] = "user_experience_metrics.user_call_datause";
-
-// Maximum number of tabs that has been opened since the last time it has been
-// reported.
-const char kTabStatsTotalTabCountMax[] = "tab_stats.total_tab_count_max";
-
-// Maximum number of tabs that has been opened in a single window since the last
-// time it has been reported.
-const char kTabStatsMaxTabsPerWindow[] = "tab_stats.max_tabs_per_window";
-
-// Maximum number of windows that has been opened since the last time it has
-// been reported.
-const char kTabStatsWindowCountMax[] = "tab_stats.window_count_max";
-
-//  Timestamp of the last time the tab stats daily metrics have been reported.
-const char kTabStatsDailySample[] = "tab_stats.last_daily_sample";
 
 }  // namespace prefs
 }  // namespace metrics

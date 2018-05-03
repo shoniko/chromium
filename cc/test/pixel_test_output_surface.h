@@ -39,16 +39,20 @@ class PixelTestOutputSurface : public viz::OutputSurface {
   gfx::BufferFormat GetOverlayBufferFormat() const override;
   bool SurfaceIsSuspendForRecycle() const override;
   uint32_t GetFramebufferCopyTextureFormat() override;
+#if BUILDFLAG(ENABLE_VULKAN)
+  gpu::VulkanSurface* GetVulkanSurface() override;
+#endif
 
   void set_has_external_stencil_test(bool has_test) {
     external_stencil_test_ = has_test;
   }
 
  private:
-  void SwapBuffersCallback();
+  void SwapBuffersCallback(uint64_t swap_id);
 
   bool external_stencil_test_ = false;
   viz::OutputSurfaceClient* client_ = nullptr;
+  uint64_t swap_id_ = 0;
   base::WeakPtrFactory<PixelTestOutputSurface> weak_ptr_factory_;
 };
 

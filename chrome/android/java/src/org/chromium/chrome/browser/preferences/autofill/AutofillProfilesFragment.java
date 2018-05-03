@@ -12,6 +12,7 @@ import android.preference.PreferenceFragment;
 import android.support.annotation.VisibleForTesting;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.StrictModeContext;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
@@ -65,7 +66,9 @@ public class AutofillProfilesFragment
             }
             Bundle args = pref.getExtras();
             args.putString(AutofillAndPaymentsPreferences.AUTOFILL_GUID, profile.getGUID());
-            getPreferenceScreen().addPreference(pref);
+            try (StrictModeContext unused = StrictModeContext.allowDiskWrites()) {
+                getPreferenceScreen().addPreference(pref);
+            }
         }
 
         // Add 'Add address' button. Tap of it brings up address editor which allows users type in
@@ -80,7 +83,10 @@ public class AutofillProfilesFragment
         pref.setIcon(plusIcon);
         pref.setTitle(R.string.autofill_create_profile);
         pref.setKey(PREF_NEW_PROFILE); // For testing.
-        getPreferenceScreen().addPreference(pref);
+
+        try (StrictModeContext unused = StrictModeContext.allowDiskWrites()) {
+            getPreferenceScreen().addPreference(pref);
+        }
     }
 
     @Override

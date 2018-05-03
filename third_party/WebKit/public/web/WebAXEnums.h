@@ -38,7 +38,6 @@ namespace blink {
 // Enforced in AssertMatchingEnums.cpp.
 enum WebAXEvent {
   kWebAXEventActiveDescendantChanged,
-  kWebAXEventAlert,
   kWebAXEventAriaAttributeChanged,
   kWebAXEventAutocorrectionOccured,
   kWebAXEventBlur,
@@ -67,8 +66,6 @@ enum WebAXEvent {
   kWebAXEventSelectedTextChanged,
   kWebAXEventShow,
   kWebAXEventTextChanged,
-  kWebAXEventTextInserted,
-  kWebAXEventTextRemoved,
   kWebAXEventValueChanged
 };
 
@@ -95,7 +92,8 @@ enum WebAXRole {
   kWebAXRoleColorWell,
   kWebAXRoleColumnHeader,
   kWebAXRoleColumn,
-  kWebAXRoleComboBox,
+  kWebAXRoleComboBoxGrouping,
+  kWebAXRoleComboBoxMenuButton,
   kWebAXRoleComplementary,
   kWebAXRoleContentInfo,
   kWebAXRoleDate,
@@ -182,6 +180,7 @@ enum WebAXRole {
   kWebAXRoleTable,
   kWebAXRoleTerm,
   kWebAXRoleTextField,
+  kWebAXRoleTextFieldWithComboBox,
   kWebAXRoleTime,
   kWebAXRoleTimer,
   kWebAXRoleToggleButton,

@@ -23,12 +23,19 @@
     menuModel_.reset(
         new PermissionMenuModel(profile, url, permissionInfo, callback));
 
-    menuController_.reset([[MenuController alloc] initWithModel:menuModel_.get()
-                                         useWithPopUpButtonCell:NO]);
+    menuController_.reset([[MenuControllerCocoa alloc]
+                 initWithModel:menuModel_.get()
+        useWithPopUpButtonCell:NO]);
     [self setMenu:[menuController_ menu]];
     [self selectItemWithTag:permissionInfo.setting];
 
     [self setButtonTitle:permissionInfo profile:profile];
+
+    NSString* description = base::SysUTF16ToNSString(
+        PageInfoUI::PermissionTypeToUIString(permissionInfo.type));
+    [[self cell]
+        accessibilitySetOverrideValue:description
+                         forAttribute:NSAccessibilityDescriptionAttribute];
   }
   return self;
 }

@@ -4,7 +4,6 @@
 
 static_library("router") {
   public_deps = [
-    "mojo:media_controller",
     "//base:base",
     "//base:i18n",
     "//net:net",
@@ -15,12 +14,15 @@ static_library("router") {
   sources = [
     "discovery/media_sink_internal.cc",
     "discovery/media_sink_internal.h",
-    "discovery/media_sink_service.cc",
-    "discovery/media_sink_service.h",
+    "discovery/media_sink_service_base.cc",
+    "discovery/media_sink_service_base.h",
+    "discovery/media_sink_service_util.cc",
+    "discovery/media_sink_service_util.h",
     "issue.cc",
     "issue.h",
     "media_route.cc",
     "media_route.h",
+    "media_route_provider_helper.h",
     "media_sink.cc",
     "media_sink.h",
     "media_source.cc",
@@ -32,8 +34,4 @@ static_library("router") {
     "route_request_result.cc",
     "route_request_result.h",
   ]
-
-  if (!is_android) {
-    public_deps += [ "mojo:media_router" ]
-  }
 }

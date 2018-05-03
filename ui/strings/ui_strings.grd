@@ -616,9 +616,6 @@ need to be translated for each locale.-->
       <message name="IDS_MESSAGE_CENTER_NOTIFIER_DISABLE" desc="The menu entry for disabling a notifier from a notification.">
         Disable notifications from <ph name="notifier_name">$1<ex>Notification Galore!</ex></ph>
       </message>
-      <message name="IDS_MESSAGE_CENTER_SETTINGS" desc="The menu entry or button for visiting the appropriate settings page.">
-        Settings...
-      </message>
       <message name="IDS_MESSAGE_CENTER_EXPAND_NOTIFICATION" desc="The button for expanding the notification. By clicking this, the long message and the buttons of the notification are shown.">
         Expand notification
       </message>
@@ -637,6 +634,9 @@ need to be translated for each locale.-->
       <message name="IDS_MESSAGE_CENTER_NOTIFICATION_CHROMEOS_SYSTEM" desc="The label to describe the notification comes from ChromeOS system.">
         <ph name="IDS_SHORT_PRODUCT_OS_NAME">$1<ex>Chrome OS</ex></ph> system
       </message>
+      <message name="IDS_MESSAGE_CENTER_NOTIFICATION_INLINE_REPLY_PLACEHOLDER" desc="The default placeholder text for notification inline reply.">
+        Send message
+      </message>
       <message name="IDS_MESSAGE_NOTIFICATION_NOW_STRING_SHORTEST" desc="A string denoting the current point in time that should be as short as possible. Should be same as AndroidPlatform msgId 8912796667087856402. (frameworks/base/core/res/res/values/strings.xml:string:now_string_shortest)">
         now
       </message>
@@ -651,6 +651,15 @@ need to be translated for each locale.-->
       </message>
       <message name="IDS_MESSAGE_NOTIFICATION_DURATION_YEARS_SHORTEST" desc="Phrase describing a time duration using years that is as short as possible, preferrably one character. Should be same as AndroidPlatform msgId 7848711145196397042. (frameworks/base/core/res/res/values/strings.xml:plurals:duration_years_shortest) [ICU Syntax]">
         {YEARS, plural, =1 {1y} other {#y}}
+      </message>
+      <message name="IDS_MESSAGE_CENTER_BLOCK_ALL_NOTIFICATIONS" desc="The label for the radio button to block all the notifications from this notification origin.">
+        Block all notifications
+      </message>
+      <message name="IDS_MESSAGE_CENTER_DONT_BLOCK_NOTIFICATIONS" desc="The label for the radio button to allow all the notifications from this notification origin.">
+        Don't block
+      </message>
+      <message name="IDS_MESSAGE_CENTER_SETTINGS_DONE" desc="The caption of the button to finish inline notification settings.">
+        Done
       </message>
       <message name="IDS_MESSAGE_CENTER_CLOSE_NOTIFICATION_BUTTON_ACCESSIBLE_NAME" desc="The spoken feedback text for the close button in a notification. Usually 'button' is suffixed to this text automatically.">
         Notification close
@@ -698,9 +707,6 @@ need to be translated for each locale.-->
       <message name="IDS_APP_LIST_BACK" desc="The name of the button that goes to the previous screen in the launcher.">
         Back
       </message>
-      <message name="IDS_APP_LIST_ALL_APPS" desc="The text on the button that opens the app grid view in the app launcher.">
-        All Apps
-      </message>
       <message name="IDS_APP_LIST_FOLDER_NAME_PLACEHOLDER" desc="The placeholder text for app list folder name.">
         Unnamed Folder
       </message>
@@ -734,7 +740,7 @@ need to be translated for each locale.-->
       <message name="IDS_APP_LIST_PAGE_SWITCHER" desc="Tooltip for page switcher for each page in fullscreen view which shows all apps.">
         Page <ph name="selected_page">$1<ex>1</ex></ph> of <ph name="total_page_num">$2<ex>3</ex></ph>
       </message>
-      <message name="IDS_APP_ACCESSIBILITY_STAR_RATING_ARC" desc="Accessibility text for the start rating of a Play Store app.">
+      <message name="IDS_APP_ACCESSIBILITY_STAR_RATING_ARC" desc="Accessibility text for the star rating of a Play Store app.">
         Star rating <ph name="RATING_SCORE">$1<ex>5.0</ex></ph>
       </message>
 

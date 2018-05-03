@@ -44,17 +44,8 @@ BoxClipper::BoxClipper(const LayoutBox& box,
     return;
 
   if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-    const auto* object_properties =
-        box_.FirstFragment() ? box_.FirstFragment()->PaintProperties()
-                             : nullptr;
-    if (object_properties && object_properties->OverflowClip()) {
-      PaintChunkProperties properties(paint_info.context.GetPaintController()
-                                          .CurrentPaintChunkProperties());
-      properties.property_tree_state.SetClip(object_properties->OverflowClip());
-      scoped_clip_property_.emplace(
-          paint_info.context.GetPaintController(), box,
-          paint_info.DisplayItemTypeForClipping(), properties);
-    }
+    InitializeScopedClipProperty(paint_info.FragmentToPaint(box_), box,
+                                 paint_info);
     return;
   }
 

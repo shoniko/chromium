@@ -63,11 +63,12 @@ void RendererWebApplicationCacheHostImpl::OnCacheSelected(
 }
 
 void RendererWebApplicationCacheHostImpl::SetSubresourceFactory(
-    mojo::MessagePipeHandle loader_factory_pipe_handle) {
+    network::mojom::URLLoaderFactoryPtr url_loader_factory) {
   RenderFrameImpl* render_frame =
       RenderFrameImpl::FromRoutingID(frame_routing_id_);
-  if (render_frame)
-    render_frame->SetCustomURLLoadeFactory(loader_factory_pipe_handle);
+  if (render_frame) {
+    render_frame->SetCustomURLLoaderFactory(std::move(url_loader_factory));
+  }
 }
 
 RenderViewImpl* RendererWebApplicationCacheHostImpl::GetRenderView() {

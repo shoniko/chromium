@@ -50,7 +50,7 @@ V0InsertionPoint::V0InsertionPoint(const QualifiedName& tag_name,
   SetHasCustomStyleCallbacks();
 }
 
-V0InsertionPoint::~V0InsertionPoint() {}
+V0InsertionPoint::~V0InsertionPoint() = default;
 
 void V0InsertionPoint::SetDistributedNodes(
     DistributedNodes& distributed_nodes) {
@@ -109,7 +109,6 @@ void V0InsertionPoint::AttachLayoutTree(AttachContext& context) {
   // cause them to be inserted in the wrong place later. This also lets
   // distributed nodes benefit from the n^2 protection.
   AttachContext children_context(context);
-  children_context.resolved_style = nullptr;
 
   for (size_t i = 0; i < distributed_nodes_.size(); ++i) {
     Node* child = distributed_nodes_.at(i);
@@ -210,8 +209,11 @@ bool V0InsertionPoint::LayoutObjectIsNeeded(const ComputedStyle& style) {
 void V0InsertionPoint::ChildrenChanged(const ChildrenChange& change) {
   HTMLElement::ChildrenChanged(change);
   if (ShadowRoot* root = ContainingShadowRoot()) {
-    if (ElementShadow* root_owner = root->Owner())
-      root_owner->SetNeedsDistributionRecalc();
+    if (ElementShadow* root_owner = root->Owner()) {
+      if (!(RuntimeEnabledFeatures::IncrementalShadowDOMEnabled() &&
+            root_owner->IsV1()))
+        root_owner->SetNeedsDistributionRecalc();
+    }
   }
 }
 
@@ -221,7 +223,9 @@ Node::InsertionNotificationRequest V0InsertionPoint::InsertedInto(
   if (ShadowRoot* root = ContainingShadowRoot()) {
     if (!root->IsV1()) {
       if (ElementShadow* root_owner = root->Owner()) {
-        root_owner->SetNeedsDistributionRecalc();
+        if (!(RuntimeEnabledFeatures::IncrementalShadowDOMEnabled() &&
+              root_owner->IsV1()))
+          root_owner->SetNeedsDistributionRecalc();
         if (CanBeActive() && !registered_with_shadow_root_ &&
             insertion_point->GetTreeScope().RootNode() == root) {
           registered_with_shadow_root_ = true;
@@ -245,14 +249,12 @@ void V0InsertionPoint::RemovedFrom(ContainerNode* insertion_point) {
   if (!root)
     root = insertion_point->ContainingShadowRoot();
 
-  if (root) {
-    if (ElementShadow* root_owner = root->Owner())
-      root_owner->SetNeedsDistributionRecalc();
-  }
-
   // host can be null when removedFrom() is called from ElementShadow
   // destructor.
   ElementShadow* root_owner = root ? root->Owner() : nullptr;
+  if (root_owner && !(RuntimeEnabledFeatures::IncrementalShadowDOMEnabled() &&
+                      root_owner->IsV1()))
+    root_owner->SetNeedsDistributionRecalc();
 
   // Since this insertion point is no longer visible from the shadow subtree, it
   // need to clean itself up.

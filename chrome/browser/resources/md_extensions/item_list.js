@@ -6,7 +6,7 @@ cr.define('extensions', function() {
   const ItemList = Polymer({
     is: 'extensions-item-list',
 
-    behaviors: [CrContainerShadowBehavior],
+    behaviors: [CrContainerShadowBehavior, I18nBehavior],
 
     properties: {
       /** @type {!Array<!chrome.developerPrivate.ExtensionInfo>} */
@@ -25,31 +25,58 @@ cr.define('extensions', function() {
 
       isGuest: Boolean,
 
-      filter: String,
-
-      /** @private {!Array<!chrome.developerPrivate.ExtensionInfo>} */
-      shownApps_: {
-        type: Array,
-        computed: 'computeShownItems_(apps, apps.*, filter)',
+      filter: {
+        type: String,
       },
 
-      /** @private {!Array<!chrome.developerPrivate.ExtensionInfo>} */
-      shownExtensions_: {
-        type: Array,
-        computed: 'computeShownItems_(extensions, extensions.*, filter)',
-      }
+      /** @private */
+      computedFilter_: {
+        type: String,
+        computed: 'computeFilter_(filter)',
+        observer: 'announceSearchResults_',
+      },
+
+      /** @private */
+      shownExtensionsCount_: {
+        type: Number,
+        value: 0,
+      },
+
+      /** @private */
+      shownAppsCount_: {
+        type: Number,
+        value: 0,
+      },
     },
 
     /**
-     * Computes the list of items to be shown.
-     * @param {!Array<!chrome.developerPrivate.ExtensionInfo>} items
-     * @return {!Array<!chrome.developerPrivate.ExtensionInfo>}
+     * @param {string} id
+     * @return {?Element}
+     */
+    getDetailsButton: function(id) {
+      return this.$$(`#${id} /deep/ #details-button`);
+    },
+
+    /**
+     * @param {string} id
+     * @return {?Element}
+     */
+    getErrorsButton: function(id) {
+      return this.$$(`#${id} /deep/ #errors-button`);
+    },
+
+    /**
+     * Computes the filter function to be used for determining which items
+     * should be shown. A |null| value indicates that everything should be
+     * shown.
+     * return {?Function}
      * @private
      */
-    computeShownItems_: function(items) {
+    computeFilter_: function() {
       const formattedFilter = this.filter.trim().toLowerCase();
-      return items.filter(
-          item => item.name.toLowerCase().includes(formattedFilter));
+      return formattedFilter ?
+          i => i.name.toLowerCase().includes(formattedFilter) :
+          null;
     },
 
     /** @private */
@@ -61,7 +88,27 @@ cr.define('extensions', function() {
     /** @private */
     shouldShowEmptySearchMessage_: function() {
       return !this.isGuest && !this.shouldShowEmptyItemsMessage_() &&
-          this.shownApps_.length === 0 && this.shownExtensions_.length === 0;
+          this.shownAppsCount_ === 0 && this.shownExtensionsCount_ === 0;
+    },
+
+    /** @private */
+    onNoExtensionsTap_: function(e) {
+      if (e.target.tagName == 'A')
+        chrome.metricsPrivate.recordUserAction('Options_GetMoreExtensions');
+    },
+
+    /** @private */
+    announceSearchResults_: function() {
+      if (this.computedFilter_) {
+        Polymer.IronA11yAnnouncer.requestAvailability();
+        this.async(() => {  // Async to allow list to update.
+          this.fire('iron-announce', {
+            text: this.shouldShowEmptySearchMessage_() ?
+                this.i18n('noSearchResults') :
+                this.i18n('searchResults', this.filter),
+          });
+        });
+      }
     },
   });
 

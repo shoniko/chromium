@@ -27,6 +27,8 @@
 #ifndef Image_h
 #define Image_h
 
+#include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "platform/PlatformExport.h"
 #include "platform/SharedBuffer.h"
 #include "platform/geometry/IntRect.h"
@@ -38,9 +40,8 @@
 #include "platform/graphics/paint/PaintRecord.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
-#include "platform/wtf/WeakPtr.h"
+#include "platform/wtf/Time.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
 class SkMatrix;
@@ -74,7 +75,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
  public:
   virtual ~Image();
 
-  static RefPtr<Image> LoadPlatformResource(const char* name);
+  static scoped_refptr<Image> LoadPlatformResource(const char* name);
   static bool SupportsType(const String&);
 
   virtual bool IsSVGImage() const { return false; }
@@ -125,7 +126,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
   // Otherwise:
   //   Image loading is completed synchronously.
   //   ImageResourceObserver::AsyncLoadCompleted() is not called.
-  virtual SizeAvailability SetData(RefPtr<SharedBuffer> data,
+  virtual SizeAvailability SetData(scoped_refptr<SharedBuffer> data,
                                    bool all_data_received);
   virtual SizeAvailability DataChanged(bool /*all_data_received*/) {
     return kSizeUnavailable;
@@ -136,7 +137,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
 
   virtual void DestroyDecodedData() = 0;
 
-  virtual RefPtr<SharedBuffer> Data() { return encoded_image_data_; }
+  virtual scoped_refptr<SharedBuffer> Data() { return encoded_image_data_; }
 
   // Animation begins whenever someone draws the image, so startAnimation() is
   // not normally called. It will automatically pause once all observers no
@@ -152,7 +153,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
   virtual ImageAnimationPolicy AnimationPolicy() {
     return kImageAnimationPolicyAllowed;
   }
-  virtual void AdvanceTime(double delta_time_in_seconds) {}
+  virtual void AdvanceTime(TimeDelta delta) {}
 
   // Advances an animated image. For BitmapImage (e.g., animated gifs) this
   // will advance to the next frame. For SVGImage, this will trigger an
@@ -172,7 +173,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
 
   enum TileRule { kStretchTile, kRoundTile, kSpaceTile, kRepeatTile };
 
-  virtual RefPtr<Image> ImageForDefaultFrame();
+  virtual scoped_refptr<Image> ImageForDefaultFrame();
 
   enum ImageDecodingMode {
     // No preference specified.
@@ -217,14 +218,14 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
 
   virtual bool ApplyShader(PaintFlags&, const SkMatrix& local_matrix);
 
-  // Use ContextProvider() for immediate use only, use ContextProviderWrapper()
-  // to obtain a retainable reference.
-  // Note: Implemented only in sub-classes that use the GPU.
+  // Use ContextProvider() for immediate use only, use
+  // ContextProviderWrapper() to obtain a retainable reference. Note:
+  // Implemented only in sub-classes that use the GPU.
   virtual WebGraphicsContext3DProvider* ContextProvider() const {
     return nullptr;
   }
-  virtual WeakPtr<WebGraphicsContext3DProviderWrapper> ContextProviderWrapper()
-      const {
+  virtual base::WeakPtr<WebGraphicsContext3DProviderWrapper>
+  ContextProviderWrapper() const {
     return nullptr;
   }
 
@@ -269,7 +270,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
   PaintImage::Id paint_image_id() const { return stable_image_id_; }
 
  protected:
-  Image(ImageObserver* = 0, bool is_multipart = false);
+  Image(ImageObserver* = nullptr, bool is_multipart = false);
 
   void DrawTiledBackground(GraphicsContext&,
                            const FloatRect& dst_rect,
@@ -302,7 +303,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
 
  private:
   bool image_observer_disabled_;
-  RefPtr<SharedBuffer> encoded_image_data_;
+  scoped_refptr<SharedBuffer> encoded_image_data_;
   // TODO(Oilpan): consider having Image on the Oilpan heap and
   // turn this into a Member<>.
   //

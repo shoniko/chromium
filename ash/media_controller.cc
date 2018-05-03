@@ -6,9 +6,9 @@
 
 namespace ash {
 
-MediaController::MediaController() {}
+MediaController::MediaController() = default;
 
-MediaController::~MediaController() {}
+MediaController::~MediaController() = default;
 
 void MediaController::BindRequest(mojom::MediaControllerRequest request) {
   bindings_.AddBinding(this, std::move(request));

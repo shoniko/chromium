@@ -41,6 +41,7 @@
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/text_input_test_utils.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/app_window/app_window.h"
@@ -52,7 +53,9 @@
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/range/range.h"
+#include "ui/touch_selection/touch_selection_menu_runner.h"
 
 using extensions::AppWindow;
 using extensions::ExtensionsAPIClient;
@@ -103,6 +106,43 @@ class BrowserClientForTextInputClientMac : public ChromeContentBrowserClient {
       filters_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserClientForTextInputClientMac);
+};
+
+// This class observes the RenderWidgetHostViewCocoa corresponding to the outer
+// most WebContents provided for newly added subviews. The added subview
+// corresponds to a NSPopUpButtonCell which will be removed shortly after being
+// shown.
+class NewSubViewAddedObserver : content::RenderWidgetHostViewCocoaObserver {
+ public:
+  explicit NewSubViewAddedObserver(content::WebContents* web_contents)
+      : content::RenderWidgetHostViewCocoaObserver(web_contents) {}
+
+  ~NewSubViewAddedObserver() override {}
+
+  void WaitForNextSubView() {
+    if (did_receive_rect_)
+      return;
+
+    run_loop_.reset(new base::RunLoop());
+    run_loop_->Run();
+  }
+
+  const gfx::Rect& view_bounds_in_screen() const { return bounds_; }
+
+ private:
+  void DidAddSubviewWillBeDismissed(
+      const gfx::Rect& bounds_in_root_view) override {
+    did_receive_rect_ = true;
+    bounds_ = bounds_in_root_view;
+    if (run_loop_)
+      run_loop_->Quit();
+  }
+
+  bool did_receive_rect_ = false;
+  gfx::Rect bounds_;
+  std::unique_ptr<base::RunLoop> run_loop_;
+
+  DISALLOW_COPY_AND_ASSIGN(NewSubViewAddedObserver);
 };
 #endif  // OS_MACOSX
 
@@ -320,7 +360,7 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
             embedder_web_contents();
 
     gfx::Rect offset = embedder_web_contents_->GetContainerBounds();
-    corner_ = gfx::Point(offset.x(), offset.y());
+    corner_ = offset.origin();
 
     const testing::TestInfo* const test_info =
             testing::UnitTest::GetInstance()->current_test_info();
@@ -1011,14 +1051,7 @@ IN_PROC_BROWSER_TEST_P(WebViewNewWindowInteractiveTest, NewWindow_NoName) {
              NEEDS_TEST_SERVER);
 }
 
-// Flaky on win_chromium_rel_ng. https://crbug.com/504054
-#if defined(OS_WIN)
-#define MAYBE_NewWindow_Redirect DISABLED_NewWindow_Redirect
-#else
-#define MAYBE_NewWindow_Redirect NewWindow_Redirect
-#endif
-IN_PROC_BROWSER_TEST_P(WebViewNewWindowInteractiveTest,
-                       MAYBE_NewWindow_Redirect) {
+IN_PROC_BROWSER_TEST_P(WebViewNewWindowInteractiveTest, NewWindow_Redirect) {
   TestHelper("testNewWindowRedirect",
              "web_view/newwindow",
              NEEDS_TEST_SERVER);
@@ -1264,14 +1297,7 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, ExecuteCode) {
       "platform_apps/web_view/common", "execute_code")) << message_;
 }
 
-// Causes problems on windows: http://crbug.com/544037
-#if defined(OS_WIN)
-#define MAYBE_PopupPositioningBasic DISABLED_PopupPositioningBasic
-#else
-#define MAYBE_PopupPositioningBasic PopupPositioningBasic
-#endif
-IN_PROC_BROWSER_TEST_F(WebViewPopupInteractiveTest,
-                       MAYBE_PopupPositioningBasic) {
+IN_PROC_BROWSER_TEST_F(WebViewPopupInteractiveTest, PopupPositioningBasic) {
   TestHelper("testBasic", "web_view/popup_positioning", NO_TEST_SERVER);
   ASSERT_TRUE(guest_web_contents());
   PopupTestHelper(gfx::Point());
@@ -1281,8 +1307,7 @@ IN_PROC_BROWSER_TEST_F(WebViewPopupInteractiveTest,
 }
 
 // Flaky on ChromeOS and Linux: http://crbug.com/526886
-// Causes problems on windows: http://crbug.com/544998
-#if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_LINUX)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 #define MAYBE_PopupPositioningMoved DISABLED_PopupPositioningMoved
 #else
 #define MAYBE_PopupPositioningMoved PopupPositioningMoved
@@ -1333,8 +1358,15 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, Navigation_BackForwardKeys) {
 
 // Trips over a DCHECK in content::MouseLockDispatcher::OnLockMouseACK; see
 // https://crbug.com/761783.
+#if defined(OS_WIN)
+#define MAYBE_PointerLock_PointerLockLostWithFocus \
+  PointerLock_PointerLockLostWithFocus
+#else
+#define MAYBE_PointerLock_PointerLockLostWithFocus \
+  DISABLED_PointerLock_PointerLockLostWithFocus
+#endif
 IN_PROC_BROWSER_TEST_P(WebViewPointerLockInteractiveTest,
-                       DISABLED_PointerLock_PointerLockLostWithFocus) {
+                       MAYBE_PointerLock_PointerLockLostWithFocus) {
   TestHelper("testPointerLockLostWithFocus",
              "web_view/pointerlock",
              NO_TEST_SERVER);
@@ -1348,28 +1380,56 @@ IN_PROC_BROWSER_TEST_P(WebViewPointerLockInteractiveTest,
 //     transitionedWindowFrame],"
 // See similar bug: http://crbug.com/169820.
 //
-// In addition to the above, these tests are flaky on many platforms:
+// In addition to the above, these tests are flaky on some platforms:
 // http://crbug.com/468660
+#if defined(OS_WIN)
+#define MAYBE_FullscreenAllow_EmbedderHasPermission \
+  FullscreenAllow_EmbedderHasPermission
+#else
+#define MAYBE_FullscreenAllow_EmbedderHasPermission \
+  DISABLED_FullscreenAllow_EmbedderHasPermission
+#endif
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest,
-                       DISABLED_FullscreenAllow_EmbedderHasPermission) {
+                       MAYBE_FullscreenAllow_EmbedderHasPermission) {
   FullscreenTestHelper("testFullscreenAllow",
                        "web_view/fullscreen/embedder_has_permission");
 }
 
+#if defined(OS_WIN)
+#define MAYBE_FullscreenDeny_EmbedderHasPermission \
+  FullscreenDeny_EmbedderHasPermission
+#else
+#define MAYBE_FullscreenDeny_EmbedderHasPermission \
+  DISABLED_FullscreenDeny_EmbedderHasPermission
+#endif
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest,
-                       DISABLED_FullscreenDeny_EmbedderHasPermission) {
+                       MAYBE_FullscreenDeny_EmbedderHasPermission) {
   FullscreenTestHelper("testFullscreenDeny",
                        "web_view/fullscreen/embedder_has_permission");
 }
 
+#if defined(OS_WIN)
+#define MAYBE_FullscreenAllow_EmbedderHasNoPermission \
+  FullscreenAllow_EmbedderHasNoPermission
+#else
+#define MAYBE_FullscreenAllow_EmbedderHasNoPermission \
+  DISABLED_FullscreenAllow_EmbedderHasNoPermission
+#endif
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest,
-                       DISABLED_FullscreenAllow_EmbedderHasNoPermission) {
+                       MAYBE_FullscreenAllow_EmbedderHasNoPermission) {
   FullscreenTestHelper("testFullscreenAllow",
                        "web_view/fullscreen/embedder_has_no_permission");
 }
 
+#if defined(OS_WIN)
+#define MAYBE_FullscreenDeny_EmbedderHasNoPermission \
+  FullscreenDeny_EmbedderHasNoPermission
+#else
+#define MAYBE_FullscreenDeny_EmbedderHasNoPermission \
+  DISABLED_FullscreenDeny_EmbedderHasNoPermission
+#endif
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest,
-                       DISABLED_FullscreenDeny_EmbedderHasNoPermission) {
+                       MAYBE_FullscreenDeny_EmbedderHasNoPermission) {
   FullscreenTestHelper("testFullscreenDeny",
                        "web_view/fullscreen/embedder_has_no_permission");
 }
@@ -1524,6 +1584,65 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, DISABLED_Focus_InputMethod) {
     // Wait for the next step to complete.
     ASSERT_TRUE(next_step_listener.WaitUntilSatisfied());
   }
+}
+#endif
+
+#if defined(OS_LINUX)  // TODO(https://crbug.com/801552): Flaky.
+#define MAYBE_LongPressSelection DISABLED_LongPressSelection
+#else
+#define MAYBE_LongPressSelection LongPressSelection
+#endif
+#if !defined(OS_MACOSX)
+IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, MAYBE_LongPressSelection) {
+  if (!base::FeatureList::IsEnabled(::features::kGuestViewCrossProcessFrames))
+    return;
+
+  SetupTest("web_view/text_selection",
+            "/extensions/platform_apps/web_view/text_selection/guest.html");
+  ASSERT_TRUE(guest_web_contents());
+  ASSERT_TRUE(embedder_web_contents());
+  ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(GetPlatformAppWindow()));
+
+  auto filter = std::make_unique<content::InputMsgWatcher>(
+      guest_web_contents()->GetRenderWidgetHostView()->GetRenderWidgetHost(),
+      blink::WebInputEvent::kGestureLongPress);
+
+  // Wait for guest to load (without this the events never reach the guest).
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner =
+      new content::MessageLoopRunner;
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, message_loop_runner->QuitClosure(),
+      base::TimeDelta::FromMilliseconds(200));
+  message_loop_runner->Run();
+
+  gfx::Rect guest_rect = guest_web_contents()->GetContainerBounds();
+  gfx::Point embedder_origin =
+      embedder_web_contents()->GetContainerBounds().origin();
+  guest_rect.Offset(-embedder_origin.x(), -embedder_origin.y());
+
+  // Mouse click is necessary for focus.
+  content::SimulateMouseClickAt(embedder_web_contents(), 0,
+                                blink::WebMouseEvent::Button::kLeft,
+                                guest_rect.CenterPoint());
+
+  content::SimulateLongPressAt(embedder_web_contents(),
+                               guest_rect.CenterPoint());
+  EXPECT_EQ(content::INPUT_EVENT_ACK_STATE_CONSUMED,
+            filter->GetAckStateWaitIfNecessary());
+
+  // Give enough time for the quick menu to fire.
+  message_loop_runner = new content::MessageLoopRunner;
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, message_loop_runner->QuitClosure(),
+      base::TimeDelta::FromMilliseconds(200));
+  message_loop_runner->Run();
+
+// TODO: Fix quick menu opening on Windows.
+#if !defined(OS_WIN)
+  EXPECT_TRUE(ui::TouchSelectionMenuRunner::GetInstance()->IsRunning());
+#endif
+
+  EXPECT_FALSE(guest_web_contents()->IsShowingContextMenu());
 }
 #endif
 
@@ -1874,3 +1993,56 @@ IN_PROC_BROWSER_TEST_P(WebViewImeInteractiveTest, CompositionRangeUpdates) {
       gfx::Range::InvalidRange(), 0, 3);
   observer.WaitForCompositionRangeLength(3U);
 }
+
+#if defined(OS_MACOSX)
+// This test verifies that drop-down lists appear correctly inside OOPIF-based
+// webviews which have offset inside embedder. This is a test for all guest
+// views as the logic for showing such popups is inside content/ layer. For more
+// context see https://crbug.com/772840.
+IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest,
+                       DropDownPopupInCorrectPosition) {
+  // This test only works with OOPIF-based guests, since BrowserPlugin guests
+  // don't keep the WebContentsTree.
+  if (!base::FeatureList::IsEnabled(::features::kGuestViewCrossProcessFrames))
+    return;
+
+  TestHelper("testSelectPopupPositionInMac", "web_view/shim", NO_TEST_SERVER);
+  ASSERT_TRUE(guest_web_contents_);
+
+  // This is set in javascript.
+  const float distance_from_root_view_origin = 250.0;
+  // Verify that the view is offset inside root view as expected.
+  content::RenderWidgetHostView* guest_rwhv =
+      guest_web_contents_->GetRenderWidgetHostView();
+  while (guest_rwhv->TransformPointToRootCoordSpace(gfx::Point())
+             .OffsetFromOrigin()
+             .Length() < distance_from_root_view_origin) {
+    base::RunLoop run_loop;
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
+    run_loop.Run();
+  }
+
+  // Now trigger the popup and wait until it is displayed. The popup will get
+  // dismissed after being shown.
+  NewSubViewAddedObserver popup_observer(embedder_web_contents_);
+  // Now send a mouse click and wait until the <select> tag is focused.
+  SimulateRWHMouseClick(guest_rwhv->GetRenderWidgetHost(),
+                        blink::WebMouseEvent::Button::kLeft, 5, 5);
+  popup_observer.WaitForNextSubView();
+
+  // Verify the popup bounds intersect with those of the guest. Since the popup
+  // is relatively small (the width is determined by the <select> element's
+  // width and the hight is a factor of font-size and number of items), the
+  // intersection alone is a good indication the popup is shown properly inside
+  // the screen.
+  gfx::Rect guest_bounds_in_embedder(
+      guest_rwhv->TransformPointToRootCoordSpace(gfx::Point()),
+      guest_rwhv->GetViewBounds().size());
+  EXPECT_TRUE(guest_bounds_in_embedder.Intersects(
+      popup_observer.view_bounds_in_screen()))
+      << "Guest bounds:" << guest_bounds_in_embedder.ToString()
+      << " do not intersect with popup bounds:"
+      << popup_observer.view_bounds_in_screen().ToString();
+}
+#endif

@@ -13,11 +13,10 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "chrome/browser/ui/passwords/credential_provider_interface.h"
-#include "chrome/browser/ui/passwords/password_access_authenticator.h"
-#include "chrome/browser/ui/passwords/password_manager_porter.h"
+#include "components/password_manager/core/browser/password_list_sorter.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
+#include "components/password_manager/core/browser/ui/credential_provider_interface.h"
 #include "components/prefs/pref_member.h"
 #include "components/undo/undo_manager.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -26,12 +25,6 @@ namespace autofill {
 struct PasswordForm;
 }
 
-// Multimap from sort key to password forms.
-using DuplicatesMap =
-    std::multimap<std::string, std::unique_ptr<autofill::PasswordForm>>;
-
-enum class PasswordEntryType { SAVED, BLACKLISTED };
-
 class PasswordUIView;
 
 // Contains the common logic used by a PasswordUIView to
@@ -39,7 +32,7 @@ class PasswordUIView;
 // PasswordStore operations and updates the view on PasswordStore changes.
 class PasswordManagerPresenter
     : public password_manager::PasswordStore::Observer,
-      public CredentialProviderInterface {
+      public password_manager::CredentialProviderInterface {
  public:
   // |password_view| the UI view that owns this presenter, must not be NULL.
   explicit PasswordManagerPresenter(PasswordUIView* password_view);
@@ -57,7 +50,7 @@ class PasswordManagerPresenter
   // Gets the password entry at |index|.
   const autofill::PasswordForm* GetPassword(size_t index);
 
-  // CredentialProviderInterface:
+  // password::manager::CredentialProviderInterface:
   std::vector<std::unique_ptr<autofill::PasswordForm>> GetAllPasswords()
       override;
 
@@ -79,14 +72,6 @@ class PasswordManagerPresenter
   // |index| The index of the entry.
   void RequestShowPassword(size_t index);
 
-  // Trigger the password import procedure, allowing the user to load passwords
-  // from a file.
-  void ImportPasswords(content::WebContents* web_contents);
-
-  // Trigger the password export procedure, allowing the user to save all their
-  // passwords to a file.
-  void ExportPasswords(content::WebContents* web_contents);
-
   // Wrapper around |PasswordStore::AddLogin| that adds the corresponding undo
   // action to |undo_manager_|.
   void AddLogin(const autofill::PasswordForm& form);
@@ -95,31 +80,12 @@ class PasswordManagerPresenter
   // undo action to |undo_manager_|.
   void RemoveLogin(const autofill::PasswordForm& form);
 
-  // Use this in tests to mock the OS-level reauthentication.
-  void SetOsReauthCallForTesting(
-      base::RepeatingCallback<bool()> os_reauth_call);
-
  private:
   friend class PasswordManagerPresenterTest;
-
-  // Triggers an OS-dependent UI to present OS account login challenge and
-  // returns true if the user is passed that challenge.
-  bool OsReauthCall();
 
   // Sets the password and exception list of the UI view.
   void SetPasswordList();
   void SetPasswordExceptionList();
-
-  // Sort entries of |list| based on sort key. The key is the concatenation of
-  // origin, entry type (non-Android credential, Android w/ affiliated web realm
-  // or Android w/o affiliated web realm). If |entry_type == SAVED|,
-  // username, password and federation are also included in sort key. If there
-  // are several forms with the same key, all such forms but the first one are
-  // stored in |duplicates| instead of |list|.
-  void SortEntriesAndHideDuplicates(
-      std::vector<std::unique_ptr<autofill::PasswordForm>>* list,
-      DuplicatesMap* duplicates,
-      PasswordEntryType entry_type);
 
   // Returns the password store associated with the currently active profile.
   password_manager::PasswordStore* GetPasswordStore();
@@ -169,8 +135,8 @@ class PasswordManagerPresenter
 
   std::vector<std::unique_ptr<autofill::PasswordForm>> password_list_;
   std::vector<std::unique_ptr<autofill::PasswordForm>> password_exception_list_;
-  DuplicatesMap password_duplicates_;
-  DuplicatesMap password_exception_duplicates_;
+  password_manager::DuplicatesMap password_duplicates_;
+  password_manager::DuplicatesMap password_exception_duplicates_;
 
   UndoManager undo_manager_;
 
@@ -179,10 +145,6 @@ class PasswordManagerPresenter
 
   // UI view that owns this presenter.
   PasswordUIView* password_view_;
-
-  PasswordManagerPorter password_manager_porter_;
-
-  PasswordAccessAuthenticator password_access_authenticator_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerPresenter);
 };

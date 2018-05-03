@@ -5,6 +5,7 @@
 #include "core/layout/ng/ng_layout_input_node.h"
 
 #include "core/layout/LayoutReplaced.h"
+#include "core/layout/LayoutView.h"
 #include "core/layout/MinMaxSize.h"
 #include "core/layout/ng/geometry/ng_logical_size.h"
 #include "core/layout/ng/inline/ng_inline_node.h"
@@ -63,6 +64,10 @@ bool NGLayoutInputNode::IsInline() const {
 
 bool NGLayoutInputNode::IsBlock() const {
   return type_ == kBlock;
+}
+
+bool NGLayoutInputNode::IsColumnSpanAll() const {
+  return IsBlock() && box_->IsColumnSpanAll();
 }
 
 bool NGLayoutInputNode::IsFloating() const {
@@ -124,7 +129,7 @@ void NGLayoutInputNode::IntrinsicSize(
   *default_intrinsic_size =
       NGLogicalSize(box_intrinsic_size.Width(), box_intrinsic_size.Height());
 
-  LayoutReplaced::IntrinsicSizingInfo legacy_sizing_info;
+  IntrinsicSizingInfo legacy_sizing_info;
 
   ToLayoutReplaced(box_)->ComputeIntrinsicSizingInfo(legacy_sizing_info);
   if (legacy_sizing_info.has_width)
@@ -139,6 +144,16 @@ void NGLayoutInputNode::IntrinsicSize(
 NGLayoutInputNode NGLayoutInputNode::NextSibling() {
   return IsInline() ? ToNGInlineNode(*this).NextSibling()
                     : ToNGBlockNode(*this).NextSibling();
+}
+
+Document& NGLayoutInputNode::GetDocument() const {
+  return box_->GetDocument();
+}
+
+NGPhysicalSize NGLayoutInputNode::InitialContainingBlockSize() const {
+  LayoutView* view = GetDocument().GetLayoutView();
+  FloatSize size = view->ViewportSizeForViewportUnits();
+  return NGPhysicalSize{LayoutUnit(size.Width()), LayoutUnit(size.Height())};
 }
 
 LayoutObject* NGLayoutInputNode::GetLayoutObject() const {
@@ -157,7 +172,7 @@ String NGLayoutInputNode::ToString() const {
 #ifndef NDEBUG
 void NGLayoutInputNode::ShowNodeTree() const {
   StringBuilder string_builder;
-  string_builder.Append("\n.:: LayoutNG Node Tree ::.\n\n");
+  string_builder.Append(".:: LayoutNG Node Tree ::.\n");
   AppendNodeToString(*this, &string_builder);
   fprintf(stderr, "%s\n", string_builder.ToString().Utf8().data());
 }

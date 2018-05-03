@@ -142,6 +142,10 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
 
 @synthesize shouldMonitorDataSource = _shouldMonitorDataSource;
 
++ (NSString*)accessibilityIdentifier {
+  return @"ReadingListCollectionView";
+}
+
 #pragma mark lifecycle
 
 - (instancetype)initWithDataSource:(id<ReadingListDataSource>)dataSource
@@ -183,7 +187,8 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
   [super viewDidLoad];
 
   self.title = l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_READING_LIST);
-
+  self.collectionView.accessibilityIdentifier =
+      [ReadingListCollectionViewController accessibilityIdentifier];
   // Add "Done" button.
   UIBarButtonItem* doneItem = [[UIBarButtonItem alloc]
       initWithTitle:l10n_util::GetNSString(IDS_IOS_READING_LIST_DONE_BUTTON)
@@ -203,6 +208,11 @@ typedef void (^EntryUpdater)(CollectionViewItem* item);
                   action:@selector(handleLongPress:)];
   longPressRecognizer.delegate = self;
   [self.collectionView addGestureRecognizer:longPressRecognizer];
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  [_toolbar updateHeight];
 }
 
 #pragma mark - UICollectionViewDelegate

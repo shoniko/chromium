@@ -4,9 +4,9 @@
 
 #include "chrome/browser/predictors/loading_predictor.h"
 
+#include <algorithm>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/predictors/loading_data_collector.h"
 #include "chrome/browser/predictors/loading_stats_collector.h"
@@ -26,16 +26,23 @@ const base::TimeDelta kMinDelayBetweenPreconnectRequests =
 bool AddInitialUrlToPreconnectPrediction(const GURL& initial_url,
                                          PreconnectPrediction* prediction) {
   GURL initial_origin = initial_url.GetOrigin();
+  // Open minimum 2 sockets to the main frame host to speed up the loading if a
+  // main page has a redirect to the same host. This is because there can be a
+  // race between reading the server redirect response and sending a new request
+  // while the connection is still in use.
+  static const int kMinSockets = 2;
 
-  if ((prediction->preconnect_origins.empty() ||
-       prediction->preconnect_origins.front() != initial_origin) &&
-      initial_origin.is_valid() && initial_origin.SchemeIsHTTPOrHTTPS()) {
-    prediction->preconnect_origins.emplace(
-        prediction->preconnect_origins.begin(), initial_origin);
+  if (!prediction->requests.empty() &&
+      prediction->requests.front().origin == initial_origin) {
+    prediction->requests.front().num_sockets =
+        std::max(prediction->requests.front().num_sockets, kMinSockets);
+  } else if (initial_origin.is_valid() &&
+             initial_origin.SchemeIsHTTPOrHTTPS()) {
+    prediction->requests.emplace(prediction->requests.begin(), initial_origin,
+                                 kMinSockets);
   }
 
-  return !prediction->preconnect_origins.empty() ||
-         !prediction->preresolve_hosts.empty();
+  return !prediction->requests.empty();
 }
 
 }  // namespace
@@ -45,11 +52,11 @@ LoadingPredictor::LoadingPredictor(const LoadingPredictorConfig& config,
     : config_(config),
       profile_(profile),
       resource_prefetch_predictor_(
-          base::MakeUnique<ResourcePrefetchPredictor>(config, profile)),
-      stats_collector_(base::MakeUnique<LoadingStatsCollector>(
+          std::make_unique<ResourcePrefetchPredictor>(config, profile)),
+      stats_collector_(std::make_unique<LoadingStatsCollector>(
           resource_prefetch_predictor_.get(),
           config)),
-      loading_data_collector_(base::MakeUnique<LoadingDataCollector>(
+      loading_data_collector_(std::make_unique<LoadingDataCollector>(
           resource_prefetch_predictor_.get(),
           stats_collector_.get(),
           config)),
@@ -95,18 +102,13 @@ void LoadingPredictor::PrepareForPageLoad(const GURL& url,
     has_preconnect_prediction =
         resource_prefetch_predictor_->PredictPreconnectOrigins(url,
                                                                &prediction);
-    // For all but NAVIGATION hint origins it makes sense to preconnect to the
-    // |url| even if the predictor has no prediction. In the NAVIGATION case
-    // it makes less sense because the connection will follow shortly after
-    // the hint with a higher priority.
-    if (origin != HintOrigin::NAVIGATION) {
-      has_preconnect_prediction =
-          AddInitialUrlToPreconnectPrediction(url, &prediction);
-    }
+    // Try to preconnect to the |url| even if the predictor has no
+    // prediction.
+    has_preconnect_prediction =
+        AddInitialUrlToPreconnectPrediction(url, &prediction);
     if (has_preconnect_prediction &&
         config_.IsPreconnectEnabledForOrigin(profile_, origin)) {
-      MaybeAddPreconnect(url, prediction.preconnect_origins,
-                         prediction.preresolve_hosts, origin);
+      MaybeAddPreconnect(url, std::move(prediction.requests), origin);
       hint_activated = true;
     }
   }
@@ -145,7 +147,7 @@ PreconnectManager* LoadingPredictor::preconnect_manager() {
 
   if (!preconnect_manager_ &&
       config_.IsPreconnectEnabledForSomeOrigin(profile_)) {
-    preconnect_manager_ = base::MakeUnique<PreconnectManager>(
+    preconnect_manager_ = std::make_unique<PreconnectManager>(
         GetWeakPtr(), profile_->GetRequestContext());
   }
 
@@ -269,7 +271,7 @@ void LoadingPredictor::MaybeAddPrefetch(const GURL& url,
   if (prefetches_.find(host) != prefetches_.end())
     return;
 
-  auto prefetcher = base::MakeUnique<ResourcePrefetcher>(
+  auto prefetcher = std::make_unique<ResourcePrefetcher>(
       GetWeakPtr(), profile_->GetRequestContext(),
       config_.max_prefetches_inflight_per_navigation,
       config_.max_prefetches_inflight_per_host_per_navigation, url, urls);
@@ -336,15 +338,14 @@ void LoadingPredictor::ResourcePrefetcherFinished(
 
 void LoadingPredictor::MaybeAddPreconnect(
     const GURL& url,
-    const std::vector<GURL>& preconnect_origins,
-    const std::vector<GURL>& preresolve_hosts,
+    std::vector<PreconnectRequest>&& requests,
     HintOrigin origin) {
   DCHECK(!shutdown_);
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
       base::BindOnce(&PreconnectManager::Start,
                      base::Unretained(preconnect_manager()), url,
-                     preconnect_origins, preresolve_hosts));
+                     std::move(requests)));
 }
 
 void LoadingPredictor::MaybeRemovePreconnect(const GURL& url) {

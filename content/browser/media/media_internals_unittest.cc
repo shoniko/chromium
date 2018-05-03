@@ -51,7 +51,7 @@ class MediaInternalsTestBase {
         utf8_update.substr(first_brace, last_brace - first_brace + 1));
     CHECK(output_value);
 
-    base::DictionaryValue* output_dict = NULL;
+    base::DictionaryValue* output_dict = nullptr;
     CHECK(output_value->GetAsDictionary(&output_dict));
     update_data_.MergeDictionary(output_dict);
   }
@@ -156,7 +156,7 @@ TEST_F(MediaInternalsVideoCaptureDeviceTest,
   const float kFrameRate = 30.0f;
   const gfx::Size kFrameSize(1280, 720);
   const media::VideoPixelFormat kPixelFormat = media::PIXEL_FORMAT_I420;
-  const media::VideoPixelStorage kPixelStorage = media::PIXEL_STORAGE_CPU;
+  const media::VideoPixelStorage kPixelStorage = media::VideoPixelStorage::CPU;
   const media::VideoCaptureFormat capture_format(kFrameSize, kFrameRate,
                                                  kPixelFormat, kPixelStorage);
   const std::string expected_string = base::StringPrintf(

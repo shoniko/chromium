@@ -40,13 +40,14 @@
 #include "core/html/media/HTMLVideoElement.h"
 #include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/LayoutVideo.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "core/page/scrolling/TopDocumentRootScrollerController.h"
 #include "core/paint/FramePainter.h"
 #include "core/paint/ObjectPaintInvalidator.h"
+#include "core/paint/ScrollableAreaPainter.h"
 #include "core/paint/TransformRecorder.h"
 #include "core/paint/compositing/CompositedLayerMapping.h"
 #include "core/paint/compositing/CompositingInputsUpdater.h"
@@ -62,7 +63,6 @@
 #include "platform/graphics/paint/CullRect.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintController.h"
-#include "platform/graphics/paint/PaintRecordBuilder.h"
 #include "platform/graphics/paint/TransformDisplayItem.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/json/JSONValues.h"
@@ -219,9 +219,9 @@ void PaintLayerCompositor::UpdateIfNeededRecursiveInternal(
     // the middle of frame detach.
     // TODO(bbudge) Remove this check when trusted Pepper plugins are gone.
     if (local_frame->GetDocument()->IsActive() &&
-        !local_frame->ContentLayoutItem().IsNull()) {
-      local_frame->ContentLayoutItem()
-          .Compositor()
+        local_frame->ContentLayoutObject()) {
+      local_frame->ContentLayoutObject()
+          ->Compositor()
           ->UpdateIfNeededRecursiveInternal(target_state,
                                             compositing_reasons_stats);
     }
@@ -272,10 +272,10 @@ void PaintLayerCompositor::UpdateIfNeededRecursiveInternal(
       continue;
     LocalFrame* local_frame = ToLocalFrame(child);
     if (local_frame->ShouldThrottleRendering() ||
-        local_frame->ContentLayoutItem().IsNull())
+        !local_frame->ContentLayoutObject())
       continue;
-    local_frame->ContentLayoutItem()
-        .Compositor()
+    local_frame->ContentLayoutObject()
+        ->Compositor()
         ->AssertNoUnresolvedDirtyBits();
   }
 #endif
@@ -285,7 +285,7 @@ void PaintLayerCompositor::SetNeedsCompositingUpdate(
     CompositingUpdateType update_type) {
   DCHECK_NE(update_type, kCompositingUpdateNone);
   pending_update_type_ = std::max(pending_update_type_, update_type);
-  if (Page* page = this->GetPage())
+  if (Page* page = GetPage())
     page->Animator().ScheduleVisualUpdate(layout_view_.GetFrame());
   Lifecycle().EnsureStateAtMost(DocumentLifecycle::kLayoutClean);
 }
@@ -479,8 +479,10 @@ void PaintLayerCompositor::UpdateIfNeeded(
     if (layers_changed) {
       update_type = std::max(update_type, kCompositingUpdateRebuildTree);
       if (ScrollingCoordinator* scrolling_coordinator =
-              this->GetScrollingCoordinator())
-        scrolling_coordinator->NotifyGeometryChanged();
+              GetScrollingCoordinator()) {
+        LocalFrameView* frame_view = layout_view_.GetFrameView();
+        scrolling_coordinator->NotifyGeometryChanged(frame_view);
+      }
     }
   }
 
@@ -530,23 +532,17 @@ void PaintLayerCompositor::UpdateIfNeeded(
     }
   }
 
-  if (!RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
-    bool is_root_scroller_ancestor = IsRootScrollerAncestor();
+  bool is_root_scroller_ancestor = IsRootScrollerAncestor();
+  if (scroll_layer_)
+    scroll_layer_->SetIsResizedByBrowserControls(is_root_scroller_ancestor);
 
-    if (scroll_layer_)
-      scroll_layer_->SetIsResizedByBrowserControls(is_root_scroller_ancestor);
-
-    // Clip a frame's overflow controls layer only if it's not an ancestor of
-    // the root scroller. If it is an ancestor, then it's guaranteed to be
-    // viewport sized and so will be appropriately clipped by the visual
-    // viewport. We don't want to clip here in this case so that URL bar
-    // expansion doesn't need to resize the clip.
-
-    if (overflow_controls_host_layer_) {
-      overflow_controls_host_layer_->SetMasksToBounds(
-          !is_root_scroller_ancestor);
-    }
-  }
+  // Clip a frame's overflow controls layer only if it's not an ancestor of
+  // the root scroller. If it is an ancestor, then it's guaranteed to be
+  // viewport sized and so will be appropriately clipped by the visual
+  // viewport. We don't want to clip here in this case so that URL bar
+  // expansion doesn't need to resize the clip.
+  if (overflow_controls_host_layer_)
+    overflow_controls_host_layer_->SetMasksToBounds(!is_root_scroller_ancestor);
 
   // Inform the inspector that the layer tree has changed.
   if (IsMainFrame())
@@ -601,7 +597,7 @@ bool PaintLayerCompositor::AllocateOrClearCompositedLayerMapping(
       // frame.
       if (layer->IsRootLayer() && layout_view_.GetFrame()->IsLocalRoot()) {
         if (ScrollingCoordinator* scrolling_coordinator =
-                this->GetScrollingCoordinator()) {
+                GetScrollingCoordinator()) {
           scrolling_coordinator->FrameViewRootLayerDidChange(
               layout_view_.GetFrameView());
         }
@@ -623,29 +619,31 @@ bool PaintLayerCompositor::AllocateOrClearCompositedLayerMapping(
       break;
   }
 
-  if (composited_layer_mapping_changed &&
-      layer->GetLayoutObject().IsLayoutEmbeddedContent()) {
+  if (!composited_layer_mapping_changed)
+    return false;
+
+  if (layer->GetLayoutObject().IsLayoutEmbeddedContent()) {
     PaintLayerCompositor* inner_compositor = FrameContentsCompositor(
         ToLayoutEmbeddedContent(layer->GetLayoutObject()));
     if (inner_compositor && inner_compositor->StaleInCompositingMode())
       inner_compositor->EnsureRootLayer();
   }
 
-  if (composited_layer_mapping_changed)
-    layer->ClearClipRects(kPaintingClipRects);
+  layer->ClearClipRects(kPaintingClipRects);
 
   // If a fixed position layer gained/lost a compositedLayerMapping or the
   // reason not compositing it changed, the scrolling coordinator needs to
   // recalculate whether it can do fast scrolling.
-  if (composited_layer_mapping_changed) {
-    if (ScrollingCoordinator* scrolling_coordinator =
-            this->GetScrollingCoordinator()) {
-      scrolling_coordinator->FrameViewFixedObjectsDidChange(
-          layout_view_.GetFrameView());
-    }
+  if (ScrollingCoordinator* scrolling_coordinator = GetScrollingCoordinator()) {
+    scrolling_coordinator->FrameViewFixedObjectsDidChange(
+        layout_view_.GetFrameView());
   }
 
-  return composited_layer_mapping_changed;
+  // Compositing state affects whether to create paint offset translation of
+  // this layer, and amount of paint offset translation of descendants.
+  layer->GetLayoutObject().SetNeedsPaintPropertyUpdate();
+
+  return true;
 }
 
 void PaintLayerCompositor::PaintInvalidationOnCompositingChange(
@@ -708,8 +706,7 @@ void PaintLayerCompositor::FrameViewDidScroll() {
     return;
 
   bool scrolling_coordinator_handles_offset = false;
-  if (ScrollingCoordinator* scrolling_coordinator =
-          this->GetScrollingCoordinator()) {
+  if (ScrollingCoordinator* scrolling_coordinator = GetScrollingCoordinator()) {
     scrolling_coordinator_handles_offset =
         scrolling_coordinator->ScrollableAreaScrollLayerDidChange(frame_view);
   }
@@ -797,8 +794,8 @@ PaintLayerCompositor* PaintLayerCompositor::FrameContentsCompositor(
   HTMLFrameOwnerElement* element =
       ToHTMLFrameOwnerElement(layout_object.GetNode());
   if (Document* content_document = element->contentDocument()) {
-    if (LayoutViewItem view = content_document->GetLayoutViewItem())
-      return view.Compositor();
+    if (auto* view = content_document->GetLayoutView())
+      return view->Compositor();
   }
   return nullptr;
 }
@@ -817,6 +814,8 @@ bool PaintLayerCompositor::AttachFrameContentLayersToIframeLayer(
     return false;
 
   DisableCompositingQueryAsserts disabler;
+  if (RuntimeEnabledFeatures::RootLayerScrollingEnabled())
+    inner_compositor->RootLayer()->EnsureCompositedLayerMapping();
   layer->GetCompositedLayerMapping()->SetSublayers(
       GraphicsLayerVector(1, inner_compositor->RootGraphicsLayer()));
   return true;
@@ -911,8 +910,8 @@ bool PaintLayerCompositor::CanBeComposited(const PaintLayer* layer) const {
     return false;
 
   const bool has_compositor_animation =
-      compositing_reason_finder_.RequiresCompositingForAnimation(
-          *layer->GetLayoutObject().Style());
+      compositing_reason_finder_.CompositingReasonsForAnimation(
+          *layer->GetLayoutObject().Style()) != CompositingReason::kNone;
   return has_accelerated_compositing_ &&
          (has_compositor_animation || !layer->SubtreeIsInvisible()) &&
          layer->IsSelfPaintingLayer() &&
@@ -920,9 +919,9 @@ bool PaintLayerCompositor::CanBeComposited(const PaintLayer* layer) const {
 }
 
 // Return true if the given layer is a stacking context and has compositing
-// child layers that it needs to clip. In this case we insert a clipping
-// GraphicsLayer into the hierarchy between this layer and its children in the
-// z-order hierarchy.
+// child layers that it needs to clip, or is an embedded object with a border
+// radius. In these cases we insert a clipping GraphicsLayer into the hierarchy
+// between this layer and its children in the z-order hierarchy.
 bool PaintLayerCompositor::ClipsCompositingDescendants(
     const PaintLayer* layer) const {
   if (!layer->HasCompositingDescendant())
@@ -930,7 +929,8 @@ bool PaintLayerCompositor::ClipsCompositingDescendants(
   if (!layer->GetLayoutObject().IsBox())
     return false;
   const LayoutBox& box = ToLayoutBox(layer->GetLayoutObject());
-  return box.ShouldClipOverflow() || box.HasClip();
+  return box.ShouldClipOverflow() || box.HasClip() ||
+         (box.IsLayoutEmbeddedContent() && box.StyleRef().HasBorderRadius());
 }
 
 // If an element has composited negative z-index children, those children paint
@@ -941,22 +941,6 @@ bool PaintLayerCompositor::NeedsContentsCompositingLayer(
   if (!layer->HasCompositingDescendant())
     return false;
   return layer->StackingNode()->HasNegativeZOrderList();
-}
-
-static void PaintScrollbar(const GraphicsLayer* graphics_layer,
-                           const Scrollbar* scrollbar,
-                           GraphicsContext& context,
-                           const IntRect& clip) {
-  // Frame scrollbars are painted in the space of the containing frame, not the
-  // local space of the scrollbar.
-  const IntPoint& paint_offset = scrollbar->FrameRect().Location();
-  IntRect transformed_clip = clip;
-  transformed_clip.MoveBy(paint_offset);
-
-  AffineTransform translation;
-  translation.Translate(-paint_offset.X(), -paint_offset.Y());
-  TransformRecorder transform_recorder(context, *scrollbar, translation);
-  scrollbar->Paint(context, CullRect(transformed_clip));
 }
 
 IntRect PaintLayerCompositor::ComputeInterestRect(
@@ -977,27 +961,22 @@ void PaintLayerCompositor::PaintContents(const GraphicsLayer* graphics_layer,
   if (!scrollbar && graphics_layer != LayerForScrollCorner())
     return;
 
-  if (DrawingRecorder::UseCachedDrawingIfPossible(
-          context, *graphics_layer, DisplayItem::kScrollbarCompositedScrollbar))
-    return;
-
-  FloatRect layer_bounds(FloatPoint(), graphics_layer->Size());
-  PaintRecordBuilder builder(layer_bounds, nullptr, &context);
+  // Map context and cull_rect which are in the local space of the scrollbar
+  // to the space of the containing scrollable area in which Scrollbar::Paint()
+  // will paint the scrollbar.
+  IntSize offset = graphics_layer->OffsetFromLayoutObject();
+  IntRect cull_rect = interest_rect;
+  cull_rect.Move(offset);
+  TransformRecorder transform_recorder(
+      context, *graphics_layer,
+      AffineTransform::Translation(-offset.Width(), -offset.Height()));
 
   if (scrollbar) {
-    PaintScrollbar(graphics_layer, scrollbar, builder.Context(), interest_rect);
+    scrollbar->Paint(context, CullRect(cull_rect));
   } else {
     FramePainter(*layout_view_.GetFrameView())
-        .PaintScrollCorner(builder.Context(), interest_rect);
+        .PaintScrollCorner(context, cull_rect);
   }
-
-  // Replay the painted scrollbar content with the GraphicsLayer backing as the
-  // DisplayItemClient in order for the resulting DrawingDisplayItem to produce
-  // the correct visualRect (i.e., the bounds of the involved GraphicsLayer).
-  DrawingRecorder recorder(context, *graphics_layer,
-                           DisplayItem::kScrollbarCompositedScrollbar,
-                           layer_bounds);
-  context.Canvas()->drawPicture(builder.EndRecording());
 }
 
 Scrollbar* PaintLayerCompositor::GraphicsLayerToScrollbar(
@@ -1097,7 +1076,7 @@ void PaintLayerCompositor::UpdateOverflowControlsLayers() {
       controls_parent->AddChild(layer_for_horizontal_scrollbar_.get());
 
       if (ScrollingCoordinator* scrolling_coordinator =
-              this->GetScrollingCoordinator()) {
+              GetScrollingCoordinator()) {
         scrolling_coordinator->ScrollableAreaScrollbarLayerDidChange(
             layout_view_.GetFrameView(), kHorizontalScrollbar);
       }
@@ -1107,7 +1086,7 @@ void PaintLayerCompositor::UpdateOverflowControlsLayers() {
     layer_for_horizontal_scrollbar_ = nullptr;
 
     if (ScrollingCoordinator* scrolling_coordinator =
-            this->GetScrollingCoordinator()) {
+            GetScrollingCoordinator()) {
       scrolling_coordinator->ScrollableAreaScrollbarLayerDidChange(
           layout_view_.GetFrameView(), kHorizontalScrollbar);
     }
@@ -1122,7 +1101,7 @@ void PaintLayerCompositor::UpdateOverflowControlsLayers() {
       controls_parent->AddChild(layer_for_vertical_scrollbar_.get());
 
       if (ScrollingCoordinator* scrolling_coordinator =
-              this->GetScrollingCoordinator()) {
+              GetScrollingCoordinator()) {
         scrolling_coordinator->ScrollableAreaScrollbarLayerDidChange(
             layout_view_.GetFrameView(), kVerticalScrollbar);
       }
@@ -1132,7 +1111,7 @@ void PaintLayerCompositor::UpdateOverflowControlsLayers() {
     layer_for_vertical_scrollbar_ = nullptr;
 
     if (ScrollingCoordinator* scrolling_coordinator =
-            this->GetScrollingCoordinator()) {
+            GetScrollingCoordinator()) {
       scrolling_coordinator->ScrollableAreaScrollbarLayerDidChange(
           layout_view_.GetFrameView(), kVerticalScrollbar);
     }
@@ -1197,11 +1176,7 @@ void PaintLayerCompositor::EnsureRootLayer() {
     // Create a clipping layer if this is an iframe or settings require to clip.
     container_layer_ = GraphicsLayer::Create(this);
     scroll_layer_ = GraphicsLayer::Create(this);
-    if (ScrollingCoordinator* scrolling_coordinator =
-            this->GetScrollingCoordinator()) {
-      scrolling_coordinator->SetLayerIsContainerForFixedPositionLayers(
-          scroll_layer_.get(), true);
-    }
+    scroll_layer_->SetIsContainerForFixedPositionLayers(true);
 
     // In RLS mode, LayoutView scrolling contents layer gets this element ID (in
     // CompositedLayerMapping::UpdateScrollingLayers).
@@ -1229,7 +1204,7 @@ void PaintLayerCompositor::DestroyRootLayer() {
     layer_for_horizontal_scrollbar_->RemoveFromParent();
     layer_for_horizontal_scrollbar_ = nullptr;
     if (ScrollingCoordinator* scrolling_coordinator =
-            this->GetScrollingCoordinator()) {
+            GetScrollingCoordinator()) {
       scrolling_coordinator->ScrollableAreaScrollbarLayerDidChange(
           layout_view_.GetFrameView(), kHorizontalScrollbar);
     }
@@ -1241,7 +1216,7 @@ void PaintLayerCompositor::DestroyRootLayer() {
     layer_for_vertical_scrollbar_->RemoveFromParent();
     layer_for_vertical_scrollbar_ = nullptr;
     if (ScrollingCoordinator* scrolling_coordinator =
-            this->GetScrollingCoordinator()) {
+            GetScrollingCoordinator()) {
       scrolling_coordinator->ScrollableAreaScrollbarLayerDidChange(
           layout_view_.GetFrameView(), kVerticalScrollbar);
     }
@@ -1345,7 +1320,7 @@ void PaintLayerCompositor::DetachCompositorTimeline() {
 }
 
 ScrollingCoordinator* PaintLayerCompositor::GetScrollingCoordinator() const {
-  if (Page* page = this->GetPage())
+  if (Page* page = GetPage())
     return page->GetScrollingCoordinator();
 
   return nullptr;

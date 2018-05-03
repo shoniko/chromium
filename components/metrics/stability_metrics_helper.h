@@ -32,7 +32,7 @@ class StabilityMetricsHelper {
   void BrowserChildProcessCrashed();
 
   // Logs the initiation of a page load.
-  void LogLoadStarted();
+  void LogLoadStarted(bool is_incognito);
 
   // Records a renderer process crash.
   void LogRendererCrash(bool was_extension_process,
@@ -49,7 +49,7 @@ class StabilityMetricsHelper {
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Increments the RendererCrash pref.
-  static void IncreaseRendererCrashCount(PrefService* local_state);
+  void IncreaseRendererCrashCount();
 
  private:
   // Increments an Integer pref value specified by |path|.

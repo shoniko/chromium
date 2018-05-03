@@ -15,6 +15,7 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "gpu/command_buffer/common/swap_buffers_complete_params.h"
 #include "gpu/ipc/client/command_buffer_proxy_impl.h"
 #include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
 #include "ui/gl/gl_utils.h"
@@ -29,7 +30,7 @@ GpuBrowserCompositorOutputSurface::GpuBrowserCompositorOutputSurface(
     : BrowserCompositorOutputSurface(std::move(context),
                                      update_vsync_parameters_callback,
                                      std::move(overlay_candidate_validator)),
-      weak_ptr_factory_(this) {
+      latency_info_cache_(this) {
   if (capabilities_.uses_default_gl_framebuffer) {
     capabilities_.flipped_output_surface =
         context_provider()->ContextCapabilities().flips_vertically;
@@ -39,8 +40,14 @@ GpuBrowserCompositorOutputSurface::GpuBrowserCompositorOutputSurface(
 }
 
 GpuBrowserCompositorOutputSurface::~GpuBrowserCompositorOutputSurface() {
+  // Reset GetCommandBufferProxy() callbacks to avoid calling those callbacks
+  // from dtor of the base class.
+  GetCommandBufferProxy()->SetSwapBuffersCompletionCallback(
+      gpu::CommandBufferProxyImpl::SwapBuffersCompletionCallback());
   GetCommandBufferProxy()->SetUpdateVSyncParametersCallback(
       UpdateVSyncParametersCallback());
+  GetCommandBufferProxy()->SetPresentationCallback(
+      gpu::CommandBufferProxyImpl::PresentationCallback());
 }
 
 void GpuBrowserCompositorOutputSurface::SetNeedsVSync(bool needs_vsync) {
@@ -52,11 +59,18 @@ void GpuBrowserCompositorOutputSurface::SetNeedsVSync(bool needs_vsync) {
 }
 
 void GpuBrowserCompositorOutputSurface::OnGpuSwapBuffersCompleted(
-    const std::vector<ui::LatencyInfo>& latency_info,
-    gfx::SwapResult result,
-    const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) {
+    const gpu::SwapBuffersCompleteParams& params) {
+  if (!params.ca_layer_params.is_empty)
+    client_->DidReceiveCALayerParams(params.ca_layer_params);
+  if (!params.texture_in_use_responses.empty())
+    client_->DidReceiveTextureInUseResponses(params.texture_in_use_responses);
+  client_->DidReceiveSwapBuffersAck(params.swap_response.swap_id);
+  latency_info_cache_.OnSwapBuffersCompleted(params.swap_response);
+}
+
+void GpuBrowserCompositorOutputSurface::LatencyInfoCompleted(
+    const std::vector<ui::LatencyInfo>& latency_info) {
   RenderWidgetHostImpl::OnGpuSwapBuffersCompleted(latency_info);
-  client_->DidReceiveSwapBuffersAck();
 }
 
 void GpuBrowserCompositorOutputSurface::OnReflectorChanged() {
@@ -75,11 +89,16 @@ void GpuBrowserCompositorOutputSurface::BindToClient(
   DCHECK(!client_);
   client_ = client;
 
+  // CommandBufferProxy() will always call below callbacks directly (no
+  // PostTask), so it is safe to use base::Unretained(this).
   GetCommandBufferProxy()->SetSwapBuffersCompletionCallback(
       base::Bind(&GpuBrowserCompositorOutputSurface::OnGpuSwapBuffersCompleted,
-                 weak_ptr_factory_.GetWeakPtr()));
+                 base::Unretained(this)));
   GetCommandBufferProxy()->SetUpdateVSyncParametersCallback(
       update_vsync_parameters_callback_);
+  GetCommandBufferProxy()->SetPresentationCallback(
+      base::Bind(&GpuBrowserCompositorOutputSurface::OnPresentation,
+                 base::Unretained(this)));
 }
 
 void GpuBrowserCompositorOutputSurface::EnsureBackbuffer() {}
@@ -107,7 +126,8 @@ void GpuBrowserCompositorOutputSurface::Reshape(
 
 void GpuBrowserCompositorOutputSurface::SwapBuffers(
     viz::OutputSurfaceFrame frame) {
-  GetCommandBufferProxy()->AddLatencyInfo(frame.latency_info);
+  if (latency_info_cache_.WillSwap(std::move(frame.latency_info)))
+    GetCommandBufferProxy()->SetSnapshotRequested();
 
   gfx::Size surface_size = frame.size;
   if (reflector_) {
@@ -174,6 +194,13 @@ void GpuBrowserCompositorOutputSurface::SetDrawRectangle(
       rect.x(), rect.y(), rect.width(), rect.height());
 }
 
+void GpuBrowserCompositorOutputSurface::OnPresentation(
+    uint64_t swap_id,
+    const gfx::PresentationFeedback& feedback) {
+  DCHECK(client_);
+  client_->DidReceivePresentationFeedback(swap_id, feedback);
+}
+
 gpu::CommandBufferProxyImpl*
 GpuBrowserCompositorOutputSurface::GetCommandBufferProxy() {
   ui::ContextProviderCommandBuffer* provider_command_buffer =
@@ -183,5 +210,12 @@ GpuBrowserCompositorOutputSurface::GetCommandBufferProxy() {
   DCHECK(command_buffer_proxy);
   return command_buffer_proxy;
 }
+
+#if BUILDFLAG(ENABLE_VULKAN)
+gpu::VulkanSurface* GpuBrowserCompositorOutputSurface::GetVulkanSurface() {
+  NOTIMPLEMENTED();
+  return nullptr;
+}
+#endif
 
 }  // namespace content

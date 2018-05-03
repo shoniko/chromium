@@ -21,6 +21,7 @@ OverlayStrategyFullscreen::OverlayStrategyFullscreen(
 OverlayStrategyFullscreen::~OverlayStrategyFullscreen() {}
 
 bool OverlayStrategyFullscreen::Attempt(
+    const SkMatrix44& output_color_matrix,
     cc::DisplayResourceProvider* resource_provider,
     RenderPass* render_pass,
     cc::OverlayCandidateList* candidate_list,
@@ -31,7 +32,7 @@ bool OverlayStrategyFullscreen::Attempt(
   while (front != quad_list->end()) {
     if (!cc::OverlayCandidate::IsInvisibleQuad(*front))
       break;
-    front++;
+    ++front;
   }
 
   if (front == quad_list->end())
@@ -42,8 +43,8 @@ bool OverlayStrategyFullscreen::Attempt(
     return false;
 
   cc::OverlayCandidate candidate;
-  if (!cc::OverlayCandidate::FromDrawQuad(resource_provider, quad,
-                                          &candidate)) {
+  if (!cc::OverlayCandidate::FromDrawQuad(
+          resource_provider, output_color_matrix, quad, &candidate)) {
     return false;
   }
 

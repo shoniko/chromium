@@ -57,9 +57,9 @@ class CORE_EXPORT CSSCrossfadeValue final : public CSSImageGeneratorValue {
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
                                 const Document&,
                                 const ComputedStyle&,
-                                const IntSize& container_size);
+                                const LayoutSize& container_size);
   bool IsFixedSize() const { return true; }
-  IntSize FixedSize(const Document&, const FloatSize&);
+  FloatSize FixedSize(const Document&, const FloatSize&);
 
   bool IsPending() const;
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const;
@@ -88,10 +88,12 @@ class CORE_EXPORT CSSCrossfadeValue final : public CSSImageGeneratorValue {
     explicit CrossfadeSubimageObserverProxy(CSSCrossfadeValue* owner_value)
         : owner_value_(owner_value), ready_(false) {}
 
-    ~CrossfadeSubimageObserverProxy() override {}
+    ~CrossfadeSubimageObserverProxy() override = default;
     void Trace(blink::Visitor* visitor) { visitor->Trace(owner_value_); }
 
-    void ImageChanged(ImageResourceContent*, const IntRect* = nullptr) override;
+    void ImageChanged(ImageResourceContent*,
+                      CanDeferInvalidation,
+                      const IntRect* = nullptr) override;
     bool WillRenderImage() override;
     String DebugName() const override {
       return "CrossfadeSubimageObserverProxy";
@@ -104,7 +106,8 @@ class CORE_EXPORT CSSCrossfadeValue final : public CSSImageGeneratorValue {
   };
 
   bool WillRenderImage() const;
-  void CrossfadeChanged(const IntRect&);
+  void CrossfadeChanged(const IntRect&,
+                        ImageResourceObserver::CanDeferInvalidation);
 
   Member<CSSValue> from_value_;
   Member<CSSValue> to_value_;

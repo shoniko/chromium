@@ -17,13 +17,13 @@ using content::DesktopMediaID;
 namespace {
 
 // Update the list twice per second.
-const int kDefaultUpdatePeriod = 500;
+const int kDefaultDesktopMediaListUpdatePeriod = 500;
 
 }  // namespace
 
 DesktopMediaListAsh::DesktopMediaListAsh(content::DesktopMediaID::Type type)
-    : DesktopMediaListBase(
-          base::TimeDelta::FromMilliseconds(kDefaultUpdatePeriod)),
+    : DesktopMediaListBase(base::TimeDelta::FromMilliseconds(
+          kDefaultDesktopMediaListUpdatePeriod)),
       weak_factory_(this) {
   DCHECK(type == content::DesktopMediaID::TYPE_SCREEN ||
          type == content::DesktopMediaID::TYPE_WINDOW);
@@ -125,7 +125,7 @@ void DesktopMediaListAsh::CaptureThumbnail(content::DesktopMediaID id,
 }
 
 void DesktopMediaListAsh::OnThumbnailCaptured(content::DesktopMediaID id,
-                                              const gfx::Image& image) {
+                                              gfx::Image image) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   UpdateSourceThumbnail(id, image.AsImageSkia());

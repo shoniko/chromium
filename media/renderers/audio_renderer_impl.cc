@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -49,7 +50,7 @@ AudioRendererImpl::AudioRendererImpl(
       sink_(sink),
       media_log_(media_log),
       client_(nullptr),
-      tick_clock_(new base::DefaultTickClock()),
+      tick_clock_(base::DefaultTickClock::GetInstance()),
       last_audio_memory_usage_(0),
       last_decoded_sample_rate_(0),
       last_decoded_channel_layout_(CHANNEL_LAYOUT_NONE),
@@ -374,7 +375,7 @@ void AudioRendererImpl::Initialize(DemuxerStream* stream,
   current_decoder_config_ = stream->audio_decoder_config();
   DCHECK(current_decoder_config_.IsValidConfig());
 
-  audio_buffer_stream_ = base::MakeUnique<AudioBufferStream>(
+  audio_buffer_stream_ = std::make_unique<AudioBufferStream>(
       task_runner_, create_audio_decoders_cb_, media_log_);
 
   audio_buffer_stream_->set_config_change_observer(base::Bind(
@@ -879,7 +880,7 @@ int AudioRendererImpl::Render(base::TimeDelta delay,
                               base::TimeTicks delay_timestamp,
                               int prior_frames_skipped,
                               AudioBus* audio_bus) {
-  TRACE_EVENT0("media", "AudioRendererImpl::Render");
+  TRACE_EVENT1("media", "AudioRendererImpl::Render", "id", media_log_->id());
   int frames_requested = audio_bus->frames();
   DVLOG(4) << __func__ << " delay:" << delay
            << " prior_frames_skipped:" << prior_frames_skipped

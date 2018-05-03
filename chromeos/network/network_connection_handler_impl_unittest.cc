@@ -44,8 +44,8 @@ const char kTetherGuid[] = "tether-guid";
 
 class TestNetworkConnectionObserver : public NetworkConnectionObserver {
  public:
-  TestNetworkConnectionObserver() {}
-  ~TestNetworkConnectionObserver() override {}
+  TestNetworkConnectionObserver() = default;
+  ~TestNetworkConnectionObserver() override = default;
 
   // NetworkConnectionObserver
   void ConnectToNetworkRequested(const std::string& service_path) override {
@@ -87,7 +87,7 @@ class FakeTetherDelegate : public NetworkConnectionHandler::TetherDelegate {
  public:
   FakeTetherDelegate()
       : last_delegate_function_type_(DelegateFunctionType::NONE) {}
-  ~FakeTetherDelegate() override {}
+  ~FakeTetherDelegate() override = default;
 
   enum class DelegateFunctionType { NONE, CONNECT, DISCONNECT };
 
@@ -138,7 +138,7 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
       : scoped_task_environment_(
             base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
-  ~NetworkConnectionHandlerImplTest() override {}
+  ~NetworkConnectionHandlerImplTest() override = default;
 
   void SetUp() override {
     ASSERT_TRUE(test_nssdb_.is_open());
@@ -206,14 +206,13 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
 
  protected:
   void Connect(const std::string& service_path) {
-    const bool check_error_state = true;
     network_connection_handler_->ConnectToNetwork(
         service_path,
         base::Bind(&NetworkConnectionHandlerImplTest::SuccessCallback,
                    base::Unretained(this)),
         base::Bind(&NetworkConnectionHandlerImplTest::ErrorCallback,
                    base::Unretained(this)),
-        check_error_state);
+        true /* check_error_state */, ConnectCallbackMode::ON_COMPLETED);
     scoped_task_environment_.RunUntilIdle();
   }
 

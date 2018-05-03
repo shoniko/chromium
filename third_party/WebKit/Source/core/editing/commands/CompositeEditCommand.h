@@ -77,7 +77,6 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
   virtual bool IsCommandGroupWrapper() const;
   virtual bool IsDragAndDropCommand() const;
   virtual bool PreservesTypingStyle() const;
-  virtual void SetShouldRetainAutocorrectionIndicator(bool);
 
   virtual void Trace(blink::Visitor*);
 
@@ -91,9 +90,6 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
   //
   void AppendNode(Node*, ContainerNode* parent, EditingState*);
   void ApplyCommandToComposite(EditCommand*, EditingState*);
-  void ApplyCommandToComposite(CompositeEditCommand*,
-                               const SelectionForUndoStep&,
-                               EditingState*);
   void ApplyStyle(const EditingStyle*, EditingState*);
   void ApplyStyle(const EditingStyle*,
                   const Position& start,

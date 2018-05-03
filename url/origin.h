@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "base/debug/alias.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "url/scheme_host_port.h"
@@ -174,17 +175,8 @@ class URL_EXPORT Origin {
   bool operator<(const Origin& other) const;
 
  private:
-  explicit Origin(const GURL& url);
-  Origin(base::StringPiece scheme,
-         base::StringPiece host,
-         uint16_t port,
-         base::StringPiece suborigin,
-         SchemeHostPort::ConstructPolicy policy);
-  Origin(std::string scheme,
-         std::string host,
-         uint16_t port,
-         std::string suborigin,
-         SchemeHostPort::ConstructPolicy policy);
+  // |tuple| must be valid, implying that the created Origin is never unique.
+  Origin(SchemeHostPort tuple, std::string suborigin);
 
   SchemeHostPort tuple_;
   bool unique_;
@@ -195,6 +187,12 @@ URL_EXPORT std::ostream& operator<<(std::ostream& out, const Origin& origin);
 
 URL_EXPORT bool IsSameOriginWith(const GURL& a, const GURL& b);
 URL_EXPORT bool IsSamePhysicalOriginWith(const GURL& a, const GURL& b);
+
+// DEBUG_ALIAS_FOR_ORIGIN(var_name, origin) copies |origin| into a new
+// stack-allocated variable named |<var_name>|.  This helps ensure that the
+// value of |origin| gets preserved in crash dumps.
+#define DEBUG_ALIAS_FOR_ORIGIN(var_name, origin) \
+  DEBUG_ALIAS_FOR_CSTR(var_name, origin.Serialize().c_str(), 128)
 
 }  // namespace url
 

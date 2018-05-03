@@ -13,6 +13,7 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -28,10 +29,9 @@
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/ownership/fake_owner_settings_service.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
@@ -56,7 +56,8 @@
 #include "chromeos/settings/cros_settings_provider.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -238,7 +239,7 @@ bool IsAppInstalled(const std::string& app_id, const std::string& version) {
       extensions::ExtensionSystem::Get(app_profile)
           ->extension_service()
           ->GetInstalledExtension(app_id);
-  return app != nullptr && version == app->version()->GetString();
+  return app != nullptr && version == app->version().GetString();
 }
 
 extensions::Manifest::Type GetAppType(const std::string& app_id) {
@@ -616,7 +617,7 @@ class KioskTest : public OobeBaseTest {
   }
 
   const base::Version& GetInstalledAppVersion() {
-    return *GetInstalledApp()->version();
+    return GetInstalledApp()->version();
   }
 
   extensions::Manifest::Location GetInstalledAppLocation() {
@@ -2312,8 +2313,8 @@ class KioskVirtualKeyboardTest : public KioskTest {
 IN_PROC_BROWSER_TEST_F(KioskVirtualKeyboardTest, RestrictFeatures) {
   // Mock existence of audio input.
   // We cannot do this in SetUp because it's overriden in RunTestOnMainThread.
-  mock_audio_manager_ = base::MakeUnique<media::MockAudioManager>(
-      base::MakeUnique<media::TestAudioThread>());
+  mock_audio_manager_ = std::make_unique<media::MockAudioManager>(
+      std::make_unique<media::TestAudioThread>());
   mock_audio_manager_->SetHasInputDevices(true);
 
   set_test_app_id(kTestVirtualKeyboardKioskApp);
@@ -2335,14 +2336,8 @@ class KioskHiddenWebUITest : public KioskTest,
  public:
   KioskHiddenWebUITest() : wallpaper_loaded_(false) {}
 
-  // KioskTest overrides:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    KioskTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kDisableBootAnimation);
-  }
-
   void SetUpOnMainThread() override {
-    LoginDisplayHostImpl::DisableRestrictiveProxyCheckForTest();
+    LoginDisplayHostWebUI::DisableRestrictiveProxyCheckForTest();
 
     KioskTest::SetUpOnMainThread();
     ash::Shell::Get()->wallpaper_controller()->AddObserver(this);
@@ -2380,7 +2375,7 @@ IN_PROC_BROWSER_TEST_F(KioskHiddenWebUITest, AutolaunchWarning) {
   // Add a device owner.
   FakeChromeUserManager* user_manager = new FakeChromeUserManager();
   user_manager->AddUser(test_owner_account_id_);
-  ScopedUserManagerEnabler enabler(user_manager);
+  user_manager::ScopedUserManager enabler(base::WrapUnique(user_manager));
 
   // Set kiosk app to autolaunch.
   EnableConsumerKioskMode();

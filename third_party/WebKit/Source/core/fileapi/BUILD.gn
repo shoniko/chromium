@@ -8,7 +8,6 @@ blink_core_sources("fileapi") {
   sources = [
     "Blob.cpp",
     "Blob.h",
-    "BlobCallback.h",
     "File.cpp",
     "File.h",
     "FileError.cpp",
@@ -24,10 +23,5 @@ blink_core_sources("fileapi") {
     "FileReaderSync.h",
     "URLFileAPI.cpp",
     "URLFileAPI.h",
-  ]
-
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
   ]
 }

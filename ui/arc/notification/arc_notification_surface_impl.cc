@@ -30,7 +30,13 @@ class CustomWindowDelegate : public aura::WindowDelegate {
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override {}
   gfx::NativeCursor GetCursor(const gfx::Point& point) override {
-    return notification_surface_->GetCursor(point);
+    views::Widget* widget = views::Widget::GetTopLevelWidgetForNativeView(
+        notification_surface_->host_window());
+    // Exo explicitly update the cursor on widget, so just use the one
+    // set on the cursor.
+    if (widget)
+      return widget->GetNativeWindow()->GetCursor(point /* not used */);
+    return ui::CursorType::kNull;
   }
   int GetNonClientComponent(const gfx::Point& point) const override {
     return HTNOWHERE;
@@ -48,9 +54,7 @@ class CustomWindowDelegate : public aura::WindowDelegate {
   void OnWindowDestroying(aura::Window* window) override {}
   void OnWindowDestroyed(aura::Window* window) override { delete this; }
   void OnWindowTargetVisibilityChanged(bool visible) override {}
-  bool HasHitTestMask() const override {
-    return notification_surface_->HasHitTestMask();
-  }
+  bool HasHitTestMask() const override { return true; }
   void GetHitTestMask(gfx::Path* mask) const override {
     notification_surface_->GetHitTestMask(mask);
   }

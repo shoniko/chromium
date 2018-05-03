@@ -15,9 +15,7 @@
 #include "base/logging.h"
 #import "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/observer_list.h"
@@ -249,7 +247,7 @@ CookieStoreIOS::CookieStoreIOS(
 
 CookieStoreIOS::CookieStoreIOS(NSHTTPCookieStorage* ns_cookie_store)
     : CookieStoreIOS(
-          base::MakeUnique<NSHTTPSystemCookieStore>(ns_cookie_store)) {}
+          std::make_unique<NSHTTPSystemCookieStore>(ns_cookie_store)) {}
 
 CookieStoreIOS::~CookieStoreIOS() {
   NotificationTrampoline::GetInstance()->RemoveObserver(this);
@@ -316,77 +314,6 @@ void CookieStoreIOS::SetCookieWithOptionsAsync(
     system_store_->SetCookieAsync(cookie,
                                   BindSetCookiesCallback(&callback, true));
     return;
-  }
-
-  if (!callback.is_null())
-    std::move(callback).Run(false);
-}
-
-void CookieStoreIOS::SetCookieWithDetailsAsync(const GURL& url,
-                                               const std::string& name,
-                                               const std::string& value,
-                                               const std::string& domain,
-                                               const std::string& path,
-                                               base::Time creation_time,
-                                               base::Time expiration_time,
-                                               base::Time last_access_time,
-                                               bool secure,
-                                               bool http_only,
-                                               CookieSameSite same_site,
-                                               CookiePriority priority,
-                                               SetCookiesCallback callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  // If cookies are not allowed, they are stashed in the CookieMonster, and
-  // should be written there instead.
-  DCHECK(SystemCookiesAllowed());
-
-  if (creation_time.is_null())
-    creation_time = base::Time::Now();
-
-  // Validate consistency of passed arguments.
-  if (ParsedCookie::ParseTokenString(name) != name ||
-      ParsedCookie::ParseValueString(value) != value ||
-      ParsedCookie::ParseValueString(domain) != domain ||
-      ParsedCookie::ParseValueString(path) != path) {
-    if (!callback.is_null())
-      std::move(callback).Run(false);
-    return;
-  }
-
-  // Validate passed arguments against URL.
-  std::string cookie_domain;
-  std::string cookie_path = CanonicalCookie::CanonPathWithString(url, path);
-  if ((secure && !url.SchemeIsCryptographic()) ||
-      !cookie_util::GetCookieDomainWithString(url, domain, &cookie_domain) ||
-      (!path.empty() && cookie_path != path)) {
-    if (!callback.is_null())
-      std::move(callback).Run(false);
-    return;
-  }
-
-  // Canonicalize path again to make sure it escapes characters as needed.
-  url::Component path_component(0, cookie_path.length());
-  url::RawCanonOutputT<char> canon_path;
-  url::Component canon_path_component;
-  url::CanonicalizePath(cookie_path.data(), path_component, &canon_path,
-                        &canon_path_component);
-  cookie_path = std::string(canon_path.data() + canon_path_component.begin,
-                            canon_path_component.len);
-
-  std::unique_ptr<net::CanonicalCookie> canonical_cookie =
-      base::MakeUnique<net::CanonicalCookie>(
-          name, value, cookie_domain, cookie_path, creation_time,
-          expiration_time, creation_time, secure, http_only, same_site,
-          priority);
-
-  if (canonical_cookie) {
-    NSHTTPCookie* cookie = SystemCookieFromCanonicalCookie(*canonical_cookie);
-
-    if (cookie != nil) {
-      system_store_->SetCookieAsync(cookie, &canonical_cookie->CreationDate(),
-                                    BindSetCookiesCallback(&callback, true));
-      return;
-    }
   }
 
   if (!callback.is_null())
@@ -693,7 +620,7 @@ CookieStoreIOS::AddCallbackForCookie(const GURL& gurl,
   std::pair<GURL, std::string> key(gurl, name);
   if (hook_map_.count(key) == 0) {
     UpdateCacheForCookieFromSystem(gurl, name, /*run_callbacks=*/false);
-    hook_map_[key] = base::MakeUnique<CookieChangedCallbackList>();
+    hook_map_[key] = std::make_unique<CookieChangedCallbackList>();
   }
 
   DCHECK(hook_map_.find(key) != hook_map_.end());

@@ -5,9 +5,11 @@
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/stringprintf.h"
 #include "content/browser/frame_host/debug_urls.h"
 #include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/bindings_policy.h"
@@ -16,7 +18,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/request_context_type.h"
 #include "content/public/common/url_constants.h"
-#include "content/public/test/browser_side_navigation_test_utils.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -31,6 +32,13 @@
 #include "net/test/url_request/url_request_failed_job.h"
 #include "ui/base/page_transition_types.h"
 #include "url/url_constants.h"
+
+namespace {
+
+// Text to place in an HTML body. Should not contain any markup.
+const char kBodyTextContent[] = "some plain text content";
+
+}  // namespace
 
 namespace content {
 
@@ -523,7 +531,7 @@ IN_PROC_BROWSER_TEST_F(NavigationHandleImplBrowserTest, VerifyRedirect) {
 }
 
 // Ensure that a certificate error results in a committed navigation with
-// the error code net::ERR_INSECURE_RESPONSE on the handle.
+// the appropriate error code on the handle.
 IN_PROC_BROWSER_TEST_F(NavigationHandleImplBrowserTest,
                        VerifyCertErrorFailure) {
   if (!IsBrowserSideNavigationEnabled()) {
@@ -541,7 +549,7 @@ IN_PROC_BROWSER_TEST_F(NavigationHandleImplBrowserTest,
 
   EXPECT_TRUE(observer.has_committed());
   EXPECT_TRUE(observer.is_error());
-  EXPECT_EQ(net::ERR_INSECURE_RESPONSE, observer.net_error_code());
+  EXPECT_EQ(net::ERR_CERT_COMMON_NAME_INVALID, observer.net_error_code());
 }
 
 // Ensure that the IsRendererInitiated() method on NavigationHandle behaves
@@ -951,7 +959,7 @@ IN_PROC_BROWSER_TEST_F(NavigationHandleImplBrowserTest, ThrottleDeferFailure) {
 
   EXPECT_TRUE(observer.has_committed());
   EXPECT_TRUE(observer.is_error());
-  EXPECT_EQ(net::ERR_INSECURE_RESPONSE, observer.net_error_code());
+  EXPECT_EQ(net::ERR_CERT_COMMON_NAME_INVALID, observer.net_error_code());
 }
 
 // Ensure that a NavigationThrottle can block the navigation and collapse the
@@ -1588,13 +1596,10 @@ IN_PROC_BROWSER_TEST_F(NavigationHandleImplBrowserTest, ErrorCodeOnRedirect) {
 
 // This class allows running tests with PlzNavigate enabled, regardless of
 // default test configuration.
+// TODO(clamy): Make those regular NavigationHandleImplBrowserTests.
 class PlzNavigateNavigationHandleImplBrowserTest : public ContentBrowserTest {
  public:
   PlzNavigateNavigationHandleImplBrowserTest() {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kEnableBrowserSideNavigation);
-  }
 
   void SetUpOnMainThread() override {
     host_resolver()->AddRule("*", "127.0.0.1");
@@ -1622,7 +1627,7 @@ IN_PROC_BROWSER_TEST_F(PlzNavigateNavigationHandleImplBrowserTest,
   scoped_refptr<SiteInstance> site_instance =
       shell()->web_contents()->GetMainFrame()->GetSiteInstance();
 
-  auto installer = base::MakeUnique<TestNavigationThrottleInstaller>(
+  auto installer = std::make_unique<TestNavigationThrottleInstaller>(
       shell()->web_contents(), NavigationThrottle::BLOCK_REQUEST,
       NavigationThrottle::PROCEED, NavigationThrottle::PROCEED,
       NavigationThrottle::PROCEED);
@@ -1643,18 +1648,36 @@ IN_PROC_BROWSER_TEST_F(PlzNavigateNavigationHandleImplBrowserTest,
   }
 
   {
-    // Reloading the blocked document should load about:blank and not transfer
-    // processes.
-    GURL about_blank_url(url::kAboutBlankURL);
-    NavigationHandleObserver observer(shell()->web_contents(), about_blank_url);
+    // Reloading the blocked document from the renderer process should not
+    // transfer processes.
+    NavigationHandleObserver observer(shell()->web_contents(), blocked_url);
+    TestNavigationObserver navigation_observer(shell()->web_contents(), 1);
+
+    EXPECT_TRUE(ExecuteScript(shell(), "location.reload()"));
+    navigation_observer.Wait();
+    EXPECT_TRUE(observer.has_committed());
+    EXPECT_TRUE(observer.is_error());
+    EXPECT_EQ(site_instance,
+              shell()->web_contents()->GetMainFrame()->GetSiteInstance());
+  }
+
+  {
+    // Reloading the blocked document from the browser process ends up
+    // transferring processes in --site-per-process.
+    NavigationHandleObserver observer(shell()->web_contents(), blocked_url);
     TestNavigationObserver navigation_observer(shell()->web_contents(), 1);
 
     shell()->Reload();
     navigation_observer.Wait();
     EXPECT_TRUE(observer.has_committed());
-    EXPECT_FALSE(observer.is_error());
-    EXPECT_EQ(site_instance,
-              shell()->web_contents()->GetMainFrame()->GetSiteInstance());
+    EXPECT_TRUE(observer.is_error());
+    if (AreAllSitesIsolatedForTesting()) {
+      EXPECT_NE(site_instance,
+                shell()->web_contents()->GetMainFrame()->GetSiteInstance());
+    } else {
+      EXPECT_EQ(site_instance,
+                shell()->web_contents()->GetMainFrame()->GetSiteInstance());
+    }
   }
 
   installer.reset();
@@ -1673,7 +1696,7 @@ IN_PROC_BROWSER_TEST_F(PlzNavigateNavigationHandleImplBrowserTest,
               shell()->web_contents()->GetMainFrame()->GetSiteInstance());
   }
 
-  installer = base::MakeUnique<TestNavigationThrottleInstaller>(
+  installer = std::make_unique<TestNavigationThrottleInstaller>(
       shell()->web_contents(), NavigationThrottle::BLOCK_REQUEST,
       NavigationThrottle::PROCEED, NavigationThrottle::PROCEED,
       NavigationThrottle::PROCEED);
@@ -1703,8 +1726,7 @@ IN_PROC_BROWSER_TEST_F(PlzNavigateNavigationHandleImplBrowserTest,
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL start_url(embedded_test_server()->GetURL("foo.com", "/title1.html"));
-  GURL error_url(
-      net::URLRequestFailedJob::GetMockHttpUrl(net::ERR_CONNECTION_RESET));
+  GURL error_url(embedded_test_server()->GetURL("/close-socket"));
   EXPECT_NE(start_url.host(), error_url.host());
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -1992,6 +2014,38 @@ IN_PROC_BROWSER_TEST_F(NavigationHandleImplDownloadBrowserTest,
   EXPECT_FALSE(observer.is_download());
   EXPECT_TRUE(observer.is_error());
   EXPECT_TRUE(observer.was_redirected());
+}
+
+IN_PROC_BROWSER_TEST_F(NavigationHandleImplBrowserTest,
+                       ThrottleFailureWithErrorPageContent) {
+  if (!IsBrowserSideNavigationEnabled())
+    return;
+
+  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server.SetSSLConfig(net::EmbeddedTestServer::CERT_MISMATCHED_NAME);
+  ASSERT_TRUE(https_server.Start());
+  GURL url(https_server.GetURL("/title1.html"));
+
+  NavigationThrottle::ThrottleCheckResult cancel_result = {
+      NavigationThrottle::CANCEL, net::ERR_CERT_COMMON_NAME_INVALID,
+      base::StringPrintf("<html><body>%s</body><html>", kBodyTextContent)};
+
+  NavigationHandleObserver observer(shell()->web_contents(), url);
+  TestNavigationThrottleInstaller installer(
+      shell()->web_contents(), NavigationThrottle::PROCEED,
+      NavigationThrottle::PROCEED, cancel_result, NavigationThrottle::PROCEED);
+
+  EXPECT_FALSE(NavigateToURL(shell(), url));
+
+  EXPECT_TRUE(observer.has_committed());
+  EXPECT_TRUE(observer.is_error());
+
+  std::string result;
+  const std::string javascript =
+      "domAutomationController.send(document.body.textContent)";
+  content::RenderFrameHost* rfh = shell()->web_contents()->GetMainFrame();
+  ASSERT_TRUE(content::ExecuteScriptAndExtractString(rfh, javascript, &result));
+  EXPECT_EQ(kBodyTextContent, result);
 }
 
 }  // namespace content

@@ -14,10 +14,8 @@
 #include "base/metrics/user_metrics.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
-#include "chrome/browser/chromeos/bluetooth/bluetooth_pairing_dialog.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
@@ -26,11 +24,14 @@
 #include "chrome/browser/chromeos/system/system_clock.h"
 #include "chrome/browser/lifetime/termination_notification.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
+#include "chrome/browser/ui/webui/chromeos/bluetooth_pairing_dialog.h"
 #include "chrome/browser/ui/webui/chromeos/internet_config_dialog.h"
+#include "chrome/browser/ui/webui/chromeos/internet_detail_dialog.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_switches.h"
@@ -44,7 +45,7 @@
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/common/net.mojom.h"
-#include "components/arc/instance_holder.h"
+#include "components/arc/connection_holder.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/common/service_manager_connection.h"
@@ -56,20 +57,19 @@
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "third_party/cros_system_api/dbus/shill/dbus-constants.h"
+#include "ui/events/event_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
-using chromeos::BluetoothPairingDialog;
 using chromeos::DBusThreadManager;
 using chromeos::UpdateEngineClient;
-using device::BluetoothDevice;
 using session_manager::SessionState;
 using session_manager::SessionManager;
 using views::Widget;
 
 namespace {
 
-SystemTrayClient* g_instance = nullptr;
+SystemTrayClient* g_system_tray_client_instance = nullptr;
 
 void ShowSettingsSubPageForActiveUser(const std::string& sub_page) {
   chrome::ShowSettingsSubPageForProfile(ProfileManager::GetActiveUserProfile(),
@@ -138,14 +138,14 @@ SystemTrayClient::SystemTrayClient() : binding_(this) {
     policy_manager->core()->store()->AddObserver(this);
   UpdateEnterpriseDisplayDomain();
 
-  DCHECK(!g_instance);
-  g_instance = this;
+  DCHECK(!g_system_tray_client_instance);
+  g_system_tray_client_instance = this;
   UpgradeDetector::GetInstance()->AddObserver(this);
 }
 
 SystemTrayClient::~SystemTrayClient() {
-  DCHECK_EQ(this, g_instance);
-  g_instance = nullptr;
+  DCHECK_EQ(this, g_system_tray_client_instance);
+  g_system_tray_client_instance = nullptr;
 
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
@@ -160,7 +160,7 @@ SystemTrayClient::~SystemTrayClient() {
 
 // static
 SystemTrayClient* SystemTrayClient::Get() {
-  return g_instance;
+  return g_system_tray_client_instance;
 }
 
 // static
@@ -226,16 +226,15 @@ void SystemTrayClient::ShowBluetoothPairingDialog(
     const base::string16& name_for_display,
     bool paired,
     bool connected) {
-  std::string canonical_address = BluetoothDevice::CanonicalizeAddress(address);
+  std::string canonical_address =
+      device::BluetoothDevice::CanonicalizeAddress(address);
   if (canonical_address.empty())  // Address was invalid.
     return;
 
   base::RecordAction(
       base::UserMetricsAction("StatusArea_Bluetooth_Connect_Unknown"));
-  BluetoothPairingDialog* dialog = new BluetoothPairingDialog(
+  chromeos::BluetoothPairingDialog::ShowDialog(
       canonical_address, name_for_display, paired, connected);
-  // The dialog deletes itself on close.
-  dialog->ShowInContainer(GetDialogParentContainerId());
 }
 
 void SystemTrayClient::ShowDateSettings() {
@@ -285,7 +284,7 @@ void SystemTrayClient::ShowHelp() {
 void SystemTrayClient::ShowAccessibilityHelp() {
   chrome::ScopedTabbedBrowserDisplayer displayer(
       ProfileManager::GetActiveUserProfile());
-  chromeos::accessibility::ShowAccessibilityHelp(displayer.browser());
+  chromeos::AccessibilityManager::ShowAccessibilityHelp(displayer.browser());
 }
 
 void SystemTrayClient::ShowAccessibilitySettings() {
@@ -296,8 +295,7 @@ void SystemTrayClient::ShowAccessibilitySettings() {
 void SystemTrayClient::ShowPaletteHelp() {
   chrome::ScopedTabbedBrowserDisplayer displayer(
       ProfileManager::GetActiveUserProfile());
-  chrome::ShowSingletonTab(displayer.browser(),
-                           GURL(chrome::kChromePaletteHelpURL));
+  ShowSingletonTab(displayer.browser(), GURL(chrome::kChromePaletteHelpURL));
 }
 
 void SystemTrayClient::ShowPaletteSettings() {
@@ -323,8 +321,7 @@ void SystemTrayClient::ShowEnterpriseInfo() {
   // Otherwise show enterprise help in a browser tab.
   chrome::ScopedTabbedBrowserDisplayer displayer(
       ProfileManager::GetActiveUserProfile());
-  chrome::ShowSingletonTab(displayer.browser(),
-                           GURL(chrome::kLearnMoreEnterpriseURL));
+  ShowSingletonTab(displayer.browser(), GURL(chrome::kLearnMoreEnterpriseURL));
 }
 
 void SystemTrayClient::ShowNetworkConfigure(const std::string& network_id) {
@@ -344,13 +341,10 @@ void SystemTrayClient::ShowNetworkConfigure(const std::string& network_id) {
     return;
   }
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kNetworkSettingsConfig)) {
-    chromeos::InternetConfigDialog::ShowDialogForNetworkState(network_state);
-
-  } else {
+  if (chromeos::switches::IsNetworkSettingsConfigEnabled())
+    chromeos::InternetConfigDialog::ShowDialogForNetworkId(network_id);
+  else
     chromeos::NetworkConfigView::ShowForNetworkId(network_id);
-  }
 }
 
 void SystemTrayClient::ShowNetworkCreate(const std::string& type) {
@@ -363,8 +357,7 @@ void SystemTrayClient::ShowNetworkCreate(const std::string& type) {
     ShowNetworkSettingsHelper(network_id, false /* show_configure */);
     return;
   }
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kNetworkSettingsConfig)) {
+  if (chromeos::switches::IsNetworkSettingsConfigEnabled()) {
     // TODO(stevenjb): Pass ONC type to ShowNetworkCreate once NetworkConfigView
     // is deprecated.
     std::string onc_type =
@@ -377,19 +370,23 @@ void SystemTrayClient::ShowNetworkCreate(const std::string& type) {
 
 void SystemTrayClient::ShowThirdPartyVpnCreate(
     const std::string& extension_id) {
-  const user_manager::User* primary_user =
-      user_manager::UserManager::Get()->GetPrimaryUser();
-  if (!primary_user)
-    return;
+  Profile* profile = ProfileManager::GetPrimaryUserProfile();
 
-  Profile* profile =
-      chromeos::ProfileHelper::Get()->GetProfileByUser(primary_user);
   if (!profile)
     return;
 
   // Request that the third-party VPN provider show its "add network" dialog.
   chromeos::VpnServiceFactory::GetForBrowserContext(profile)
       ->SendShowAddDialogToExtension(extension_id);
+}
+
+void SystemTrayClient::ShowArcVpnCreate(const std::string& app_id) {
+  Profile* profile = ProfileManager::GetPrimaryUserProfile();
+
+  if (!profile)
+    return;
+
+  arc::LaunchApp(profile, app_id, ui::EF_NONE);
 }
 
 void SystemTrayClient::ShowNetworkSettings(const std::string& network_id) {
@@ -402,8 +399,7 @@ void SystemTrayClient::ShowNetworkSettingsHelper(const std::string& network_id,
   if (session_manager->IsInSecondaryLoginScreen())
     return;
   if (!session_manager->IsSessionStarted()) {
-    chromeos::LoginDisplayHost::default_host()->OpenInternetDetailDialog(
-        network_id);
+    chromeos::InternetDetailDialog::ShowDialog(network_id);
     return;
   }
 

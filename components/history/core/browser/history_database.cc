@@ -15,6 +15,7 @@
 #include "base/command_line.h"
 #include "base/containers/hash_tables.h"
 #include "base/files/file_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
@@ -37,7 +38,7 @@ namespace {
 // Current version number. We write databases at the "current" version number,
 // but any previous version that can read the "compatible" one can make do with
 // our database without *too* many bad effects.
-const int kCurrentVersionNumber = 37;
+const int kCurrentVersionNumber = 38;
 const int kCompatibleVersionNumber = 16;
 const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
 const int kMaxHostsInMemory = 10000;
@@ -46,8 +47,7 @@ const int kMaxHostsInMemory = 10000;
 // what to return from ::Init (to simplify the call sites). Migration failures
 // are almost always fatal since the database can be in an inconsistent state.
 sql::InitStatus LogMigrationFailure(int from_version) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("History.MigrateFailureFromVersion",
-                              from_version);
+  base::UmaHistogramSparse("History.MigrateFailureFromVersion", from_version);
   LOG(ERROR) << "History failed to migrate from version " << from_version
              << ". History will be disabled.";
   return sql::INIT_FAILURE;
@@ -68,8 +68,8 @@ enum class InitStep {
 };
 
 sql::InitStatus LogInitFailure(InitStep what) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("History.InitializationFailureStep",
-                              static_cast<int>(what));
+  base::UmaHistogramSparse("History.InitializationFailureStep",
+                           static_cast<int>(what));
   return sql::INIT_FAILURE;
 }
 
@@ -366,13 +366,9 @@ SegmentID HistoryDatabase::GetSegmentID(VisitID visit_id) {
       "SELECT segment_id FROM visits WHERE id = ?"));
   s.BindInt64(0, visit_id);
 
-  if (s.Step()) {
-    if (s.ColumnType(0) == sql::COLUMN_TYPE_NULL)
-      return 0;
-    else
-      return s.ColumnInt64(0);
-  }
-  return 0;
+  if (!s.Step() || s.ColumnType(0) == sql::COLUMN_TYPE_NULL)
+    return 0;
+  return s.ColumnInt64(0);
 }
 
 base::Time HistoryDatabase::GetEarlyExpirationThreshold() {
@@ -586,6 +582,13 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
     }
 
     DCHECK(URLTableContainsAutoincrement());
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 37) {
+    if (!MigrateVisitSegmentNames())
+      return LogMigrationFailure(37);
     cur_version++;
     meta_table_.SetVersionNumber(cur_version);
   }

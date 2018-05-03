@@ -11,7 +11,6 @@
 #include <memory>
 
 #import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
-#import "remoting/ios/app/physical_keyboard_detector.h"
 #import "remoting/ios/app/remoting_theme.h"
 #import "remoting/ios/app/settings/remoting_settings_view_controller.h"
 #import "remoting/ios/app/view_utils.h"
@@ -47,6 +46,9 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
   BOOL _surfaceCreated;
   HostSettings* _settings;
 
+  // Used to blur the content when the app enters background.
+  UIView* _blurView;
+
   // Only change this by calling setFabIsRight:.
   BOOL _fabIsRight;
   NSArray<NSLayoutConstraint*>* _fabLeftConstraints;
@@ -54,7 +56,6 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
   // When set to true, ClientKeyboard will immediately resign first responder
   // after it becomes first responder.
   BOOL _blocksKeyboard;
-  BOOL _hasPhysicalKeyboard;
   NSLayoutConstraint* _keyboardHeightConstraint;
 
   // Subview of self.view. Adjusted frame for safe area.
@@ -78,15 +79,8 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
     _keyboardSize = CGSizeZero;
     _surfaceCreated = NO;
     _blocksKeyboard = NO;
-    _hasPhysicalKeyboard = NO;
     _settings =
         [[RemotingPreferences instance] settingsForHost:client.hostInfo.hostId];
-    _surfaceSizeAnimationLink = [CADisplayLink
-        displayLinkWithTarget:self
-                     selector:@selector(animateHostSurfaceSize:)];
-    _surfaceSizeAnimationLink.paused = YES;
-    [_surfaceSizeAnimationLink addToRunLoop:NSRunLoop.currentRunLoop
-                                    forMode:NSDefaultRunLoopMode];
 
     BOOL fabIsRight =
         [UIView userInterfaceLayoutDirectionForSemanticContentAttribute:
@@ -205,11 +199,10 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
     _surfaceCreated = YES;
   }
 
-  [PhysicalKeyboardDetector detectOnView:_hostView
-                                callback:^(BOOL hasPhysicalKeyboard) {
-                                  _hasPhysicalKeyboard = hasPhysicalKeyboard;
-                                  [_clientKeyboard becomeFirstResponder];
-                                }];
+  // |_clientKeyboard| should always be the first responder even when the soft
+  // keyboard is not visible, so that input from physical keyboard can still be
+  // captured.
+  [_clientKeyboard becomeFirstResponder];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -220,6 +213,7 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
         [[ClientGestures alloc] initWithView:_hostView client:_client];
     _clientGestures.delegate = self;
   }
+
   [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(keyboardWillShow:)
@@ -231,6 +225,32 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
          selector:@selector(keyboardWillHide:)
              name:UIKeyboardWillHideNotification
            object:nil];
+
+  [NSNotificationCenter.defaultCenter
+      addObserver:self
+         selector:@selector(applicationDidBecomeActive:)
+             name:UIApplicationDidBecomeActiveNotification
+           object:nil];
+
+  [NSNotificationCenter.defaultCenter
+      addObserver:self
+         selector:@selector(applicationWillResignActive:)
+             name:UIApplicationWillResignActiveNotification
+           object:nil];
+
+  // If the host view is presented when the app is inactive, synthesize an
+  // initial UIApplicationWillResignActiveNotification event.
+  if (UIApplication.sharedApplication.applicationState !=
+      UIApplicationStateActive) {
+    [self applicationWillResignActive:UIApplication.sharedApplication];
+  }
+
+  _surfaceSizeAnimationLink =
+      [CADisplayLink displayLinkWithTarget:self
+                                  selector:@selector(animateHostSurfaceSize:)];
+  _surfaceSizeAnimationLink.paused = YES;
+  [_surfaceSizeAnimationLink addToRunLoop:NSRunLoop.currentRunLoop
+                                  forMode:NSDefaultRunLoopMode];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -240,6 +260,9 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
                                       forHost:_client.hostInfo.hostId];
 
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+
+  _surfaceSizeAnimationLink.paused = YES;
+  [_surfaceSizeAnimationLink invalidate];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -257,9 +280,13 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
 #pragma mark - Keyboard Notifications
 
 - (void)keyboardWillShow:(NSNotification*)notification {
-  // The soft keyboard can be triggered by the PhysicalKeyboardDetector, in this
-  // case we don't need to change the keyboard size.
-  if (!_clientKeyboard.isFirstResponder) {
+  // Note that this won't be called in split keyboard mode.
+
+  // keyboardWillShow may be called with a wrong keyboard size when the physical
+  // keyboard is plugged in while the soft keyboard is hidden. This is
+  // potentially an OS bug. `!_clientKeyboard.showsSoftKeyboard` works around
+  // it.
+  if (!_clientKeyboard.showsSoftKeyboard) {
     return;
   }
 
@@ -272,11 +299,13 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
     return;
   }
 
-  CGSize keyboardSize =
-      [[[notification userInfo] objectForKey:UIKeyboardFrameEndUserInfoKey]
-          CGRectValue]
-          .size;
-  [self setKeyboardSize:keyboardSize needsLayout:YES];
+  // On iOS 10 the keyboard might be partially shown, i.e. part of the keyboard
+  // is below the screen.
+  CGRect keyboardRect = [[[notification userInfo]
+      objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
+  CGSize visibleKeyboardSize =
+      CGRectIntersection(self.view.bounds, keyboardRect).size;
+  [self setKeyboardSize:visibleKeyboardSize needsLayout:YES];
 }
 
 - (void)keyboardWillHide:(NSNotification*)notification {
@@ -315,8 +344,6 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
 #pragma mark - RemotingSettingsViewControllerDelegate
 
 - (void)setResizeToFit:(BOOL)resizeToFit {
-  // TODO(yuweih): Maybe we add a native screen size mimimum before enabling
-  // this option? This doesn't work well for smaller screens. Ask Jon.
   _settings.shouldResizeHostToFit = resizeToFit;
   [self resizeHostToFitIfNeeded];
 }
@@ -445,24 +472,21 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
                 preferredStyle:UIAlertControllerStyleActionSheet];
 
   __weak HostViewController* weakSelf = self;
-  if (!_hasPhysicalKeyboard) {
-    // These are only needed if the device has no physical keyboard.
-    __weak ClientKeyboard* weakClientKeyboard = _clientKeyboard;
-    if (_clientKeyboard.showsSoftKeyboard) {
-      [self addActionToAlert:alert
-                       title:IDS_HIDE_KEYBOARD
-                       style:UIAlertActionStyleDefault
-            restoresKeyboard:NO
-                     handler:^() {
-                       weakClientKeyboard.showsSoftKeyboard = NO;
-                     }];
-    } else {
-      [self addActionToAlert:alert
-                       title:IDS_SHOW_KEYBOARD
-                     handler:^() {
-                       weakClientKeyboard.showsSoftKeyboard = YES;
-                     }];
-    }
+  __weak ClientKeyboard* weakClientKeyboard = _clientKeyboard;
+  if (_clientKeyboard.showsSoftKeyboard) {
+    [self addActionToAlert:alert
+                     title:IDS_HIDE_KEYBOARD
+                     style:UIAlertActionStyleDefault
+          restoresKeyboard:NO
+                   handler:^() {
+                     weakClientKeyboard.showsSoftKeyboard = NO;
+                   }];
+  } else {
+    [self addActionToAlert:alert
+                     title:IDS_SHOW_KEYBOARD
+                   handler:^() {
+                     weakClientKeyboard.showsSoftKeyboard = YES;
+                   }];
   }
 
   remoting::GestureInterpreter::InputMode currentInputMode =
@@ -598,6 +622,33 @@ static const CGFloat kMoveFABAnimationTime = 0.3;
                        [self.view layoutIfNeeded];
                      }];
   }
+}
+
+- (void)applicationDidBecomeActive:(UIApplication*)application {
+  if (!_blurView) {
+    LOG(DFATAL) << "Blur view does not exist.";
+    return;
+  }
+  [_blurView removeFromSuperview];
+  _blurView = nil;
+}
+
+- (void)applicationWillResignActive:(UIApplication*)application {
+  if (_blurView) {
+    LOG(DFATAL) << "Blur view already exists.";
+    return;
+  }
+  UIBlurEffect* effect =
+      [UIBlurEffect effectWithStyle:UIBlurEffectStyleRegular];
+  _blurView = [[UIVisualEffectView alloc] initWithEffect:effect];
+  _blurView.translatesAutoresizingMaskIntoConstraints = NO;
+  [self.view insertSubview:_blurView aboveSubview:_hostView];
+  [NSLayoutConstraint activateConstraints:@[
+    [_blurView.leadingAnchor constraintEqualToAnchor:_hostView.leadingAnchor],
+    [_blurView.trailingAnchor constraintEqualToAnchor:_hostView.trailingAnchor],
+    [_blurView.topAnchor constraintEqualToAnchor:_hostView.topAnchor],
+    [_blurView.bottomAnchor constraintEqualToAnchor:_hostView.bottomAnchor],
+  ]];
 }
 
 @end

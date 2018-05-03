@@ -28,9 +28,9 @@ LayerImplTestProperties::LayerImplTestProperties(LayerImpl* owning_layer)
       clip_parent(nullptr),
       mask_layer(nullptr),
       parent(nullptr),
-      scroll_boundary_behavior(ScrollBoundaryBehavior()) {}
+      overscroll_behavior(OverscrollBehavior()) {}
 
-LayerImplTestProperties::~LayerImplTestProperties() {}
+LayerImplTestProperties::~LayerImplTestProperties() = default;
 
 void LayerImplTestProperties::AddChild(std::unique_ptr<LayerImpl> child) {
   child->test_properties()->parent = owning_layer;

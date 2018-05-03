@@ -23,8 +23,7 @@ OcclusionTracker::OcclusionTracker(const gfx::Rect& screen_space_clip_rect)
     : screen_space_clip_rect_(screen_space_clip_rect) {
 }
 
-OcclusionTracker::~OcclusionTracker() {
-}
+OcclusionTracker::~OcclusionTracker() = default;
 
 Occlusion OcclusionTracker::GetCurrentOcclusionForLayer(
     const gfx::Transform& draw_transform) const {
@@ -126,8 +125,8 @@ void OcclusionTracker::EnterRenderTarget(
   if (!stack_.empty() && stack_.back().target == new_target_surface)
     return;
 
-  const RenderSurfaceImpl* old_target_surface = NULL;
-  const RenderSurfaceImpl* old_occlusion_immune_ancestor = NULL;
+  const RenderSurfaceImpl* old_target_surface = nullptr;
+  const RenderSurfaceImpl* old_occlusion_immune_ancestor = nullptr;
   if (!stack_.empty()) {
     old_target_surface = stack_.back().target;
     old_occlusion_immune_ancestor =

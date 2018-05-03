@@ -5,12 +5,13 @@
 #import <EarlGrey/EarlGrey.h>
 #import <XCTest/XCTest.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#import "base/test/ios/wait_util.h"
 #include "base/test/scoped_command_line.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
 #include "components/ntp_snippets/content_suggestion.h"
@@ -75,7 +76,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
     return nullptr;
   }
   std::unique_ptr<net::test_server::BasicHttpResponse> http_response =
-      base::MakeUnique<net::test_server::BasicHttpResponse>();
+      std::make_unique<net::test_server::BasicHttpResponse>();
   http_response->set_code(net::HTTP_OK);
   http_response->set_content("<html><head><title>" + std::string(kPageTitle) +
                              "</title></head><body>" +
@@ -110,9 +111,7 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
 #pragma mark - TestCase
 
 // Test case for the ContentSuggestion UI.
-@interface ContentSuggestionsTestCase : ChromeTestCase {
-  std::unique_ptr<base::test::ScopedCommandLine> _scopedCommandLine;
-}
+@interface ContentSuggestionsTestCase : ChromeTestCase
 
 // Current non-incognito browser state.
 @property(nonatomic, assign, readonly) ios::ChromeBrowserState* browserState;
@@ -129,12 +128,6 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
 
 + (void)setUp {
   [super setUp];
-  if (IsIPadIdiom()) {
-    // Make sure we are on the Home panel on iPad.
-    chrome_test_util::OpenNewTab();
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
-        performAction:grey_typeText(@"chrome://newtab/#most_visited\n")];
-  }
 
   [self closeAllTabs];
   ios::ChromeBrowserState* browserState =
@@ -168,11 +161,6 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
 }
 
 - (void)setUp {
-  // The command line is set up before [super setUp] in order to have the NTP
-  // opened with the command line already setup.
-  _scopedCommandLine = base::MakeUnique<base::test::ScopedCommandLine>();
-  base::CommandLine* commandLine = _scopedCommandLine->GetProcessCommandLine();
-  commandLine->AppendSwitch(switches::kEnableSuggestionsUI);
   self.provider->FireCategoryStatusChanged(self.category,
                                            CategoryStatus::AVAILABLE);
 
@@ -180,17 +168,11 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
       ReadingListModelFactory::GetForBrowserState(self.browserState);
   readingListModel->DeleteAllEntries();
   [super setUp];
-  if (IsIPadIdiom()) {
-    [[EarlGrey selectElementWithMatcher:
-                   chrome_test_util::ButtonWithAccessibilityLabelId(
-                       IDS_IOS_NEW_TAB_HOME)] performAction:grey_tap()];
-  }
 }
 
 - (void)tearDown {
   self.provider->FireCategoryStatusChanged(
       self.category, CategoryStatus::ALL_SUGGESTIONS_EXPLICITLY_DISABLED);
-  _scopedCommandLine.reset();
   chrome_test_util::ClearBrowsingHistory();
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
   [super tearDown];
@@ -559,6 +541,11 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
   [ChromeEarlGrey waitForMainTabCount:2];
   [ChromeEarlGrey waitForIncognitoTabCount:0];
 
+  // Wait for the end of the new tab opening in background. This is needed as
+  // the iOS 11 devices cannot complete this animations while checking if the
+  // collection is present.
+  base::test::ios::SpinRunLoopWithMinDelay(base::TimeDelta::FromSecondsD(1));
+
   // Check that the tab has been opened in background.
   ConditionBlock condition = ^{
     NSError* error = nil;
@@ -802,8 +789,11 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
   [ChromeEarlGrey goBack];
 
   [[self class] closeAllTabs];
-
   chrome_test_util::OpenNewTab();
+  // TODO(crbug.com/783192): ChromeEarlGrey should have a method to open a new
+  // tab and synchronize with the UI.
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+
   [[EarlGrey selectElementWithMatcher:
                  chrome_test_util::StaticTextWithAccessibilityLabel(pageTitle)]
       performAction:grey_longPress()];

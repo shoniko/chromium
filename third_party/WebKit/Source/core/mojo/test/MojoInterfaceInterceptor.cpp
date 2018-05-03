@@ -7,7 +7,6 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
@@ -19,6 +18,7 @@
 #include "platform/bindings/ScriptState.h"
 #include "platform/wtf/text/StringUTF8Adaptor.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
@@ -41,7 +41,7 @@ MojoInterfaceInterceptor* MojoInterfaceInterceptor::Create(
   return new MojoInterfaceInterceptor(context, interface_name, process_scope);
 }
 
-MojoInterfaceInterceptor::~MojoInterfaceInterceptor() {}
+MojoInterfaceInterceptor::~MojoInterfaceInterceptor() = default;
 
 void MojoInterfaceInterceptor::start(ExceptionState& exception_state) {
   if (started_)
@@ -73,9 +73,8 @@ void MojoInterfaceInterceptor::start(ExceptionState& exception_state) {
     started_ = true;
     test_api.OverrideBinderForTesting(
         browser_service, interface_name,
-        ConvertToBaseCallback(
-            WTF::Bind(&MojoInterfaceInterceptor::OnInterfaceRequest,
-                      WrapWeakPersistent(this))));
+        WTF::BindRepeating(&MojoInterfaceInterceptor::OnInterfaceRequest,
+                           WrapWeakPersistent(this)));
     return;
   }
 
@@ -89,10 +88,10 @@ void MojoInterfaceInterceptor::start(ExceptionState& exception_state) {
   }
 
   started_ = true;
-  test_api.SetBinderForName(interface_name,
-                            ConvertToBaseCallback(WTF::Bind(
-                                &MojoInterfaceInterceptor::OnInterfaceRequest,
-                                WrapWeakPersistent(this))));
+  test_api.SetBinderForName(
+      interface_name,
+      WTF::BindRepeating(&MojoInterfaceInterceptor::OnInterfaceRequest,
+                         WrapWeakPersistent(this)));
 }
 
 void MojoInterfaceInterceptor::stop() {
@@ -153,14 +152,7 @@ MojoInterfaceInterceptor::GetInterfaceProvider() const {
   if (!context)
     return nullptr;
 
-  if (context->IsWorkerGlobalScope())
-    return &ToWorkerGlobalScope(context)->GetThread()->GetInterfaceProvider();
-
-  LocalFrame* frame = ToDocument(context)->GetFrame();
-  if (!frame)
-    return nullptr;
-
-  return frame->Client()->GetInterfaceProvider();
+  return context->GetInterfaceProvider();
 }
 
 void MojoInterfaceInterceptor::OnInterfaceRequest(
@@ -170,9 +162,10 @@ void MojoInterfaceInterceptor::OnInterfaceRequest(
   // 'interfacerequest' event is therefore scheduled to take place in the next
   // microtask. This also more closely mirrors the behavior when an interface
   // request is being satisfied by another process.
-  TaskRunnerHelper::Get(TaskType::kMicrotask, GetExecutionContext())
+  GetExecutionContext()
+      ->GetTaskRunner(TaskType::kMicrotask)
       ->PostTask(
-          BLINK_FROM_HERE,
+          FROM_HERE,
           WTF::Bind(&MojoInterfaceInterceptor::DispatchInterfaceRequestEvent,
                     WrapPersistent(this), WTF::Passed(std::move(handle))));
 }

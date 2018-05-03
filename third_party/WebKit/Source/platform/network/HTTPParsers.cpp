@@ -36,7 +36,6 @@
 #include "net/http/http_content_disposition.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
-#include "platform/json/JSONParser.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/network/HeaderFieldTokenizer.h"
 #include "platform/network/http_names.h"
@@ -485,8 +484,13 @@ ReflectedXSSDisposition ParseXSSProtectionHeader(const String& header,
 }
 
 ContentTypeOptionsDisposition ParseContentTypeOptionsHeader(
-    const String& header) {
-  if (header.StripWhiteSpace().DeprecatedLower() == "nosniff")
+    const String& value) {
+  if (value.IsEmpty())
+    return kContentTypeOptionsNone;
+
+  Vector<String> results;
+  value.Split(",", results);
+  if (results[0].StripWhiteSpace().LowerASCII() == "nosniff")
     return kContentTypeOptionsNosniff;
   return kContentTypeOptionsNone;
 }
@@ -805,18 +809,6 @@ bool ParseMultipartFormHeadersFromBody(const char* bytes,
   return true;
 }
 
-// See https://tools.ietf.org/html/draft-ietf-httpbis-jfv-01, Section 4.
-std::unique_ptr<JSONArray> ParseJSONHeader(const String& header,
-                                           int max_parse_depth) {
-  StringBuilder sb;
-  sb.Append("[");
-  sb.Append(header);
-  sb.Append("]");
-  std::unique_ptr<JSONValue> header_value =
-      ParseJSON(sb.ToString(), max_parse_depth);
-  return JSONArray::From(std::move(header_value));
-}
-
 bool ParseContentRangeHeaderFor206(const String& content_range,
                                    int64_t* first_byte_position,
                                    int64_t* last_byte_position,
@@ -841,20 +833,23 @@ std::unique_ptr<ServerTimingHeaderVector> ParseServerTimingHeader(
         break;
       }
 
-      double value = 0.0;
-      String description = "";
-      if (tokenizer.Consume('=')) {
-        StringView valueOutput;
-        if (tokenizer.ConsumeToken(Mode::kNormal, valueOutput)) {
-          value = valueOutput.ToString().ToDouble();
+      ServerTimingHeader header(name.ToString());
+
+      while (tokenizer.Consume(';')) {
+        StringView parameter_name;
+        if (!tokenizer.ConsumeToken(Mode::kNormal, parameter_name)) {
+          break;
         }
-      }
-      if (tokenizer.Consume(';')) {
-        tokenizer.ConsumeTokenOrQuotedString(Mode::kNormal, description);
+
+        String value = "";
+        if (tokenizer.Consume('=')) {
+          tokenizer.ConsumeTokenOrQuotedString(Mode::kNormal, value);
+          tokenizer.ConsumeBeforeAnyCharMatch({',', ';'});
+        }
+        header.SetParameter(parameter_name, value);
       }
 
-      headers->push_back(std::make_unique<ServerTimingHeader>(
-          name.ToString(), value, description));
+      headers->push_back(std::make_unique<ServerTimingHeader>(header));
 
       if (!tokenizer.Consume(',')) {
         break;

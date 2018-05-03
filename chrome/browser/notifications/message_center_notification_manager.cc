@@ -18,11 +18,11 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/message_center/message_center_tray.h"
 #include "ui/message_center/message_center_types.h"
 #include "ui/message_center/notification.h"
-#include "ui/message_center/notifier_settings.h"
+#include "ui/message_center/notifier_id.h"
 #include "ui/message_center/public/cpp/message_center_constants.h"
+#include "ui/message_center/ui_controller.h"
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/notifications/fullscreen_notification_blocker.h"
@@ -49,7 +49,7 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
   || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
   // On Windows, Linux and Mac, the notification manager owns the tray icon and
   // views.Other platforms have global ownership and Create will return NULL.
-  tray_.reset(CreateMessageCenterTrayDelegate());
+  tray_.reset(CreateUiDelegate());
 #endif
 }
 
@@ -122,11 +122,6 @@ bool MessageCenterNotificationManager::Update(
 
     // TODO(liyanhou): Add routing updated notifications to alternative
     // providers.
-
-    // Non-persistent Web Notifications rely on receiving the Display() event
-    // to inform the developer, even when replacing a previous notification.
-    if (notification.notifier_id().type == NotifierId::WEB_PAGE)
-      notification.delegate()->Display();
 
     // WARNING: You MUST use AddProfileNotification or update the message
     // center via the notification within a ProfileNotification object or the
@@ -232,8 +227,8 @@ void MessageCenterNotificationManager::OnNotificationRemoved(
   RemoveProfileNotification(id);
 }
 
-void MessageCenterNotificationManager::SetMessageCenterTrayDelegateForTest(
-    message_center::MessageCenterTrayDelegate* delegate) {
+void MessageCenterNotificationManager::SetUiDelegateForTest(
+    message_center::UiDelegate* delegate) {
   tray_.reset(delegate);
 }
 

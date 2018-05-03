@@ -33,7 +33,6 @@
 #include <memory>
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/fileapi/FileError.h"
 #include "core/frame/LocalFrame.h"
 #include "core/workers/WorkerGlobalScope.h"
@@ -42,6 +41,7 @@
 #include "platform/ContentSettingCallbacks.h"
 #include "platform/wtf/Functional.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebFileSystem.h"
 
 namespace blink {
@@ -60,7 +60,7 @@ class CallbackWrapper final
  public:
   CallbackWrapper(std::unique_ptr<AsyncFileSystemCallbacks> c)
       : callbacks_(std::move(c)) {}
-  virtual ~CallbackWrapper() {}
+  virtual ~CallbackWrapper() = default;
   std::unique_ptr<AsyncFileSystemCallbacks> Release() {
     return std::move(callbacks_);
   }
@@ -71,7 +71,7 @@ class CallbackWrapper final
   std::unique_ptr<AsyncFileSystemCallbacks> callbacks_;
 };
 
-LocalFileSystem::~LocalFileSystem() {}
+LocalFileSystem::~LocalFileSystem() = default;
 
 void LocalFileSystem::ResolveURL(
     ExecutionContext* context,
@@ -112,15 +112,16 @@ WebFileSystem* LocalFileSystem::GetFileSystem() const {
   return platform->FileSystem();
 }
 
-void LocalFileSystem::RequestFileSystemAccessInternal(ExecutionContext* context,
-                                                      WTF::Closure allowed,
-                                                      WTF::Closure denied) {
+void LocalFileSystem::RequestFileSystemAccessInternal(
+    ExecutionContext* context,
+    base::OnceClosure allowed,
+    base::OnceClosure denied) {
   if (!context->IsDocument()) {
     if (!Client().RequestFileSystemAccessSync(context)) {
-      denied();
+      std::move(denied).Run();
       return;
     }
-    allowed();
+    std::move(allowed).Run();
     return;
   }
   Client().RequestFileSystemAccessAsync(
@@ -130,16 +131,16 @@ void LocalFileSystem::RequestFileSystemAccessInternal(ExecutionContext* context,
 
 void LocalFileSystem::FileSystemNotAvailable(ExecutionContext* context,
                                              CallbackWrapper* callbacks) {
-  TaskRunnerHelper::Get(TaskType::kFileReading, context)
-      ->PostTask(BLINK_FROM_HERE,
+  context->GetTaskRunner(TaskType::kFileReading)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&ReportFailure, WTF::Passed(callbacks->Release()),
                            FileError::kAbortErr));
 }
 
 void LocalFileSystem::FileSystemNotAllowedInternal(ExecutionContext* context,
                                                    CallbackWrapper* callbacks) {
-  TaskRunnerHelper::Get(TaskType::kFileReading, context)
-      ->PostTask(BLINK_FROM_HERE,
+  context->GetTaskRunner(TaskType::kFileReading)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&ReportFailure, WTF::Passed(callbacks->Release()),
                            FileError::kAbortErr));
 }
@@ -185,6 +186,12 @@ LocalFileSystem::LocalFileSystem(WorkerClients& worker_clients,
 void LocalFileSystem::Trace(blink::Visitor* visitor) {
   Supplement<LocalFrame>::Trace(visitor);
   Supplement<WorkerClients>::Trace(visitor);
+}
+
+void LocalFileSystem::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  Supplement<LocalFrame>::TraceWrappers(visitor);
+  Supplement<WorkerClients>::TraceWrappers(visitor);
 }
 
 const char* LocalFileSystem::SupplementName() {

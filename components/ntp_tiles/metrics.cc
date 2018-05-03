@@ -8,7 +8,6 @@
 
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/strings/stringprintf.h"
 #include "components/rappor/public/rappor_utils.h"
 
@@ -84,7 +83,7 @@ const char* GetTileTypeSuffix(TileVisualType type) {
 }  // namespace
 
 void RecordPageImpression(int number_of_tiles) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.NumberOfTiles", number_of_tiles);
+  base::UmaHistogramSparse("NewTabPage.NumberOfTiles", number_of_tiles);
 }
 
 void RecordTileImpression(const NTPTileImpression& impression,
@@ -141,6 +140,18 @@ void RecordTileImpression(const NTPTileImpression& impression,
         base::StringPrintf("NewTabPage.SuggestionsImpression.%s",
                            tile_type_suffix),
         impression.index, kMaxNumTiles);
+
+    if (impression.icon_type != favicon_base::IconType::kInvalid) {
+      base::UmaHistogramEnumeration(
+          base::StringPrintf("NewTabPage.TileFaviconType.%s", tile_type_suffix),
+          impression.icon_type, favicon_base::IconType::kCount);
+    }
+  }
+
+  if (impression.icon_type != favicon_base::IconType::kInvalid) {
+    base::UmaHistogramEnumeration("NewTabPage.TileFaviconType",
+                                  impression.icon_type,
+                                  favicon_base::IconType::kCount);
   }
 }
 
@@ -167,6 +178,19 @@ void RecordTileClick(const NTPTileImpression& impression) {
     base::UmaHistogramExactLinear(
         base::StringPrintf("NewTabPage.MostVisited.%s", tile_type_suffix),
         impression.index, kMaxNumTiles);
+
+    if (impression.icon_type != favicon_base::IconType::kInvalid) {
+      base::UmaHistogramEnumeration(
+          base::StringPrintf("NewTabPage.TileFaviconTypeClicked.%s",
+                             tile_type_suffix),
+          impression.icon_type, favicon_base::IconType::kCount);
+    }
+  }
+
+  if (impression.icon_type != favicon_base::IconType::kInvalid) {
+    base::UmaHistogramEnumeration("NewTabPage.TileFaviconTypeClicked",
+                                  impression.icon_type,
+                                  favicon_base::IconType::kCount);
   }
 
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.TileTitleClicked",

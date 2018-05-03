@@ -5,22 +5,19 @@
 #ifndef CONTENT_BROWSER_SHARED_WORKER_SHARED_WORKER_SERVICE_IMPL_H_
 #define CONTENT_BROWSER_SHARED_WORKER_SHARED_WORKER_SERVICE_IMPL_H_
 
-#include <map>
 #include <memory>
 #include <set>
 #include <utility>
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/containers/unique_ptr_comparator.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
-#include "base/observer_list.h"
 #include "content/browser/shared_worker/shared_worker_host.h"
 #include "content/common/shared_worker/shared_worker_connector.mojom.h"
 #include "content/common/shared_worker/shared_worker_factory.mojom.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/worker_service.h"
+#include "content/public/browser/shared_worker_service.h"
 
 namespace blink {
 class MessagePortChannel;
@@ -30,23 +27,18 @@ namespace content {
 
 class SharedWorkerInstance;
 class SharedWorkerHost;
-class ResourceContext;
-class WorkerServiceObserver;
-class WorkerStoragePartitionId;
 
-// The implementation of WorkerService. We try to place workers in an existing
-// renderer process when possible.
-class CONTENT_EXPORT SharedWorkerServiceImpl : public WorkerService {
+class CONTENT_EXPORT SharedWorkerServiceImpl : public SharedWorkerService {
  public:
-  // Returns the SharedWorkerServiceImpl singleton.
-  static SharedWorkerServiceImpl* GetInstance();
+  SharedWorkerServiceImpl();
+  ~SharedWorkerServiceImpl() override;
 
-  // WorkerService implementation:
-  bool TerminateWorker(int process_id, int route_id) override;
-  void TerminateAllWorkersForTesting(base::OnceClosure callback) override;
-  std::vector<WorkerInfo> GetWorkers() override;
-  void AddObserver(WorkerServiceObserver* observer) override;
-  void RemoveObserver(WorkerServiceObserver* observer) override;
+  // SharedWorkerService implementation.
+  bool TerminateWorker(const GURL& url,
+                       const std::string& name,
+                       const url::Origin& constructor_origin) override;
+
+  void TerminateAllWorkersForTesting(base::OnceClosure callback);
 
   // Creates the worker if necessary or connects to an already existing worker.
   void ConnectToWorker(
@@ -55,23 +47,12 @@ class CONTENT_EXPORT SharedWorkerServiceImpl : public WorkerService {
       mojom::SharedWorkerInfoPtr info,
       mojom::SharedWorkerClientPtr client,
       blink::mojom::SharedWorkerCreationContextType creation_context_type,
-      const blink::MessagePortChannel& port,
-      ResourceContext* resource_context,
-      const WorkerStoragePartitionId& partition_id);
+      const blink::MessagePortChannel& port);
 
-  void DestroyHost(int process_id, int route_id);
+  void DestroyHost(SharedWorkerHost* host);
 
  private:
-  friend struct base::DefaultSingletonTraits<SharedWorkerServiceImpl>;
   friend class SharedWorkerServiceImplTest;
-
-  using WorkerID = std::pair<int /* process_id */, int /* route_id */>;
-  using WorkerHostMap = std::map<WorkerID, std::unique_ptr<SharedWorkerHost>>;
-
-  SharedWorkerServiceImpl();
-  ~SharedWorkerServiceImpl() override;
-
-  void ResetForTesting();
 
   void CreateWorker(std::unique_ptr<SharedWorkerInstance> instance,
                     mojom::SharedWorkerClientPtr client,
@@ -84,8 +65,8 @@ class CONTENT_EXPORT SharedWorkerServiceImpl : public WorkerService {
   SharedWorkerHost* FindAvailableSharedWorkerHost(
       const SharedWorkerInstance& instance);
 
-  WorkerHostMap worker_hosts_;
-  base::ObserverList<WorkerServiceObserver> observers_;
+  std::set<std::unique_ptr<SharedWorkerHost>, base::UniquePtrComparator>
+      worker_hosts_;
   base::OnceClosure terminate_all_workers_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(SharedWorkerServiceImpl);

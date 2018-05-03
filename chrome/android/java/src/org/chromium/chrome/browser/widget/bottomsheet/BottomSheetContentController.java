@@ -12,6 +12,7 @@ import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.PointF;
 import android.graphics.drawable.Drawable;
+import android.support.annotation.IdRes;
 import android.support.annotation.IntDef;
 import android.support.annotation.Nullable;
 import android.util.AttributeSet;
@@ -29,6 +30,7 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.chrome.R;
@@ -38,6 +40,7 @@ import org.chromium.chrome.browser.bookmarks.BookmarkSheetContent;
 import org.chromium.chrome.browser.download.DownloadSheetContent;
 import org.chromium.chrome.browser.history.HistorySheetContent;
 import org.chromium.chrome.browser.ntp.IncognitoBottomSheetContent;
+import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.suggestions.SuggestionsBottomSheetContent;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
@@ -51,6 +54,7 @@ import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.BottomSheetCon
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.StateChangeReason;
 import org.chromium.chrome.browser.widget.bottomsheet.base.BottomNavigationView;
 import org.chromium.chrome.browser.widget.bottomsheet.base.BottomNavigationView.OnNavigationItemSelectedListener;
+import org.chromium.chrome.browser.widget.textbubble.ViewAnchoredTextBubble;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.ui.UiUtils;
 
@@ -99,8 +103,8 @@ public class BottomSheetContentController
     private int mBottomNavHeight;
 
     private final Map<Integer, BottomSheetContent> mBottomSheetContents = new HashMap<>();
-
     private boolean mLabelsEnabled;
+    private boolean mDestroyed;
 
     private final BottomSheetObserver mBottomSheetObserver = new EmptyBottomSheetObserver() {
         @Override
@@ -110,7 +114,7 @@ public class BottomSheetContentController
                 float offsetY = mBottomSheet.getSheetHeightForState(mBottomSheet.isSmallScreen()
                                                 ? BottomSheet.SHEET_STATE_FULL
                                                 : BottomSheet.SHEET_STATE_HALF)
-                        - mBottomSheet.getSheetOffsetFromBottom();
+                        - mBottomSheet.getCurrentOffsetPx();
                 setTranslationY(Math.max(offsetY, 0f));
 
                 if (mBottomSheet.getTargetSheetState() != BottomSheet.SHEET_STATE_PEEK
@@ -148,7 +152,11 @@ public class BottomSheetContentController
         public void onSheetClosed(@StateChangeReason int reason) {
             removeIcons();
 
-            if (ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_HOME_DESTROY_SUGGESTIONS)) {
+            if (ChromeFeatureList.isInitialized()
+                    && ChromeFeatureList.isEnabled(
+                               ChromeFeatureList.CHROME_HOME_DESTROY_SUGGESTIONS)
+                    && !ChromeFeatureList.isEnabled(
+                               ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_ABOVE_ARTICLES)) {
                 // TODO(bauerb): Implement support for destroying the home sheet after a delay.
                 mSelectedItemId = NO_CONTENT_ID;
                 mBottomSheet.showContent(null);
@@ -175,20 +183,24 @@ public class BottomSheetContentController
 
             if (mShouldOpenSheetOnNextContentChange) {
                 mShouldOpenSheetOnNextContentChange = false;
-                if (mBottomSheet.getSheetState() != BottomSheet.SHEET_STATE_FULL) {
-                    mBottomSheet.setSheetState(BottomSheet.SHEET_STATE_FULL, true);
+                @BottomSheet.SheetState
+                int targetState = mShouldOpenSheetToHalfOnNextContentChange
+                        ? BottomSheet.SHEET_STATE_HALF
+                        : BottomSheet.SHEET_STATE_FULL;
+                if (mBottomSheet.getSheetState() != targetState) {
+                    mBottomSheet.setSheetState(targetState, true);
                 }
                 return;
             }
 
-            if (mBottomSheet.getSheetState() == BottomSheet.SHEET_STATE_PEEK) {
-                clearBottomSheetContents(mBottomSheet.getCurrentSheetContent() == null);
+            // If the home content is showing and the sheet is closed, destroy sheet contents that
+            // are no longer needed.
+            if ((mShouldClearContentsOnNextContentChange
+                        || mBottomSheet.getSheetState() == BottomSheet.SHEET_STATE_PEEK)
+                    && (newContent == null
+                               || newContent == mBottomSheetContents.get(getHomeContentId()))) {
+                clearBottomSheetContents(newContent == null);
             }
-        }
-
-        @Override
-        public void onSheetLayout(int windowHeight, int containerHeight) {
-            setTranslationY(containerHeight - windowHeight);
         }
     };
 
@@ -198,6 +210,8 @@ public class BottomSheetContentController
     private int mSelectedItemId;
     private ChromeActivity mActivity;
     private boolean mShouldOpenSheetOnNextContentChange;
+    private boolean mShouldOpenSheetToHalfOnNextContentChange;
+    private boolean mShouldClearContentsOnNextContentChange;
     private PlaceholderSheetContent mPlaceholderContent;
     private boolean mOmniboxHasFocus;
     private TabModelSelectorObserver mTabModelSelectorObserver;
@@ -218,6 +232,7 @@ public class BottomSheetContentController
 
     /** Called when the activity containing the bottom sheet is destroyed. */
     public void destroy() {
+        mDestroyed = true;
         clearBottomSheetContents(true);
         if (mPlaceholderContent != null) {
             mPlaceholderContent.destroy();
@@ -227,6 +242,22 @@ public class BottomSheetContentController
             mTabModelSelector.removeObserver(mTabModelSelectorObserver);
             mTabModelSelector = null;
         }
+    }
+
+    @Override
+    public void onFinishInflate() {
+        super.onFinishInflate();
+        BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
+                .addStartupCompletedObserver(new BrowserStartupController.StartupCallback() {
+                    @Override
+                    public void onSuccess(boolean alreadyStarted) {
+                        initBottomNavMenu();
+                        setIconsEnabled(true);
+                    }
+
+                    @Override
+                    public void onFailure() {}
+                });
     }
 
     /**
@@ -241,21 +272,17 @@ public class BottomSheetContentController
         mBottomSheet.addObserver(mBottomSheetObserver);
         mActivity = activity;
         mTabModelSelector = tabModelSelector;
-
-        BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                .addStartupCompletedObserver(new BrowserStartupController.StartupCallback() {
-                    @Override
-                    public void onSuccess(boolean alreadyStarted) {
-                        initBottomNavMenu();
-                    }
-
-                    @Override
-                    public void onFailure() {}
-                });
+        setIconsEnabled(mActivity.didFinishNativeInitialization());
 
         mTabModelSelectorObserver = new EmptyTabModelSelectorObserver() {
             @Override
             public void onTabModelSelected(TabModel newModel, TabModel oldModel) {
+                // Remove all bottom sheet contents except Home if switching between standard and
+                // incognito mode to prevent contents from being out of date.
+                if (newModel.isIncognito() != oldModel.isIncognito()) {
+                    mShouldClearContentsOnNextContentChange = true;
+                }
+
                 updateVisuals(newModel.isIncognito());
                 showBottomSheetContent(R.id.action_home);
                 mPlaceholderContent.setIsIncognito(newModel.isIncognito());
@@ -331,10 +358,13 @@ public class BottomSheetContentController
      * Needs to be called after the native library is loaded.
      */
     private void initializeMenuView() {
+        if (mDestroyed) return;
+
         mLabelsEnabled =
                 ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_HOME_BOTTOM_NAV_LABELS);
         if (mLabelsEnabled) {
-            ((ImageView) findViewById(R.id.bottom_nav_shadow)).setVisibility(View.VISIBLE);
+            ImageView bottomNavShadow = (ImageView) findViewById(R.id.bottom_nav_shadow);
+            if (bottomNavShadow != null) bottomNavShadow.setVisibility(View.VISIBLE);
         } else {
             hideMenuLabels();
         }
@@ -354,7 +384,8 @@ public class BottomSheetContentController
                 (ViewGroup) mActivity.findViewById(R.id.bottom_sheet_snackbar_container);
         ((MarginLayoutParams) snackbarContainer.getLayoutParams()).bottomMargin = mBottomNavHeight;
 
-        setMenuBackgroundColor(mTabModelSelector.isIncognitoSelected());
+        setMenuBackgroundColor(
+                mTabModelSelector != null ? mTabModelSelector.isIncognitoSelected() : false);
     }
 
     /**
@@ -472,6 +503,11 @@ public class BottomSheetContentController
         return createAndCacheContentForId(navItemId);
     }
 
+    private int getHomeContentId() {
+        if (mTabModelSelector.isIncognitoSelected()) return INCOGNITO_HOME_ID;
+        return R.id.action_home;
+    }
+
     /**
      * Create and return the content for the provided nav button id.
      * @param navItemId The id to create and get the content for.
@@ -508,6 +544,13 @@ public class BottomSheetContentController
         if (mSelectedItemId > 0) getMenu().findItem(mSelectedItemId).setChecked(false);
         mSelectedItemId = navItemId;
         getMenu().findItem(mSelectedItemId).setChecked(true);
+
+        // Cancel clearing contents for switched tab model if showing contents other than Home.
+        // This is to prevent crash when bottom nav is clicked shortly after switching tab model.
+        // See crbug.com/780430 for more details.
+        if (mShouldClearContentsOnNextContentChange && mSelectedItemId != getHomeContentId()) {
+            mShouldClearContentsOnNextContentChange = false;
+        }
 
         BottomSheetContent newContent = getSheetContentForId(mSelectedItemId);
         mBottomSheet.showContent(newContent);
@@ -548,6 +591,12 @@ public class BottomSheetContentController
         getMenu().findItem(R.id.action_downloads).setIcon(null);
         getMenu().findItem(R.id.action_bookmarks).setIcon(null);
         getMenu().findItem(R.id.action_history).setIcon(null);
+    }
+
+    private void setIconsEnabled(boolean enabled) {
+        getMenu().findItem(R.id.action_downloads).setEnabled(enabled);
+        getMenu().findItem(R.id.action_bookmarks).setEnabled(enabled);
+        getMenu().findItem(R.id.action_history).setEnabled(enabled);
     }
 
     /**
@@ -726,5 +775,66 @@ public class BottomSheetContentController
 
             animator.start();
         }
+    }
+
+    /**
+     * Record a menu item click and open the bottom sheet to the specified content. This method
+     * assumes that Chrome Home is enabled.
+     * @param navId The bottom sheet navigation id to open.
+     */
+    public void openBottomSheetForMenuItem(@IdRes int navId) {
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+            ChromePreferenceManager.getInstance().incrementChromeHomeMenuItemClickCount();
+        }
+
+        mShouldOpenSheetToHalfOnNextContentChange = true;
+        final View highlightedView = findViewById(navId);
+
+        int stringId = 0;
+        if (navId == R.id.action_bookmarks) {
+            stringId = R.string.chrome_home_menu_bookmarks_help_bubble;
+        } else if (navId == R.id.action_downloads) {
+            stringId = R.string.chrome_home_menu_downloads_help_bubble;
+        } else if (navId == R.id.action_history) {
+            stringId = R.string.chrome_home_menu_history_help_bubble;
+        } else {
+            throw new RuntimeException("Attempting to show invalid content in bottom sheet.");
+        }
+
+        final ViewAnchoredTextBubble helpBubble =
+                new ViewAnchoredTextBubble(getContext(), mBottomSheet, stringId, stringId);
+        helpBubble.setDismissOnTouchInteraction(true);
+
+        mBottomSheet.addObserver(new EmptyBottomSheetObserver() {
+            /** Whether the help bubble has been shown. */
+            private boolean mHelpBubbleShown;
+
+            @Override
+            public void onSheetContentChanged(BottomSheet.BottomSheetContent newContent) {
+                if (getSheetContentForId(navId) == newContent) return;
+                post(() -> {
+                    ViewHighlighter.turnOffHighlight(highlightedView);
+                    mBottomSheet.removeObserver(this);
+                });
+            }
+
+            @Override
+            public void onSheetOpened(@StateChangeReason int reason) {
+                ViewHighlighter.turnOnHighlight(highlightedView, false);
+                mShouldOpenSheetToHalfOnNextContentChange = false;
+            }
+
+            @Override
+            public void onSheetStateChanged(@BottomSheet.SheetState int state) {
+                if (state != BottomSheet.SHEET_STATE_HALF || mHelpBubbleShown) return;
+                int inset = getContext().getResources().getDimensionPixelSize(
+                        R.dimen.bottom_sheet_help_bubble_inset);
+                helpBubble.setInsetPx(0, inset, 0, inset);
+                helpBubble.show();
+                mHelpBubbleShown = true;
+            }
+        });
+
+        showContentAndOpenSheet(navId);
     }
 }

@@ -15,8 +15,8 @@ class MediaColorTest : public MediaBrowserTest {
   void RunColorTest(const std::string& video_file) {
     base::FilePath path = media::GetTestDataFilePath("blackwhite.html");
     std::string final_title =
-        RunTest(GetFileUrlWithQuery(path, video_file), kEnded);
-    EXPECT_EQ(kEnded, final_title);
+        RunTest(GetFileUrlWithQuery(path, video_file), media::kEnded);
+    EXPECT_EQ(media::kEnded, final_title);
   }
 };
 
@@ -92,12 +92,18 @@ IN_PROC_BROWSER_TEST_F(MediaColorTest, MAYBE_Yuv420pRec709H264) {
   RunColorTest("yuv420p_rec709.mp4");
 }
 
-// Android devices usually only support baseline, main and high.
-#if !defined(OS_ANDROID)
-IN_PROC_BROWSER_TEST_F(MediaColorTest, Yuv420pHighBitDepth) {
+// This fails on Linux: http://crbug.com/767926. Android doesn't support 10bpc.
+#if defined(OS_LINUX) || defined(OS_ANDROID)
+#define MAYBE_Yuv420pHighBitDepth DISABLED_Yuv420pHighBitDepth
+#else
+#define MAYBE_Yuv420pHighBitDepth Yuv420pHighBitDepth
+#endif
+IN_PROC_BROWSER_TEST_F(MediaColorTest, MAYBE_Yuv420pHighBitDepth) {
   RunColorTest("yuv420p_hi10p.mp4");
 }
 
+// Android devices usually only support baseline, main and high.
+#if !defined(OS_ANDROID)
 IN_PROC_BROWSER_TEST_F(MediaColorTest, Yuv422pH264) {
   RunColorTest("yuv422p.mp4");
 }

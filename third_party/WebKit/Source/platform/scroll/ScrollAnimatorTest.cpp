@@ -118,7 +118,7 @@ class MockScrollableAreaForAnimatorTest
     ScrollableArea::SetScrollOffset(offset, type, behavior);
   }
 
-  RefPtr<WebTaskRunner> GetTimerTaskRunner() const final {
+  scoped_refptr<WebTaskRunner> GetTimerTaskRunner() const final {
     return Platform::Current()->CurrentThread()->Scheduler()->TimerTaskRunner();
   }
 
@@ -150,7 +150,7 @@ class TestScrollAnimator : public ScrollAnimator {
   TestScrollAnimator(ScrollableArea* scrollable_area,
                      WTF::TimeFunction timing_function)
       : ScrollAnimator(scrollable_area, timing_function) {}
-  ~TestScrollAnimator() override {}
+  ~TestScrollAnimator() override = default;
 
   void SetShouldSendToCompositor(bool send) {
     should_send_to_compositor_ = send;

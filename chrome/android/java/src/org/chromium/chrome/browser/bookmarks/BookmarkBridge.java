@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.bookmarks;
 
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Pair;
 
@@ -11,6 +12,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksShim;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.bookmarks.BookmarkId;
@@ -19,6 +21,7 @@ import org.chromium.components.url_formatter.UrlFormatter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Provides the communication channel for Android to fetch and manipulate the
@@ -303,20 +306,23 @@ public class BookmarkBridge {
             return true;
         }
 
-        // Start reading as a fail-safe measure to avoid waiting forever if the caller forgets to
-        // call kickOffReading().
-        PartnerBookmarksShim.kickOffReading(ContextUtils.getApplicationContext());
-
+        long startTime = SystemClock.elapsedRealtime();
         addObserver(new BookmarkModelObserver() {
             @Override
             public void bookmarkModelLoaded() {
                 removeObserver(this);
+                RecordHistogram.recordTimesHistogram("PartnerBookmark.LoadingTime",
+                        SystemClock.elapsedRealtime() - startTime, TimeUnit.MILLISECONDS);
                 runAfterModelLoaded.run();
             }
             @Override
             public void bookmarkModelChanged() {
             }
         });
+
+        // Start reading as a fail-safe measure to avoid waiting forever if the caller forgets to
+        // call kickOffReading().
+        PartnerBookmarksShim.kickOffReading(ContextUtils.getApplicationContext());
         return false;
     }
 
@@ -489,6 +495,16 @@ public class BookmarkBridge {
         assert mIsNativeBookmarkModelLoaded;
         return nativeGetChildAt(mNativeBookmarkBridge, folderId.getId(), folderId.getType(),
                 index);
+    }
+
+    /**
+     * Get the total number of bookmarks in the sub tree of the specified folder.
+     * @param id The {@link BookmarkId} of the folder to be queried.
+     * @return The total number of bookmarks in the folder.
+     */
+    public int getTotalBookmarkCount(BookmarkId id) {
+        assert mIsNativeBookmarkModelLoaded;
+        return nativeGetTotalBookmarkCount(mNativeBookmarkBridge, id.getId(), id.getType());
     }
 
     /**
@@ -890,6 +906,7 @@ public class BookmarkBridge {
             boolean getFolders, boolean getBookmarks, List<BookmarkId> bookmarksList);
     private native BookmarkId nativeGetChildAt(long nativeBookmarkBridge, long id, int type,
             int index);
+    private native int nativeGetTotalBookmarkCount(long nativeBookmarkBridge, long id, int type);
     private native void nativeSetBookmarkTitle(long nativeBookmarkBridge, long id, int type,
             String title);
     private native void nativeSetBookmarkUrl(long nativeBookmarkBridge, long id, int type,

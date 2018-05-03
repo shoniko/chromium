@@ -46,15 +46,18 @@
 #include "core/input/ContextMenuAllowedScope.h"
 #include "core/input/EventHandler.h"
 #include "core/input_type_names.h"
+#include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutBoxModelObject.h"
 #include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "modules/accessibility/AXSparseAttributeSetter.h"
+#include "platform/scroll/ScrollAlignment.h"
 #include "platform/text/PlatformLocale.h"
 #include "platform/wtf/HashSet.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/text/WTFString.h"
+#include "public/platform/WebScrollIntoViewParams.h"
 
 using blink::WebLocalizedString;
 
@@ -91,7 +94,7 @@ const RoleEntry kRoles[] = {{"alert", kAlertRole},
                             {"cell", kCellRole},
                             {"checkbox", kCheckBoxRole},
                             {"columnheader", kColumnHeaderRole},
-                            {"combobox", kComboBoxRole},
+                            {"combobox", kComboBoxGroupingRole},
                             {"complementary", kComplementaryRole},
                             {"contentinfo", kContentInfoRole},
                             {"definition", kDefinitionRole},
@@ -177,7 +180,8 @@ const InternalRoleEntry kInternalRoles[] = {
     {kColorWellRole, "ColorWell"},
     {kColumnHeaderRole, "ColumnHeader"},
     {kColumnRole, "Column"},
-    {kComboBoxRole, "ComboBox"},
+    {kComboBoxGroupingRole, "ComboBox"},
+    {kComboBoxMenuButtonRole, "ComboBox"},
     {kComplementaryRole, "Complementary"},
     {kContentInfoRole, "ContentInfo"},
     {kDateRole, "Date"},
@@ -264,6 +268,7 @@ const InternalRoleEntry kInternalRoles[] = {
     {kTableRole, "Table"},
     {kTermRole, "Term"},
     {kTextFieldRole, "TextField"},
+    {kTextFieldWithComboBoxRole, "ComboBox"},
     {kTimeRole, "Time"},
     {kTimerRole, "Timer"},
     {kToggleButtonRole, "ToggleButton"},
@@ -279,11 +284,15 @@ static_assert(WTF_ARRAY_LENGTH(kInternalRoles) == kNumRoles,
               "Not all internal roles have an entry in internalRoles array");
 
 // Roles which we need to map in the other direction
-const RoleEntry kReverseRoles[] = {
-    {"button", kToggleButtonRole},     {"combobox", kPopUpButtonRole},
-    {"contentinfo", kFooterRole},      {"menuitem", kMenuButtonRole},
-    {"menuitem", kMenuListOptionRole}, {"progressbar", kMeterRole},
-    {"textbox", kTextFieldRole}};
+const RoleEntry kReverseRoles[] = {{"button", kToggleButtonRole},
+                                   {"combobox", kPopUpButtonRole},
+                                   {"contentinfo", kFooterRole},
+                                   {"menuitem", kMenuButtonRole},
+                                   {"menuitem", kMenuListOptionRole},
+                                   {"progressbar", kMeterRole},
+                                   {"textbox", kTextFieldRole},
+                                   {"combobox", kComboBoxMenuButtonRole},
+                                   {"combobox", kTextFieldWithComboBoxRole}};
 
 static ARIARoleMap* CreateARIARoleMap() {
   ARIARoleMap* role_map = new ARIARoleMap;
@@ -528,7 +537,7 @@ void AXObject::GetSparseAXAttributes(
 bool AXObject::IsARIATextControl() const {
   return AriaRoleAttribute() == kTextFieldRole ||
          AriaRoleAttribute() == kSearchBoxRole ||
-         AriaRoleAttribute() == kComboBoxRole;
+         AriaRoleAttribute() == kTextFieldWithComboBoxRole;
 }
 
 bool AXObject::IsButton() const {
@@ -664,10 +673,8 @@ bool AXObject::IsClickable() const {
   // TODO(dmazzoni): Ensure that kColorWellRole and kSpinButtonRole are
   // correctly handled here via their constituent parts.
   switch (RoleValue()) {
-    // TODO(dmazzoni): Replace kComboBoxRole with two new combo box roles.
-    // Composite widget and text field.
-    case kComboBoxRole:
     case kCheckBoxRole:
+    case kComboBoxMenuButtonRole:
     case kDisclosureTriangleRole:
     case kListBoxRole:
     case kListBoxOptionRole:
@@ -684,7 +691,7 @@ bool AXObject::IsClickable() const {
   }
 }
 
-bool AXObject::AccessibilityIsIgnored() {
+bool AXObject::AccessibilityIsIgnored() const {
   Node* node = GetNode();
   if (!node) {
     AXObject* parent = this->ParentObject();
@@ -712,7 +719,7 @@ void AXObject::UpdateCachedAttributeValuesIfNeeded() const {
   if (IsDetached())
     return;
 
-  AXObjectCacheImpl& cache = AxObjectCache();
+  AXObjectCacheImpl& cache = AXObjectCache();
 
   if (cache.ModificationCount() == last_modification_count_)
     return;
@@ -725,9 +732,7 @@ void AXObject::UpdateCachedAttributeValuesIfNeeded() const {
   cached_has_inherited_presentational_role_ =
       !!InheritsPresentationalRoleFrom();
   cached_is_ignored_ = ComputeAccessibilityIsIgnored();
-  cached_is_editable_root_ =
-      GetNode() ? IsNativeTextControl() || IsRootEditableElement(*GetNode())
-                : false;
+  cached_is_editable_root_ = ComputeIsEditableRoot();
   cached_live_region_root_ =
       IsLiveRegion()
           ? const_cast<AXObject*>(this)
@@ -735,6 +740,13 @@ void AXObject::UpdateCachedAttributeValuesIfNeeded() const {
                                     : nullptr);
   cached_ancestor_exposes_active_descendant_ =
       ComputeAncestorExposesActiveDescendant();
+
+  // TODO(dmazzoni): remove this const_cast.
+  if (cached_is_ignored_ != LastKnownIsIgnoredValue()) {
+    const_cast<AXObject*>(this)->ChildrenChanged();
+    last_known_is_ignored_value_ =
+        cached_is_ignored_ ? kIgnoreObject : kIncludeObject;
+  }
 }
 
 bool AXObject::AccessibilityIsIgnoredByDefault(
@@ -772,7 +784,7 @@ bool AXObject::ComputeIsInertOrAriaHidden(
       if (ignored_reasons) {
         HTMLDialogElement* dialog = GetActiveDialogElement(GetNode());
         if (dialog) {
-          AXObject* dialog_object = AxObjectCache().GetOrCreate(dialog);
+          AXObject* dialog_object = AXObjectCache().GetOrCreate(dialog);
           if (dialog_object) {
             ignored_reasons->push_back(
                 IgnoredReason(kAXActiveModalDialog, dialog_object));
@@ -854,7 +866,7 @@ const AXObject* AXObject::InertRoot() const {
                          : FlatTreeTraversal::ParentElement(*node);
   while (element) {
     if (element->hasAttribute(inertAttr))
-      return AxObjectCache().GetOrCreate(element);
+      return AXObjectCache().GetOrCreate(element);
     element = FlatTreeTraversal::ParentElement(*element);
   }
 
@@ -895,8 +907,8 @@ bool AXObject::DispatchEventToAOMEventListeners(Event& event,
   // time an event is received that actually would have triggered an
   // event listener. However, if the user grants this permission, it
   // persists for this origin from then on.
-  if (!AxObjectCache().CanCallAOMEventListeners()) {
-    AxObjectCache().RequestAOMEventListenerPermission();
+  if (!AXObjectCache().CanCallAOMEventListeners()) {
+    AXObjectCache().RequestAOMEventListenerPermission();
     return false;
   }
 
@@ -968,7 +980,7 @@ const AXObject* AXObject::DisabledAncestor() const {
   return nullptr;
 }
 
-bool AXObject::LastKnownIsIgnoredValue() {
+bool AXObject::LastKnownIsIgnoredValue() const {
   if (last_known_is_ignored_value_ == kDefaultBehavior) {
     last_known_is_ignored_value_ =
         AccessibilityIsIgnored() ? kIgnoreObject : kIncludeObject;
@@ -1003,16 +1015,14 @@ bool AXObject::CanReceiveAccessibilityFocus() const {
 bool AXObject::CanSetValueAttribute() const {
   switch (RoleValue()) {
     case kColorWellRole:
-    case kComboBoxRole:
     case kDateRole:
     case kDateTimeRole:
-    case kListBoxRole:
-    case kMenuButtonRole:
     case kScrollBarRole:
     case kSliderRole:
     case kSpinButtonRole:
     case kSplitterRole:
     case kTextFieldRole:
+    case kTextFieldWithComboBoxRole:
     case kTimeRole:
     case kSearchBoxRole:
       return Restriction() == kNone;
@@ -1062,7 +1072,7 @@ bool AXObject::ComputeAncestorExposesActiveDescendant() const {
   if (!parent)
     return false;
 
-  if (parent->SupportsActiveDescendant() &&
+  if (parent->SupportsARIAActiveDescendant() &&
       parent->GetAOMPropertyOrARIAAttribute(
           AOMRelationProperty::kActiveDescendant)) {
     return true;
@@ -1094,8 +1104,9 @@ bool AXObject::IsSubWidget(AccessibilityRole role) {
   return false;
 }
 
-bool AXObject::SupportsSetSizeAndPosInSet() const {
+bool AXObject::SupportsARIASetSizeAndPosInSet() const {
   switch (RoleValue()) {
+    case kArticleRole:
     case kListBoxOptionRole:
     case kListItemRole:
     case kMenuItemRole:
@@ -1280,7 +1291,7 @@ String AXObject::AriaTextAlternative(bool recursive,
         text_alternative =
             TextFromAriaLabelledby(visited_copy, related_objects, ids);
         if (!ids.IsEmpty())
-          AxObjectCache().UpdateReverseRelations(this, ids);
+          AXObjectCache().UpdateReverseRelations(this, ids);
         if (!text_alternative.IsNull()) {
           if (name_sources) {
             NameSource& source = name_sources->back();
@@ -1336,7 +1347,7 @@ String AXObject::TextFromElements(
   AXRelatedObjectVector local_related_objects;
 
   for (const auto& element : elements) {
-    AXObject* ax_element = AxObjectCache().GetOrCreate(element);
+    AXObject* ax_element = AXObjectCache().GetOrCreate(element);
     if (ax_element) {
       found_valid_element = true;
 
@@ -1368,7 +1379,7 @@ void AXObject::TokenVectorFromAttribute(Vector<String>& tokens,
   if (attribute_value.IsEmpty())
     return;
 
-  attribute_value.SimplifyWhiteSpace();
+  attribute_value = attribute_value.SimplifyWhiteSpace();
   attribute_value.Split(' ', tokens);
 }
 
@@ -1448,9 +1459,7 @@ AXDefaultActionVerb AXObject::Action() const {
       return AXDefaultActionVerb::kSelect;
     case kLinkRole:
       return AXDefaultActionVerb::kJump;
-    // TODO(dmazzoni): Change kComboBoxRole to combo box composite widget.
-    case kComboBoxRole:
-    case kListBoxRole:
+    case kComboBoxMenuButtonRole:
     case kPopUpButtonRole:
       return AXDefaultActionVerb::kOpen;
     default:
@@ -1470,12 +1479,13 @@ bool AXObject::AriaCheckedIsPresent() const {
   return HasAOMPropertyOrARIAAttribute(AOMStringProperty::kChecked, result);
 }
 
-bool AXObject::SupportsActiveDescendant() const {
+bool AXObject::SupportsARIAActiveDescendant() const {
   // According to the ARIA Spec, all ARIA composite widgets, ARIA text boxes,
   // ARIA groups and ARIA application should be able to expose an active descendant.
   // Implicitly, <input> and <textarea> elements should also have this ability.
   switch (AriaRoleAttribute()) {
-    case kComboBoxRole:
+    case kComboBoxGroupingRole:
+    case kComboBoxMenuButtonRole:
     case kGridRole:
     case kGroupRole:
     case kListBoxRole:
@@ -1486,10 +1496,77 @@ bool AXObject::SupportsActiveDescendant() const {
     case kSearchBoxRole:
     case kTabListRole:
     case kTextFieldRole:
+    case kTextFieldWithComboBoxRole:
     case kToolbarRole:
     case kTreeRole:
     case kTreeGridRole:
     case kApplicationRole:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool AXObject::SupportsARIAExpanded() const {
+  switch (AriaRoleAttribute()) {
+    case kAlertDialogRole:
+    case kAlertRole:
+    case kArticleRole:
+    case kBannerRole:
+    case kButtonRole:
+    case kCellRole:
+    case kColumnHeaderRole:
+    case kComboBoxGroupingRole:
+    case kComboBoxMenuButtonRole:
+    case kComplementaryRole:
+    case kContentInfoRole:
+    case kDefinitionRole:
+    case kDialogRole:
+    case kDirectoryRole:
+    case kDisclosureTriangleRole:
+    case kDocumentRole:
+    case kFeedRole:
+    case kFigureRole:
+    case kFormRole:
+    case kGridRole:
+    case kGroupRole:
+    case kHeadingRole:
+    case kImageRole:
+    case kListRole:
+    case kListBoxRole:
+    case kListBoxOptionRole:
+    case kListItemRole:
+    case kLinkRole:
+    case kLogRole:
+    case kMainRole:
+    case kMarqueeRole:
+    case kMathRole:
+    case kMenuRole:
+    case kMenuBarRole:
+    case kMenuButtonRole:
+    case kMenuItemRole:
+    case kMenuItemCheckBoxRole:
+    case kMenuItemRadioRole:
+    case kNavigationRole:
+    case kNoteRole:
+    case kProgressIndicatorRole:
+    case kRadioGroupRole:
+    case kRegionRole:
+    case kRowRole:
+    case kRowHeaderRole:
+    case kSearchRole:
+    case kStatusRole:
+    case kTabRole:
+    case kTableRole:
+    case kTabPanelRole:
+    case kTermRole:
+    case kTextFieldWithComboBoxRole:
+    case kTimerRole:
+    case kToolbarRole:
+    case kUserInterfaceTooltipRole:
+    case kTreeRole:
+    case kTreeGridRole:
+    case kTreeItemRole:
       return true;
     default:
       return false;
@@ -1544,7 +1621,7 @@ AXRestriction AXObject::Restriction() const {
 
   // Check aria-readonly if supported by current role.
   bool is_read_only;
-  if (CanSupportAriaReadOnly() &&
+  if (SupportsARIAReadOnly() &&
       HasAOMPropertyOrARIAAttribute(AOMBooleanProperty::kReadOnly,
                                     is_read_only)) {
     // ARIA overrides other readonly state markup.
@@ -1581,6 +1658,21 @@ AccessibilityRole AXObject::DetermineAriaRoleAttribute() const {
     role = ButtonRoleType();
 
   role = RemapAriaRoleDueToParent(role);
+
+  // Distinguish between different uses of the "combobox" role:
+  //
+  // kComboBoxGroupingRole:
+  //   <div role="combobox"><input></div>
+  // kTextFieldWithComboBoxRole:
+  //   <input role="combobox">
+  // kComboBoxMenuButtonRole:
+  //   <div tabindex=0 role="combobox">Select</div>
+  if (role == kComboBoxGroupingRole) {
+    if (IsNativeTextControl())
+      role = kTextFieldWithComboBoxRole;
+    else if (GetElement() && GetElement()->SupportsFocus())
+      role = kComboBoxMenuButtonRole;
+  }
 
   if (role)
     return role;
@@ -1692,8 +1784,8 @@ AXObject* AXObject::ParentObject() const {
   if (parent_)
     return parent_;
 
-  if (AxObjectCache().IsAriaOwned(this))
-    return AxObjectCache().GetAriaOwnedParent(this);
+  if (AXObjectCache().IsAriaOwned(this))
+    return AXObjectCache().GetAriaOwnedParent(this);
 
   return ComputeParent();
 }
@@ -1721,7 +1813,8 @@ AXObject* AXObject::ParentObjectUnignored() const {
 // sub-widgets
 bool AXObject::IsContainerWidget() const {
   switch (RoleValue()) {
-    case kComboBoxRole:
+    case kComboBoxGroupingRole:
+    case kComboBoxMenuButtonRole:
     case kGridRole:
     case kListBoxRole:
     case kMenuBarRole:
@@ -1770,7 +1863,7 @@ void AXObject::AddAccessibleNodeChildren() {
     return;
 
   for (const auto& child : accessible_node->GetChildren())
-    children_.push_back(AxObjectCache().GetOrCreate(child));
+    children_.push_back(AXObjectCache().GetOrCreate(child));
 }
 
 Element* AXObject::GetElement() const {
@@ -1876,7 +1969,8 @@ void AXObject::SetScrollOffset(const IntPoint& offset) const {
 
 void AXObject::GetRelativeBounds(AXObject** out_container,
                                  FloatRect& out_bounds_in_container,
-                                 SkMatrix44& out_container_transform) const {
+                                 SkMatrix44& out_container_transform,
+                                 bool* clips_children) const {
   *out_container = nullptr;
   out_bounds_in_container = FloatRect();
   out_container_transform.setIdentity();
@@ -1886,7 +1980,7 @@ void AXObject::GetRelativeBounds(AXObject** out_container,
   // explicit container element that the coordinates are relative to must be
   // provided too.
   if (!explicit_element_rect_.IsEmpty()) {
-    *out_container = AxObjectCache().ObjectFromAXID(explicit_container_id_);
+    *out_container = AXObjectCache().ObjectFromAXID(explicit_container_id_);
     if (*out_container) {
       out_bounds_in_container = FloatRect(explicit_element_rect_);
       return;
@@ -1896,6 +1990,13 @@ void AXObject::GetRelativeBounds(AXObject** out_container,
   LayoutObject* layout_object = LayoutObjectForRelativeBounds();
   if (!layout_object)
     return;
+
+  if (clips_children) {
+    if (IsWebArea())
+      *clips_children = true;
+    else
+      *clips_children = layout_object->HasOverflowClip();
+  }
 
   if (IsWebArea()) {
     if (layout_object->GetFrame()->View()) {
@@ -1911,16 +2012,32 @@ void AXObject::GetRelativeBounds(AXObject** out_container,
   // layer.
   AXObject* container = ParentObjectUnignored();
   LayoutObject* container_layout_object = nullptr;
-  while (container) {
-    container_layout_object = container->GetLayoutObject();
-    if (container_layout_object && container_layout_object->IsBox() &&
-        layout_object->IsDescendantOf(container_layout_object)) {
-      if (container->IsScrollableContainer() ||
-          container_layout_object->HasLayer())
-        break;
-    }
+  if (layout_object->IsFixedPositioned()) {
+    // If it's a fixed position element, the container should simply be the
+    // root web area.
+    container = AXObjectCache().GetOrCreate(GetDocument());
+  } else {
+    while (container) {
+      container_layout_object = container->GetLayoutObject();
+      if (container_layout_object && container_layout_object->IsBox() &&
+          layout_object->IsDescendantOf(container_layout_object)) {
+        if (container->IsScrollableContainer() ||
+            container_layout_object->HasLayer()) {
+          if (layout_object->IsAbsolutePositioned()) {
+            // If it's absolutely positioned, the container must be the
+            // nearest positioned container, or the root.
+            if (container->IsWebArea())
+              break;
+            if (container_layout_object->IsPositioned())
+              break;
+          } else {
+            break;
+          }
+        }
+      }
 
-    container = container->ParentObjectUnignored();
+      container = container->ParentObjectUnignored();
+    }
   }
 
   if (!container)
@@ -1929,20 +2046,40 @@ void AXObject::GetRelativeBounds(AXObject** out_container,
   out_bounds_in_container =
       layout_object->LocalBoundingBoxRectForAccessibility();
 
+  // Frames need to take their border and padding into account so the
+  // child element's computed position will be correct.
+  if (layout_object->IsBox() && layout_object->GetNode() &&
+      layout_object->GetNode()->IsFrameOwnerElement()) {
+    out_bounds_in_container =
+        FloatRect(ToLayoutBox(layout_object)->ContentBoxRect());
+  }
+
   // If the container has a scroll offset, subtract that out because we want our
   // bounds to be relative to the *unscrolled* position of the container object.
   ScrollableArea* scrollable_area = container->GetScrollableAreaIfScrollable();
-  if (scrollable_area && !container->IsWebArea()) {
+
+  // Without RLS, LayoutView (i.e. "WebArea") is scrolled by the FrameView and
+  // those scrolls aren't accounted for at all in the layout tree. The
+  // scrollable_area returned above returns the FrameView in that case though
+  // so we avoid making the adjustment below. Once RLS ships, the LayoutView
+  // scroll will be accounted for by the layout tree so this condition can be
+  // removed.
+  bool is_self_scrolling = !container->IsWebArea() ||
+                           RuntimeEnabledFeatures::RootLayerScrollingEnabled();
+
+  if (scrollable_area && is_self_scrolling) {
     ScrollOffset scroll_offset = scrollable_area->GetScrollOffset();
     out_bounds_in_container.Move(scroll_offset);
   }
 
   // Compute the transform between the container's coordinate space and this
-  // object.  If the transform is just a simple translation, apply that to the
-  // bounding box, but if it's a non-trivial transformation like a rotation,
-  // scaling, etc. then return the full matrix instead.
+  // object.
   TransformationMatrix transform = layout_object->LocalToAncestorTransform(
       ToLayoutBoxModelObject(container_layout_object));
+
+  // If the transform is just a simple translation, apply that to the
+  // bounding box, but if it's a non-trivial transformation like a rotation,
+  // scaling, etc. then return the full matrix instead.
   if (transform.IsIdentityOr2DTranslation()) {
     out_bounds_in_container.Move(transform.To2DTranslation());
   } else {
@@ -2100,11 +2237,12 @@ bool AXObject::OnNativeScrollToMakeVisibleAction() const {
     return false;
   LayoutRect target_rect(layout_object->AbsoluteBoundingBoxRect());
   layout_object->ScrollRectToVisible(
-      target_rect, ScrollAlignment::kAlignCenterIfNeeded,
-      ScrollAlignment::kAlignCenterIfNeeded, kProgrammaticScroll, false,
-      kScrollBehaviorAuto);
-  AxObjectCache().PostNotification(
-      AxObjectCache().GetOrCreate(GetDocument()->GetLayoutView()),
+      target_rect,
+      WebScrollIntoViewParams(ScrollAlignment::kAlignCenterIfNeeded,
+                              ScrollAlignment::kAlignCenterIfNeeded,
+                              kProgrammaticScroll, false, kScrollBehaviorAuto));
+  AXObjectCache().PostNotification(
+      AXObjectCache().GetOrCreate(GetDocument()->GetLayoutView()),
       AXObjectCacheImpl::kAXLocationChanged);
   return true;
 }
@@ -2125,11 +2263,12 @@ bool AXObject::OnNativeScrollToMakeVisibleWithSubFocusAction(
   // is the default behavior of element.scrollIntoView.
   ScrollAlignment scroll_alignment = {
       kScrollAlignmentNoScroll, kScrollAlignmentCenter, kScrollAlignmentCenter};
-  layout_object->ScrollRectToVisible(target_rect, scroll_alignment,
-                                     scroll_alignment, kProgrammaticScroll,
-                                     false, kScrollBehaviorAuto);
-  AxObjectCache().PostNotification(
-      AxObjectCache().GetOrCreate(GetDocument()->GetLayoutView()),
+  layout_object->ScrollRectToVisible(
+      target_rect,
+      WebScrollIntoViewParams(scroll_alignment, scroll_alignment,
+                              kProgrammaticScroll, false, kScrollBehaviorAuto));
+  AXObjectCache().PostNotification(
+      AXObjectCache().GetOrCreate(GetDocument()->GetLayoutView()),
       AXObjectCacheImpl::kAXLocationChanged);
   return true;
 }
@@ -2143,11 +2282,12 @@ bool AXObject::OnNativeScrollToGlobalPointAction(
   LayoutRect target_rect(layout_object->AbsoluteBoundingBoxRect());
   target_rect.MoveBy(-global_point);
   layout_object->ScrollRectToVisible(
-      target_rect, ScrollAlignment::kAlignLeftAlways,
-      ScrollAlignment::kAlignTopAlways, kProgrammaticScroll, false,
-      kScrollBehaviorAuto);
-  AxObjectCache().PostNotification(
-      AxObjectCache().GetOrCreate(GetDocument()->GetLayoutView()),
+      target_rect,
+      WebScrollIntoViewParams(ScrollAlignment::kAlignLeftAlways,
+                              ScrollAlignment::kAlignTopAlways,
+                              kProgrammaticScroll, false, kScrollBehaviorAuto));
+  AXObjectCache().PostNotification(
+      AXObjectCache().GetOrCreate(GetDocument()->GetLayoutView()),
       AXObjectCacheImpl::kAXLocationChanged);
   return true;
 }
@@ -2238,13 +2378,13 @@ int AXObject::LineForPosition(const VisiblePosition& position) const {
 
 bool AXObject::IsARIAControl(AccessibilityRole aria_role) {
   return IsARIAInput(aria_role) || aria_role == kButtonRole ||
-         aria_role == kComboBoxRole || aria_role == kSliderRole;
+         aria_role == kComboBoxMenuButtonRole || aria_role == kSliderRole;
 }
 
 bool AXObject::IsARIAInput(AccessibilityRole aria_role) {
   return aria_role == kRadioButtonRole || aria_role == kCheckBoxRole ||
          aria_role == kTextFieldRole || aria_role == kSwitchRole ||
-         aria_role == kSearchBoxRole;
+         aria_role == kSearchBoxRole || aria_role == kTextFieldWithComboBoxRole;
 }
 
 AccessibilityRole AXObject::AriaRoleToWebCoreRole(const String& value) {
@@ -2276,6 +2416,7 @@ bool AXObject::NameFromContents(bool recursive) const {
     case kCellRole:
     case kCheckBoxRole:
     case kColumnHeaderRole:
+    case kComboBoxMenuButtonRole:
     case kDisclosureTriangleRole:
     case kHeadingRole:
     case kLineBreakRole:
@@ -2310,7 +2451,7 @@ bool AXObject::NameFromContents(bool recursive) const {
     case kBlockquoteRole:
     case kColorWellRole:
     case kColumnRole:
-    case kComboBoxRole:
+    case kComboBoxGroupingRole:
     case kComplementaryRole:
     case kContentInfoRole:
     case kDateRole:
@@ -2358,6 +2499,7 @@ bool AXObject::NameFromContents(bool recursive) const {
     case kTabPanelRole:
     case kTermRole:
     case kTextFieldRole:
+    case kTextFieldWithComboBoxRole:
     case kTimeRole:
     case kTimerRole:
     case kToolbarRole:
@@ -2414,13 +2556,14 @@ bool AXObject::NameFromContents(bool recursive) const {
   return result;
 }
 
-bool AXObject::CanSupportAriaReadOnly() const {
+bool AXObject::SupportsARIAReadOnly() const {
   switch (RoleValue()) {
     case kCellRole:
     case kCheckBoxRole:
     case kColorWellRole:
     case kColumnHeaderRole:
-    case kComboBoxRole:
+    case kComboBoxGroupingRole:
+    case kComboBoxMenuButtonRole:
     case kDateRole:
     case kDateTimeRole:
     case kGridRole:
@@ -2437,6 +2580,7 @@ bool AXObject::CanSupportAriaReadOnly() const {
     case kSpinButtonRole:
     case kSwitchRole:
     case kTextFieldRole:
+    case kTextFieldWithComboBoxRole:
     case kToggleButtonRole:
     case kTreeGridRole:
       return true;

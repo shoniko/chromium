@@ -275,6 +275,12 @@ bool ProfileSyncServiceHarness::RestartSyncService() {
   return true;
 }
 
+void ProfileSyncServiceHarness::SignoutSyncService() {
+  DCHECK(!username_.empty());
+  service()->GoogleSignedOut(service()->signin()->GetAuthenticatedAccountId(),
+                             username_);
+}
+
 bool ProfileSyncServiceHarness::AwaitMutualSyncCycleCompletion(
     ProfileSyncServiceHarness* partner) {
   std::vector<ProfileSyncServiceHarness*> harnesses;
@@ -533,9 +539,12 @@ bool ProfileSyncServiceHarness::IsTypePreferred(syncer::ModelType type) {
 }
 
 std::string ProfileSyncServiceHarness::GetServiceStatus() {
+  AccountInfo primary_account_info;
+  primary_account_info.email = username_;
+  primary_account_info.gaia = gaia_id_;
   std::unique_ptr<base::DictionaryValue> value(
-      syncer::sync_ui_util::ConstructAboutInformation(service(),
-                                                      chrome::GetChannel()));
+      syncer::sync_ui_util::ConstructAboutInformation(
+          service(), primary_account_info, chrome::GetChannel()));
   std::string service_status;
   base::JSONWriter::WriteWithOptions(
       *value, base::JSONWriter::OPTIONS_PRETTY_PRINT, &service_status);

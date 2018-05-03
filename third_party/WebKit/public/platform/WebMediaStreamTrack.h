@@ -26,7 +26,6 @@
 #define WebMediaStreamTrack_h
 
 #include "WebCommon.h"
-#include "WebNonCopyable.h"
 #include "WebPrivatePtr.h"
 #include "WebString.h"
 
@@ -77,8 +76,8 @@ class WebMediaStreamTrack {
 
   class TrackData {
    public:
-    TrackData() {}
-    virtual ~TrackData() {}
+    TrackData() = default;
+    virtual ~TrackData() = default;
     virtual void GetSettings(Settings&) = 0;
   };
 
@@ -90,7 +89,7 @@ class WebMediaStreamTrack {
     kVideoDetail
   };
 
-  WebMediaStreamTrack() {}
+  WebMediaStreamTrack() = default;
   WebMediaStreamTrack(const WebMediaStreamTrack& other) { Assign(other); }
   ~WebMediaStreamTrack() { Reset(); }
 
@@ -132,7 +131,7 @@ class WebMediaStreamTrack {
 #if INSIDE_BLINK
   BLINK_PLATFORM_EXPORT WebMediaStreamTrack(MediaStreamComponent*);
   BLINK_PLATFORM_EXPORT WebMediaStreamTrack& operator=(MediaStreamComponent*);
-  BLINK_PLATFORM_EXPORT operator WTF::RefPtr<MediaStreamComponent>() const;
+  BLINK_PLATFORM_EXPORT operator scoped_refptr<MediaStreamComponent>() const;
   BLINK_PLATFORM_EXPORT operator MediaStreamComponent*() const;
 #endif
 

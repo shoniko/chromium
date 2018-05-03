@@ -6,10 +6,11 @@
 #define THIRD_PARTY_WEBKIT_SOURCE_PLATFORM_SCHEDULER_CHILD_IDLE_HELPER_H_
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "platform/PlatformExport.h"
-#include "platform/scheduler/base/cancelable_closure_holder.h"
 #include "platform/scheduler/base/task_queue_selector.h"
+#include "platform/scheduler/child/cancelable_closure_holder.h"
 #include "platform/scheduler/child/scheduler_helper.h"
 #include "public/platform/scheduler/child/single_thread_idle_task_runner.h"
 
@@ -76,14 +77,14 @@ class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
 
   // Keep IdleHelper::IdlePeriodStateToString in sync with this enum.
   enum class IdlePeriodState {
-    NOT_IN_IDLE_PERIOD,
-    IN_SHORT_IDLE_PERIOD,
-    IN_LONG_IDLE_PERIOD,
-    IN_LONG_IDLE_PERIOD_WITH_MAX_DEADLINE,
-    IN_LONG_IDLE_PERIOD_PAUSED,
+    kNotInIdlePeriod,
+    kInShortIdlePeriod,
+    kInLongIdlePeriod,
+    kInLongIdlePeriodWithMaxDeadline,
+    kInLongIdlePeriodPaused,
     // Must be the last entry.
-    IDLE_PERIOD_STATE_COUNT,
-    FIRST_IDLE_PERIOD_STATE = NOT_IN_IDLE_PERIOD,
+    kIdlePeriodStateCount,
+    kFirstIdlePeriodState = kNotInIdlePeriod,
   };
 
   // The maximum length of an idle period.

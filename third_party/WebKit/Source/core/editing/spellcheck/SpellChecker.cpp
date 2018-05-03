@@ -26,12 +26,10 @@
 
 #include "core/editing/spellcheck/SpellChecker.h"
 
-#include "core/clipboard/DataObject.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeTraversal.h"
-#include "core/dom/Range.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
 #include "core/editing/EphemeralRange.h"
@@ -39,18 +37,13 @@
 #include "core/editing/SelectionTemplate.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleUnits.h"
-#include "core/editing/commands/CompositeEditCommand.h"
-#include "core/editing/commands/ReplaceSelectionCommand.h"
-#include "core/editing/commands/TypingCommand.h"
 #include "core/editing/iterators/CharacterIterator.h"
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/editing/markers/SpellCheckMarker.h"
 #include "core/editing/spellcheck/IdleSpellCheckCallback.h"
 #include "core/editing/spellcheck/SpellCheckRequester.h"
-#include "core/editing/spellcheck/SpellCheckerClient.h"
 #include "core/editing/spellcheck/TextCheckingParagraph.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/Settings.h"
 #include "core/html/forms/HTMLInputElement.h"
 #include "core/html_names.h"
 #include "core/input_type_names.h"
@@ -58,10 +51,9 @@
 #include "core/loader/EmptyClients.h"
 #include "core/page/Page.h"
 #include "platform/text/TextBreakIterator.h"
-#include "platform/text/TextCheckerClient.h"
-#include "platform/wtf/Assertions.h"
 #include "public/platform/WebSpellCheckPanelHostClient.h"
 #include "public/platform/WebString.h"
+#include "public/web/WebTextCheckClient.h"
 #include "public/web/WebTextDecorationType.h"
 
 namespace blink {
@@ -80,17 +72,6 @@ SpellChecker* SpellChecker::Create(LocalFrame& frame) {
   return new SpellChecker(frame);
 }
 
-static SpellCheckerClient& GetEmptySpellCheckerClient() {
-  DEFINE_STATIC_LOCAL(EmptySpellCheckerClient, client, ());
-  return client;
-}
-
-SpellCheckerClient& SpellChecker::GetSpellCheckerClient() const {
-  if (Page* page = GetFrame().GetPage())
-    return page->GetSpellCheckerClient();
-  return GetEmptySpellCheckerClient();
-}
-
 static WebSpellCheckPanelHostClient& GetEmptySpellCheckPanelHostClient() {
   DEFINE_STATIC_LOCAL(EmptySpellCheckPanelHostClient, client, ());
   return client;
@@ -104,7 +85,10 @@ WebSpellCheckPanelHostClient& SpellChecker::SpellCheckPanelHostClient() const {
   return *spell_check_panel_host_client;
 }
 
-TextCheckerClient& SpellChecker::TextChecker() const {
+WebTextCheckClient* SpellChecker::GetTextCheckerClient() const {
+  // There is no frame client if the frame is detached.
+  if (!GetFrame().Client())
+    return nullptr;
   return GetFrame().Client()->GetTextCheckerClient();
 }
 
@@ -114,13 +98,9 @@ SpellChecker::SpellChecker(LocalFrame& frame)
       idle_spell_check_callback_(IdleSpellCheckCallback::Create(frame)) {}
 
 bool SpellChecker::IsSpellCheckingEnabled() const {
-  return GetSpellCheckerClient().IsSpellCheckingEnabled();
-}
-
-void SpellChecker::ToggleSpellCheckingEnabled() {
-  GetSpellCheckerClient().ToggleSpellCheckingEnabled();
-  if (IsSpellCheckingEnabled())
-    return;
+  if (WebTextCheckClient* client = GetTextCheckerClient())
+    return client->IsSpellCheckingEnabled();
+  return false;
 }
 
 void SpellChecker::IgnoreSpelling() {
@@ -238,9 +218,10 @@ void SpellChecker::AdvanceToNextMisspelling(bool start_before_selection) {
     const EphemeralRange misspelling_range = CalculateCharacterSubrange(
         EphemeralRange(spelling_search_start, spelling_search_end),
         misspelling_offset, misspelled_word.length());
-    GetFrame().Selection().SetSelection(SelectionInDOMTree::Builder()
-                                            .SetBaseAndExtent(misspelling_range)
-                                            .Build());
+    GetFrame().Selection().SetSelectionAndEndTyping(
+        SelectionInDOMTree::Builder()
+            .SetBaseAndExtent(misspelling_range)
+            .Build());
     GetFrame().Selection().RevealSelection();
     SpellCheckPanelHostClient().UpdateSpellingUIWithMisspelledWord(
         misspelled_word);
@@ -256,28 +237,6 @@ void SpellChecker::ShowSpellingGuessPanel() {
 
   AdvanceToNextMisspelling(true);
   SpellCheckPanelHostClient().ShowSpellingUI(true);
-}
-
-bool SpellChecker::IsSpellCheckingEnabledInFocusedNode() const {
-  // To avoid regression on speedometer benchmark[1] test, we should not
-  // update layout tree in this code block.
-  // [1] http://browserbench.org/Speedometer/
-  DocumentLifecycle::DisallowTransitionScope disallow_transition(
-      GetFrame().GetDocument()->Lifecycle());
-
-  Node* focused_node = GetFrame()
-                           .Selection()
-                           .GetSelectionInDOMTree()
-                           .ComputeStartPosition()
-                           .AnchorNode();
-  if (!focused_node)
-    return false;
-  const Element* focused_element = focused_node->IsElementNode()
-                                       ? ToElement(focused_node)
-                                       : focused_node->parentElement();
-  if (!focused_element)
-    return false;
-  return focused_element->IsSpellCheckingEnabled();
 }
 
 static void AddMarker(Document* document,
@@ -345,7 +304,7 @@ void SpellChecker::MarkAndReplaceFor(
       PlainText(checking_range, TextIteratorBehavior::Builder()
                                     .SetEmitsObjectReplacementCharacter(true)
                                     .Build());
-  if (current_content != request->Data().GetText()) {
+  if (current_content != request->GetText()) {
     // "editing/spelling/spellcheck-async-mutation.html" reaches here.
     return;
   }
@@ -358,14 +317,14 @@ void SpellChecker::MarkAndReplaceFor(
 
   TextCheckingParagraph paragraph(checking_range, checking_range);
 
-  // TODO(xiaochengh): The following comment does not match the current behavior
-  // and should be rewritten.
+  // TODO(crbug.com/230387): The following comment does not match the current
+  // behavior and should be rewritten.
   // Expand the range to encompass entire paragraphs, since text checking needs
   // that much context.
   int ambiguous_boundary_offset = -1;
 
   if (GetFrame().Selection().ComputeVisibleSelectionInDOMTree().IsCaret()) {
-    // TODO(xiaochengh): The following comment does not match the current
+    // TODO(crbug.com/230387): The following comment does not match the current
     // behavior and should be rewritten.
     // Attempt to save the caret position so we can restore it later if needed
     const Position& caret_position =
@@ -529,7 +488,7 @@ void SpellChecker::ReplaceMisspelledRange(const String& text) {
   Node* const container_node = node_and_marker.first;
   const SpellCheckMarker* const marker = node_and_marker.second;
 
-  GetFrame().Selection().SetSelection(
+  GetFrame().Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .Collapse(Position(container_node, marker->StartOffset()))
           .Extend(Position(container_node, marker->EndOffset()))
@@ -677,9 +636,15 @@ Vector<TextCheckingResult> SpellChecker::FindMisspellings(const String& text) {
     int word_length = word_end - word_start;
     int misspelling_location = -1;
     int misspelling_length = 0;
-    TextChecker().CheckSpellingOfString(
-        String(characters.data() + word_start, word_length),
-        &misspelling_location, &misspelling_length);
+    if (WebTextCheckClient* text_checker_client = GetTextCheckerClient()) {
+      // SpellCheckWord will write (0, 0) into the output vars, which is what
+      // our caller expects if the word is spelled correctly.
+      text_checker_client->CheckSpelling(
+          String(characters.data() + word_start, word_length),
+          misspelling_location, misspelling_length, nullptr);
+    } else {
+      misspelling_location = 0;
+    }
     if (misspelling_length > 0) {
       DCHECK_GE(misspelling_location, 0);
       DCHECK_LE(misspelling_location + misspelling_length, word_length);

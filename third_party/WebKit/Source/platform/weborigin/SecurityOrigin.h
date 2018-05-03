@@ -29,13 +29,16 @@
 #ifndef SecurityOrigin_h
 #define SecurityOrigin_h
 
+#include <stdint.h>
 #include <memory>
+
 #include "base/gtest_prod_util.h"
 #include "platform/PlatformExport.h"
 #include "platform/weborigin/Suborigin.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
 #include "platform/wtf/text/WTFString.h"
+#include "url/origin.h"
 
 namespace blink {
 
@@ -46,17 +49,19 @@ class PLATFORM_EXPORT SecurityOrigin : public RefCounted<SecurityOrigin> {
   WTF_MAKE_NONCOPYABLE(SecurityOrigin);
 
  public:
-  static RefPtr<SecurityOrigin> Create(const KURL&);
-  static RefPtr<SecurityOrigin> CreateUnique();
+  static scoped_refptr<SecurityOrigin> Create(const KURL&);
+  static scoped_refptr<SecurityOrigin> CreateUnique();
 
-  static RefPtr<SecurityOrigin> CreateFromString(const String&);
-  static RefPtr<SecurityOrigin> Create(const String& protocol,
-                                       const String& host,
-                                       int port);
-  static RefPtr<SecurityOrigin> Create(const String& protocol,
-                                       const String& host,
-                                       int port,
-                                       const String& suborigin);
+  static scoped_refptr<SecurityOrigin> CreateFromString(const String&);
+  static scoped_refptr<SecurityOrigin> Create(const String& protocol,
+                                              const String& host,
+                                              uint16_t port);
+  static scoped_refptr<SecurityOrigin> Create(const String& protocol,
+                                              const String& host,
+                                              uint16_t port,
+                                              const String& suborigin);
+  static scoped_refptr<SecurityOrigin> CreateFromUrlOrigin(const url::Origin&);
+  url::Origin ToUrlOrigin() const;
 
   static void SetMap(URLSecurityOriginMap*);
 
@@ -75,7 +80,7 @@ class PLATFORM_EXPORT SecurityOrigin : public RefCounted<SecurityOrigin> {
 
   // Create a deep copy of this SecurityOrigin. This method is useful
   // when marshalling a SecurityOrigin to another thread.
-  RefPtr<SecurityOrigin> IsolatedCopy() const;
+  scoped_refptr<SecurityOrigin> IsolatedCopy() const;
 
   // Set the domain property of this security origin to newDomain. This
   // function does not check whether newDomain is a suffix of the current
@@ -86,12 +91,13 @@ class PLATFORM_EXPORT SecurityOrigin : public RefCounted<SecurityOrigin> {
   String Protocol() const { return protocol_; }
   String Host() const { return host_; }
   String Domain() const { return domain_; }
-  unsigned short Port() const { return port_; }
 
-  // |port()| will return 0 if the port is the default for an origin. This
-  // method instead returns the effective port, even if it is the default port
-  // (e.g. "http" => 80).
-  unsigned short EffectivePort() const { return effective_port_; }
+  // Returns 0 if the effective port of this origin is the default for its
+  // scheme.
+  uint16_t Port() const { return port_; }
+  // Returns the effective port, even if it is the default port for the
+  // scheme (e.g. "http" => 80).
+  uint16_t EffectivePort() const { return effective_port_; }
 
   // Returns true if a given URL is secure, based either directly on its
   // own protocol, or, when relevant, on the protocol of its "inner URL"
@@ -177,6 +183,7 @@ class PLATFORM_EXPORT SecurityOrigin : public RefCounted<SecurityOrigin> {
   bool CanAccessPasswordManager() const { return !IsUnique(); }
   bool CanAccessFileSystem() const { return !IsUnique(); }
   bool CanAccessCacheStorage() const { return !IsUnique(); }
+  bool CanAccessLocks() const { return !IsUnique(); }
 
   // Technically, we should always allow access to sessionStorage, but we
   // currently don't handle creating a sessionStorage area for unique
@@ -229,14 +236,16 @@ class PLATFORM_EXPORT SecurityOrigin : public RefCounted<SecurityOrigin> {
   // we shouldTreatURLSchemeAsNoAccess.
   String ToString() const;
   AtomicString ToAtomicString() const;
-  // Same as toString above, but ignores Suborigin, if present. This is
+
+  // Same as ToString(), but ignores Suborigin, if present. This is
   // generally not what you want.
+  //
+  // https://w3c.github.io/webappsec-suborigins/#physical-origin
   String ToPhysicalOriginString() const;
 
-  // Similar to toString(), but does not take into account any factors that
+  // Similar to ToString(), but does not take into account any factors that
   // could make the string return "null".
   String ToRawString() const;
-  AtomicString ToRawAtomicString() const;
 
   // This method checks for equality, ignoring the value of document.domain
   // (and whether it was set) but considering the host. It is used for
@@ -285,21 +294,30 @@ class PLATFORM_EXPORT SecurityOrigin : public RefCounted<SecurityOrigin> {
   void BuildRawString(StringBuilder&, bool include_suborigin) const;
 
   String ToRawStringIgnoreSuborigin() const;
-  static bool DeserializeSuboriginAndProtocolAndHost(const String&,
-                                                     const String&,
-                                                     String&,
-                                                     String&,
-                                                     String&);
+
+  // Parses a serialization of a Suborigin. Returns true if successful with
+  // the results stored in |suborigin|, |scheme| and |host|. Otherwise,
+  // returns false leaving the out parameters untouched.
+  //
+  // https://w3c.github.io/webappsec-suborigins/#serializing
+  static bool DeserializeSuboriginAndProtocolAndHost(
+      const String& scheme_with_suffix,
+      const String& host_with_prefix,
+      String& suborigin,
+      String& scheme,
+      String& host);
 
   bool HasSameSuboriginAs(const SecurityOrigin* other) const;
+
+  bool SerializesAsNull() const;
 
   String protocol_;
   String host_;
   String domain_;
   Suborigin suborigin_;
-  unsigned short port_;
-  unsigned short effective_port_;
-  bool is_unique_;
+  uint16_t port_;
+  uint16_t effective_port_;
+  const bool is_unique_;
   bool universal_access_;
   bool domain_was_set_in_dom_;
   bool can_load_local_resources_;

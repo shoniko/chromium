@@ -1,6 +1,5 @@
 Test that watch expressions expansion state is restored after update.
 
-Bug 99304
 Watch expressions added.
 expanded foo [object Object]
 expanded bar [object Object]

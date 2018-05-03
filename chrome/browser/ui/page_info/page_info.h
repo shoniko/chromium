@@ -13,6 +13,7 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "ui/gfx/vector_icon_types.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -32,6 +33,7 @@ class ChooserContextBase;
 class HostContentSettingsMap;
 class Profile;
 class PageInfoUI;
+class PageInfoBubbleViewBrowserTest;
 
 // The |PageInfo| provides information about a website's permissions,
 // connection state and its identity. It owns a UI that displays the
@@ -124,8 +126,6 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
   struct ChooserUIInfo {
     ContentSettingsType content_settings_type;
     ChooserContextBase* (*get_context)(Profile*);
-    int blocked_icon_id;
-    int allowed_icon_id;
     int label_string_id;
     int delete_tooltip_string_id;
     const char* ui_name_key;
@@ -184,8 +184,9 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
   void OnSiteDataAccessed() override;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(PageInfoTest, NonFactoryDefaultPermissionsShown);
-
+  FRIEND_TEST_ALL_PREFIXES(PageInfoTest,
+                           NonFactoryDefaultAndRecentlyChangedPermissionsShown);
+  friend class PageInfoBubbleViewBrowserTest;
   // Initializes the |PageInfo|.
   void Init(const GURL& url, const security_state::SecurityInfo& security_info);
 
@@ -198,6 +199,10 @@ class PageInfo : public TabSpecificContentSettings::SiteDataObserver,
   // Sets (presents) the information about the site's identity and connection
   // in the |ui_|.
   void PresentSiteIdentity();
+
+  // Retrieves all the permissions that are shown in Page Info.
+  // Exposed for testing.
+  static std::vector<ContentSettingsType> GetAllPermissionsForTesting();
 
   // The page info UI displays information and controls for site-
   // specific data (local stored objects like cookies), site-specific

@@ -50,18 +50,6 @@ enum EWordSide {
   kPreviousWordIfOnBoundary = true
 };
 
-// This struct represents local caret rectangle in |layout_object|.
-struct LocalCaretRect {
-  const LayoutObject* layout_object = nullptr;
-  LayoutRect rect;
-
-  LocalCaretRect() = default;
-  LocalCaretRect(const LayoutObject* layout_object, const LayoutRect& rect)
-      : layout_object(layout_object), rect(rect) {}
-
-  bool IsEmpty() const { return !layout_object || rect.IsEmpty(); }
-};
-
 // offset functions on Node
 CORE_EXPORT int CaretMinOffset(const Node*);
 CORE_EXPORT int CaretMaxOffset(const Node*);
@@ -233,8 +221,6 @@ CORE_EXPORT VisiblePositionInFlatTree
 EndOfParagraph(const VisiblePositionInFlatTree&,
                EditingBoundaryCrossingRule = kCannotCrossEditingBoundary);
 VisiblePosition StartOfNextParagraph(const VisiblePosition&);
-VisiblePosition PreviousParagraphPosition(const VisiblePosition&, LayoutUnit x);
-VisiblePosition NextParagraphPosition(const VisiblePosition&, LayoutUnit x);
 CORE_EXPORT bool IsStartOfParagraph(
     const VisiblePosition&,
     EditingBoundaryCrossingRule = kCannotCrossEditingBoundary);
@@ -275,12 +261,7 @@ CORE_EXPORT bool IsEndOfEditableOrNonEditableContent(const VisiblePosition&);
 CORE_EXPORT bool IsEndOfEditableOrNonEditableContent(
     const VisiblePositionInFlatTree&);
 
-// Rect is local to the returned layoutObject
-CORE_EXPORT LocalCaretRect
-LocalCaretRectOfPosition(const PositionWithAffinity&);
-CORE_EXPORT LocalCaretRect
-LocalCaretRectOfPosition(const PositionInFlatTreeWithAffinity&);
-bool HasRenderedNonAnonymousDescendantsWithHeight(LayoutObject*);
+bool HasRenderedNonAnonymousDescendantsWithHeight(const LayoutObject*);
 
 // Returns a hit-tested VisiblePosition for the given point in contents-space
 // coordinates.
@@ -308,12 +289,20 @@ typedef unsigned (*BoundarySearchFunction)(const UChar*,
                                            BoundarySearchContextAvailability,
                                            bool& need_more_context);
 
-Position NextBoundary(const VisiblePosition&, BoundarySearchFunction);
+CORE_EXPORT Position NextBoundary(const VisiblePosition&,
+                                  BoundarySearchFunction);
 PositionInFlatTree NextBoundary(const VisiblePositionInFlatTree&,
                                 BoundarySearchFunction);
 Position PreviousBoundary(const VisiblePosition&, BoundarySearchFunction);
 PositionInFlatTree PreviousBoundary(const VisiblePositionInFlatTree&,
                                     BoundarySearchFunction);
+
+PositionWithAffinity HonorEditingBoundaryAtOrAfter(const PositionWithAffinity&,
+                                                   const Position&);
+
+PositionInFlatTreeWithAffinity HonorEditingBoundaryAtOrAfter(
+    const PositionInFlatTreeWithAffinity&,
+    const PositionInFlatTree&);
 
 PositionWithAffinity HonorEditingBoundaryAtOrBefore(const PositionWithAffinity&,
                                                     const Position&);

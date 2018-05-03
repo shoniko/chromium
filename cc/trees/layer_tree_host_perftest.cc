@@ -21,10 +21,11 @@
 #include "cc/test/layer_tree_json_parser.h"
 #include "cc/test/layer_tree_test.h"
 #include "cc/trees/layer_tree_impl.h"
-#include "components/viz/common/quads/texture_mailbox.h"
 #include "components/viz/common/resources/single_release_callback.h"
 #include "components/viz/test/paths.h"
 #include "components/viz/test/test_layer_tree_frame_sink.h"
+#include "gpu/command_buffer/common/mailbox.h"
+#include "gpu/command_buffer/common/sync_token.h"
 #include "testing/perf/perf_test.h"
 
 namespace cc {
@@ -50,7 +51,8 @@ class LayerTreeHostPerfTest : public LayerTreeTest {
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
-      scoped_refptr<viz::ContextProvider> worker_context_provider) override {
+      scoped_refptr<viz::RasterContextProvider> worker_context_provider)
+      override {
     constexpr bool disable_display_vsync = true;
     bool synchronous_composite =
         !HasImplThread() &&
@@ -252,7 +254,8 @@ class ScrollingLayerTreePerfTest : public LayerTreeHostPerfTestJsonReader {
     ASSERT_TRUE(scrollable_.get());
   }
 
-  void UpdateLayerTreeHost() override {
+  void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) override {
     if (TestEnded())
       return;
     static const gfx::Vector2d delta = gfx::Vector2d(0, 10);
@@ -320,14 +323,15 @@ class BrowserCompositorInvalidateLayerTreePerfTest
             &BrowserCompositorInvalidateLayerTreePerfTest::ReleaseMailbox,
             base::Unretained(this)));
 
-    gpu::SyncToken next_sync_token(gpu::CommandBufferNamespace::GPU_IO, 0,
+    gpu::SyncToken next_sync_token(gpu::CommandBufferNamespace::GPU_IO,
                                    gpu::CommandBufferId::FromUnsafeValue(1),
                                    next_fence_sync_);
     next_sync_token.SetVerifyFlush();
-    viz::TextureMailbox mailbox(gpu_mailbox, next_sync_token, GL_TEXTURE_2D);
+    viz::TransferableResource resource = viz::TransferableResource::MakeGL(
+        gpu_mailbox, GL_LINEAR, GL_TEXTURE_2D, next_sync_token);
     next_fence_sync_++;
 
-    tab_contents_->SetTextureMailbox(mailbox, std::move(callback));
+    tab_contents_->SetTransferableResource(resource, std::move(callback));
     ++sent_mailboxes_count_;
     tab_contents_->SetNeedsDisplay();
   }
@@ -348,7 +352,7 @@ class BrowserCompositorInvalidateLayerTreePerfTest
   }
 
   void CleanUpAndEndTestOnMainThread() {
-    tab_contents_->SetTextureMailbox(viz::TextureMailbox(), nullptr);
+    tab_contents_->ClearTexture();
     // ReleaseMailbox will end the test when we get the last mailbox back.
   }
 

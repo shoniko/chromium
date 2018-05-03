@@ -15,7 +15,6 @@
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
-#include "ash/shell_port.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/tray_constants.h"
@@ -45,6 +44,9 @@ namespace tray {
 
 namespace {
 
+// Vertical mergin for the top/bottom edges of the view.
+constexpr size_t kVerticalMargin = 2;
+
 // Switch to a user with the given |user_index|.
 void SwitchUser(UserIndex user_index) {
   // Do not switch users when the log screen is presented.
@@ -68,7 +70,7 @@ void SwitchUser(UserIndex user_index) {
 bool IsUserDropdownEnabled() {
   // Don't allow user add or switch when screen cast warning dialog is open.
   // See http://crrev.com/291276 and http://crbug.com/353170.
-  if (ShellPort::Get()->IsSystemModalWindowOpen())
+  if (Shell::IsSystemModalWindowOpen())
     return false;
 
   // Don't allow at login, lock or when adding a multi-profile user.
@@ -85,11 +87,11 @@ bool IsUserDropdownEnabled() {
 views::View* CreateAddUserView(AddUserSessionPolicy policy) {
   auto* view = new views::View;
   const int icon_padding = (kMenuButtonSize - kMenuIconSize) / 2;
-  auto* layout =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, gfx::Insets(),
-                           kTrayPopupLabelHorizontalPadding + icon_padding);
+  auto layout = std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal, gfx::Insets(),
+      kTrayPopupLabelHorizontalPadding + icon_padding);
   layout->set_minimum_cross_axis_size(kTrayPopupItemMinHeight);
-  view->SetLayoutManager(layout);
+  view->SetLayoutManager(std::move(layout));
   view->SetBackground(views::CreateThemedSolidBackground(
       view, ui::NativeTheme::kColorId_BubbleBackground));
 
@@ -141,24 +143,6 @@ views::View* CreateAddUserView(AddUserSessionPolicy policy) {
   return view;
 }
 
-class UserViewMouseWatcherHost : public views::MouseWatcherHost {
- public:
-  explicit UserViewMouseWatcherHost(const gfx::Rect& screen_area)
-      : screen_area_(screen_area) {}
-  ~UserViewMouseWatcherHost() override {}
-
-  // Implementation of MouseWatcherHost.
-  bool Contains(const gfx::Point& screen_point,
-                views::MouseWatcherHost::MouseEventType type) override {
-    return screen_area_.Contains(screen_point);
-  }
-
- private:
-  gfx::Rect screen_area_;
-
-  DISALLOW_COPY_AND_ASSIGN(UserViewMouseWatcherHost);
-};
-
 // A view that acts as the contents of the widget that appears when clicking
 // the active user. If the mouse exits this view or an otherwise unhandled
 // click is detected, it will invoke a closure passed at construction time.
@@ -170,7 +154,7 @@ class UserDropdownWidgetContents : public views::View {
     set_notify_enter_exit_on_child(true);
   }
 
-  ~UserDropdownWidgetContents() override {}
+  ~UserDropdownWidgetContents() override = default;
 
   bool OnMousePressed(const ui::MouseEvent& event) override { return true; }
   void OnMouseReleased(const ui::MouseEvent& event) override {
@@ -191,8 +175,8 @@ class UserDropdownWidgetContents : public views::View {
 // separator 3dp below the host view.
 class ActiveUserBorder : public views::Border {
  public:
-  ActiveUserBorder() {}
-  ~ActiveUserBorder() override {}
+  ActiveUserBorder() = default;
+  ~ActiveUserBorder() override = default;
 
   // views::Border:
   void Paint(const views::View& view, gfx::Canvas* canvas) override {
@@ -204,9 +188,9 @@ class ActiveUserBorder : public views::Border {
   }
 
   gfx::Insets GetInsets() const override {
-    return gfx::Insets(kMenuSeparatorVerticalPadding,
+    return gfx::Insets(kVerticalMargin + kMenuSeparatorVerticalPadding,
                        kMenuExtraMarginFromLeftEdge,
-                       kMenuSeparatorVerticalPadding * 2, 0);
+                       kVerticalMargin + kMenuSeparatorVerticalPadding, 0);
   }
 
   gfx::Size GetMinimumSize() const override { return gfx::Size(); }
@@ -224,8 +208,8 @@ UserView::UserView(SystemTrayItem* owner, LoginStatus login) : owner_(owner) {
   AddLogoutButton(login);
   AddUserCard(login);
 
-  auto* layout = new views::BoxLayout(views::BoxLayout::kHorizontal);
-  SetLayoutManager(layout);
+  auto* layout = SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
   layout->SetFlexForView(user_card_container_, 1);
@@ -365,16 +349,15 @@ void UserView::ToggleUserDropdownWidget() {
   user_dropdown_padding->SetBorder(views::CreateSolidSidedBorder(
       kMenuSeparatorVerticalPadding - kSeparatorWidth, 0, 0, 0, bg_color));
   user_dropdown_padding->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical));
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
   views::Separator* separator = new views::Separator();
   separator->SetPreferredHeight(kSeparatorWidth);
   separator->SetColor(
       color_utils::GetResultingPaintColor(kMenuSeparatorColor, bg_color));
   const int separator_horizontal_padding =
       (kTrayPopupItemMinStartWidth - kTrayItemSize) / 2;
-  separator->SetBorder(
-      views::CreateSolidSidedBorder(0, separator_horizontal_padding, 0,
-                                    separator_horizontal_padding, bg_color));
+  separator->SetBorder(views::CreateEmptyBorder(
+      0, separator_horizontal_padding, 0, separator_horizontal_padding));
   user_dropdown_padding->AddChildView(separator);
 
   // Add other logged in users.
@@ -395,7 +378,7 @@ void UserView::ToggleUserDropdownWidget() {
   }
 
   container->AddChildView(user_dropdown_padding);
-  container->SetLayoutManager(new views::FillLayout());
+  container->SetLayoutManager(std::make_unique<views::FillLayout>());
   user_dropdown_widget_->SetContentsView(container);
 
   bounds.set_height(container->GetPreferredSize().height());

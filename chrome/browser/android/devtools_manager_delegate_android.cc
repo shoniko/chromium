@@ -7,7 +7,6 @@
 #include <map>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -38,8 +37,7 @@ class ClientProxy : public content::DevToolsAgentHostClient {
     proxy_->DispatchOnClientHost(message);
   }
 
-  void AgentHostClosed(DevToolsAgentHost* agent_host,
-                       bool replaced_with_another_client) override {
+  void AgentHostClosed(DevToolsAgentHost* agent_host) override {
     proxy_->ConnectionClosed();
   }
 
@@ -184,7 +182,7 @@ scoped_refptr<DevToolsAgentHost> DevToolsAgentHostForTab(TabAndroid* tab) {
     return result;
 
   result = DevToolsAgentHost::Forward(base::IntToString(tab->GetAndroidId()),
-                                      base::MakeUnique<TabProxyDelegate>(tab));
+                                      std::make_unique<TabProxyDelegate>(tab));
   tab->SetDevToolsAgentHost(result);
   return result;
 }

@@ -4,7 +4,7 @@
 
 #include "chromeos/components/tether/ble_synchronizer_base.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
 
 namespace chromeos {
 
@@ -18,7 +18,7 @@ BleSynchronizerBase::RegisterArgs::RegisterArgs(
       callback(callback),
       error_callback(error_callback) {}
 
-BleSynchronizerBase::RegisterArgs::~RegisterArgs() {}
+BleSynchronizerBase::RegisterArgs::~RegisterArgs() = default;
 
 BleSynchronizerBase::UnregisterArgs::UnregisterArgs(
     scoped_refptr<device::BluetoothAdvertisement> advertisement,
@@ -28,14 +28,14 @@ BleSynchronizerBase::UnregisterArgs::UnregisterArgs(
       callback(callback),
       error_callback(error_callback) {}
 
-BleSynchronizerBase::UnregisterArgs::~UnregisterArgs() {}
+BleSynchronizerBase::UnregisterArgs::~UnregisterArgs() = default;
 
 BleSynchronizerBase::StartDiscoveryArgs::StartDiscoveryArgs(
     const device::BluetoothAdapter::DiscoverySessionCallback& callback,
     const device::BluetoothAdapter::ErrorCallback& error_callback)
     : callback(callback), error_callback(error_callback) {}
 
-BleSynchronizerBase::StartDiscoveryArgs::~StartDiscoveryArgs() {}
+BleSynchronizerBase::StartDiscoveryArgs::~StartDiscoveryArgs() = default;
 
 BleSynchronizerBase::StopDiscoveryArgs::StopDiscoveryArgs(
     base::WeakPtr<device::BluetoothDiscoverySession> discovery_session,
@@ -45,7 +45,7 @@ BleSynchronizerBase::StopDiscoveryArgs::StopDiscoveryArgs(
       callback(callback),
       error_callback(error_callback) {}
 
-BleSynchronizerBase::StopDiscoveryArgs::~StopDiscoveryArgs() {}
+BleSynchronizerBase::StopDiscoveryArgs::~StopDiscoveryArgs() = default;
 
 BleSynchronizerBase::Command::Command(
     std::unique_ptr<RegisterArgs> register_args)
@@ -67,11 +67,11 @@ BleSynchronizerBase::Command::Command(
     : command_type(CommandType::STOP_DISCOVERY),
       stop_discovery_args(std::move(stop_discovery_args)) {}
 
-BleSynchronizerBase::Command::~Command() {}
+BleSynchronizerBase::Command::~Command() = default;
 
-BleSynchronizerBase::BleSynchronizerBase() {}
+BleSynchronizerBase::BleSynchronizerBase() = default;
 
-BleSynchronizerBase::~BleSynchronizerBase() {}
+BleSynchronizerBase::~BleSynchronizerBase() = default;
 
 void BleSynchronizerBase::RegisterAdvertisement(
     std::unique_ptr<device::BluetoothAdvertisement::Data> advertisement_data,
@@ -79,7 +79,7 @@ void BleSynchronizerBase::RegisterAdvertisement(
     const device::BluetoothAdapter::AdvertisementErrorCallback&
         error_callback) {
   command_queue_.emplace_back(
-      base::MakeUnique<Command>(base::MakeUnique<RegisterArgs>(
+      std::make_unique<Command>(std::make_unique<RegisterArgs>(
           std::move(advertisement_data), callback, error_callback)));
   ProcessQueue();
 }
@@ -89,7 +89,7 @@ void BleSynchronizerBase::UnregisterAdvertisement(
     const device::BluetoothAdvertisement::SuccessCallback& callback,
     const device::BluetoothAdvertisement::ErrorCallback& error_callback) {
   command_queue_.emplace_back(
-      base::MakeUnique<Command>(base::MakeUnique<UnregisterArgs>(
+      std::make_unique<Command>(std::make_unique<UnregisterArgs>(
           std::move(advertisement), callback, error_callback)));
   ProcessQueue();
 }
@@ -97,8 +97,8 @@ void BleSynchronizerBase::UnregisterAdvertisement(
 void BleSynchronizerBase::StartDiscoverySession(
     const device::BluetoothAdapter::DiscoverySessionCallback& callback,
     const device::BluetoothAdapter::ErrorCallback& error_callback) {
-  command_queue_.emplace_back(base::MakeUnique<Command>(
-      base::MakeUnique<StartDiscoveryArgs>(callback, error_callback)));
+  command_queue_.emplace_back(std::make_unique<Command>(
+      std::make_unique<StartDiscoveryArgs>(callback, error_callback)));
   ProcessQueue();
 }
 
@@ -107,7 +107,7 @@ void BleSynchronizerBase::StopDiscoverySession(
     const base::Closure& callback,
     const device::BluetoothDiscoverySession::ErrorCallback& error_callback) {
   command_queue_.emplace_back(
-      base::MakeUnique<Command>(base::MakeUnique<StopDiscoveryArgs>(
+      std::make_unique<Command>(std::make_unique<StopDiscoveryArgs>(
           discovery_session, callback, error_callback)));
   ProcessQueue();
 }

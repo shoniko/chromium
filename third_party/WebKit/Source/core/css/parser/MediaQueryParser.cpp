@@ -6,7 +6,6 @@
 
 #include "core/css/parser/CSSTokenizer.h"
 #include "core/media_type_names.h"
-#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -58,7 +57,7 @@ MediaQueryParser::MediaQueryParser(ParserType parser_type)
     state_ = &MediaQueryParser::ReadMediaNot;
 }
 
-MediaQueryParser::~MediaQueryParser() {}
+MediaQueryParser::~MediaQueryParser() = default;
 
 void MediaQueryParser::SetStateAndRestrict(
     State state,

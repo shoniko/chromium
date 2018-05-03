@@ -7,6 +7,7 @@
 #include "core/frame/csp/CSPSource.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/HashSet.h"
@@ -14,6 +15,13 @@
 #include "platform/wtf/text/ParsingUtilities.h"
 #include "platform/wtf/text/StringToNumber.h"
 #include "platform/wtf/text/WTFString.h"
+
+namespace {
+struct SupportedPrefixesStruct {
+  const char* prefix;
+  blink::ContentSecurityPolicyHashAlgorithm type;
+};
+}  // namespace
 
 namespace blink {
 
@@ -27,6 +35,7 @@ SourceListDirective::SourceListDirective(const String& name,
       allow_star_(false),
       allow_inline_(false),
       allow_eval_(false),
+      allow_wasm_eval_(false),
       allow_dynamic_(false),
       allow_hashed_attributes_(false),
       report_sample_(false),
@@ -82,6 +91,10 @@ bool SourceListDirective::AllowEval() const {
   return allow_eval_;
 }
 
+bool SourceListDirective::AllowWasmEval() const {
+  return allow_wasm_eval_;
+}
+
 bool SourceListDirective::AllowDynamic() const {
   return allow_dynamic_;
 }
@@ -105,8 +118,8 @@ bool SourceListDirective::AllowReportSample() const {
 
 bool SourceListDirective::IsNone() const {
   return !list_.size() && !allow_self_ && !allow_star_ && !allow_inline_ &&
-         !allow_hashed_attributes_ && !allow_eval_ && !allow_dynamic_ &&
-         !nonces_.size() && !hashes_.size();
+         !allow_hashed_attributes_ && !allow_eval_ && !allow_wasm_eval_ &&
+         !allow_dynamic_ && !nonces_.size() && !hashes_.size();
 }
 
 uint8_t SourceListDirective::HashAlgorithmsUsed() const {
@@ -201,7 +214,16 @@ bool SourceListDirective::ParseSource(
     return true;
   }
 
-  if (EqualIgnoringASCIICase("'strict-dynamic'", token)) {
+  if (policy_->SupportsWasmEval() &&
+      EqualIgnoringASCIICase("'wasm-eval'", token)) {
+    AddSourceWasmEval();
+    return true;
+  }
+
+  if (EqualIgnoringASCIICase("'strict-dynamic'", token) ||
+      (RuntimeEnabledFeatures::
+           ExperimentalContentSecurityPolicyFeaturesEnabled() &&
+       EqualIgnoringASCIICase("'csp3-strict-dynamic'", token))) {
     AddSourceStrictDynamic();
     return true;
   }
@@ -323,8 +345,16 @@ bool SourceListDirective::ParseNonce(const UChar* begin,
 
   // TODO(esprehn): Should be StringView(begin, nonceLength).startsWith(prefix).
   if (nonce_length <= prefix.length() ||
-      !EqualIgnoringASCIICase(prefix, StringView(begin, prefix.length())))
-    return true;
+      !EqualIgnoringASCIICase(prefix, StringView(begin, prefix.length()))) {
+    // Experimentally the prefix could also be "'csp3-nonce-"
+    prefix = "'csp3-nonce-";
+    if (!RuntimeEnabledFeatures::
+            ExperimentalContentSecurityPolicyFeaturesEnabled() ||
+        nonce_length <= prefix.length() ||
+        !EqualIgnoringASCIICase(prefix, StringView(begin, prefix.length()))) {
+      return true;
+    }
+  }
 
   const UChar* position = begin + prefix.length();
   const UChar* nonce_begin = position;
@@ -350,11 +380,10 @@ bool SourceListDirective::ParseHash(
     DigestValue& hash,
     ContentSecurityPolicyHashAlgorithm& hash_algorithm) {
   // Any additions or subtractions from this struct should also modify the
-  // respective entries in the kAlgorithmMap array in checkDigest().
-  static const struct {
-    const char* prefix;
-    ContentSecurityPolicyHashAlgorithm type;
-  } kSupportedPrefixes[] = {
+  // respective entries in the kAlgorithmMap array in
+  // ContentSecurityPolicy::FillInCSPHashValues().
+
+  static const SupportedPrefixesStruct kSupportedPrefixes[] = {
       {"'sha256-", kContentSecurityPolicyHashAlgorithmSha256},
       {"'sha384-", kContentSecurityPolicyHashAlgorithmSha384},
       {"'sha512-", kContentSecurityPolicyHashAlgorithmSha512},
@@ -363,17 +392,44 @@ bool SourceListDirective::ParseHash(
       {"'sha-512-", kContentSecurityPolicyHashAlgorithmSha512},
       {"'ed25519-", kContentSecurityPolicyHashAlgorithmEd25519}};
 
+  static const SupportedPrefixesStruct kSupportedPrefixesExperimental[] = {
+      {"'sha256-", kContentSecurityPolicyHashAlgorithmSha256},
+      {"'sha384-", kContentSecurityPolicyHashAlgorithmSha384},
+      {"'sha512-", kContentSecurityPolicyHashAlgorithmSha512},
+      {"'sha-256-", kContentSecurityPolicyHashAlgorithmSha256},
+      {"'sha-384-", kContentSecurityPolicyHashAlgorithmSha384},
+      {"'sha-512-", kContentSecurityPolicyHashAlgorithmSha512},
+      {"'ed25519-", kContentSecurityPolicyHashAlgorithmEd25519},
+      {"'csp3-sha256-", kContentSecurityPolicyHashAlgorithmSha256},
+      {"'csp3-sha384-", kContentSecurityPolicyHashAlgorithmSha384},
+      {"'csp3-sha512-", kContentSecurityPolicyHashAlgorithmSha512},
+      {"'csp3-sha-256-", kContentSecurityPolicyHashAlgorithmSha256},
+      {"'csp3-sha-384-", kContentSecurityPolicyHashAlgorithmSha384},
+      {"'csp3-sha-512-", kContentSecurityPolicyHashAlgorithmSha512},
+      {"'csp3-ed25519-", kContentSecurityPolicyHashAlgorithmEd25519}};
+
+  const auto supportedPrefixes =
+      RuntimeEnabledFeatures::ExperimentalContentSecurityPolicyFeaturesEnabled()
+          ? kSupportedPrefixesExperimental
+          : kSupportedPrefixes;
+
+  const size_t supportedPrefixesLength =
+      RuntimeEnabledFeatures::ExperimentalContentSecurityPolicyFeaturesEnabled()
+          ? sizeof(kSupportedPrefixesExperimental) /
+                sizeof(kSupportedPrefixesExperimental[0])
+          : sizeof(kSupportedPrefixes) / sizeof(kSupportedPrefixes[0]);
+
   StringView prefix;
   hash_algorithm = kContentSecurityPolicyHashAlgorithmNone;
   size_t hash_length = end - begin;
 
-  for (const auto& algorithm : kSupportedPrefixes) {
-    prefix = algorithm.prefix;
+  for (size_t i = 0; i < supportedPrefixesLength; i++) {
+    prefix = supportedPrefixes[i].prefix;
     // TODO(esprehn): Should be StringView(begin, end -
     // begin).startsWith(prefix).
     if (hash_length > prefix.length() &&
         EqualIgnoringASCIICase(prefix, StringView(begin, prefix.length()))) {
-      hash_algorithm = algorithm.type;
+      hash_algorithm = supportedPrefixes[i].type;
       break;
     }
   }
@@ -558,6 +614,10 @@ void SourceListDirective::AddSourceUnsafeEval() {
   allow_eval_ = true;
 }
 
+void SourceListDirective::AddSourceWasmEval() {
+  allow_wasm_eval_ = true;
+}
+
 void SourceListDirective::AddSourceStrictDynamic() {
   allow_dynamic_ = true;
 }
@@ -647,6 +707,7 @@ bool SourceListDirective::Subsumes(
 
   bool allow_inline_other = other[0]->allow_inline_;
   bool allow_eval_other = other[0]->allow_eval_;
+  bool allow_wasm_eval_other = other[0]->allow_wasm_eval_;
   bool allow_dynamic_other = other[0]->allow_dynamic_;
   bool allow_hashed_attributes_other = other[0]->allow_hashed_attributes_;
   bool is_hash_or_nonce_present_other = other[0]->IsHashOrNoncePresent();
@@ -658,6 +719,7 @@ bool SourceListDirective::Subsumes(
   for (size_t i = 1; i < other.size(); i++) {
     allow_inline_other = allow_inline_other && other[i]->allow_inline_;
     allow_eval_other = allow_eval_other && other[i]->allow_eval_;
+    allow_wasm_eval_other = allow_wasm_eval_other && other[i]->allow_wasm_eval_;
     allow_dynamic_other = allow_dynamic_other && other[i]->allow_dynamic_;
     allow_hashed_attributes_other =
         allow_hashed_attributes_other && other[i]->allow_hashed_attributes_;
@@ -676,6 +738,8 @@ bool SourceListDirective::Subsumes(
   if (type == ContentSecurityPolicy::DirectiveType::kScriptSrc ||
       type == ContentSecurityPolicy::DirectiveType::kStyleSrc) {
     if (!allow_eval_ && allow_eval_other)
+      return false;
+    if (!allow_wasm_eval_ && allow_wasm_eval_other)
       return false;
     if (!allow_hashed_attributes_ && allow_hashed_attributes_other)
       return false;

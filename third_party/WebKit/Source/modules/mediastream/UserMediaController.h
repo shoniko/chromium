@@ -34,7 +34,7 @@ namespace blink {
 
 class ApplyConstraintsRequest;
 class MediaDevices;
-class MediaDevicesRequest;
+class MediaStreamComponent;
 class UserMediaRequest;
 
 class UserMediaController final
@@ -50,9 +50,9 @@ class UserMediaController final
 
   void RequestUserMedia(UserMediaRequest*);
   void CancelUserMediaRequest(UserMediaRequest*);
-  void RequestMediaDevices(MediaDevicesRequest*);
   void SetMediaDeviceChangeObserver(MediaDevices*);
   void ApplyConstraints(ApplyConstraintsRequest*);
+  void StopTrack(MediaStreamComponent*);
 
   static const char* SupplementName();
   static UserMediaController* From(LocalFrame* frame) {
@@ -73,11 +73,6 @@ inline void UserMediaController::CancelUserMediaRequest(
   client_->CancelUserMediaRequest(request);
 }
 
-inline void UserMediaController::RequestMediaDevices(
-    MediaDevicesRequest* request) {
-  client_->RequestMediaDevices(request);
-}
-
 inline void UserMediaController::SetMediaDeviceChangeObserver(
     MediaDevices* observer) {
   client_->SetMediaDeviceChangeObserver(observer);
@@ -86,6 +81,10 @@ inline void UserMediaController::SetMediaDeviceChangeObserver(
 inline void UserMediaController::ApplyConstraints(
     ApplyConstraintsRequest* request) {
   client_->ApplyConstraints(request);
+}
+
+inline void UserMediaController::StopTrack(MediaStreamComponent* track) {
+  client_->StopTrack(track);
 }
 
 }  // namespace blink

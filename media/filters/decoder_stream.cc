@@ -328,10 +328,17 @@ void DecoderStream<StreamType>::OnDecoderSelected(
     return;
   }
 
+  // Send logs and statistics updates including the decoder name.
+  traits_.ReportStatistics(statistics_cb_, 0);
   media_log_->SetBooleanProperty(GetStreamTypeString() + "_dds",
                                  !!decrypting_demuxer_stream_);
   media_log_->SetStringProperty(GetStreamTypeString() + "_decoder",
                                 decoder_->GetDisplayName());
+
+  MEDIA_LOG(INFO, media_log_)
+      << "Selected " << decoder_->GetDisplayName() << " for "
+      << GetStreamTypeString() << " decoding, config: "
+      << StreamTraits::GetDecoderConfig(stream_).AsHumanReadableString();
 
   if (state_ == STATE_REINITIALIZING_DECODER) {
     CompleteDecoderReinitialization(true);
@@ -673,6 +680,11 @@ void DecoderStream<StreamType>::OnBufferReady(
 
     const DecoderConfig& config = StreamTraits::GetDecoderConfig(stream_);
     traits_.OnConfigChanged(config);
+
+    MEDIA_LOG(INFO, media_log_)
+        << GetStreamTypeString()
+        << " decoder config changed midstream, new config: "
+        << config.AsHumanReadableString();
 
     if (!config_change_observer_cb_.is_null())
       config_change_observer_cb_.Run(config);

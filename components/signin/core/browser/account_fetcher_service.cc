@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -16,9 +15,8 @@
 #include "components/signin/core/browser/account_info_fetcher.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/child_account_info_fetcher.h"
-#include "components/signin/core/browser/refresh_token_annotation_request.h"
 #include "components/signin/core/browser/signin_client.h"
-#include "components/signin/core/common/signin_switches.h"
+#include "components/signin/core/browser/signin_switches.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace {
@@ -33,16 +31,6 @@ bool AccountSupportsUserInfo(const std::string& account_id) {
   // Should put in a common place.
   return account_id != "managed_user@localhost";
 }
-
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-// IsRefreshTokenDeviceIdExperimentEnabled is called from
-// SendRefreshTokenAnnotationRequest only on desktop platforms.
-bool IsRefreshTokenDeviceIdExperimentEnabled() {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("RefreshTokenDeviceId");
-  return group_name == "Enabled";
-}
-#endif
 
 }
 
@@ -141,6 +129,7 @@ void AccountFetcherService::RefreshAllAccountInfo(bool only_fetch_if_invalid) {
 // dependency on signin_manager which we get around by only allowing a single
 // account. This is possible since we only support a single account to be a
 // child anyway.
+#if defined(OS_ANDROID)
 void AccountFetcherService::UpdateChildInfo() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   std::vector<std::string> accounts = token_service_->GetAccounts();
@@ -158,6 +147,7 @@ void AccountFetcherService::UpdateChildInfo() {
     ResetChildInfo();
   }
 }
+#endif
 
 void AccountFetcherService::MaybeEnableNetworkFetches() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -168,7 +158,9 @@ void AccountFetcherService::MaybeEnableNetworkFetches() {
     ScheduleNextRefresh();
   }
   RefreshAllAccountInfo(true);
+#if defined(OS_ANDROID)
   UpdateChildInfo();
+#endif
 }
 
 void AccountFetcherService::RefreshAllAccountsAndScheduleNext() {
@@ -207,7 +199,7 @@ void AccountFetcherService::StartFetchingUserInfo(
   if (!request) {
     DVLOG(1) << "StartFetching " << account_id;
     std::unique_ptr<AccountInfoFetcher> fetcher =
-        base::MakeUnique<AccountInfoFetcher>(
+        std::make_unique<AccountInfoFetcher>(
             token_service_, signin_client_->GetURLRequestContext(), this,
             account_id);
     request = std::move(fetcher);
@@ -248,35 +240,6 @@ void AccountFetcherService::RefreshAccountInfo(const std::string& account_id,
   if (!only_fetch_if_invalid || !info.IsValid())
 #endif
     StartFetchingUserInfo(account_id);
-
-  SendRefreshTokenAnnotationRequest(account_id);
-}
-
-void AccountFetcherService::SendRefreshTokenAnnotationRequest(
-    const std::string& account_id) {
-// We only need to send RefreshTokenAnnotationRequest from desktop platforms.
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-  if (IsRefreshTokenDeviceIdExperimentEnabled() ||
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableRefreshTokenAnnotationRequest)) {
-    std::unique_ptr<RefreshTokenAnnotationRequest> request =
-        RefreshTokenAnnotationRequest::SendIfNeeded(
-            signin_client_->GetPrefs(), token_service_, signin_client_,
-            signin_client_->GetURLRequestContext(), account_id,
-            base::Bind(
-                &AccountFetcherService::RefreshTokenAnnotationRequestDone,
-                base::Unretained(this), account_id));
-    // If request was sent AccountFetcherService needs to own request till it
-    // finishes.
-    if (request)
-      refresh_token_annotation_requests_[account_id] = std::move(request);
-  }
-#endif
-}
-
-void AccountFetcherService::RefreshTokenAnnotationRequestDone(
-    const std::string& account_id) {
-  refresh_token_annotation_requests_.erase(account_id);
 }
 
 void AccountFetcherService::OnUserInfoFetchSuccess(
@@ -316,7 +279,9 @@ void AccountFetcherService::OnRefreshTokenAvailable(
   if (!network_fetches_enabled_)
     return;
   RefreshAccountInfo(account_id, true);
+#if defined(OS_ANDROID)
   UpdateChildInfo();
+#endif
 }
 
 void AccountFetcherService::OnRefreshTokenRevoked(
@@ -330,7 +295,9 @@ void AccountFetcherService::OnRefreshTokenRevoked(
   if (!network_fetches_enabled_)
     return;
   user_info_requests_.erase(account_id);
+#if defined(OS_ANDROID)
   UpdateChildInfo();
+#endif
   account_tracker_service_->StopTrackingAccount(account_id);
 }
 

@@ -382,8 +382,6 @@ Status ParsePerfLoggingPrefs(const base::Value& option,
       &ParseInspectorDomainStatus, &capabilities->perf_logging_prefs.network);
   parser_map["enablePage"] = base::Bind(
       &ParseInspectorDomainStatus, &capabilities->perf_logging_prefs.page);
-  parser_map["enableTimeline"] = base::Bind(
-      &ParseInspectorDomainStatus, &capabilities->perf_logging_prefs.timeline);
   parser_map["traceCategories"] = base::Bind(
       &ParseString, &capabilities->perf_logging_prefs.trace_categories);
 
@@ -619,7 +617,6 @@ std::string Switches::ToString() const {
 PerfLoggingPrefs::PerfLoggingPrefs()
     : network(InspectorDomainStatus::kDefaultEnabled),
       page(InspectorDomainStatus::kDefaultEnabled),
-      timeline(InspectorDomainStatus::kDefaultDisabled),
       trace_categories(),
       buffer_usage_reporting_interval(1000) {}
 
@@ -631,6 +628,7 @@ Capabilities::Capabilities()
       force_devtools_screenshot(true),
       page_load_strategy(PageLoadStrategy::kNormal),
       network_emulation_enabled(false),
+      accept_insecure_certs(false),
       use_automation_extension(true) {}
 
 Capabilities::~Capabilities() {}
@@ -658,6 +656,8 @@ Status Capabilities::Parse(const base::DictionaryValue& desired_caps) {
   parser_map["pageLoadStrategy"] = base::Bind(&ParsePageLoadStrategy);
   parser_map["unexpectedAlertBehaviour"] =
       base::Bind(&ParseUnexpectedAlertBehaviour);
+  parser_map["acceptInsecureCerts"] =
+      base::BindRepeating(&ParseBoolean, &accept_insecure_certs);
   // Network emulation requires device mode, which is only enabled when
   // mobile emulation is on.
   if (desired_caps.GetDictionary("goog:chromeOptions.mobileEmulation",

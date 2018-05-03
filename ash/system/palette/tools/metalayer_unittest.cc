@@ -6,6 +6,7 @@
 
 #include "ash/highlighter/highlighter_controller.h"
 #include "ash/highlighter/highlighter_controller_test_api.h"
+#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
 #include "ash/shell.h"
 #include "ash/shell_test_api.h"
 #include "ash/system/palette/mock_palette_tool_delegate.h"
@@ -14,6 +15,7 @@
 #include "ash/system/palette/tools/metalayer_mode.h"
 #include "ash/system/tray/hover_highlight_view.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/voice_interaction/voice_interaction_controller.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -27,8 +29,8 @@ namespace {
 // Base class for all metalayer ash tests.
 class MetalayerToolTest : public AshTestBase {
  public:
-  MetalayerToolTest() {}
-  ~MetalayerToolTest() override {}
+  MetalayerToolTest() = default;
+  ~MetalayerToolTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
@@ -61,35 +63,58 @@ class MetalayerToolTest : public AshTestBase {
 // The metalayer tool is always visible, but only enabled when the user
 // has enabled the metalayer AND the voice interaction framework is ready.
 TEST_F(MetalayerToolTest, PaletteMenuState) {
-  const VoiceInteractionState kStates[] = {VoiceInteractionState::NOT_READY,
-                                           VoiceInteractionState::STOPPED,
-                                           VoiceInteractionState::RUNNING};
+  const mojom::VoiceInteractionState kStates[] = {
+      mojom::VoiceInteractionState::NOT_READY,
+      mojom::VoiceInteractionState::STOPPED,
+      mojom::VoiceInteractionState::RUNNING};
+  const mojom::AssistantAllowedState kAllowedStates[] = {
+      mojom::AssistantAllowedState::ALLOWED,
+      mojom::AssistantAllowedState::DISALLOWED_BY_ARC_DISALLOWED,
+      mojom::AssistantAllowedState::DISALLOWED_BY_ARC_POLICY,
+      mojom::AssistantAllowedState::DISALLOWED_BY_LOCALE,
+      mojom::AssistantAllowedState::DISALLOWED_BY_FLAG,
+      mojom::AssistantAllowedState::DISALLOWED_BY_NONPRIMARY_USER,
+      mojom::AssistantAllowedState::DISALLOWED_BY_SUPERVISED_USER,
+      mojom::AssistantAllowedState::DISALLOWED_BY_INCOGNITO,
+  };
   const base::string16 kLoading(base::ASCIIToUTF16("loading"));
 
   // Iterate over every possible combination of states.
-  for (VoiceInteractionState state : kStates) {
-    for (int enabled = 0; enabled <= 1; enabled++) {
-      for (int context = 0; context <= 1; context++) {
-        const bool ready = state != VoiceInteractionState::NOT_READY;
-        const bool selectable = enabled && context && ready;
+  for (mojom::VoiceInteractionState state : kStates) {
+    for (mojom::AssistantAllowedState allowed_state : kAllowedStates) {
+      for (int enabled = 0; enabled <= 1; enabled++) {
+        for (int context = 0; context <= 1; context++) {
+          const bool allowed =
+              allowed_state == mojom::AssistantAllowedState::ALLOWED;
+          const bool ready = state != mojom::VoiceInteractionState::NOT_READY;
+          const bool selectable = allowed && enabled && context && ready;
 
-        Shell::Get()->NotifyVoiceInteractionStatusChanged(state);
-        Shell::Get()->NotifyVoiceInteractionEnabled(enabled);
-        Shell::Get()->NotifyVoiceInteractionContextEnabled(context);
+          Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+              state);
+          Shell::Get()->voice_interaction_controller()->NotifySettingsEnabled(
+              enabled);
+          Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(
+              context);
+          Shell::Get()->voice_interaction_controller()->NotifyFeatureAllowed(
+              allowed_state);
 
-        std::unique_ptr<views::View> view =
-            base::WrapUnique(tool_->CreateView());
-        EXPECT_TRUE(view);
-        EXPECT_EQ(selectable, view->enabled());
+          std::unique_ptr<views::View> view =
+              base::WrapUnique(tool_->CreateView());
+          EXPECT_TRUE(view);
+          EXPECT_EQ(selectable, view->enabled());
 
-        const base::string16 label_text =
-            static_cast<HoverHighlightView*>(view.get())->text_label()->text();
+          const base::string16 label_text =
+              static_cast<HoverHighlightView*>(view.get())
+                  ->text_label()
+                  ->text();
 
-        const bool label_contains_loading =
-            label_text.find(kLoading) != base::string16::npos;
+          const bool label_contains_loading =
+              label_text.find(kLoading) != base::string16::npos;
 
-        EXPECT_EQ(enabled && context && !ready, label_contains_loading);
-        tool_->OnViewDestroyed();
+          EXPECT_EQ(allowed && enabled && context && !ready,
+                    label_contains_loading);
+          tool_->OnViewDestroyed();
+        }
       }
     }
   }
@@ -117,25 +142,25 @@ TEST_F(MetalayerToolTest, EnablingDisablingMetalayerEnablesDisablesController) {
 
 // Verifies that disabling the metalayer support disables the tool.
 TEST_F(MetalayerToolTest, MetalayerUnsupportedDisablesPaletteTool) {
-  Shell::Get()->NotifyVoiceInteractionStatusChanged(
-      VoiceInteractionState::RUNNING);
-  Shell::Get()->NotifyVoiceInteractionEnabled(true);
-  Shell::Get()->NotifyVoiceInteractionContextEnabled(true);
+  Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+      mojom::VoiceInteractionState::RUNNING);
+  Shell::Get()->voice_interaction_controller()->NotifySettingsEnabled(true);
+  Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(true);
 
   // Disabling the user prefs individually should disable the tool.
   tool_->OnEnable();
   EXPECT_CALL(*palette_tool_delegate_.get(),
               DisableTool(PaletteToolId::METALAYER));
-  Shell::Get()->NotifyVoiceInteractionEnabled(false);
+  Shell::Get()->voice_interaction_controller()->NotifySettingsEnabled(false);
   testing::Mock::VerifyAndClearExpectations(palette_tool_delegate_.get());
-  Shell::Get()->NotifyVoiceInteractionEnabled(true);
+  Shell::Get()->voice_interaction_controller()->NotifySettingsEnabled(true);
 
   tool_->OnEnable();
   EXPECT_CALL(*palette_tool_delegate_.get(),
               DisableTool(PaletteToolId::METALAYER));
-  Shell::Get()->NotifyVoiceInteractionContextEnabled(false);
+  Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(false);
   testing::Mock::VerifyAndClearExpectations(palette_tool_delegate_.get());
-  Shell::Get()->NotifyVoiceInteractionContextEnabled(true);
+  Shell::Get()->voice_interaction_controller()->NotifyContextEnabled(true);
 
   // Test VoiceInteractionState changes.
   tool_->OnEnable();
@@ -145,17 +170,17 @@ TEST_F(MetalayerToolTest, MetalayerUnsupportedDisablesPaletteTool) {
   EXPECT_CALL(*palette_tool_delegate_.get(),
               DisableTool(PaletteToolId::METALAYER))
       .Times(0);
-  Shell::Get()->NotifyVoiceInteractionStatusChanged(
-      VoiceInteractionState::STOPPED);
-  Shell::Get()->NotifyVoiceInteractionStatusChanged(
-      VoiceInteractionState::RUNNING);
+  Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+      mojom::VoiceInteractionState::STOPPED);
+  Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+      mojom::VoiceInteractionState::RUNNING);
   testing::Mock::VerifyAndClearExpectations(palette_tool_delegate_.get());
 
   // Changing the state to NOT_READY should disable the tool.
   EXPECT_CALL(*palette_tool_delegate_.get(),
               DisableTool(PaletteToolId::METALAYER));
-  Shell::Get()->NotifyVoiceInteractionStatusChanged(
-      VoiceInteractionState::NOT_READY);
+  Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+      mojom::VoiceInteractionState::NOT_READY);
   testing::Mock::VerifyAndClearExpectations(palette_tool_delegate_.get());
 }
 

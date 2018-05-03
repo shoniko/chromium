@@ -28,6 +28,8 @@
 #include "core/workers/WorkerScriptLoader.h"
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
+#include "common/net/ip_address_space.mojom-blink.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/inspector/ConsoleMessage.h"
@@ -44,13 +46,11 @@
 #include "platform/network/http_names.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
-#include "public/platform/WebAddressSpace.h"
 
 namespace blink {
 
 WorkerScriptLoader::WorkerScriptLoader()
-    : response_address_space_(kWebAddressSpacePublic) {}
+    : response_address_space_(mojom::IPAddressSpace::kPublic) {}
 
 WorkerScriptLoader::~WorkerScriptLoader() {
   // If |m_threadableLoader| is still working, we have to cancel it here.
@@ -65,7 +65,7 @@ void WorkerScriptLoader::LoadSynchronously(
     ExecutionContext& execution_context,
     const KURL& url,
     WebURLRequest::RequestContext request_context,
-    WebAddressSpace creation_address_space) {
+    mojom::IPAddressSpace creation_address_space) {
   url_ = url;
   execution_context_ = &execution_context;
 
@@ -92,11 +92,11 @@ void WorkerScriptLoader::LoadAsynchronously(
     ExecutionContext& execution_context,
     const KURL& url,
     WebURLRequest::RequestContext request_context,
-    WebURLRequest::FetchRequestMode fetch_request_mode,
-    WebURLRequest::FetchCredentialsMode fetch_credentials_mode,
-    WebAddressSpace creation_address_space,
-    WTF::Closure response_callback,
-    WTF::Closure finished_callback) {
+    network::mojom::FetchRequestMode fetch_request_mode,
+    network::mojom::FetchCredentialsMode fetch_credentials_mode,
+    mojom::IPAddressSpace creation_address_space,
+    base::OnceClosure response_callback,
+    base::OnceClosure finished_callback) {
   DCHECK(response_callback || finished_callback);
   response_callback_ = std::move(response_callback);
   finished_callback_ = std::move(finished_callback);
@@ -159,12 +159,12 @@ void WorkerScriptLoader::DidReceiveResponse(
   if (NetworkUtils::IsReservedIPAddress(response.RemoteIPAddress())) {
     response_address_space_ =
         SecurityOrigin::Create(response_url_)->IsLocalhost()
-            ? kWebAddressSpaceLocal
-            : kWebAddressSpacePrivate;
+            ? mojom::IPAddressSpace::kLocal
+            : mojom::IPAddressSpace::kPrivate;
   }
 
   if (response_callback_)
-    response_callback_();
+    std::move(response_callback_).Run();
 }
 
 void WorkerScriptLoader::DidReceiveData(const char* data, unsigned len) {
@@ -172,14 +172,10 @@ void WorkerScriptLoader::DidReceiveData(const char* data, unsigned len) {
     return;
 
   if (!decoder_) {
-    if (!response_encoding_.IsEmpty()) {
-      decoder_ = TextResourceDecoder::Create(TextResourceDecoderOptions(
-          TextResourceDecoderOptions::kPlainTextContent,
-          WTF::TextEncoding(response_encoding_)));
-    } else {
-      decoder_ = TextResourceDecoder::Create(TextResourceDecoderOptions(
-          TextResourceDecoderOptions::kPlainTextContent, UTF8Encoding()));
-    }
+    decoder_ = TextResourceDecoder::Create(TextResourceDecoderOptions(
+        TextResourceDecoderOptions::kPlainTextContent,
+        response_encoding_.IsEmpty() ? UTF8Encoding()
+                                     : WTF::TextEncoding(response_encoding_)));
   }
 
   if (!len)
@@ -189,7 +185,7 @@ void WorkerScriptLoader::DidReceiveData(const char* data, unsigned len) {
 }
 
 void WorkerScriptLoader::DidReceiveCachedMetadata(const char* data, int size) {
-  cached_metadata_ = WTF::MakeUnique<Vector<char>>(size);
+  cached_metadata_ = std::make_unique<Vector<char>>(size);
   memcpy(cached_metadata_->data(), data, size);
 }
 
@@ -239,8 +235,7 @@ void WorkerScriptLoader::NotifyFinished() {
   if (!finished_callback_)
     return;
 
-  WTF::Closure callback = std::move(finished_callback_);
-  callback();
+  std::move(finished_callback_).Run();
 }
 
 void WorkerScriptLoader::ProcessContentSecurityPolicy(

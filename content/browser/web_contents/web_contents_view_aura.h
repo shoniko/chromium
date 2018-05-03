@@ -99,6 +99,9 @@ class CONTENT_EXPORT WebContentsViewAura
   // crbug.com/666858.
   bool IsValidDragTarget(RenderWidgetHostImpl* target_rwh) const;
 
+  // Called from CreateView() to create |window_|.
+  void CreateAuraWindow(aura::Window* context);
+
   // Overridden from WebContentsView:
   gfx::NativeView GetNativeView() const override;
   gfx::NativeView GetContentNativeView() const override;
@@ -110,6 +113,7 @@ class CONTENT_EXPORT WebContentsViewAura
   void SetInitialFocus() override;
   void StoreFocus() override;
   void RestoreFocus() override;
+  void FocusThroughTabTraversal(bool reverse) override;
   DropData* GetDropData() const override;
   gfx::Rect GetViewBounds() const override;
   void CreateView(const gfx::Size& initial_size,
@@ -152,6 +156,7 @@ class CONTENT_EXPORT WebContentsViewAura
 
   // Overridden from OverscrollControllerDelegate:
   gfx::Size GetDisplaySize() const override;
+  void OnOverscrollBehaviorUpdate(cc::OverscrollBehavior) override;
   bool OnOverscrollUpdate(float delta_x, float delta_y) override;
   void OnOverscrollComplete(OverscrollMode overscroll_mode) override;
   void OnOverscrollModeChange(OverscrollMode old_mode,
@@ -195,8 +200,9 @@ class CONTENT_EXPORT WebContentsViewAura
 
   FRIEND_TEST_ALL_PREFIXES(WebContentsViewAuraTest, EnableDisableOverscroll);
 
-  bool enable_surface_synchronization_ = false;
+  const bool is_mus_browser_plugin_guest_;
 
+  // NOTE: this is null when running in mus and |is_mus_browser_plugin_guest_|.
   std::unique_ptr<aura::Window> window_;
 
   std::unique_ptr<WindowObserver> window_observer_;

@@ -174,6 +174,13 @@ net::QuicTagVector GetQuicClientConnectionOptions(
   return net::ParseQuicConnectionOptions(it->second);
 }
 
+bool ShouldQuicCloseSessionsOnIpChange(
+    const VariationParameters& quic_trial_params) {
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "close_sessions_on_ip_change"),
+      "true");
+}
+
 int GetQuicIdleConnectionTimeoutSeconds(
     const VariationParameters& quic_trial_params) {
   int value;
@@ -196,6 +203,30 @@ int GetQuicReducedPingTimeoutSeconds(
   return 0;
 }
 
+int GetQuicMaxTimeBeforeCryptoHandshakeSeconds(
+    const VariationParameters& quic_trial_params) {
+  int value;
+  if (base::StringToInt(
+          GetVariationParam(quic_trial_params,
+                            "max_time_before_crypto_handshake_seconds"),
+          &value)) {
+    return value;
+  }
+  return 0;
+}
+
+int GetQuicMaxIdleTimeBeforeCryptoHandshakeSeconds(
+    const VariationParameters& quic_trial_params) {
+  int value;
+  if (base::StringToInt(
+          GetVariationParam(quic_trial_params,
+                            "max_idle_time_before_crypto_handshake_seconds"),
+          &value)) {
+    return value;
+  }
+  return 0;
+}
+
 bool ShouldQuicRaceCertVerification(
     const VariationParameters& quic_trial_params) {
   return base::LowerCaseEqualsASCII(
@@ -206,6 +237,14 @@ bool ShouldQuicEstimateInitialRtt(
     const VariationParameters& quic_trial_params) {
   return base::LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params, "estimate_initial_rtt"), "true");
+}
+
+bool ShouldQuicHeadersIncludeH2StreamDependencies(
+    const VariationParameters& quic_trial_params) {
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params,
+                        "headers_include_h2_stream_dependency"),
+      "true");
 }
 
 bool ShouldQuicConnectUsingDefaultNetwork(
@@ -229,10 +268,59 @@ bool ShouldQuicMigrateSessionsEarly(
       GetVariationParam(quic_trial_params, "migrate_sessions_early"), "true");
 }
 
+bool ShouldQuicMigrateSessionsOnNetworkChangeV2(
+    const VariationParameters& quic_trial_params) {
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params,
+                        "migrate_sessions_on_network_change_v2"),
+      "true");
+}
+
+bool ShouldQuicMigrateSessionsEarlyV2(
+    const VariationParameters& quic_trial_params) {
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "migrate_sessions_early_v2"),
+      "true");
+}
+
+int GetQuicMaxTimeOnNonDefaultNetworkSeconds(
+    const VariationParameters& quic_trial_params) {
+  int value;
+  if (base::StringToInt(
+          GetVariationParam(quic_trial_params,
+                            "max_time_on_non_default_network_seconds"),
+          &value)) {
+    return value;
+  }
+  return 0;
+}
+
+int GetQuicMaxNumMigrationsToNonDefaultNetworkOnPathDegrading(
+    const VariationParameters& quic_trial_params) {
+  int value;
+  if (base::StringToInt(
+          GetVariationParam(
+              quic_trial_params,
+              "max_migrations_to_non_default_network_on_path_degrading"),
+          &value)) {
+    return value;
+  }
+  return 0;
+}
+
 bool ShouldQuicAllowServerMigration(
     const VariationParameters& quic_trial_params) {
   return base::LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params, "allow_server_migration"), "true");
+}
+
+base::flat_set<std::string> GetQuicHostWhitelist(
+    const VariationParameters& quic_trial_params) {
+  std::string host_whitelist =
+      GetVariationParam(quic_trial_params, "host_whitelist");
+  std::vector<std::string> host_vector = base::SplitString(
+      host_whitelist, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+  return base::flat_set<std::string>(std::move(host_vector));
 }
 
 size_t GetQuicMaxPacketLength(const VariationParameters& quic_trial_params) {
@@ -283,6 +371,8 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
         GetQuicConnectionOptions(quic_trial_params);
     params->quic_client_connection_options =
         GetQuicClientConnectionOptions(quic_trial_params);
+    params->quic_close_sessions_on_ip_change =
+        ShouldQuicCloseSessionsOnIpChange(quic_trial_params);
     int idle_connection_timeout_seconds =
         GetQuicIdleConnectionTimeoutSeconds(quic_trial_params);
     if (idle_connection_timeout_seconds != 0) {
@@ -295,18 +385,50 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
         reduced_ping_timeout_seconds < net::kPingTimeoutSecs) {
       params->quic_reduced_ping_timeout_seconds = reduced_ping_timeout_seconds;
     }
+    int max_time_before_crypto_handshake_seconds =
+        GetQuicMaxTimeBeforeCryptoHandshakeSeconds(quic_trial_params);
+    if (max_time_before_crypto_handshake_seconds > 0) {
+      params->quic_max_time_before_crypto_handshake_seconds =
+          max_time_before_crypto_handshake_seconds;
+    }
+    int max_idle_time_before_crypto_handshake_seconds =
+        GetQuicMaxIdleTimeBeforeCryptoHandshakeSeconds(quic_trial_params);
+    if (max_idle_time_before_crypto_handshake_seconds > 0) {
+      params->quic_max_idle_time_before_crypto_handshake_seconds =
+          max_idle_time_before_crypto_handshake_seconds;
+    }
     params->quic_race_cert_verification =
         ShouldQuicRaceCertVerification(quic_trial_params);
     params->quic_estimate_initial_rtt =
         ShouldQuicEstimateInitialRtt(quic_trial_params);
+    params->quic_headers_include_h2_stream_dependency =
+        ShouldQuicHeadersIncludeH2StreamDependencies(quic_trial_params);
     params->quic_connect_using_default_network =
         ShouldQuicConnectUsingDefaultNetwork(quic_trial_params);
     params->quic_migrate_sessions_on_network_change =
         ShouldQuicMigrateSessionsOnNetworkChange(quic_trial_params);
     params->quic_migrate_sessions_early =
         ShouldQuicMigrateSessionsEarly(quic_trial_params);
+    params->quic_migrate_sessions_on_network_change_v2 =
+        ShouldQuicMigrateSessionsOnNetworkChangeV2(quic_trial_params);
+    params->quic_migrate_sessions_early_v2 =
+        ShouldQuicMigrateSessionsEarlyV2(quic_trial_params);
+    int max_time_on_non_default_network_seconds =
+        GetQuicMaxTimeOnNonDefaultNetworkSeconds(quic_trial_params);
+    if (max_time_on_non_default_network_seconds > 0) {
+      params->quic_max_time_on_non_default_network =
+          base::TimeDelta::FromSeconds(max_time_on_non_default_network_seconds);
+    }
+    int max_migrations_to_non_default_network_on_path_degrading =
+        GetQuicMaxNumMigrationsToNonDefaultNetworkOnPathDegrading(
+            quic_trial_params);
+    if (max_migrations_to_non_default_network_on_path_degrading > 0) {
+      params->quic_max_migrations_to_non_default_network_on_path_degrading =
+          max_migrations_to_non_default_network_on_path_degrading;
+    }
     params->quic_allow_server_migration =
         ShouldQuicAllowServerMigration(quic_trial_params);
+    params->quic_host_whitelist = GetQuicHostWhitelist(quic_trial_params);
   }
 
   size_t max_packet_length = GetQuicMaxPacketLength(quic_trial_params);

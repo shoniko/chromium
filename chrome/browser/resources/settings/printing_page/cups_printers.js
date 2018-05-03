@@ -100,14 +100,15 @@ Polymer({
    * @private
    */
   onAddPrinter_: function(result_code, printerName) {
+    let message;
     if (result_code == PrinterSetupResult.SUCCESS) {
       this.updateCupsPrintersList_();
-      var message = this.$.addPrinterDoneMessage;
+      message = this.$.addPrinterDoneMessage;
       message.textContent =
           loadTimeData.getStringF('printerAddedSuccessfulMessage', printerName);
     } else {
-      var message = this.$.addPrinterErrorMessage;
-      var messageText = this.$.addPrinterFailedMessage;
+      message = this.$.addPrinterErrorMessage;
+      const messageText = this.$.addPrinterFailedMessage;
       switch (result_code) {
         case PrinterSetupResult.FATAL_ERROR:
           messageText.textContent =
@@ -115,7 +116,7 @@ Polymer({
           break;
         case PrinterSetupResult.PRINTER_UNREACHABLE:
           messageText.textContent =
-              loadTimeData.getString('printerAddedPrinterUnreachableMessage');
+              loadTimeData.getString('printerAddedUnreachableMessage');
           break;
         case PrinterSetupResult.DBUS_ERROR:
           // Simply display a generic error message as this error should only
@@ -178,7 +179,7 @@ Polymer({
   onShowCupsEditPrinterDialog_: function() {
     this.showCupsEditPrinterDialog_ = true;
     this.async(function() {
-      var dialog = this.$$('settings-cups-edit-printer-dialog');
+      const dialog = this.$$('settings-cups-edit-printer-dialog');
       dialog.addEventListener('close', function() {
         this.showCupsEditPrinterDialog_ = false;
       }.bind(this));

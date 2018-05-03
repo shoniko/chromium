@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/compiler_specific.h"
-#include "base/metrics/statistics_recorder.h"
 #include "base/test/test_suite.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
@@ -40,14 +39,13 @@ ContentTestSuiteBase::ContentTestSuiteBase(int argc, char** argv)
 void ContentTestSuiteBase::Initialize() {
   base::TestSuite::Initialize();
 
-  // Initialize the histograms subsystem, so that any histograms hit in tests
-  // are correctly registered with the statistics recorder and can be queried
-  // by tests.
-  base::StatisticsRecorder::Initialize();
-
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
   gin::V8Initializer::LoadV8Snapshot();
   gin::V8Initializer::LoadV8Natives();
+#endif
+
+#if defined(USE_V8_CONTEXT_SNAPSHOT)
+  gin::V8Initializer::LoadV8ContextSnapshot();
 #endif
 
 #if defined(OS_ANDROID) && !defined(USE_AURA)
@@ -61,7 +59,7 @@ void ContentTestSuiteBase::RegisterContentSchemes(
     ContentClient* content_client) {
   SetContentClient(content_client);
   content::RegisterContentSchemes(false);
-  SetContentClient(NULL);
+  SetContentClient(nullptr);
 }
 
 void ContentTestSuiteBase::RegisterInProcessThreads() {

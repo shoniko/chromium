@@ -4,16 +4,17 @@
 
 #include "chrome/browser/ui/android/infobars/app_banner_infobar_android.h"
 
+#include <memory>
+#include <string>
 #include <utility>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
-#include "chrome/browser/android/banners/app_banner_infobar_delegate_android.h"
+#include "chrome/browser/banners/app_banner_infobar_delegate_android.h"
+#include "components/url_formatter/elide_url.h"
 #include "jni/AppBannerInfoBarAndroid_jni.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/gfx/android/java_bitmap.h"
-#include "ui/gfx/image/image.h"
 
 AppBannerInfoBarAndroid::AppBannerInfoBarAndroid(
     std::unique_ptr<banners::AppBannerInfoBarDelegateAndroid> delegate,
@@ -25,36 +26,31 @@ AppBannerInfoBarAndroid::AppBannerInfoBarAndroid(
     const GURL& app_url)
     : ConfirmInfoBar(std::move(delegate)), app_url_(app_url) {}
 
-AppBannerInfoBarAndroid::~AppBannerInfoBarAndroid() {
-}
+AppBannerInfoBarAndroid::~AppBannerInfoBarAndroid() {}
 
 base::android::ScopedJavaLocalRef<jobject>
 AppBannerInfoBarAndroid::CreateRenderInfoBar(JNIEnv* env) {
-  ConfirmInfoBarDelegate* app_banner_infobar_delegate = GetDelegate();
+  banners::AppBannerInfoBarDelegateAndroid* delegate = GetDelegate();
 
   base::android::ScopedJavaLocalRef<jstring> app_title =
-      base::android::ConvertUTF16ToJavaString(
-          env, app_banner_infobar_delegate->GetMessageText());
+      base::android::ConvertUTF16ToJavaString(env, delegate->GetMessageText());
 
-  base::android::ScopedJavaLocalRef<jobject> java_bitmap;
-  if (!app_banner_infobar_delegate->GetIcon().IsEmpty()) {
-    java_bitmap = gfx::ConvertToJavaBitmap(
-        app_banner_infobar_delegate->GetIcon().ToSkBitmap());
-  }
+  DCHECK(!delegate->GetPrimaryIcon().drawsNothing());
+  base::android::ScopedJavaLocalRef<jobject> java_bitmap =
+      gfx::ConvertToJavaBitmap(&delegate->GetPrimaryIcon());
 
   base::android::ScopedJavaLocalRef<jobject> infobar;
   if (!japp_data_.is_null()) {
     infobar.Reset(Java_AppBannerInfoBarAndroid_createNativeAppInfoBar(
         env, app_title, java_bitmap, japp_data_));
   } else {
-    // Trim down the app URL to the domain and registry.
-    std::string trimmed_url =
-        net::registry_controlled_domains::GetDomainAndRegistry(
-            app_url_,
-            net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
-
+    // Trim down the app URL to the origin. Banners only show on secure origins,
+    // so elide the scheme.
     base::android::ScopedJavaLocalRef<jstring> app_url =
-        base::android::ConvertUTF8ToJavaString(env, trimmed_url);
+        base::android::ConvertUTF16ToJavaString(
+            env,
+            url_formatter::FormatUrlForSecurityDisplay(
+                app_url_, url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC));
 
     infobar.Reset(Java_AppBannerInfoBarAndroid_createWebAppInfoBar(
         env, app_title, java_bitmap, app_url));
@@ -70,3 +66,7 @@ void AppBannerInfoBarAndroid::OnInstallStateChanged(int new_state) {
                                                      new_state);
 }
 
+banners::AppBannerInfoBarDelegateAndroid*
+AppBannerInfoBarAndroid::GetDelegate() {
+  return static_cast<banners::AppBannerInfoBarDelegateAndroid*>(delegate());
+}

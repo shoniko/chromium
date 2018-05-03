@@ -6,9 +6,14 @@
 
 #include <utility>
 
-#include "base/macros.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/run_loop.h"
+#include "base/test/bind_test_util.h"
+#include "base/test/mock_callback.h"
+#include "build/build_config.h"
 #include "content/browser/frame_host/navigation_handle_impl.h"
+#include "content/browser/interface_provider_filtering.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/public/browser/javascript_dialog_manager.h"
@@ -17,6 +22,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -24,10 +30,14 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "content/test/did_commit_provisional_load_interceptor.h"
+#include "content/test/frame_host_test_interface.mojom.h"
 #include "content/test/test_content_browser_client.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
+#include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/WebKit/common/page/page_visibility_state.mojom.h"
 
 namespace content {
 
@@ -39,29 +49,28 @@ class PrerenderTestContentBrowserClient : public TestContentBrowserClient {
  public:
   PrerenderTestContentBrowserClient()
       : override_enabled_(false),
-        visibility_override_(blink::kWebPageVisibilityStateVisible) {}
+        visibility_override_(blink::mojom::PageVisibilityState::kVisible) {}
   ~PrerenderTestContentBrowserClient() override {}
 
   void EnableVisibilityOverride(
-      blink::WebPageVisibilityState visibility_override) {
+      blink::mojom::PageVisibilityState visibility_override) {
     override_enabled_ = true;
     visibility_override_ = visibility_override;
   }
 
   void OverridePageVisibilityState(
       RenderFrameHost* render_frame_host,
-      blink::WebPageVisibilityState* visibility_state) override {
+      blink::mojom::PageVisibilityState* visibility_state) override {
     if (override_enabled_)
       *visibility_state = visibility_override_;
   }
 
  private:
   bool override_enabled_;
-  blink::WebPageVisibilityState visibility_override_;
+  blink::mojom::PageVisibilityState visibility_override_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderTestContentBrowserClient);
 };
-
 }  // anonymous namespace
 
 // TODO(mlamouri): part of these tests were removed because they were dependent
@@ -148,11 +157,11 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostImplBrowserTest,
   WebContents* web_contents = shell()->web_contents();
 
   web_contents->WasShown();
-  EXPECT_EQ(blink::kWebPageVisibilityStateVisible,
+  EXPECT_EQ(blink::mojom::PageVisibilityState::kVisible,
             web_contents->GetMainFrame()->GetVisibilityState());
 
   web_contents->WasHidden();
-  EXPECT_EQ(blink::kWebPageVisibilityStateHidden,
+  EXPECT_EQ(blink::mojom::PageVisibilityState::kHidden,
             web_contents->GetMainFrame()->GetVisibilityState());
 }
 
@@ -166,11 +175,12 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostImplBrowserTest,
   ContentBrowserClient* old_client = SetBrowserClientForTesting(&new_client);
 
   web_contents->WasShown();
-  EXPECT_EQ(blink::kWebPageVisibilityStateVisible,
+  EXPECT_EQ(blink::mojom::PageVisibilityState::kVisible,
             web_contents->GetMainFrame()->GetVisibilityState());
 
-  new_client.EnableVisibilityOverride(blink::kWebPageVisibilityStatePrerender);
-  EXPECT_EQ(blink::kWebPageVisibilityStatePrerender,
+  new_client.EnableVisibilityOverride(
+      blink::mojom::PageVisibilityState::kPrerender);
+  EXPECT_EQ(blink::mojom::PageVisibilityState::kPrerender,
             web_contents->GetMainFrame()->GetVisibilityState());
 
   SetBrowserClientForTesting(old_client);
@@ -181,7 +191,8 @@ namespace {
 class TestJavaScriptDialogManager : public JavaScriptDialogManager,
                                     public WebContentsDelegate {
  public:
-  TestJavaScriptDialogManager() : message_loop_runner_(new MessageLoopRunner) {}
+  TestJavaScriptDialogManager()
+      : message_loop_runner_(new MessageLoopRunner), url_invalidate_count_(0) {}
   ~TestJavaScriptDialogManager() override {}
 
   void Wait() {
@@ -209,6 +220,7 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager,
                            bool* did_suppress_message) override {}
 
   void RunBeforeUnloadDialog(WebContents* web_contents,
+                             RenderFrameHost* render_frame_host,
                              bool is_reload,
                              DialogClosedCallback callback) override {
     callback_ = std::move(callback);
@@ -223,11 +235,25 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager,
 
   void CancelDialogs(WebContents* web_contents, bool reset_state) override {}
 
+  // Keep track of whether the tab has notified us of a navigation state change
+  // which invalidates the displayed URL.
+  void NavigationStateChanged(WebContents* source,
+                              InvalidateTypes changed_flags) override {
+    if (changed_flags & INVALIDATE_TYPE_URL)
+      url_invalidate_count_++;
+  }
+
+  int url_invalidate_count() { return url_invalidate_count_; }
+  void reset_url_invalidate_count() { url_invalidate_count_ = 0; }
+
  private:
   DialogClosedCallback callback_;
 
   // The MessageLoopRunner used to spin the message loop.
   scoped_refptr<MessageLoopRunner> message_loop_runner_;
+
+  // The number of times NavigationStateChanged has been called.
+  int url_invalidate_count_;
 
   DISALLOW_COPY_AND_ASSIGN(TestJavaScriptDialogManager);
 };
@@ -252,8 +278,14 @@ class DropBeforeUnloadACKFilter : public BrowserMessageFilter {
 
 // Tests that a beforeunload dialog in an iframe doesn't stop the beforeunload
 // timer of a parent frame.
+// TODO(avi): flaky on Linux TSAN: http://crbug.com/795326
+#if defined(OS_LINUX) && defined(THREAD_SANITIZER)
+#define MAYBE_IframeBeforeUnloadParentHang DISABLED_IframeBeforeUnloadParentHang
+#else
+#define MAYBE_IframeBeforeUnloadParentHang IframeBeforeUnloadParentHang
+#endif
 IN_PROC_BROWSER_TEST_F(RenderFrameHostImplBrowserTest,
-                       IframeBeforeUnloadParentHang) {
+                       MAYBE_IframeBeforeUnloadParentHang) {
   WebContentsImpl* wc = static_cast<WebContentsImpl*>(shell()->web_contents());
   TestJavaScriptDialogManager dialog_manager;
   wc->SetDelegate(&dialog_manager);
@@ -335,6 +367,43 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostImplBrowserTest,
   // there should be no beforeunload dialog.
   shell()->LoadURL(GURL("about:blank"));
   EXPECT_TRUE(WaitForLoadStop(wc));
+
+  wc->SetDelegate(nullptr);
+  wc->SetJavaScriptDialogManagerForTesting(nullptr);
+}
+
+// Test for crbug.com/80401.  Canceling a beforeunload dialog should reset
+// the URL to the previous page's URL.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostImplBrowserTest,
+                       CancelBeforeUnloadResetsURL) {
+  WebContentsImpl* wc = static_cast<WebContentsImpl*>(shell()->web_contents());
+  TestJavaScriptDialogManager dialog_manager;
+  wc->SetDelegate(&dialog_manager);
+
+  GURL url(GetTestUrl("render_frame_host", "beforeunload.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  PrepContentsForBeforeUnloadTest(wc);
+
+  // Navigate to a page that triggers a cross-site transition.
+  GURL url2(embedded_test_server()->GetURL("foo.com", "/title1.html"));
+  shell()->LoadURL(url2);
+  dialog_manager.Wait();
+
+  // Cancel the dialog.
+  dialog_manager.reset_url_invalidate_count();
+  std::move(dialog_manager.callback()).Run(false, base::string16());
+  EXPECT_FALSE(wc->IsLoading());
+
+  // Verify there are no pending history items after the dialog is cancelled.
+  // (see crbug.com/93858)
+  NavigationEntry* entry = wc->GetController().GetPendingEntry();
+  EXPECT_EQ(nullptr, entry);
+  EXPECT_EQ(url, wc->GetVisibleURL());
+
+  // There should have been at least one NavigationStateChange event for
+  // invalidating the URL in the address bar, to avoid leaving the stale URL
+  // visible.
+  EXPECT_GE(dialog_manager.url_invalidate_count(), 1);
 
   wc->SetDelegate(nullptr);
   wc->SetJavaScriptDialogManagerForTesting(nullptr);
@@ -460,9 +529,12 @@ class DropStreamHandleConsumedFilter : public BrowserMessageFilter {
 // After a renderer crash, the StreamHandle must be released.
 IN_PROC_BROWSER_TEST_F(RenderFrameHostImplBrowserTest,
                        StreamHandleReleasedOnRendererCrash) {
-  // |stream_handle_| is only used with PlzNavigate.
-  if (!IsBrowserSideNavigationEnabled())
+  // Disable this test when the |stream_handle_| is not used.
+  if (!IsBrowserSideNavigationEnabled() ||
+      base::FeatureList::IsEnabled(features::kNetworkService) ||
+      IsNavigationMojoResponseEnabled()) {
     return;
+  }
 
   GURL url_1(embedded_test_server()->GetURL("a.com", "/title1.html"));
   GURL url_2(embedded_test_server()->GetURL("a.com", "/title2.html"));
@@ -818,6 +890,335 @@ IN_PROC_BROWSER_TEST_F(
   std::string second_part_received;
   EXPECT_TRUE(dom_message_queue.WaitForMessage(&second_part_received));
   EXPECT_EQ("\"Second part received\"", second_part_received);
+}
+
+namespace {
+
+// Allows injecting a fake, test-provided |interface_provider_request| into
+// DidCommitProvisionalLoad messages in a given |web_contents| instead of the
+// real one coming from the renderer process.
+class ScopedFakeInterfaceProviderRequestInjector
+    : public DidCommitProvisionalLoadInterceptor {
+ public:
+  explicit ScopedFakeInterfaceProviderRequestInjector(WebContents* web_contents)
+      : DidCommitProvisionalLoadInterceptor(web_contents) {}
+  ~ScopedFakeInterfaceProviderRequestInjector() override = default;
+
+  // Sets the fake InterfaceProvider |request| to inject into the next incoming
+  // DidCommitProvisionalLoad message.
+  void set_fake_request_for_next_commit(
+      service_manager::mojom::InterfaceProviderRequest request) {
+    next_fake_request_ = std::move(request);
+  }
+
+  const GURL& url_of_last_commit() const { return url_of_last_commit_; }
+
+  const service_manager::mojom::InterfaceProviderRequest&
+  original_request_of_last_commit() const {
+    return original_request_of_last_commit_;
+  }
+
+ protected:
+  void WillDispatchDidCommitProvisionalLoad(
+      RenderFrameHost* render_frame_host,
+      ::FrameHostMsg_DidCommitProvisionalLoad_Params* params,
+      service_manager::mojom::InterfaceProviderRequest*
+          interface_provider_request) override {
+    url_of_last_commit_ = params->url;
+    original_request_of_last_commit_ = std::move(*interface_provider_request);
+    *interface_provider_request = std::move(next_fake_request_);
+  }
+
+ private:
+  service_manager::mojom::InterfaceProviderRequest next_fake_request_;
+  service_manager::mojom::InterfaceProviderRequest
+      original_request_of_last_commit_;
+  GURL url_of_last_commit_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedFakeInterfaceProviderRequestInjector);
+};
+
+// Monitors the |document_scoped_interface_provider_binding_| of the given
+// |render_frame_host| for incoming interface requests for |interface_name|, and
+// invokes |callback| synchronously just before such a request would be
+// dispatched.
+class ScopedInterfaceRequestMonitor
+    : public service_manager::mojom::InterfaceProviderInterceptorForTesting {
+ public:
+  ScopedInterfaceRequestMonitor(RenderFrameHost* render_frame_host,
+                                base::StringPiece interface_name,
+                                base::RepeatingClosure callback)
+      : rfhi_(static_cast<RenderFrameHostImpl*>(render_frame_host)),
+        impl_(binding().SwapImplForTesting(this)),
+        interface_name_(interface_name),
+        request_callback_(callback) {}
+
+  ~ScopedInterfaceRequestMonitor() override {
+    auto* old_impl = binding().SwapImplForTesting(impl_);
+    DCHECK_EQ(old_impl, this);
+  }
+
+ protected:
+  // service_manager::mojom::InterfaceProviderInterceptorForTesting:
+  service_manager::mojom::InterfaceProvider* GetForwardingInterface() override {
+    return impl_;
+  }
+
+  void GetInterface(const std::string& interface_name,
+                    mojo::ScopedMessagePipeHandle pipe) override {
+    if (interface_name == interface_name_)
+      request_callback_.Run();
+    GetForwardingInterface()->GetInterface(interface_name, std::move(pipe));
+  }
+
+ private:
+  mojo::Binding<service_manager::mojom::InterfaceProvider>& binding() {
+    return rfhi_->document_scoped_interface_provider_binding_for_testing();
+  }
+
+  RenderFrameHostImpl* rfhi_;
+  service_manager::mojom::InterfaceProvider* impl_;
+
+  std::string interface_name_;
+  base::RepeatingClosure request_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedInterfaceRequestMonitor);
+};
+
+// Calls |callback| whenever a navigation finishes in |render_frame_host|.
+class DidFinishNavigationObserver : public WebContentsObserver {
+ public:
+  DidFinishNavigationObserver(RenderFrameHost* render_frame_host,
+                              base::RepeatingClosure callback)
+      : WebContentsObserver(
+            WebContents::FromRenderFrameHost(render_frame_host)),
+        callback_(callback) {}
+
+ protected:
+  // WebContentsObserver:
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override {
+    callback_.Run();
+  }
+
+ private:
+  base::RepeatingClosure callback_;
+  DISALLOW_COPY_AND_ASSIGN(DidFinishNavigationObserver);
+};
+
+}  // namespace
+
+// For cross-document navigations, the DidCommitProvisionalLoad message from
+// the renderer process will have its |interface_provider_request| argument set
+// to the request end of a new InterfaceProvider interface connection that will
+// be used by the newly committed document to access services exposed by the
+// RenderFrameHost.
+//
+// This test verifies that even if that |interface_provider_request| already has
+// pending interface requests, the RenderFrameHost binds the InterfaceProvider
+// request in such a way that these pending interface requests are dispatched
+// strictly after WebContentsObserver::DidFinishNavigation has fired, so that
+// the requests will be served correctly in the security context of the newly
+// committed document (i.e. GetLastCommittedURL/Origin will have been updated).
+IN_PROC_BROWSER_TEST_F(
+    RenderFrameHostImplBrowserTest,
+    EarlyInterfaceRequestsFromNewDocumentDispatchedAfterNavigationFinished) {
+  const GURL first_url(embedded_test_server()->GetURL("/title1.html"));
+  const GURL second_url(embedded_test_server()->GetURL("/title2.html"));
+
+  // Load a URL that maps to the same SiteInstance as the second URL, to make
+  // sure the second navigation will not be cross-process.
+  ASSERT_TRUE(NavigateToURL(shell(), first_url));
+
+  // Prepare an InterfaceProviderRequest with pending interface requests.
+  service_manager::mojom::InterfaceProviderPtr
+      interface_provider_with_pending_request;
+  service_manager::mojom::InterfaceProviderRequest
+      interface_provider_request_with_pending_request =
+          mojo::MakeRequest(&interface_provider_with_pending_request);
+  mojom::FrameHostTestInterfacePtr test_interface;
+  interface_provider_with_pending_request->GetInterface(
+      mojom::FrameHostTestInterface::Name_,
+      mojo::MakeRequest(&test_interface).PassMessagePipe());
+
+  // Replace the |interface_provider_request| argument in the next
+  // DidCommitProvisionalLoad message coming from the renderer with the
+  // rigged |interface_provider_with_pending_request| from above.
+  ScopedFakeInterfaceProviderRequestInjector injector(shell()->web_contents());
+  injector.set_fake_request_for_next_commit(
+      std::move(interface_provider_request_with_pending_request));
+
+  // Expect that by the time the interface request for FrameHostTestInterface is
+  // dispatched to the RenderFrameHost, WebContentsObserver::DidFinishNavigation
+  // will have already been invoked.
+  bool did_finish_navigation = false;
+  auto* main_rfh = shell()->web_contents()->GetMainFrame();
+  DidFinishNavigationObserver navigation_finish_observer(
+      main_rfh, base::BindLambdaForTesting([&did_finish_navigation]() {
+        did_finish_navigation = true;
+      }));
+
+  base::RunLoop wait_until_interface_request_is_dispatched;
+  ScopedInterfaceRequestMonitor monitor(
+      main_rfh, mojom::FrameHostTestInterface::Name_,
+      base::BindLambdaForTesting([&]() {
+        EXPECT_TRUE(did_finish_navigation);
+        wait_until_interface_request_is_dispatched.Quit();
+      }));
+
+  // Start the same-process navigation.
+  test::ScopedInterfaceFilterBypass filter_bypass;
+  ASSERT_TRUE(NavigateToURL(shell(), second_url));
+  EXPECT_EQ(main_rfh, shell()->web_contents()->GetMainFrame());
+  EXPECT_EQ(second_url, injector.url_of_last_commit());
+  EXPECT_TRUE(injector.original_request_of_last_commit().is_pending());
+
+  // Wait until the interface request for FrameHostTestInterface is dispatched.
+  wait_until_interface_request_is_dispatched.Run();
+}
+
+// The InterfaceProvider interface, which is used by the RenderFrame to access
+// Mojo services exposed by the RenderFrameHost, is not Channel-associated,
+// thus not synchronized with navigation IPC messages. As a result, when the
+// renderer commits a load, the DidCommitProvisional message might be at race
+// with GetInterface messages, for example, an interface request issued by the
+// previous document in its unload handler might arrive to the browser process
+// just a moment after DidCommitProvisionalLoad.
+//
+// This test verifies that even if there is such a last-second GetInterface
+// message originating from the previous document, it is no longer serviced.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostImplBrowserTest,
+                       LateInterfaceRequestsFromOldDocumentNotDispatched) {
+  const GURL first_url(embedded_test_server()->GetURL("/title1.html"));
+  const GURL second_url(embedded_test_server()->GetURL("/title2.html"));
+
+  // Prepare an InterfaceProviderRequest with no pending requests.
+  service_manager::mojom::InterfaceProviderPtr interface_provider;
+  service_manager::mojom::InterfaceProviderRequest interface_provider_request =
+      mojo::MakeRequest(&interface_provider);
+
+  // Set up a cunning mechnism to replace the |interface_provider_request|
+  // argument in next DidCommitProvisionalLoad message with the rigged
+  // |interface_provider_request| from above, whose client end is controlled by
+  // this test; then trigger a navigation.
+  {
+    ScopedFakeInterfaceProviderRequestInjector injector(
+        shell()->web_contents());
+    test::ScopedInterfaceFilterBypass filter_bypass;
+    injector.set_fake_request_for_next_commit(
+        std::move(interface_provider_request));
+
+    ASSERT_TRUE(NavigateToURL(shell(), first_url));
+    ASSERT_EQ(first_url, injector.url_of_last_commit());
+    ASSERT_TRUE(injector.original_request_of_last_commit().is_pending());
+  }
+
+  // Prepare an interface request for FrameHostTestInterface.
+  mojom::FrameHostTestInterfacePtr test_interface;
+  auto test_interface_request = mojo::MakeRequest(&test_interface);
+
+  // Set up |dispatched_interface_request_callback| that would be invoked if the
+  // interface request for FrameHostTestInterface was ever dispatched to the
+  // RenderFrameHostImpl.
+  base::MockCallback<base::RepeatingClosure>
+      dispatched_interface_request_callback;
+  auto* main_rfh = shell()->web_contents()->GetMainFrame();
+  ScopedInterfaceRequestMonitor monitor(
+      main_rfh, mojom::FrameHostTestInterface::Name_,
+      dispatched_interface_request_callback.Get());
+
+  // Set up the |test_interface request| to arrive on the InterfaceProvider
+  // connection corresponding to the old document in the middle of the firing of
+  // WebContentsObserver::DidFinishNavigation.
+  // TODO(engedy): Should we PostTask() this instead just before synchronously
+  // invoking DidCommitProvisionalLoad?
+  //
+  // Also set up |navigation_finished_callback| to be invoked afterwards, as a
+  // sanity check to ensure that the request injection is actually executed.
+  base::MockCallback<base::RepeatingClosure> navigation_finished_callback;
+  DidFinishNavigationObserver navigation_finish_observer(
+      main_rfh, base::BindLambdaForTesting([&]() {
+        interface_provider->GetInterface(
+            mojom::FrameHostTestInterface::Name_,
+            test_interface_request.PassMessagePipe());
+        std::move(navigation_finished_callback).Run();
+      }));
+
+  // The InterfaceProvider connection that semantically belongs to the old
+  // document, but whose client end is actually controlled by this test, should
+  // still be alive and well.
+  ASSERT_TRUE(test_interface.is_bound());
+  ASSERT_FALSE(test_interface.encountered_error());
+
+  // Expect that the GetInterface message will never be dispatched, but the
+  // DidFinishNavigation callback wll be invoked.
+  EXPECT_CALL(dispatched_interface_request_callback, Run()).Times(0);
+  EXPECT_CALL(navigation_finished_callback, Run());
+
+  // Start the same-process navigation.
+  ASSERT_TRUE(NavigateToURL(shell(), second_url));
+
+  // Wait for a connection error on the |test_interface| as a signal, after
+  // which it can be safely assumed that no GetInterface message will ever be
+  // dispatched from that old InterfaceConnection.
+  base::RunLoop run_loop;
+  test_interface.set_connection_error_handler(run_loop.QuitWhenIdleClosure());
+  run_loop.Run();
+
+  EXPECT_TRUE(test_interface.encountered_error());
+}
+
+// Test the edge case where the `window` global object asssociated with the
+// initial empty document is re-used for document corresponding to the first
+// real committed load. This happens when the security origins of the two
+// documents are the same. We do not want to recalculate this in the browser
+// process, however, so for the first commit we leave it up to the renderer
+// whether it wants to replace the InterfaceProvider connection or not.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostImplBrowserTest,
+                       InterfaceProviderRequestIsOptionalForFirstCommit) {
+  const GURL main_frame_url(embedded_test_server()->GetURL("/title1.html"));
+  const GURL subframe_url(embedded_test_server()->GetURL("/title2.html"));
+
+  service_manager::mojom::InterfaceProviderPtr interface_provider;
+  auto stub_interface_provider_request = mojo::MakeRequest(&interface_provider);
+  service_manager::mojom::InterfaceProviderRequest
+      null_interface_provider_request(nullptr);
+
+  for (auto* interface_provider_request :
+       {&stub_interface_provider_request, &null_interface_provider_request}) {
+    SCOPED_TRACE(interface_provider_request->is_pending());
+
+    ASSERT_TRUE(NavigateToURL(shell(), main_frame_url));
+
+    ScopedFakeInterfaceProviderRequestInjector injector(
+        shell()->web_contents());
+    injector.set_fake_request_for_next_commit(
+        std::move(*interface_provider_request));
+
+    // Must set 'src` before adding the iframe element to the DOM, otherwise it
+    // will load `about:blank` as the first real load instead of |subframe_url|.
+    // See: https://crbug.com/778318.
+    //
+    // Note that the child frame will first cycle through loading the initial
+    // empty document regardless of when/how/if the `src` attribute is set.
+    const auto script = base::StringPrintf(
+        "let f = document.createElement(\"iframe\");"
+        "f.src=\"%s\"; "
+        "document.body.append(f);",
+        subframe_url.spec().c_str());
+    ASSERT_TRUE(ExecuteScript(shell(), script));
+
+    WaitForLoadStop(shell()->web_contents());
+
+    FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                              ->GetFrameTree()
+                              ->root();
+    ASSERT_EQ(1u, root->child_count());
+    FrameTreeNode* child = root->child_at(0u);
+
+    EXPECT_FALSE(injector.original_request_of_last_commit().is_pending());
+    EXPECT_TRUE(child->has_committed_real_load());
+    EXPECT_EQ(subframe_url, child->current_url());
+  }
 }
 
 }  // namespace content

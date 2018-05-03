@@ -38,7 +38,7 @@ class WebFont::Impl final {
 WebFont::WebFont(const WebFontDescription& description)
     : private_(new Impl(description)) {}
 
-WebFont::~WebFont() {}
+WebFont::~WebFont() = default;
 
 WebFontDescription WebFont::GetFontDescription() const {
   return WebFontDescription(private_->GetFont().GetFontDescription());
@@ -87,12 +87,11 @@ void WebFont::DrawText(WebCanvas* canvas,
   TextRunPaintInfo run_info(text_run);
   run_info.bounds = text_clip_rect;
 
-  IntRect int_rect(clip);
-  PaintRecordBuilder builder(int_rect);
+  PaintRecordBuilder builder;
   GraphicsContext& context = builder.Context();
 
   {
-    DrawingRecorder recorder(context, builder, DisplayItem::kWebFont, int_rect);
+    DrawingRecorder recorder(context, builder, DisplayItem::kWebFont);
     context.Save();
     context.SetFillColor(color);
     context.Clip(text_clip_rect);

@@ -34,12 +34,18 @@
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/install/extension_install_ui.h"
+#include "gpu/config/gpu_feature_type.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/gl/gl_switches.h"
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/chromeos_switches.h"
+#endif
+
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
 namespace utils = extension_function_test_utils;
@@ -371,6 +377,12 @@ class ExtensionWebstorePrivateApiTestChild
     ExtensionWebstorePrivateApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kSupervisedUserId,
                                     supervised_users::kChildAccountSUID);
+#if defined(OS_CHROMEOS)
+    command_line->AppendSwitchASCII(
+        chromeos::switches::kLoginUser,
+        "supervised_user@locally-managed.localhost");
+    command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "hash");
+#endif
   }
 };
 
@@ -386,14 +398,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTestChild, InstallBlocked) {
 class ExtensionWebstoreGetWebGLStatusTest : public InProcessBrowserTest {
  protected:
   void RunTest(bool webgl_allowed) {
-#if defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
-    // TODO(zmo): crbug.com/777681
-    // In Mus GpuFeatureInfo computed in GPU process isn't wired back to
-    // browser process, therefore GpuFeatureChecker times out.
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-    if (command_line->HasSwitch(switches::kMus))
-      return;
-#endif
     // If Gpu access is disallowed then WebGL will not be available.
     if (!content::GpuDataManager::GetInstance()->GpuAccessAllowed(NULL))
       webgl_allowed = false;
@@ -423,9 +427,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstoreGetWebGLStatusTest, Allowed) {
 // Tests getWebGLStatus function when WebGL is blacklisted.
 IN_PROC_BROWSER_TEST_F(ExtensionWebstoreGetWebGLStatusTest, Blocked) {
   content::GpuDataManager::GetInstance()->BlacklistWebGLForTesting();
-  EXPECT_EQ(gpu::kGpuFeatureStatusBlacklisted,
-            content::GpuDataManager::GetInstance()->GetFeatureStatus(
-                gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL));
 
   bool webgl_allowed = false;
   RunTest(webgl_allowed);

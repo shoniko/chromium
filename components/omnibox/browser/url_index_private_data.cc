@@ -16,6 +16,7 @@
 
 #include "base/containers/stack.h"
 #include "base/files/file_util.h"
+#include "base/feature_list.h"
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/case_conversion.h"
 #include "base/macros.h"
@@ -30,6 +31,8 @@
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/omnibox/browser/in_memory_url_index.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/tailored_word_break_iterator.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/url_formatter/url_formatter.h"
 #include "third_party/protobuf/src/google/protobuf/repeated_field.h"
@@ -481,36 +484,6 @@ void URLIndexPrivateData::Clear() {
 
 URLIndexPrivateData::~URLIndexPrivateData() {}
 
-// A helper class for several word ID list set-intersections below. O(n)
-// set-intersection is like a merge of sorted lists, except that it only
-// includes elements which are in the other list.  This class implements the
-// predicate parameter for an erase-if algorithm, managing an iterator into the
-// list to be compared to, advancing it as necessary to keep up with the list to
-// be edited.  Being erase-if oriented, it inverts the intuitive logic for
-// matches and returns false to keep them.
-template <typename Container>
-class is_not_in {
- public:
-  explicit is_not_in(const Container& container)
-      : i(container.begin()), end_(container.end()) {}
-
-  bool operator()(const typename Container::value_type& x) {
-    while (i != end_ && *i < x)
-      ++i;
-    if (i == end_)
-      return true;
-    if (*i == x) {
-      ++i;
-      return false;
-    }
-    return true;
-  }
-
- private:
-  typename Container::const_iterator i;
-  const typename Container::const_iterator end_;
-};
-
 HistoryIDVector URLIndexPrivateData::HistoryIDsFromWords(
     const String16Vector& unsorted_words) {
   // This histogram name reflects the historic name of this function.
@@ -538,7 +511,7 @@ HistoryIDVector URLIndexPrivateData::HistoryIDsFromWords(
       history_ids = {term_history_set.begin(), term_history_set.end()};
     } else {
       // set-intersection
-      base::EraseIf(history_ids, is_not_in<HistoryIDSet>(term_history_set));
+      base::EraseIf(history_ids, base::IsNotIn<HistoryIDSet>(term_history_set));
     }
   }
   return history_ids;
@@ -630,7 +603,7 @@ HistoryIDSet URLIndexPrivateData::HistoryIDsForTerm(
         word_id_set = std::move(leftover_set);
       } else {
         // set-intersection
-        base::EraseIf(word_id_set, is_not_in<WordIDSet>(leftover_set));
+        base::EraseIf(word_id_set, base::IsNotIn<WordIDSet>(leftover_set));
       }
     }
 
@@ -689,7 +662,7 @@ WordIDSet URLIndexPrivateData::WordIDSetForTermChars(
       word_id_set = char_word_id_set;
     } else {
       // set-intersection
-      base::EraseIf(word_id_set, is_not_in<WordIDSet>(char_word_id_set));
+      base::EraseIf(word_id_set, base::IsNotIn<WordIDSet>(char_word_id_set));
     }
   }
   return word_id_set;
@@ -758,22 +731,51 @@ void URLIndexPrivateData::HistoryIdsToScoredMatches(
 void URLIndexPrivateData::CalculateWordStartsOffsets(
     const String16Vector& lower_terms,
     WordStarts* lower_terms_to_word_starts_offsets) {
+  static const bool experiment_enabled =
+      base::FeatureList::IsEnabled(omnibox::kBreakWordsAtUnderscores);
+  CalculateWordStartsOffsets(lower_terms, experiment_enabled,
+                             lower_terms_to_word_starts_offsets);
+}
+
+// static
+void URLIndexPrivateData::CalculateWordStartsOffsets(
+    const String16Vector& lower_terms,
+    bool force_break_on_underscore,
+    WordStarts* lower_terms_to_word_starts_offsets) {
   // Calculate offsets for each term.  For instance, the offset for
   // ".net" should be 1, indicating that the actual word-part of the term
   // starts at offset 1.
   lower_terms_to_word_starts_offsets->resize(lower_terms.size(), 0u);
-  for (size_t i = 0; i < lower_terms.size(); ++i) {
-    base::i18n::BreakIterator iter(lower_terms[i],
-                                   base::i18n::BreakIterator::BREAK_WORD);
-    // If the iterator doesn't work, assume an offset of 0.
-    if (!iter.Init())
-      continue;
-    // Find the first word start. If the iterator didn't find a word break, set
-    // an offset of term size. For example, the offset for "://" should be 3,
-    // indicating that the word-part is missing.
-    while (iter.Advance() && !iter.IsWord()) {}
+  if (force_break_on_underscore) {
+    for (size_t i = 0; i < lower_terms.size(); ++i) {
+      TailoredWordBreakIterator iter(lower_terms[i],
+                                base::i18n::BreakIterator::BREAK_WORD);
+      // If the iterator doesn't work, assume an offset of 0.
+      if (!iter.Init())
+        continue;
+      // Find the first word start. If the iterator didn't find a word break,
+      // set an offset of term size. For example, the offset for "://" should be
+      // 3, indicating that the word-part is missing.
+      while (iter.Advance() && !iter.IsWord()) {
+      }
 
-    (*lower_terms_to_word_starts_offsets)[i] = iter.prev();
+      (*lower_terms_to_word_starts_offsets)[i] = iter.prev();
+    }
+  } else {
+    for (size_t i = 0; i < lower_terms.size(); ++i) {
+      base::i18n::BreakIterator iter(lower_terms[i],
+                                     base::i18n::BreakIterator::BREAK_WORD);
+      // If the iterator doesn't work, assume an offset of 0.
+      if (!iter.Init())
+        continue;
+      // Find the first word start. If the iterator didn't find a word break,
+      // set an offset of term size. For example, the offset for "://" should be
+      // 3, indicating that the word-part is missing.
+      while (iter.Advance() && !iter.IsWord()) {
+      }
+
+      (*lower_terms_to_word_starts_offsets)[i] = iter.prev();
+    }
   }
 }
 

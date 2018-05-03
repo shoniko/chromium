@@ -9,7 +9,7 @@ namespace blink {
 scoped_refptr<StyleRay> StyleRay::Create(float angle,
                                          RaySize size,
                                          bool contain) {
-  return WTF::AdoptRef(new StyleRay(angle, size, contain));
+  return base::AdoptRef(new StyleRay(angle, size, contain));
 }
 
 StyleRay::StyleRay(float angle, RaySize size, bool contain)
@@ -27,12 +27,6 @@ void StyleRay::GetPath(Path&, const FloatRect&) {
   // ComputedStyle::ApplyMotionPathTransform cannot call GetPath
   // for rays as they may have infinite length.
   NOTREACHED();
-}
-
-scoped_refptr<BasicShape> StyleRay::Blend(const BasicShape*, double) const {
-  // TODO(ericwilligers): Implement animation for offset-path.
-  NOTREACHED();
-  return nullptr;
 }
 
 }  // namespace blink

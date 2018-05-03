@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "components/autofill/core/browser/credit_card.h"
 #include "components/payments/core/payment_currency_amount.h"
 #include "components/payments/core/payment_details.h"
 #include "components/payments/core/payment_details_modifier.h"
@@ -17,8 +16,48 @@
 
 namespace payments {
 namespace {
+PaymentItem ConvertPaymentItem(const mojom::PaymentItemPtr& item_entry) {
+  PaymentItem item;
+  item.label = item_entry->label;
+  if (item_entry->amount)
+    item.amount = item_entry->amount.Clone();
+  item.pending = item_entry->pending;
+  return item;
+}
 
-// Returns the card type associated with the given BasicCardType.
+PaymentDetailsModifier ConvertPaymentDetailsModifier(
+    const mojom::PaymentDetailsModifierPtr& modifier_entry) {
+  PaymentDetailsModifier modifier;
+  if (modifier_entry->total) {
+    modifier.total = std::make_unique<PaymentItem>(
+        ConvertPaymentItem(modifier_entry->total));
+  }
+  modifier.additional_display_items.reserve(
+      modifier_entry->additional_display_items.size());
+  for (const mojom::PaymentItemPtr& additional_display_item :
+       modifier_entry->additional_display_items) {
+    modifier.additional_display_items.push_back(
+        ConvertPaymentItem(additional_display_item));
+  }
+  if (modifier_entry->method_data)
+    modifier.method_data =
+        ConvertPaymentMethodData(modifier_entry->method_data);
+  return modifier;
+}
+
+PaymentShippingOption ConvertPaymentShippingOption(
+    const mojom::PaymentShippingOptionPtr& option_entry) {
+  PaymentShippingOption option;
+  option.id = option_entry->id;
+  option.label = option_entry->label;
+  if (option_entry->amount)
+    option.amount = option_entry->amount.Clone();
+  option.selected = option_entry->selected;
+  return option;
+}
+
+}  // namespace
+
 autofill::CreditCard::CardType GetBasicCardType(
     const mojom::BasicCardType& type) {
   switch (type) {
@@ -33,8 +72,6 @@ autofill::CreditCard::CardType GetBasicCardType(
   return autofill::CreditCard::CARD_TYPE_UNKNOWN;
 }
 
-// Returns the card network name associated with a given BasicCardNetwork. Names
-// are inspired by https://www.w3.org/Payments/card-network-ids.
 std::string GetBasicCardNetworkName(const mojom::BasicCardNetwork& network) {
   switch (network) {
     case mojom::BasicCardNetwork::AMEX:
@@ -57,57 +94,6 @@ std::string GetBasicCardNetworkName(const mojom::BasicCardNetwork& network) {
   NOTREACHED();
   return std::string();
 }
-
-PaymentCurrencyAmount ConvertPaymentCurrencyAmount(
-    const mojom::PaymentCurrencyAmountPtr& amount_entry) {
-  PaymentCurrencyAmount amount;
-  amount.currency = amount_entry->currency;
-  amount.value = amount_entry->value;
-  amount.currency_system = amount_entry->currency_system;
-  return amount;
-}
-
-PaymentItem ConvertPaymentItem(const mojom::PaymentItemPtr& item_entry) {
-  PaymentItem item;
-  item.label = item_entry->label;
-  if (item_entry->amount)
-    item.amount = ConvertPaymentCurrencyAmount(item_entry->amount);
-  item.pending = item_entry->pending;
-  return item;
-}
-
-PaymentDetailsModifier ConvertPaymentDetailsModifier(
-    const mojom::PaymentDetailsModifierPtr& modifier_entry) {
-  PaymentDetailsModifier modifier;
-  if (modifier_entry->total) {
-    modifier.total = base::MakeUnique<PaymentItem>(
-        ConvertPaymentItem(modifier_entry->total));
-  }
-  modifier.additional_display_items.reserve(
-      modifier_entry->additional_display_items.size());
-  for (const mojom::PaymentItemPtr& additional_display_item :
-       modifier_entry->additional_display_items) {
-    modifier.additional_display_items.push_back(
-        ConvertPaymentItem(additional_display_item));
-  }
-  if (modifier_entry->method_data)
-    modifier.method_data =
-        ConvertPaymentMethodData(modifier_entry->method_data);
-  return modifier;
-}
-
-PaymentShippingOption ConvertPaymentShippingOption(
-    const mojom::PaymentShippingOptionPtr& option_entry) {
-  PaymentShippingOption option;
-  option.id = option_entry->id;
-  option.label = option_entry->label;
-  if (option_entry->amount)
-    option.amount = ConvertPaymentCurrencyAmount(option_entry->amount);
-  option.selected = option_entry->selected;
-  return option;
-}
-
-}  // namespace
 
 PaymentMethodData ConvertPaymentMethodData(
     const mojom::PaymentMethodDataPtr& method_data_entry) {
@@ -132,7 +118,7 @@ PaymentDetails ConvertPaymentDetails(
   PaymentDetails details;
   if (details_entry->total) {
     details.total =
-        base::MakeUnique<PaymentItem>(ConvertPaymentItem(details_entry->total));
+        std::make_unique<PaymentItem>(ConvertPaymentItem(details_entry->total));
   }
   details.display_items.reserve(details_entry->display_items.size());
   for (const mojom::PaymentItemPtr& display_item :

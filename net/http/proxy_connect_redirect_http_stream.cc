@@ -18,10 +18,11 @@ ProxyConnectRedirectHttpStream::ProxyConnectRedirectHttpStream(
     load_timing_info_ = *load_timing_info;
 }
 
-ProxyConnectRedirectHttpStream::~ProxyConnectRedirectHttpStream() {}
+ProxyConnectRedirectHttpStream::~ProxyConnectRedirectHttpStream() = default;
 
 int ProxyConnectRedirectHttpStream::InitializeStream(
     const HttpRequestInfo* request_info,
+    bool can_send_early,
     RequestPriority priority,
     const NetLogWithSource& net_log,
     const CompletionCallback& callback) {

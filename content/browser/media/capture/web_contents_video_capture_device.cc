@@ -19,12 +19,13 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/browser/media/capture/cursor_renderer.h"
+#include "content/browser/media/capture/fake_webcontent_capture_machine.h"
 #include "content/browser/media/capture/web_contents_tracker.h"
-#include "content/browser/media/capture/window_activity_tracker.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/render_widget_host_view_frame_subscriber.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -54,12 +55,10 @@ class FrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
  public:
   FrameSubscriber(media::VideoCaptureOracle::Event event_type,
                   scoped_refptr<media::ThreadSafeCaptureOracle> oracle,
-                  base::WeakPtr<content::CursorRenderer> cursor_renderer,
-                  base::WeakPtr<content::WindowActivityTracker> tracker)
+                  base::WeakPtr<content::CursorRenderer> cursor_renderer)
       : event_type_(event_type),
         oracle_proxy_(std::move(oracle)),
         cursor_renderer_(cursor_renderer),
-        window_activity_tracker_(tracker),
         source_id_for_copy_request_(base::UnguessableToken::Create()),
         weak_ptr_factory_(this) {}
 
@@ -71,8 +70,6 @@ class FrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
       base::TimeTicks timestamp,
       const gfx::Rect& region_in_frame,
       bool success);
-
-  bool IsUserInteractingWithContent();
 
   // RenderWidgetHostViewFrameSubscriber implementation:
   bool ShouldCaptureFrame(
@@ -89,9 +86,6 @@ class FrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
   // We need a weak pointer since FrameSubscriber is owned externally and
   // may outlive the cursor renderer.
   const base::WeakPtr<CursorRenderer> cursor_renderer_;
-  // We need a weak pointer since FrameSubscriber is owned externally and
-  // may outlive the ui activity tracker.
-  const base::WeakPtr<WindowActivityTracker> window_activity_tracker_;
   base::UnguessableToken source_id_for_copy_request_;
   base::WeakPtrFactory<FrameSubscriber> weak_ptr_factory_;
 };
@@ -142,12 +136,9 @@ class ContentCaptureSubscription {
 
   // Responsible for tracking the cursor state and input events to make
   // decisions and then render the mouse cursor on the video frame after
-  // capture is completed.
+  // capture is completed. Also reports whether the user is actively interacting
+  // with content.
   std::unique_ptr<content::CursorRenderer> cursor_renderer_;
-
-  // Responsible for tracking the UI events and making a decision on whether
-  // user is actively interacting with content.
-  std::unique_ptr<content::WindowActivityTracker> window_activity_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentCaptureSubscription);
 };
@@ -264,32 +255,23 @@ void FrameSubscriber::DidCaptureFrame(
     if (frame_subscriber_ && frame_subscriber_->cursor_renderer_) {
       CursorRenderer* cursor_renderer =
           frame_subscriber_->cursor_renderer_.get();
-      if (cursor_renderer->SnapshotCursorState(region_in_frame))
-        cursor_renderer->RenderOnVideoFrame(frame.get());
+      cursor_renderer->RenderOnVideoFrame(frame.get(), region_in_frame,
+                                          nullptr);
+      // Signal downstream consumers of this frame that encoding/transmission
+      // should be optimized for image quality over smoothness if: a) The user
+      // appears to be interacting with the source; and b) A significant amount
+      // of time has passed since the oracle detected animation from the source.
+      const base::TimeTicks last_animated =
+          frame_subscriber_->oracle_proxy_->last_time_animation_was_detected();
+      const bool animated_recently =
+          (base::TimeTicks::Now() - last_animated) <=
+          base::TimeDelta::FromMilliseconds(kMinPeriodNoAnimationMillis);
       frame->metadata()->SetBoolean(
           media::VideoFrameMetadata::INTERACTIVE_CONTENT,
-          frame_subscriber_->IsUserInteractingWithContent());
+          cursor_renderer->IsUserInteractingWithView() && !animated_recently);
     }
   }
   capture_frame_cb.Run(std::move(frame), timestamp, success);
-}
-
-bool FrameSubscriber::IsUserInteractingWithContent() {
-  bool ui_activity = window_activity_tracker_ &&
-                     window_activity_tracker_->IsUiInteractionActive();
-  bool interactive_mode = false;
-  if (cursor_renderer_) {
-    bool animation_active =
-        (base::TimeTicks::Now() -
-         oracle_proxy_->last_time_animation_was_detected()) <
-        base::TimeDelta::FromMilliseconds(kMinPeriodNoAnimationMillis);
-    if (ui_activity && !animation_active) {
-      interactive_mode = true;
-    } else if (animation_active && window_activity_tracker_) {
-      window_activity_tracker_->Reset();
-    }
-  }
-  return interactive_mode;
 }
 
 bool FrameSubscriber::ShouldCaptureFrame(
@@ -327,9 +309,9 @@ ContentCaptureSubscription::ContentCaptureSubscription(
   DCHECK(source_view_);
 
 #if defined(USE_AURA) || defined(OS_MACOSX)
-  cursor_renderer_ = CursorRenderer::Create(source_view_->GetNativeView());
-  window_activity_tracker_ =
-      WindowActivityTracker::Create(source_view_->GetNativeView());
+  cursor_renderer_ = CursorRenderer::Create(
+      CursorRenderer::CURSOR_DISPLAYED_ON_MOUSE_MOVEMENT);
+  cursor_renderer_->SetTargetView(source_view_->GetNativeView());
 #endif
   // Subscriptions for refresh frames and mouse cursor updates. When events
   // outside of the normal content change/compositing workflow occur, these
@@ -338,15 +320,11 @@ ContentCaptureSubscription::ContentCaptureSubscription(
   refresh_subscriber_.reset(new FrameSubscriber(
       media::VideoCaptureOracle::kActiveRefreshRequest, oracle_proxy,
       cursor_renderer_ ? cursor_renderer_->GetWeakPtr()
-                       : base::WeakPtr<CursorRenderer>(),
-      window_activity_tracker_ ? window_activity_tracker_->GetWeakPtr()
-                               : base::WeakPtr<WindowActivityTracker>()));
+                       : base::WeakPtr<CursorRenderer>()));
   mouse_activity_subscriber_.reset(new FrameSubscriber(
       media::VideoCaptureOracle::kMouseCursorUpdate, oracle_proxy,
       cursor_renderer_ ? cursor_renderer_->GetWeakPtr()
-                       : base::WeakPtr<CursorRenderer>(),
-      window_activity_tracker_ ? window_activity_tracker_->GetWeakPtr()
-                               : base::WeakPtr<WindowActivityTracker>()));
+                       : base::WeakPtr<CursorRenderer>()));
 
   // Main capture path: Subscribing to compositor updates. This means that any
   // time the tab content has changed and compositing has taken place, the
@@ -355,20 +333,18 @@ ContentCaptureSubscription::ContentCaptureSubscription(
   // RenderWidgetHostView will initiate the frame capture and NOT the
   // |capture_callback_|.
   std::unique_ptr<RenderWidgetHostViewFrameSubscriber> subscriber(
-      new FrameSubscriber(
-          media::VideoCaptureOracle::kCompositorUpdate, oracle_proxy,
-          cursor_renderer_ ? cursor_renderer_->GetWeakPtr()
-                           : base::WeakPtr<CursorRenderer>(),
-          window_activity_tracker_ ? window_activity_tracker_->GetWeakPtr()
-                                   : base::WeakPtr<WindowActivityTracker>()));
+      new FrameSubscriber(media::VideoCaptureOracle::kCompositorUpdate,
+                          oracle_proxy,
+                          cursor_renderer_ ? cursor_renderer_->GetWeakPtr()
+                                           : base::WeakPtr<CursorRenderer>()));
   source_view_->BeginFrameSubscription(std::move(subscriber));
 
-  // Begin monitoring for user activity that is used to signal "interactive
-  // content."
-  if (window_activity_tracker_) {
-    window_activity_tracker_->RegisterMouseInteractionObserver(
-        base::Bind(&ContentCaptureSubscription::OnEvent, base::Unretained(this),
-                   mouse_activity_subscriber_.get()));
+  // Begin monitoring for user activity that is used to signal the need for
+  // refresh frames with a re-rendered mouse cursor.
+  if (cursor_renderer_) {
+    cursor_renderer_->SetNeedsRedrawCallback(base::BindRepeating(
+        &ContentCaptureSubscription::OnEvent, base::Unretained(this),
+        mouse_activity_subscriber_.get()));
   }
 }
 
@@ -566,10 +542,10 @@ gfx::Size WebContentsCaptureMachine::ComputeOptimalViewSize() const {
   gfx::Size optimal_size = oracle_proxy_->max_frame_size();
 
   switch (capture_params_.resolution_change_policy) {
-    case media::RESOLUTION_POLICY_FIXED_RESOLUTION:
+    case media::ResolutionChangePolicy::FIXED_RESOLUTION:
       break;
-    case media::RESOLUTION_POLICY_FIXED_ASPECT_RATIO:
-    case media::RESOLUTION_POLICY_ANY_WITHIN_LIMIT: {
+    case media::ResolutionChangePolicy::FIXED_ASPECT_RATIO:
+    case media::ResolutionChangePolicy::ANY_WITHIN_LIMIT: {
       // If the max frame size is close to a common video aspect ratio, compute
       // a standard resolution for that aspect ratio.  For example, given
       // 1365x768, which is very close to 16:9, the optimal size would be
@@ -685,17 +661,33 @@ void WebContentsCaptureMachine::UpdateCaptureSize() {
   if (!view)
     return;
 
-  // Convert the view's size from the DIP coordinate space to the pixel
-  // coordinate space.  When the view is being rendered on a high-DPI display,
-  // this allows the high-resolution image detail to propagate through to the
-  // captured video.
-  const gfx::Size view_size = view->GetViewBounds().size();
-  const gfx::Size physical_size = gfx::ConvertSizeToPixel(
-      ui::GetScaleFactorForNativeView(view->GetNativeView()), view_size);
-  VLOG(1) << "Computed physical capture size (" << physical_size.ToString()
-          << ") from view size (" << view_size.ToString() << ").";
+  // The capture size is not the view's size in DIP coordinates, but instead
+  // based on the physical backing size. Thus, when a view is being rendered on
+  // a high-DPI display, the high-resolution image detail will propagate through
+  // in the captured video output.
+  const gfx::Size physical_size_pixels =
+      static_cast<RenderWidgetHostViewBase*>(view)->GetPhysicalBackingSize();
+  VLOG(1) << "Physical capture size pixels of view is "
+          << physical_size_pixels.ToString();
 
-  oracle_proxy_->UpdateCaptureSize(physical_size);
+  oracle_proxy_->UpdateCaptureSize(physical_size_pixels);
+}
+
+std::unique_ptr<media::VideoCaptureMachine> CreateVideoCaptureMachine(
+    int render_process_id,
+    int main_render_frame_id,
+    bool enable_auto_throttling) {
+  std::unique_ptr<media::VideoCaptureMachine> video_capture_machine;
+  if (render_process_id != DesktopMediaID::kFakeId &&
+      main_render_frame_id != DesktopMediaID::kFakeId) {
+    video_capture_machine.reset(new WebContentsCaptureMachine(
+        render_process_id, main_render_frame_id, enable_auto_throttling));
+  } else {  // For browser tests, to create a fake tab capturer.
+    video_capture_machine.reset(
+        new FakeWebContentCaptureMachine(enable_auto_throttling));
+  }
+
+  return video_capture_machine;
 }
 
 }  // namespace
@@ -705,10 +697,9 @@ WebContentsVideoCaptureDevice::WebContentsVideoCaptureDevice(
     int main_render_frame_id,
     bool enable_auto_throttling)
     : core_(new media::ScreenCaptureDeviceCore(
-          std::unique_ptr<media::VideoCaptureMachine>(
-              new WebContentsCaptureMachine(render_process_id,
-                                            main_render_frame_id,
-                                            enable_auto_throttling)))) {}
+          CreateVideoCaptureMachine(render_process_id,
+                                    main_render_frame_id,
+                                    enable_auto_throttling))) {}
 
 WebContentsVideoCaptureDevice::~WebContentsVideoCaptureDevice() {
   DVLOG(2) << "WebContentsVideoCaptureDevice@" << this << " destroying.";

@@ -27,7 +27,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/arc/intent_helper/arc_navigation_throttle.h"
 #include "chrome/browser/ui/views/intent_picker_bubble_view.h"
-#include "components/arc/common/intent_helper.mojom.h"
+#include "components/arc/common/intent_helper.mojom.h"  // nogncheck https://crbug.com/784179
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -113,7 +113,6 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // AccessiblePaneView:
   bool SetPaneFocus(View* initial_focus) override;
-  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // views::MenuButtonListener:
   void OnMenuButtonClicked(views::MenuButton* source,
@@ -194,16 +193,17 @@ class ToolbarView : public views::AccessiblePaneView,
   void OnShowHomeButtonChanged();
 
   // Controls. Most of these can be null, e.g. in popup windows. Only
-  // |location_bar_| is guaranteed to exist.
-  ToolbarButton* back_;
-  ToolbarButton* forward_;
-  ReloadButton* reload_;
-  HomeButton* home_;
-  LocationBarView* location_bar_;
-  BrowserActionsContainer* browser_actions_;
-  AppMenuButton* app_menu_button_;
+  // |location_bar_| is guaranteed to exist. These pointers are owned by the
+  // view hierarchy.
+  ToolbarButton* back_ = nullptr;
+  ToolbarButton* forward_ = nullptr;
+  ReloadButton* reload_ = nullptr;
+  HomeButton* home_ = nullptr;
+  LocationBarView* location_bar_ = nullptr;
+  BrowserActionsContainer* browser_actions_ = nullptr;
+  AppMenuButton* app_menu_button_ = nullptr;
 
-  Browser* browser_;
+  Browser* const browser_;
 
   AppMenuIconController app_menu_icon_controller_;
 

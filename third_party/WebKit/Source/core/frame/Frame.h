@@ -39,7 +39,7 @@
 #include "core/page/FrameTree.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
-#include "public/platform/WebFeaturePolicy.h"
+#include "third_party/WebKit/common/feature_policy/feature_policy.h"
 
 namespace blink {
 
@@ -51,7 +51,6 @@ class FrameClient;
 class FrameOwner;
 class HTMLFrameOwnerElement;
 class LayoutEmbeddedContent;
-class LayoutEmbeddedContentItem;
 class LocalFrame;
 class KURL;
 class Page;
@@ -90,6 +89,8 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   virtual void Detach(FrameDetachType);
   void DisconnectOwnerElement();
   virtual bool ShouldClose() = 0;
+  virtual void DidFreeze() = 0;
+  virtual void DidResume() = 0;
 
   FrameClient* Client() const;
 
@@ -118,16 +119,8 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   // otherwise.
   virtual bool PrepareForCommit() = 0;
 
-  // TODO(japhet): These should all move to LocalFrame.
-  virtual void PrintNavigationErrorMessage(const Frame&,
-                                           const char* reason) = 0;
-  virtual void PrintNavigationWarning(const String&) = 0;
-
-  // TODO(pilgrim): Replace all instances of ownerLayoutObject() with
-  // ownerLayoutItem(), https://crbug.com/499321
-  LayoutEmbeddedContent* OwnerLayoutObject()
-      const;  // LayoutObject for the element that contains this frame.
-  LayoutEmbeddedContentItem OwnerLayoutItem() const;
+  // LayoutObject for the element that contains this frame.
+  LayoutEmbeddedContent* OwnerLayoutObject() const;
 
   Settings* GetSettings() const;  // can be null
 
@@ -151,14 +144,6 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
     return user_activation_state_.HasBeenActive();
   }
 
-  bool HasTransientUserActivation() {
-    return user_activation_state_.IsActive();
-  }
-
-  bool ConsumeTransientUserActivation() {
-    return user_activation_state_.ConsumeIfActive();
-  }
-
   void ClearActivation() { user_activation_state_.Clear(); }
 
   void SetDocumentHasReceivedUserGestureBeforeNavigation(bool value) {
@@ -168,12 +153,6 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   bool HasReceivedUserGestureBeforeNavigation() const {
     return has_received_user_gesture_before_nav_;
   }
-
-  // Activates the user activation state of this frame and all its ancestors.
-  //
-  // TODO(mustaq): make this private, the only external user
-  // (LocalDOMWindow.cpp) should be able to avoid it.
-  void NotifyUserActivation();
 
   // Creates a |UserGestureIndicator| that contains a |UserGestureToken| with
   // the given status.  Also activates the user activation state of the
@@ -208,13 +187,15 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
 
   // Tests whether the feature-policy controlled feature is enabled by policy in
   // the given frame.
-  bool IsFeatureEnabled(WebFeaturePolicyFeature) const;
+  bool IsFeatureEnabled(FeaturePolicyFeature) const;
 
   // Called to make a frame inert or non-inert. A frame is inert when there
   // is a modal dialog displayed within an ancestor frame, and this frame
   // itself is not within the dialog.
   virtual void SetIsInert(bool) = 0;
   void UpdateInertIfPossible();
+
+  String GetDevToolsFrameToken() const { return devtools_frame_token_; }
 
  protected:
   Frame(FrameClient*, Page&, FrameOwner*, WindowProxyManager*);
@@ -236,10 +217,22 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   bool is_inert_ = false;
 
  private:
+  // Activates the user activation state of this frame and all its ancestors.
+  void NotifyUserActivation();
+
+  bool HasTransientUserActivation() {
+    return user_activation_state_.IsActive();
+  }
+
+  // Consumes and returns the transient user activation of current Frame, after
+  // updating all ancestor/descendant frames.
+  bool ConsumeTransientUserActivation();
+
   Member<FrameClient> client_;
   const Member<WindowProxyManager> window_proxy_manager_;
   // TODO(sashab): Investigate if this can be represented with m_lifecycle.
   bool is_loading_;
+  String devtools_frame_token_;
 };
 
 inline FrameClient* Frame::Client() const {

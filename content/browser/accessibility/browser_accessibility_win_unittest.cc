@@ -293,6 +293,9 @@ TEST_F(BrowserAccessibilityTest, TestTextBoundaries) {
   line_break.AddState(ui::AX_STATE_EDITABLE);
   line_break.SetName("\n");
 
+  inline_box1.AddIntAttribute(ui::AX_ATTR_NEXT_ON_LINE_ID, line_break.id);
+  line_break.AddIntAttribute(ui::AX_ATTR_PREVIOUS_ON_LINE_ID, inline_box1.id);
+
   ui::AXNodeData static_text2;
   static_text2.id = 6;
   static_text2.role = ui::AX_ROLE_STATIC_TEXT;
@@ -496,7 +499,8 @@ TEST_F(BrowserAccessibilityTest, TestComplexHypertext) {
 
   ui::AXNodeData combo_box;
   combo_box.id = 12;
-  combo_box.role = ui::AX_ROLE_COMBO_BOX;
+  combo_box.role = ui::AX_ROLE_TEXT_FIELD_WITH_COMBO_BOX;
+  combo_box.AddState(ui::AX_STATE_EDITABLE);
   combo_box.SetName(base::UTF16ToUTF8(combo_box_name));
   combo_box.SetValue(base::UTF16ToUTF8(combo_box_value));
 
@@ -707,7 +711,7 @@ TEST_F(BrowserAccessibilityTest, TestCreateEmptyDocument) {
 
 int32_t GetUniqueId(BrowserAccessibility* accessibility) {
   BrowserAccessibilityWin* win_root = ToBrowserAccessibilityWin(accessibility);
-  return win_root->GetCOM()->unique_id();
+  return win_root->GetCOM()->GetUniqueId();
 }
 
 // This is a regression test for a bug where the initial empty document
@@ -808,11 +812,14 @@ TEST_F(BrowserAccessibilityTest, TestValueAttributeInTextControls) {
   combo_box_text.id = 3;
   combo_box.SetName("Combo box:");
   combo_box_text.SetName("Combo box text");
-  combo_box.role = ui::AX_ROLE_COMBO_BOX;
+  combo_box.role = ui::AX_ROLE_TEXT_FIELD_WITH_COMBO_BOX;
   combo_box_text.role = ui::AX_ROLE_STATIC_TEXT;
+  combo_box.AddBoolAttribute(ui::AX_ATTR_EDITABLE_ROOT, true);
   combo_box.AddState(ui::AX_STATE_EDITABLE);
+  combo_box.AddState(ui::AX_STATE_RICHLY_EDITABLE);
   combo_box.AddState(ui::AX_STATE_FOCUSABLE);
   combo_box_text.AddState(ui::AX_STATE_EDITABLE);
+  combo_box_text.AddState(ui::AX_STATE_RICHLY_EDITABLE);
   combo_box.child_ids.push_back(combo_box_text.id);
 
   ui::AXNodeData search_box, search_box_text, new_line;
@@ -825,16 +832,21 @@ TEST_F(BrowserAccessibilityTest, TestValueAttributeInTextControls) {
   search_box.role = ui::AX_ROLE_SEARCH_BOX;
   search_box_text.role = ui::AX_ROLE_STATIC_TEXT;
   new_line.role = ui::AX_ROLE_LINE_BREAK;
+  search_box.AddBoolAttribute(ui::AX_ATTR_EDITABLE_ROOT, true);
   search_box.AddState(ui::AX_STATE_EDITABLE);
+  search_box.AddState(ui::AX_STATE_RICHLY_EDITABLE);
   search_box.AddState(ui::AX_STATE_FOCUSABLE);
   search_box_text.AddState(ui::AX_STATE_EDITABLE);
+  search_box_text.AddState(ui::AX_STATE_RICHLY_EDITABLE);
   new_line.AddState(ui::AX_STATE_EDITABLE);
+  new_line.AddState(ui::AX_STATE_RICHLY_EDITABLE);
   search_box.child_ids.push_back(search_box_text.id);
   search_box.child_ids.push_back(new_line.id);
 
   ui::AXNodeData text_field;
   text_field.id = 7;
   text_field.role = ui::AX_ROLE_TEXT_FIELD;
+  text_field.AddBoolAttribute(ui::AX_ATTR_EDITABLE_ROOT, true);
   text_field.AddState(ui::AX_STATE_EDITABLE);
   text_field.AddState(ui::AX_STATE_FOCUSABLE);
   text_field.SetValue("Text field text");
@@ -1103,7 +1115,7 @@ TEST_F(BrowserAccessibilityTest, TestCaretAndSelectionInSimpleFields) {
 
   ui::AXNodeData combo_box;
   combo_box.id = 2;
-  combo_box.role = ui::AX_ROLE_COMBO_BOX;
+  combo_box.role = ui::AX_ROLE_TEXT_FIELD_WITH_COMBO_BOX;
   combo_box.AddState(ui::AX_STATE_EDITABLE);
   combo_box.AddState(ui::AX_STATE_FOCUSABLE);
   combo_box.SetValue("Test1");
@@ -1878,7 +1890,7 @@ TEST_F(BrowserAccessibilityTest, TestExistingMisspellingsInSimpleTextFields) {
 
   ui::AXNodeData combo_box;
   combo_box.id = 2;
-  combo_box.role = ui::AX_ROLE_COMBO_BOX;
+  combo_box.role = ui::AX_ROLE_TEXT_FIELD_WITH_COMBO_BOX;
   combo_box.AddState(ui::AX_STATE_EDITABLE);
   combo_box.AddState(ui::AX_STATE_FOCUSABLE);
   combo_box.SetValue(value1 + value2);
@@ -1930,7 +1942,6 @@ TEST_F(BrowserAccessibilityTest, TestExistingMisspellingsInSimpleTextFields) {
   BrowserAccessibilityWin* ax_combo_box =
       ToBrowserAccessibilityWin(ax_root->PlatformGetChild(0));
   ASSERT_NE(nullptr, ax_combo_box);
-  ASSERT_EQ(1U, ax_combo_box->PlatformChildCount());
 
   HRESULT hr;
   LONG start_offset, end_offset;
@@ -1992,7 +2003,7 @@ TEST_F(BrowserAccessibilityTest, TestNewMisspellingsInSimpleTextFields) {
 
   ui::AXNodeData combo_box;
   combo_box.id = 2;
-  combo_box.role = ui::AX_ROLE_COMBO_BOX;
+  combo_box.role = ui::AX_ROLE_TEXT_FIELD_WITH_COMBO_BOX;
   combo_box.AddState(ui::AX_STATE_EDITABLE);
   combo_box.AddState(ui::AX_STATE_FOCUSABLE);
   combo_box.SetValue(value1 + value2);
@@ -2034,7 +2045,6 @@ TEST_F(BrowserAccessibilityTest, TestNewMisspellingsInSimpleTextFields) {
   BrowserAccessibilityWin* ax_combo_box =
       ToBrowserAccessibilityWin(ax_root->PlatformGetChild(0));
   ASSERT_NE(nullptr, ax_combo_box);
-  ASSERT_EQ(1U, ax_combo_box->PlatformChildCount());
 
   HRESULT hr;
   LONG start_offset, end_offset;

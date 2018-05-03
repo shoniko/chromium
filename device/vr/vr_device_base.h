@@ -31,14 +31,16 @@ class DEVICE_VR_EXPORT VRDeviceBase : public VRDevice {
   void Focus() override;
   void OnExitPresent() override;
   mojom::VRDisplayInfoPtr GetVRDisplayInfo() final;
+  void SetMagicWindowEnabled(bool enabled) final;
 
   virtual void RequestPresent(
       VRDisplayImpl* display,
       mojom::VRSubmitFrameClientPtr submit_client,
       mojom::VRPresentationProviderRequest request,
+      mojom::VRRequestPresentOptionsPtr present_options,
       mojom::VRDisplayHost::RequestPresentCallback callback);
   virtual void ExitPresent();
-  virtual void GetPose(mojom::VRMagicWindowProvider::GetPoseCallback callback);
+  bool IsFallbackDevice() override;
 
   void AddDisplay(VRDisplayImpl* display);
   void RemoveDisplay(VRDisplayImpl* display);
@@ -46,6 +48,8 @@ class DEVICE_VR_EXPORT VRDeviceBase : public VRDevice {
   bool CheckPresentingDisplay(VRDisplayImpl* display);
   void OnListeningForActivateChanged(VRDisplayImpl* display);
   void OnFrameFocusChanged(VRDisplayImpl* display);
+  void GetMagicWindowPose(
+      mojom::VRMagicWindowProvider::GetPoseCallback callback);
 
   VRDisplayImpl* GetPresentingDisplay() { return presenting_display_; }
 
@@ -55,10 +59,11 @@ class DEVICE_VR_EXPORT VRDeviceBase : public VRDevice {
   void OnActivate(mojom::VRDisplayEventReason reason,
                   base::Callback<void(bool)> on_handled);
 
-  virtual void OnListeningForActivate(bool listening);
-
  private:
   void UpdateListeningForActivate(VRDisplayImpl* display);
+  virtual void OnListeningForActivate(bool listening);
+  virtual void OnMagicWindowPoseRequest(
+      mojom::VRMagicWindowProvider::GetPoseCallback callback);
 
   std::set<VRDisplayImpl*> displays_;
 
@@ -81,8 +86,8 @@ class DEVICE_VR_EXPORT VRDeviceBase : public VRDevice {
   mojom::VRDisplayInfoPtr display_info_;
 
   unsigned int id_;
-
   static unsigned int next_id_;
+  bool magic_window_enabled_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(VRDeviceBase);
 };

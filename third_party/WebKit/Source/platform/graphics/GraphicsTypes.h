@@ -35,6 +35,23 @@
 
 namespace blink {
 
+enum AlphaDisposition {
+  kPremultiplyAlpha,
+  kUnpremultiplyAlpha,
+  kDontChangeAlpha,
+};
+
+enum DataU8ColorType {
+  kRGBAColorType,
+  kN32ColorType,
+};
+
+enum ImageDataStorageFormat {
+  kUint8ClampedArrayStorageFormat,
+  kUint16ArrayStorageFormat,
+  kFloat32ArrayStorageFormat,
+};
+
 enum StrokeStyle {
   kNoStroke,
   kSolidStroke,
@@ -48,11 +65,10 @@ enum InterpolationQuality {
   kInterpolationNone = kNone_SkFilterQuality,
   kInterpolationLow = kLow_SkFilterQuality,
   kInterpolationMedium = kMedium_SkFilterQuality,
-  kInterpolationHigh = kHigh_SkFilterQuality,
 #if defined(WTF_USE_LOW_QUALITY_IMAGE_INTERPOLATION)
   kInterpolationDefault = kInterpolationLow,
 #else
-  kInterpolationDefault = kInterpolationHigh,
+  kInterpolationDefault = kInterpolationMedium,
 #endif
 };
 
@@ -84,27 +100,6 @@ enum AccelerationHint {
   kPreferNoAcceleration,
 };
 
-enum SnapshotReason {
-  kSnapshotReasonUnknown,
-  kSnapshotReasonGetImageData,
-  kSnapshotReasonWebGLTexImage2D,
-  kSnapshotReasonWebGLTexSubImage2D,
-  kSnapshotReasonWebGLTexImage3D,
-  kSnapshotReasonWebGLTexSubImage3D,
-  kSnapshotReasonPaint,
-  kSnapshotReasonToDataURL,
-  kSnapshotReasonToBlob,
-  kSnapshotReasonCanvasListenerCapture,
-  kSnapshotReasonDrawImage,
-  kSnapshotReasonCreatePattern,
-  kSnapshotReasonTransferToImageBitmap,
-  kSnapshotReasonUnitTests,
-  kSnapshotReasonGetCopiedImage,
-  kSnapshotReasonWebGLDrawImageIntoBuffer,
-  kSnapshotReasonCopyToClipboard,
-  kSnapshotReasonCreateImageBitmap,
-};
-
 // Note: enum used directly for histogram, values must not change
 enum DisableDeferralReason {
   kDisableDeferralReasonUnknown =
@@ -119,12 +114,6 @@ enum DisableDeferralReason {
   kDisableDeferralReasonCount,
 };
 
-enum FlushReason {
-  kFlushReasonUnknown,
-  kFlushReasonInitialClear,
-  kFlushReasonDrawImageOfWebGL,
-};
-
 enum MailboxSyncMode {
   kVerifiedSyncToken,
   kUnverifiedSyncToken,
@@ -135,11 +124,6 @@ enum HighContrastClassification {
   kNotClassified,
   kApplyHighContrastFilter,
   kDoNotApplyHighContrastFilter,
-};
-
-enum ImageInitializationMode {
-  kInitializeImagePixels,
-  kDoNotInitializeImagePixels,
 };
 
 // TODO(junov): crbug.com/453113 Relocate ShadowMode to

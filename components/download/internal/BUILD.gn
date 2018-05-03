@@ -16,6 +16,8 @@ static_library("internal") {
   ]
 
   sources = [
+    "blob_task_proxy.cc",
+    "blob_task_proxy.h",
     "client_set.cc",
     "client_set.h",
     "config.cc",
@@ -39,10 +41,13 @@ static_library("internal") {
     "file_monitor.h",
     "file_monitor_impl.cc",
     "file_monitor_impl.h",
+    "in_memory_download.cc",
+    "in_memory_download.h",
     "log_sink.h",
     "log_source.h",
     "logger_impl.cc",
     "logger_impl.h",
+    "memory_tracker.h",
     "model.h",
     "model_impl.cc",
     "model_impl.h",
@@ -74,10 +79,13 @@ static_library("internal") {
     "//components/download/public",
     "//components/leveldb_proto",
     "//net",
+    "//storage/browser",
   ]
 
   if (is_android) {
     sources += [
+      "android/battery_status_listener_android.cc",
+      "android/battery_status_listener_android.h",
       "android/network_status_listener_android.cc",
       "android/network_status_listener_android.h",
     ]
@@ -88,7 +96,10 @@ static_library("internal") {
 
 if (is_android) {
   android_library("internal_java") {
-    java_files = [ "android/java/src/org/chromium/components/download/internal/NetworkStatusListenerAndroid.java" ]
+    java_files = [
+      "android/java/src/org/chromium/components/download/internal/BatteryStatusListenerAndroid.java",
+      "android/java/src/org/chromium/components/download/internal/NetworkStatusListenerAndroid.java",
+    ]
 
     deps = [
       "//base:base_java",
@@ -99,6 +110,7 @@ if (is_android) {
   generate_jni("jni_headers") {
     visibility = [ ":*" ]
     sources = [
+      "android/java/src/org/chromium/components/download/internal/BatteryStatusListenerAndroid.java",
       "android/java/src/org/chromium/components/download/internal/NetworkStatusListenerAndroid.java",
     ]
     jni_package = "components/download/internal"
@@ -115,6 +127,7 @@ source_set("unit_tests") {
     "download_store_unittest.cc",
     "entry_utils_unittest.cc",
     "file_monitor_unittest.cc",
+    "in_memory_download_unittest.cc",
     "model_impl_unittest.cc",
     "navigation_monitor_impl_unittests.cc",
     "proto_conversions_unittest.cc",
@@ -131,6 +144,7 @@ source_set("unit_tests") {
     "//components/download/public/test:test_support",
     "//components/leveldb_proto:test_support",
     "//net:test_support",
+    "//storage/browser",
     "//testing/gmock",
     "//testing/gtest",
   ]

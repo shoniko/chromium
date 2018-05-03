@@ -19,8 +19,8 @@ namespace media_router {
 
 TEST(DialDeviceCountMetricsTest, RecordDeviceCountsIfNeeded) {
   DialDeviceCountMetrics metrics;
-  base::SimpleTestClock* clock = new base::SimpleTestClock();
-  metrics.SetClockForTest(base::WrapUnique(clock));
+  base::SimpleTestClock clock;
+  metrics.SetClockForTest(&clock);
   base::HistogramTester tester;
   tester.ExpectTotalCount(
       DialDeviceCountMetrics::kHistogramDialAvailableDeviceCount, 0);
@@ -28,7 +28,7 @@ TEST(DialDeviceCountMetricsTest, RecordDeviceCountsIfNeeded) {
       DialDeviceCountMetrics::kHistogramDialKnownDeviceCount, 0);
 
   // Only record one count within one hour.
-  clock->SetNow(base::Time::Now());
+  clock.SetNow(base::Time::Now());
   metrics.RecordDeviceCountsIfNeeded(6, 10);
   metrics.RecordDeviceCountsIfNeeded(7, 10);
   tester.ExpectTotalCount(
@@ -41,7 +41,7 @@ TEST(DialDeviceCountMetricsTest, RecordDeviceCountsIfNeeded) {
       DialDeviceCountMetrics::kHistogramDialKnownDeviceCount, 10, 1);
 
   // Record another count.
-  clock->Advance(base::TimeDelta::FromHours(2));
+  clock.Advance(base::TimeDelta::FromHours(2));
   metrics.RecordDeviceCountsIfNeeded(7, 10);
   tester.ExpectTotalCount(
       DialDeviceCountMetrics::kHistogramDialAvailableDeviceCount, 2);
@@ -57,8 +57,8 @@ TEST(DialDeviceCountMetricsTest, RecordDeviceCountsIfNeeded) {
 
 TEST(CastDeviceCountMetricsTest, RecordDeviceCountsIfNeeded) {
   CastDeviceCountMetrics metrics;
-  base::SimpleTestClock* clock = new base::SimpleTestClock();
-  metrics.SetClockForTest(base::WrapUnique(clock));
+  base::SimpleTestClock clock;
+  metrics.SetClockForTest(&clock);
   base::HistogramTester tester;
   tester.ExpectTotalCount(
       CastDeviceCountMetrics::kHistogramCastConnectedDeviceCount, 0);
@@ -66,7 +66,7 @@ TEST(CastDeviceCountMetricsTest, RecordDeviceCountsIfNeeded) {
       CastDeviceCountMetrics::kHistogramCastKnownDeviceCount, 0);
 
   // Only record one count within one hour.
-  clock->SetNow(base::Time::Now());
+  clock.SetNow(base::Time::Now());
   metrics.RecordDeviceCountsIfNeeded(6, 10);
   metrics.RecordDeviceCountsIfNeeded(7, 10);
   tester.ExpectTotalCount(
@@ -79,7 +79,7 @@ TEST(CastDeviceCountMetricsTest, RecordDeviceCountsIfNeeded) {
       CastDeviceCountMetrics::kHistogramCastKnownDeviceCount, 10, 1);
 
   // Record another count.
-  clock->Advance(base::TimeDelta::FromHours(2));
+  clock.Advance(base::TimeDelta::FromHours(2));
   metrics.RecordDeviceCountsIfNeeded(7, 10);
   tester.ExpectTotalCount(
       CastDeviceCountMetrics::kHistogramCastConnectedDeviceCount, 2);
@@ -94,15 +94,21 @@ TEST(CastDeviceCountMetricsTest, RecordDeviceCountsIfNeeded) {
 }
 
 TEST(CastAnalyticsTest, RecordCastChannelConnectResult) {
+  const MediaRouterChannelConnectResults success =
+      MediaRouterChannelConnectResults::SUCCESS;
+  const MediaRouterChannelConnectResults failure =
+      MediaRouterChannelConnectResults::FAILURE;
+
   base::HistogramTester tester;
   tester.ExpectTotalCount(CastAnalytics::kHistogramCastChannelConnectResult, 0);
-  CastAnalytics::RecordCastChannelConnectResult(true);
-  CastAnalytics::RecordCastChannelConnectResult(false);
-  CastAnalytics::RecordCastChannelConnectResult(true);
+  CastAnalytics::RecordCastChannelConnectResult(success);
+  CastAnalytics::RecordCastChannelConnectResult(failure);
+  CastAnalytics::RecordCastChannelConnectResult(success);
   tester.ExpectTotalCount(CastAnalytics::kHistogramCastChannelConnectResult, 3);
   EXPECT_THAT(
       tester.GetAllSamples(CastAnalytics::kHistogramCastChannelConnectResult),
-      ElementsAre(Bucket(false, 1), Bucket(true, 2)));
+      ElementsAre(Bucket(static_cast<int>(failure), 1),
+                  Bucket(static_cast<int>(success), 2)));
 }
 
 TEST(CastAnalyticsTest, RecordDeviceChannelError) {
@@ -140,6 +146,29 @@ TEST(CastAnalyticsTest, RecordDeviceChannelOpenDuration) {
   CastAnalytics::RecordDeviceChannelOpenDuration(false, delta);
   tester.ExpectUniqueSample(CastAnalytics::kHistogramCastMdnsChannelOpenFailure,
                             delta.InMilliseconds(), 1);
+}
+
+TEST(WiredDisplayDeviceCountMetricsTest, RecordWiredDisplaySinkCount) {
+  base::HistogramTester tester;
+  WiredDisplayDeviceCountMetrics metrics;
+  tester.ExpectTotalCount(
+      WiredDisplayDeviceCountMetrics::kHistogramWiredDisplayDeviceCount, 0);
+
+  // Only the first argument, the available sink count, is recorded.
+  metrics.RecordDeviceCounts(1, 1);
+  metrics.RecordDeviceCounts(200, 200);
+  metrics.RecordDeviceCounts(0, 0);
+  metrics.RecordDeviceCounts(25, 30);
+  metrics.RecordDeviceCounts(1, 0);
+
+  tester.ExpectTotalCount(
+      WiredDisplayDeviceCountMetrics::kHistogramWiredDisplayDeviceCount, 5);
+  EXPECT_THAT(
+      tester.GetAllSamples(
+          WiredDisplayDeviceCountMetrics::kHistogramWiredDisplayDeviceCount),
+      ElementsAre(
+          Bucket(0, 1), Bucket(1, 2), Bucket(25, 1),
+          Bucket(100, 1)));  // Counts over 100 are all put in the 100 bucket.
 }
 
 }  // namespace media_router

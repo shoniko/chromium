@@ -12,15 +12,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ResolveInfo;
 import android.content.pm.Signature;
 import android.os.StrictMode;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Log;
-
-import org.chromium.base.annotations.SuppressFBWarnings;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -46,12 +43,8 @@ public class WebApkValidator {
 
     private static byte[] sExpectedSignature;
     private static byte[] sCommentSignedPublicKeyBytes;
-    private static ISignatureChecker sSignatureChecker;
     private static PublicKey sCommentSignedPublicKey;
     private static boolean sOverrideValidationForTesting;
-
-    /** Interface to support callback to verify if a goole package name is Google signed. */
-    public interface ISignatureChecker { public boolean isGoogleSigned(String packageName); }
 
     /**
      * Queries the PackageManager to determine whether a WebAPK can handle the URL. Ignores whether
@@ -140,8 +133,17 @@ public class WebApkValidator {
             selector.addCategory(Intent.CATEGORY_BROWSABLE);
             selector.setComponent(null);
         }
-        return context.getPackageManager().queryIntentActivities(
-                intent, PackageManager.GET_RESOLVED_FILTER);
+        List<ResolveInfo> resolveInfoList;
+        try {
+            resolveInfoList = context.getPackageManager().queryIntentActivities(
+                    intent, PackageManager.GET_RESOLVED_FILTER);
+        } catch (Exception e) {
+            // We used to catch only java.util.MissingResourceException, but we need to catch more
+            // exceptions to handle "Package manager has died" exception.
+            // http://crbug.com/794363
+            resolveInfoList = new LinkedList<>();
+        }
+        return resolveInfoList;
     }
 
     /**
@@ -177,7 +179,7 @@ public class WebApkValidator {
         try {
             packageInfo = context.getPackageManager().getPackageInfo(webappPackageName,
                     PackageManager.GET_SIGNATURES | PackageManager.GET_META_DATA);
-        } catch (NameNotFoundException e) {
+        } catch (Exception e) {
             e.printStackTrace();
             Log.d(TAG, "WebApk not found");
             return false;
@@ -237,14 +239,6 @@ public class WebApkValidator {
         String scope = packageInfo.applicationInfo.metaData.getString(SCOPE);
         if (scope == null || !scope.equals(MAPSLITE_URL_PREFIX)) {
             Log.d(TAG, "mapslite invalid scope prefix");
-            return false;
-        }
-        if (sSignatureChecker == null) {
-            Log.d(TAG, "sSignatureChecker not set");
-            return false;
-        }
-        if (!sSignatureChecker.isGoogleSigned(webappPackageName)) {
-            Log.d(TAG, "mapslite not Google signed");
             return false;
         }
         return true;
@@ -318,17 +312,12 @@ public class WebApkValidator {
      * @param expectedSignature V1 WebAPK RSA signature.
      * @param v2PublicKeyBytes New comment signed public key bytes as x509 encoded public key.
      */
-    @SuppressFBWarnings("EI_EXPOSE_STATIC_REP2")
-    public static void init(byte[] expectedSignature, byte[] v2PublicKeyBytes,
-            ISignatureChecker googleSignedCallback) {
+    public static void init(byte[] expectedSignature, byte[] v2PublicKeyBytes) {
         if (sExpectedSignature == null) {
             sExpectedSignature = expectedSignature;
         }
         if (sCommentSignedPublicKeyBytes == null) {
             sCommentSignedPublicKeyBytes = v2PublicKeyBytes;
-        }
-        if (sSignatureChecker == null) {
-            sSignatureChecker = googleSignedCallback;
         }
     }
 

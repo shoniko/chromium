@@ -37,7 +37,7 @@
 namespace content {
 
 AuraWindowCaptureMachine::AuraWindowCaptureMachine()
-    : desktop_window_(NULL),
+    : desktop_window_(nullptr),
       screen_capture_(false),
       frame_capture_active_(true),
       weak_factory_(this) {}
@@ -101,9 +101,9 @@ bool AuraWindowCaptureMachine::InternalStart(
     connector->BindInterface(device::mojom::kServiceName,
                              mojo::MakeRequest(&wake_lock_provider));
     wake_lock_provider->GetWakeLockWithoutContext(
-        device::mojom::WakeLockType::PreventDisplaySleep,
-        device::mojom::WakeLockReason::ReasonOther,
-        "Desktop capturer is running", mojo::MakeRequest(&wake_lock_));
+        device::mojom::WakeLockType::kPreventDisplaySleep,
+        device::mojom::WakeLockReason::kOther, "Desktop capturer is running",
+        mojo::MakeRequest(&wake_lock_));
 
     wake_lock_->RequestWakeLock();
   }
@@ -165,7 +165,7 @@ void AuraWindowCaptureMachine::InternalStop(const base::Closure& callback) {
       }
     }
     desktop_window_->RemoveObserver(this);
-    desktop_window_ = NULL;
+    desktop_window_ = nullptr;
     cursor_renderer_.reset();
   }
 
@@ -189,7 +189,9 @@ void AuraWindowCaptureMachine::SetWindow(aura::Window* window) {
 
   DCHECK(!desktop_window_);
   desktop_window_ = window;
-  cursor_renderer_.reset(new CursorRendererAura(window, kCursorAlwaysEnabled));
+  cursor_renderer_.reset(
+      new CursorRendererAura(CursorRenderer::CURSOR_DISPLAYED_ALWAYS));
+  cursor_renderer_->SetTargetView(window);
 
   // Start observing window events.
   desktop_window_->AddObserver(this);
@@ -208,7 +210,6 @@ void AuraWindowCaptureMachine::UpdateCaptureSize() {
      oracle_proxy_->UpdateCaptureSize(ui::ConvertSizeToPixel(
          layer, layer->bounds().size()));
   }
-  cursor_renderer_->Clear();
 }
 
 void AuraWindowCaptureMachine::Capture(base::TimeTicks event_time) {
@@ -294,6 +295,7 @@ bool AuraWindowCaptureMachine::ProcessCopyOutputResponse(
     const CaptureFrameCallback& capture_frame_cb,
     std::unique_ptr<viz::CopyOutputResult> result) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_EQ(result->format(), viz::CopyOutputResult::Format::RGBA_TEXTURE);
 
   if (!desktop_window_) {
     VLOG(1) << "Ignoring CopyOutputResult: Capture target has gone away.";
@@ -329,16 +331,10 @@ bool AuraWindowCaptureMachine::ProcessCopyOutputResponse(
     return false;
   }
 
-  viz::TextureMailbox texture_mailbox;
-  std::unique_ptr<viz::SingleReleaseCallback> release_callback;
-  if (auto* mailbox = result->GetTextureMailbox()) {
-    texture_mailbox = *mailbox;
-    release_callback = result->TakeTextureOwnership();
-  }
-  if (!texture_mailbox.IsTexture()) {
-    VLOG(1) << "Aborting capture: Failed to take texture from mailbox.";
-    return false;
-  }
+  gpu::Mailbox mailbox = result->GetTextureResult()->mailbox;
+  gpu::SyncToken sync_token = result->GetTextureResult()->sync_token;
+  std::unique_ptr<viz::SingleReleaseCallback> release_callback =
+      result->TakeTextureOwnership();
 
   if (!yuv_readback_pipeline_)
     yuv_readback_pipeline_ = gl_helper->CreateReadbackPipelineYUV(true, true);
@@ -352,17 +348,16 @@ bool AuraWindowCaptureMachine::ProcessCopyOutputResponse(
     if (scaler)
       yuv_readback_pipeline_->SetScaler(nullptr);
   } else if (!scaler || !scaler->IsSameScaleRatio(scale_from, scale_to)) {
-    std::unique_ptr<viz::GLHelper::ScalerInterface> scaler =
+    std::unique_ptr<viz::GLHelper::ScalerInterface> fast_scaler =
         gl_helper->CreateScaler(viz::GLHelper::SCALER_QUALITY_FAST, scale_from,
                                 scale_to, false, false, false);
-    DCHECK(scaler);  // Arguments to CreateScaler() should never be invalid.
-    yuv_readback_pipeline_->SetScaler(std::move(scaler));
+    DCHECK(
+        fast_scaler);  // Arguments to CreateScaler() should never be invalid.
+    yuv_readback_pipeline_->SetScaler(std::move(fast_scaler));
   }
 
-  cursor_renderer_->SnapshotCursorState(region_in_frame);
   yuv_readback_pipeline_->ReadbackYUV(
-      texture_mailbox.mailbox(), texture_mailbox.sync_token(), result->size(),
-      gfx::Rect(region_in_frame.size()),
+      mailbox, sync_token, result->size(), gfx::Rect(region_in_frame.size()),
       video_frame->stride(media::VideoFrame::kYPlane),
       video_frame->data(media::VideoFrame::kYPlane),
       video_frame->stride(media::VideoFrame::kUPlane),
@@ -370,7 +365,7 @@ bool AuraWindowCaptureMachine::ProcessCopyOutputResponse(
       video_frame->stride(media::VideoFrame::kVPlane),
       video_frame->data(media::VideoFrame::kVPlane), region_in_frame.origin(),
       base::Bind(&CopyOutputFinishedForVideo, weak_factory_.GetWeakPtr(),
-                 event_time, capture_frame_cb, video_frame,
+                 event_time, capture_frame_cb, video_frame, region_in_frame,
                  base::Passed(&release_callback)));
   media::LetterboxYUV(video_frame.get(), region_in_frame);
   return true;
@@ -384,6 +379,7 @@ void AuraWindowCaptureMachine::CopyOutputFinishedForVideo(
     base::TimeTicks event_time,
     const CaptureFrameCallback& capture_frame_cb,
     scoped_refptr<media::VideoFrame> target,
+    const gfx::Rect& region_in_frame,
     std::unique_ptr<viz::SingleReleaseCallback> release_callback,
     bool result) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -395,7 +391,8 @@ void AuraWindowCaptureMachine::CopyOutputFinishedForVideo(
   // still valid).
   if (machine) {
     if (machine->cursor_renderer_ && result)
-      machine->cursor_renderer_->RenderOnVideoFrame(target.get());
+      machine->cursor_renderer_->RenderOnVideoFrame(target.get(),
+                                                    region_in_frame, nullptr);
   } else {
     VLOG(1) << "Aborting capture: AuraWindowCaptureMachine has gone away.";
     result = false;
@@ -407,7 +404,8 @@ void AuraWindowCaptureMachine::CopyOutputFinishedForVideo(
 void AuraWindowCaptureMachine::OnWindowBoundsChanged(
     aura::Window* window,
     const gfx::Rect& old_bounds,
-    const gfx::Rect& new_bounds) {
+    const gfx::Rect& new_bounds,
+    ui::PropertyChangeReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(desktop_window_ && window == desktop_window_);
 

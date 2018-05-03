@@ -143,6 +143,7 @@ ThemePainterDefault::ThemePainterDefault(LayoutThemeDefault& theme)
     : ThemePainter(), theme_(theme) {}
 
 bool ThemePainterDefault::PaintCheckbox(const Node* node,
+                                        const Document&,
                                         const ComputedStyle& style,
                                         const PaintInfo& paint_info,
                                         const IntRect& rect) {
@@ -170,6 +171,7 @@ bool ThemePainterDefault::PaintCheckbox(const Node* node,
 }
 
 bool ThemePainterDefault::PaintRadio(const Node* node,
+                                     const Document&,
                                      const ComputedStyle&,
                                      const PaintInfo& paint_info,
                                      const IntRect& rect) {
@@ -184,6 +186,7 @@ bool ThemePainterDefault::PaintRadio(const Node* node,
 }
 
 bool ThemePainterDefault::PaintButton(const Node* node,
+                                      const Document&,
                                       const ComputedStyle& style,
                                       const PaintInfo& paint_info,
                                       const IntRect& rect) {
@@ -194,7 +197,7 @@ bool ThemePainterDefault::PaintButton(const Node* node,
       UseMockTheme() ? 0xffc0c0c0 : kDefaultButtonBackgroundColor;
   if (style.HasBackground()) {
     extra_params.button.background_color =
-        style.VisitedDependentColor(CSSPropertyBackgroundColor).Rgb();
+        style.VisitedDependentColor(GetCSSPropertyBackgroundColor()).Rgb();
   }
   Platform::Current()->ThemeEngine()->Paint(canvas, WebThemeEngine::kPartButton,
                                             GetWebThemeState(node),
@@ -220,7 +223,7 @@ bool ThemePainterDefault::PaintTextField(const Node* node,
   WebCanvas* canvas = paint_info.context.Canvas();
 
   Color background_color =
-      style.VisitedDependentColor(CSSPropertyBackgroundColor);
+      style.VisitedDependentColor(GetCSSPropertyBackgroundColor());
   extra_params.text_field.background_color = background_color.Rgb();
 
   Platform::Current()->ThemeEngine()->Paint(
@@ -230,6 +233,7 @@ bool ThemePainterDefault::PaintTextField(const Node* node,
 }
 
 bool ThemePainterDefault::PaintMenuList(const Node* node,
+                                        const Document& document,
                                         const ComputedStyle& style,
                                         const PaintInfo& i,
                                         const IntRect& rect) {
@@ -239,8 +243,10 @@ bool ThemePainterDefault::PaintMenuList(const Node* node,
   extra_params.menu_list.has_border_radius = style.HasBorderRadius();
   // Fallback to transparent if the specified color object is invalid.
   Color background_color(Color::kTransparent);
-  if (style.HasBackground())
-    background_color = style.VisitedDependentColor(CSSPropertyBackgroundColor);
+  if (style.HasBackground()) {
+    background_color =
+        style.VisitedDependentColor(GetCSSPropertyBackgroundColor());
+  }
   extra_params.menu_list.background_color = background_color.Rgb();
 
   // If we have a background image, don't fill the content area to expose the
@@ -251,7 +257,7 @@ bool ThemePainterDefault::PaintMenuList(const Node* node,
   extra_params.menu_list.fill_content_area =
       !style.HasBackgroundImage() && background_color.Alpha();
 
-  SetupMenuListArrow(node, style, rect, extra_params);
+  SetupMenuListArrow(document, style, rect, extra_params);
 
   WebCanvas* canvas = i.context.Canvas();
   Platform::Current()->ThemeEngine()->Paint(
@@ -261,6 +267,7 @@ bool ThemePainterDefault::PaintMenuList(const Node* node,
 }
 
 bool ThemePainterDefault::PaintMenuListButton(const Node* node,
+                                              const Document& document,
                                               const ComputedStyle& style,
                                               const PaintInfo& paint_info,
                                               const IntRect& rect) {
@@ -269,7 +276,7 @@ bool ThemePainterDefault::PaintMenuListButton(const Node* node,
   extra_params.menu_list.has_border_radius = style.HasBorderRadius();
   extra_params.menu_list.background_color = Color::kTransparent;
   extra_params.menu_list.fill_content_area = false;
-  SetupMenuListArrow(node, style, rect, extra_params);
+  SetupMenuListArrow(document, style, rect, extra_params);
 
   WebCanvas* canvas = paint_info.context.Canvas();
   Platform::Current()->ThemeEngine()->Paint(
@@ -279,7 +286,7 @@ bool ThemePainterDefault::PaintMenuListButton(const Node* node,
 }
 
 void ThemePainterDefault::SetupMenuListArrow(
-    const Node* node,
+    const Document& document,
     const ComputedStyle& style,
     const IntRect& rect,
     WebThemeEngine::ExtraParams& extra_params) {
@@ -289,7 +296,7 @@ void ThemePainterDefault::SetupMenuListArrow(
 
   extra_params.menu_list.arrow_y = middle;
   float arrow_box_width = theme_.ClampedMenuListArrowPaddingSize(
-      node->GetDocument().View()->GetChromeClient(), style);
+      document.View()->GetChromeClient(), style);
   float arrow_scale_factor = arrow_box_width / theme_.MenuListArrowWidthInDIP();
   if (UseMockTheme()) {
     // The size and position of the drop-down button is different between
@@ -320,7 +327,7 @@ void ThemePainterDefault::SetupMenuListArrow(
     extra_params.menu_list.arrow_size = arrow_size;
   }
   extra_params.menu_list.arrow_color =
-      style.VisitedDependentColor(CSSPropertyColor).Rgb();
+      style.VisitedDependentColor(GetCSSPropertyColor()).Rgb();
 }
 
 bool ThemePainterDefault::PaintSliderTrack(const LayoutObject& o,
@@ -442,8 +449,9 @@ bool ThemePainterDefault::PaintSearchFieldCancelButton(
   if (!cancel_button_object.GetNode())
     return false;
   Node* input = cancel_button_object.GetNode()->OwnerShadowHost();
-  const LayoutObject& base_layout_object =
-      input ? *input->GetLayoutObject() : cancel_button_object;
+  const LayoutObject& base_layout_object = input && input->GetLayoutObject()
+                                               ? *input->GetLayoutObject()
+                                               : cancel_button_object;
   if (!base_layout_object.IsBox())
     return false;
   const LayoutBox& input_layout_box = ToLayoutBox(base_layout_object);

@@ -34,13 +34,14 @@ float CSSLengthInterpolationType::EffectiveZoom(
 class InheritedLengthChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
-  static std::unique_ptr<InheritedLengthChecker> Create(CSSPropertyID property,
-                                                        const Length& length) {
+  static std::unique_ptr<InheritedLengthChecker> Create(
+      const CSSProperty& property,
+      const Length& length) {
     return WTF::WrapUnique(new InheritedLengthChecker(property, length));
   }
 
  private:
-  InheritedLengthChecker(CSSPropertyID property, const Length& length)
+  InheritedLengthChecker(const CSSProperty& property, const Length& length)
       : property_(property), length_(length) {}
 
   bool IsValid(const StyleResolverState& state,
@@ -52,7 +53,7 @@ class InheritedLengthChecker
     return parent_length == length_;
   }
 
-  const CSSPropertyID property_;
+  const CSSProperty& property_;
   const Length length_;
 };
 
@@ -159,7 +160,7 @@ void CSSLengthInterpolationType::ApplyStandardPropertyValue(
     Length before;
     Length after;
     DCHECK(LengthPropertyFunctions::GetLength(CssProperty(), style, before));
-    StyleBuilder::ApplyProperty(CssProperty(), state,
+    StyleBuilder::ApplyProperty(GetProperty().GetCSSProperty(), state,
                                 *CSSValue::Create(length, zoom));
     DCHECK(LengthPropertyFunctions::GetLength(CssProperty(), style, after));
     DCHECK(before.IsSpecified());
@@ -171,7 +172,7 @@ void CSSLengthInterpolationType::ApplyStandardPropertyValue(
 #endif
     return;
   }
-  StyleBuilder::ApplyProperty(CssProperty(), state,
+  StyleBuilder::ApplyProperty(GetProperty().GetCSSProperty(), state,
                               *CSSValue::Create(length, zoom));
 }
 

@@ -22,6 +22,7 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/three_d_api_types.h"
 #include "gpu/config/gpu_control_list.h"
+#include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
 
 class GURL;
@@ -38,7 +39,6 @@ struct VideoMemoryUsageStats;
 namespace content {
 
 class GpuDataManagerImplPrivate;
-struct WebPreferences;
 
 class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
  public:
@@ -65,17 +65,14 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
 
   // GpuDataManager implementation.
   void BlacklistWebGLForTesting() override;
-  bool IsFeatureBlacklisted(int feature) const override;
-  gpu::GpuFeatureStatus GetFeatureStatus(
-      gpu::GpuFeatureType feature) const override;
   gpu::GPUInfo GetGPUInfo() const override;
   bool GpuAccessAllowed(std::string* reason) const override;
   void RequestCompleteGpuInfoIfNeeded() override;
   bool IsEssentialGpuInfoAvailable() const override;
+  bool IsCompleteGpuInfoAvailable() const override;
   void RequestVideoMemoryUsageStatsUpdate(
       const base::Callback<void(const gpu::VideoMemoryUsageStats& stats)>&
           callback) const override;
-  bool ShouldUseSwiftShader() const override;
   // TODO(kbr): the threading model for the GpuDataManagerObservers is
   // not well defined, and it's impossible for callers to correctly
   // delete observers from anywhere except in one of the observer's
@@ -87,22 +84,20 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
   void SetGLStrings(const std::string& gl_vendor,
                     const std::string& gl_renderer,
                     const std::string& gl_version) override;
-  void GetGLStrings(std::string* gl_vendor,
-                    std::string* gl_renderer,
-                    std::string* gl_version) override;
   void DisableHardwareAcceleration() override;
   bool HardwareAccelerationEnabled() const override;
-  bool CanUseGpuBrowserCompositor() const override;
   void GetDisabledExtensions(std::string* disabled_extensions) const override;
   void SetGpuInfo(const gpu::GPUInfo& gpu_info) override;
+
+  void GetDisabledWebGLExtensions(std::string* disabled_webgl_extensions) const;
+
+  bool IsGpuFeatureInfoAvailable() const;
+  gpu::GpuFeatureStatus GetFeatureStatus(gpu::GpuFeatureType feature) const;
 
   // This collects preliminary GPU info, load GpuBlacklist, and compute the
   // preliminary blacklisted features; it should only be called at browser
   // startup time in UI thread before the IO restriction is turned on.
   void Initialize();
-
-  void InitializeForTesting(const gpu::GpuControlListData& gpu_blacklist_data,
-                            const gpu::GPUInfo& gpu_info);
 
   // Only update if the current GPUInfo is not finalized.  If blacklist is
   // loaded, run through blacklist and update blacklisted features.
@@ -113,7 +108,6 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
   void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info);
 
   gpu::GpuFeatureInfo GetGpuFeatureInfo() const;
-  bool IsGpuFeatureInfoAvailable() const;
 
   // Insert disable-feature switches corresponding to preliminary gpu feature
   // flags into the renderer process command line.
@@ -121,9 +115,6 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
 
   // Insert switches into gpu process command line: kUseGL, etc.
   void AppendGpuCommandLine(base::CommandLine* command_line) const;
-
-  // Update WebPreferences for renderer based on blacklisting decisions.
-  void UpdateRendererWebPrefs(WebPreferences* prefs) const;
 
   // Update GpuPreferences based on blacklisting decisions.
   void UpdateGpuPreferences(gpu::GpuPreferences* gpu_preferences) const;
@@ -174,15 +165,14 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
                           int render_frame_id,
                           ThreeDAPIType requester);
 
-  // Get number of features being blacklisted.
-  size_t GetBlacklistedFeatureCount() const;
-
   // Set the active gpu.
   // Return true if it's a different GPU from the previous active one.
   bool UpdateActiveGpu(uint32_t vendor_id, uint32_t device_id);
 
   // Called when GPU process initialization failed.
   void OnGpuProcessInitFailure();
+
+  void DisableSwiftShader();
 
  private:
   friend class GpuDataManagerImplPrivate;

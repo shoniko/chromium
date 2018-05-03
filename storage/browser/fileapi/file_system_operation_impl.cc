@@ -65,8 +65,7 @@ FileSystemOperation* FileSystemOperation::Create(
                                      std::move(operation_context));
 }
 
-FileSystemOperationImpl::~FileSystemOperationImpl() {
-}
+FileSystemOperationImpl::~FileSystemOperationImpl() = default;
 
 void FileSystemOperationImpl::CreateFile(const FileSystemURL& url,
                                          bool exclusive,
@@ -417,11 +416,11 @@ void FileSystemOperationImpl::GetUsageAndQuotaThenRunTask(
 void FileSystemOperationImpl::DidGetUsageAndQuotaAndRunTask(
     const base::Closure& task,
     const base::Closure& error_callback,
-    storage::QuotaStatusCode status,
+    blink::mojom::QuotaStatusCode status,
     int64_t usage,
     int64_t quota) {
-  if (status != storage::kQuotaStatusOk) {
-    LOG(WARNING) << "Got unexpected quota error : " << status;
+  if (status != blink::mojom::QuotaStatusCode::kOk) {
+    LOG(WARNING) << "Got unexpected quota error : " << static_cast<int>(status);
     error_callback.Run();
     return;
   }

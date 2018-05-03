@@ -32,6 +32,7 @@
 #define KeyframeEffectModel_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/animation/AnimationEffectReadOnly.h"
 #include "core/animation/EffectModel.h"
@@ -43,7 +44,6 @@
 #include "platform/heap/Handle.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -80,7 +80,11 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
 
   using KeyframeVector = Vector<scoped_refptr<Keyframe>>;
   const KeyframeVector& GetFrames() const { return keyframes_; }
+  bool HasFrames() const { return !keyframes_.IsEmpty(); }
   void SetFrames(KeyframeVector& keyframes);
+
+  CompositeOperation Composite() const { return composite_; }
+  void SetComposite(CompositeOperation composite) { composite_ = composite; }
 
   const PropertySpecificKeyframeVector& GetPropertySpecificKeyframes(
       const PropertyHandle& property) const {
@@ -123,10 +127,7 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
                                       const ComputedStyle& base_style,
                                       const ComputedStyle* parent_style) const;
 
-  static KeyframeVector NormalizedKeyframesForInspector(
-      const KeyframeVector& keyframes) {
-    return NormalizedKeyframes(keyframes);
-  }
+  static Vector<double> GetComputedOffsets(const KeyframeVector& keyframes);
 
   bool Affects(const PropertyHandle& property) const override {
     EnsureKeyframeGroups();
@@ -135,16 +136,18 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
 
   bool IsTransformRelatedEffect() const override;
 
+  virtual KeyframeEffectModelBase* Clone() = 0;
+
  protected:
-  KeyframeEffectModelBase(scoped_refptr<TimingFunction> default_keyframe_easing)
+  KeyframeEffectModelBase(CompositeOperation composite,
+                          scoped_refptr<TimingFunction> default_keyframe_easing)
       : last_iteration_(0),
         last_fraction_(std::numeric_limits<double>::quiet_NaN()),
         last_iteration_duration_(0),
+        composite_(composite),
         default_keyframe_easing_(std::move(default_keyframe_easing)),
         has_synthetic_keyframes_(false),
         needs_compositor_keyframes_snapshot_(true) {}
-
-  static KeyframeVector NormalizedKeyframes(const KeyframeVector& keyframes);
 
   // Lazily computes the groups of property-specific keyframes.
   void EnsureKeyframeGroups() const;
@@ -159,6 +162,7 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
   mutable int last_iteration_;
   mutable double last_fraction_;
   mutable double last_iteration_duration_;
+  CompositeOperation composite_;
   scoped_refptr<TimingFunction> default_keyframe_easing_;
 
   mutable bool has_synthetic_keyframes_;
@@ -168,21 +172,33 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
 };
 
 // Time independent representation of an Animation's keyframes.
-template <class Keyframe>
+template <class K>
 class KeyframeEffectModel final : public KeyframeEffectModelBase {
  public:
-  using KeyframeVector = Vector<scoped_refptr<Keyframe>>;
-  static KeyframeEffectModel<Keyframe>* Create(
+  using KeyframeVector = Vector<scoped_refptr<K>>;
+  static KeyframeEffectModel<K>* Create(
       const KeyframeVector& keyframes,
+      CompositeOperation composite = kCompositeReplace,
       scoped_refptr<TimingFunction> default_keyframe_easing = nullptr) {
-    return new KeyframeEffectModel(keyframes,
+    return new KeyframeEffectModel(keyframes, composite,
                                    std::move(default_keyframe_easing));
+  }
+
+  KeyframeEffectModelBase* Clone() override {
+    KeyframeVector keyframes;
+    for (const auto& keyframe : GetFrames()) {
+      scoped_refptr<Keyframe> new_keyframe = keyframe->Clone();
+      keyframes.push_back(
+          scoped_refptr<K>(static_cast<K*>(new_keyframe.get())));
+    }
+    return Create(keyframes, composite_, default_keyframe_easing_);
   }
 
  private:
   KeyframeEffectModel(const KeyframeVector& keyframes,
+                      CompositeOperation composite,
                       scoped_refptr<TimingFunction> default_keyframe_easing)
-      : KeyframeEffectModelBase(std::move(default_keyframe_easing)) {
+      : KeyframeEffectModelBase(composite, std::move(default_keyframe_easing)) {
     keyframes_.AppendVector(keyframes);
   }
 

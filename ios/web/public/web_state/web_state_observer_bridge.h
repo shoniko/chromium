@@ -43,9 +43,6 @@
 // Invoked by WebStateObserverBridge::PageLoaded.
 - (void)webState:(web::WebState*)webState didLoadPageWithSuccess:(BOOL)success;
 
-// Invoked by WebStateObserverBridge::InterstitialDismissed.
-- (void)webStateDidDismissInterstitial:(web::WebState*)webState;
-
 // Invoked by WebStateObserverBridge::LoadProgressChanged.
 - (void)webState:(web::WebState*)webState
     didChangeLoadingProgress:(double)progress;
@@ -62,16 +59,12 @@
 // Invoked by WebStateObserverBridge::DocumentSubmitted.
 - (void)webState:(web::WebState*)webState
     didSubmitDocumentWithFormNamed:(const std::string&)formName
-                     userInitiated:(BOOL)userInitiated;
+                     userInitiated:(BOOL)userInitiated
+                       isMainFrame:(BOOL)isMainFrame;
 
 // Invoked by WebStateObserverBridge::FormActivityRegistered.
-// TODO(ios): Method should take data transfer object rather than parameters.
 - (void)webState:(web::WebState*)webState
-    didRegisterFormActivityWithFormNamed:(const std::string&)formName
-                               fieldName:(const std::string&)fieldName
-                                    type:(const std::string&)type
-                                   value:(const std::string&)value
-                            inputMissing:(BOOL)inputMissing;
+    didRegisterFormActivity:(const web::FormActivityParams&)params;
 
 // Invoked by WebStateObserverBridge::FaviconUrlUpdated.
 - (void)webState:(web::WebState*)webState
@@ -95,16 +88,12 @@
 
 namespace web {
 
-class WebState;
-
 // Bridge to use an id<CRWWebStateObserver> as a web::WebStateObserver.
-// Will be added/removed as an observer of the underlying WebState during
-// construction/destruction. Instances should be owned by instances of the
-// class they're bridging.
 class WebStateObserverBridge : public web::WebStateObserver {
  public:
-  WebStateObserverBridge(web::WebState* web_state,
-                         id<CRWWebStateObserver> observer);
+  // It it the responsibility of calling code to add/remove the instance
+  // from the WebStates observer lists.
+  WebStateObserverBridge(id<CRWWebStateObserver> observer);
   ~WebStateObserverBridge() override;
 
   // web::WebStateObserver methods.
@@ -122,20 +111,16 @@ class WebStateObserverBridge : public web::WebStateObserver {
   void PageLoaded(
       web::WebState* web_state,
       web::PageLoadCompletionStatus load_completion_status) override;
-  void InterstitialDismissed(web::WebState* web_state) override;
   void LoadProgressChanged(web::WebState* web_state, double progress) override;
   void TitleWasSet(web::WebState* web_state) override;
   void DidChangeVisibleSecurityState(web::WebState* web_state) override;
   void DidSuppressDialog(web::WebState* web_state) override;
   void DocumentSubmitted(web::WebState* web_state,
                          const std::string& form_name,
-                         bool user_initiated) override;
+                         bool user_initiated,
+                         bool is_main_frame) override;
   void FormActivityRegistered(web::WebState* web_state,
-                              const std::string& form_name,
-                              const std::string& field_name,
-                              const std::string& type,
-                              const std::string& value,
-                              bool input_missing) override;
+                              const FormActivityParams& params) override;
   void FaviconUrlUpdated(web::WebState* web_state,
                          const std::vector<FaviconURL>& candidates) override;
   void RenderProcessGone(web::WebState* web_state) override;

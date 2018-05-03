@@ -33,11 +33,10 @@
 #include "core/clipboard/Pasteboard.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
 #include "core/css/CSSIdentifierValue.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSValueList.h"
-#include "core/css/StylePropertySet.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/TagCollection.h"
-#include "core/dom/UserGestureIndicator.h"
 #include "core/dom/events/Event.h"
 #include "core/editing/EditingStyleUtilities.h"
 #include "core/editing/EditingTriState.h"
@@ -56,8 +55,10 @@
 #include "core/editing/commands/ReplaceSelectionCommand.h"
 #include "core/editing/commands/TypingCommand.h"
 #include "core/editing/commands/UnlinkCommand.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/editing/spellcheck/SpellChecker.h"
+#include "core/frame/ContentSettingsClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
@@ -69,7 +70,6 @@
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutBox.h"
 #include "core/page/ChromeClient.h"
-#include "core/page/EditorClient.h"
 #include "core/page/Page.h"
 #include "platform/Histogram.h"
 #include "platform/KillRing.h"
@@ -206,7 +206,9 @@ StaticRangeVector* RangesFromCurrentSelectionOrExtendCaret(
     TextGranularity granularity) {
   frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
   SelectionModifier selection_modifier(
-      frame, frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated());
+      frame, frame.Selection().GetSelectionInDOMTree());
+  selection_modifier.SetSelectionIsDirectional(
+      frame.Selection().IsDirectional());
   if (selection_modifier.Selection().IsCaret())
     selection_modifier.Modify(SelectionModifyAlteration::kExtend, direction,
                               granularity);
@@ -217,6 +219,25 @@ StaticRangeVector* RangesFromCurrentSelectionOrExtendCaret(
   ranges->push_back(StaticRange::Create(
       FirstEphemeralRangeOf(selection_modifier.Selection())));
   return ranges;
+}
+
+EphemeralRange ComputeRangeForTranspose(LocalFrame& frame) {
+  const VisibleSelection& selection =
+      frame.Selection().ComputeVisibleSelectionInDOMTree();
+  if (!selection.IsCaret())
+    return EphemeralRange();
+
+  // Make a selection that goes back one character and forward two characters.
+  const VisiblePosition& caret = selection.VisibleStart();
+  const VisiblePosition& next =
+      IsEndOfParagraph(caret) ? caret : NextPositionOf(caret);
+  const VisiblePosition& previous = PreviousPositionOf(next);
+  if (next.DeepEquivalent() == previous.DeepEquivalent())
+    return EphemeralRange();
+  const VisiblePosition& previous_of_previous = PreviousPositionOf(previous);
+  if (!InSameParagraph(next, previous_of_previous))
+    return EphemeralRange();
+  return MakeRange(previous_of_previous, next);
 }
 
 }  // anonymous namespace
@@ -256,7 +277,7 @@ static LocalFrame* TargetFrame(LocalFrame& frame, Event* event) {
 static bool ApplyCommandToFrame(LocalFrame& frame,
                                 EditorCommandSource source,
                                 InputEvent::InputType input_type,
-                                StylePropertySet* style) {
+                                CSSPropertyValueSet* style) {
   // FIXME: We don't call shouldApplyStyle when the source is DOM; is there a
   // good reason for that?
   switch (source) {
@@ -276,9 +297,11 @@ static bool ExecuteApplyStyle(LocalFrame& frame,
                               InputEvent::InputType input_type,
                               CSSPropertyID property_id,
                               const String& property_value) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
-  style->SetProperty(property_id, property_value);
+  DCHECK(frame.GetDocument());
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
+  style->SetProperty(property_id, property_value, /* important */ false,
+                     frame.GetDocument()->GetSecureContextMode());
   return ApplyCommandToFrame(frame, source, input_type, style);
 }
 
@@ -287,8 +310,8 @@ static bool ExecuteApplyStyle(LocalFrame& frame,
                               InputEvent::InputType input_type,
                               CSSPropertyID property_id,
                               CSSValueID property_value) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
   style->SetProperty(property_id, property_value);
   return ApplyCommandToFrame(frame, source, input_type, style);
 }
@@ -304,7 +327,7 @@ static bool ExecuteToggleStyleInList(LocalFrame& frame,
                                      CSSValue* value) {
   EditingStyle* selection_style =
       EditingStyleUtilities::CreateStyleAtSelectionStart(
-          frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated());
+          frame.Selection().ComputeVisibleSelectionInDOMTree());
   if (!selection_style || !selection_style->Style())
     return false;
 
@@ -325,9 +348,10 @@ static bool ExecuteToggleStyleInList(LocalFrame& frame,
 
   // FIXME: We shouldn't be having to convert new style into text.  We should
   // have setPropertyCSSValue.
-  MutableStylePropertySet* new_mutable_style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
-  new_mutable_style->SetProperty(property_id, new_style);
+  MutableCSSPropertyValueSet* new_mutable_style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
+  new_mutable_style->SetProperty(property_id, new_style, /* important */ false,
+                                 frame.GetDocument()->GetSecureContextMode());
   return ApplyCommandToFrame(frame, source, input_type, new_mutable_style);
 }
 
@@ -349,8 +373,9 @@ static bool ExecuteToggleStyle(LocalFrame& frame,
     style_is_present = frame.GetEditor().SelectionHasStyle(
                            property_id, on_value) == EditingTriState::kTrue;
 
-  EditingStyle* style = EditingStyle::Create(
-      property_id, style_is_present ? off_value : on_value);
+  EditingStyle* style =
+      EditingStyle::Create(property_id, style_is_present ? off_value : on_value,
+                           frame.GetDocument()->GetSecureContextMode());
   return ApplyCommandToFrame(frame, source, input_type, style->Style());
 }
 
@@ -359,9 +384,10 @@ static bool ExecuteApplyParagraphStyle(LocalFrame& frame,
                                        InputEvent::InputType input_type,
                                        CSSPropertyID property_id,
                                        const String& property_value) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
-  style->SetProperty(property_id, property_value);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
+  style->SetProperty(property_id, property_value, /* important */ false,
+                     frame.GetDocument()->GetSecureContextMode());
   // FIXME: We don't call shouldApplyStyle when the source is DOM; is there a
   // good reason for that?
   switch (source) {
@@ -400,12 +426,9 @@ static bool ExpandSelectionToGranularity(LocalFrame& frame,
                                          TextGranularity granularity) {
   const VisibleSelection& selection = CreateVisibleSelectionWithGranularity(
       SelectionInDOMTree::Builder()
-          .SetBaseAndExtent(frame.Selection()
-                                .ComputeVisibleSelectionInDOMTreeDeprecated()
-                                .Base(),
-                            frame.Selection()
-                                .ComputeVisibleSelectionInDOMTreeDeprecated()
-                                .Extent())
+          .SetBaseAndExtent(
+              frame.Selection().ComputeVisibleSelectionInDOMTree().Base(),
+              frame.Selection().ComputeVisibleSelectionInDOMTree().Extent())
           .Build(),
       granularity);
   const EphemeralRange new_range = selection.ToNormalizedEphemeralRange();
@@ -510,7 +533,7 @@ static WritingDirection TextDirectionForSelection(
       CSSComputedStyleDeclaration* style =
           CSSComputedStyleDeclaration::Create(&n);
       const CSSValue* unicode_bidi =
-          style->GetPropertyCSSValue(GetCSSPropertyUnicodeBidiAPI());
+          style->GetPropertyCSSValue(GetCSSPropertyUnicodeBidi());
       if (!unicode_bidi || !unicode_bidi->IsIdentifierValue())
         continue;
 
@@ -546,7 +569,7 @@ static WritingDirection TextDirectionForSelection(
     CSSComputedStyleDeclaration* style =
         CSSComputedStyleDeclaration::Create(element);
     const CSSValue* unicode_bidi =
-        style->GetPropertyCSSValue(GetCSSPropertyUnicodeBidiAPI());
+        style->GetPropertyCSSValue(GetCSSPropertyUnicodeBidi());
     if (!unicode_bidi || !unicode_bidi->IsIdentifierValue())
       continue;
 
@@ -561,7 +584,7 @@ static WritingDirection TextDirectionForSelection(
     DCHECK(EditingStyleUtilities::IsEmbedOrIsolate(unicode_bidi_value))
         << unicode_bidi_value;
     const CSSValue* direction =
-        style->GetPropertyCSSValue(GetCSSPropertyDirectionAPI());
+        style->GetPropertyCSSValue(GetCSSPropertyDirection());
     if (!direction || !direction->IsIdentifierValue())
       continue;
 
@@ -616,11 +639,13 @@ static unsigned VerticalScrollDistance(LocalFrame& frame) {
         style->OverflowY() == EOverflow::kAuto ||
         HasEditableStyle(*focused_element)))
     return 0;
+  ScrollableArea* scrollable_area =
+      frame.View()->LayoutViewportScrollableArea();
   int height = std::min<int>(layout_box.ClientHeight().ToInt(),
-                             frame.View()->VisibleHeight());
+                             scrollable_area->VisibleHeight());
   return static_cast<unsigned>(
       max(max<int>(height * ScrollableArea::MinFractionToStepWhenPaging(),
-                   height - frame.View()->MaxOverlapBetweenPages()),
+                   height - scrollable_area->MaxOverlapBetweenPages()),
           1));
 }
 
@@ -653,8 +678,10 @@ static bool CanWriteClipboard(LocalFrame& frame, EditorCommandSource source) {
   Settings* settings = frame.GetSettings();
   bool default_value =
       (settings && settings->GetJavaScriptCanAccessClipboard()) ||
-      UserGestureIndicator::ProcessingUserGesture();
-  return frame.GetEditor().Client().CanCopyCut(&frame, default_value);
+      Frame::HasTransientUserActivation(&frame);
+  if (!frame.GetContentSettingsClient())
+    return default_value;
+  return frame.GetContentSettingsClient()->AllowWriteToClipboard(default_value);
 }
 
 static bool ExecuteCopy(LocalFrame& frame,
@@ -826,8 +853,11 @@ static bool ExecuteDeleteToMark(LocalFrame& frame,
         SetSelectionOptions::Builder().SetShouldCloseTyping(true).Build());
   }
   frame.GetEditor().PerformDelete();
-  frame.GetEditor().SetMark(
-      frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated());
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+  frame.GetEditor().SetMark();
   return true;
 }
 
@@ -1123,8 +1153,8 @@ static bool ExecuteMakeTextWritingDirectionLeftToRight(LocalFrame& frame,
                                                        Event*,
                                                        EditorCommandSource,
                                                        const String&) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
   style->SetProperty(CSSPropertyUnicodeBidi, CSSValueIsolate);
   style->SetProperty(CSSPropertyDirection, CSSValueLtr);
   frame.GetEditor().ApplyStyle(
@@ -1136,8 +1166,8 @@ static bool ExecuteMakeTextWritingDirectionNatural(LocalFrame& frame,
                                                    Event*,
                                                    EditorCommandSource,
                                                    const String&) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
   style->SetProperty(CSSPropertyUnicodeBidi, CSSValueNormal);
   frame.GetEditor().ApplyStyle(
       style, InputEvent::InputType::kFormatSetBlockTextDirection);
@@ -1148,8 +1178,8 @@ static bool ExecuteMakeTextWritingDirectionRightToLeft(LocalFrame& frame,
                                                        Event*,
                                                        EditorCommandSource,
                                                        const String&) {
-  MutableStylePropertySet* style =
-      MutableStylePropertySet::Create(kHTMLQuirksMode);
+  MutableCSSPropertyValueSet* style =
+      MutableCSSPropertyValueSet::Create(kHTMLQuirksMode);
   style->SetProperty(CSSPropertyUnicodeBidi, CSSValueIsolate);
   style->SetProperty(CSSPropertyDirection, CSSValueRtl);
   frame.GetEditor().ApplyStyle(
@@ -1236,13 +1266,15 @@ static bool ExecuteMoveLeftAndModifySelection(LocalFrame& frame,
 }
 
 // Returns true if selection is modified.
-bool ModifySelectionyWithPageGranularity(
+bool ModifySelectionWithPageGranularity(
     LocalFrame& frame,
     SelectionModifyAlteration alter,
     unsigned vertical_distance,
     SelectionModifyVerticalDirection direction) {
   SelectionModifier selection_modifier(
-      frame, frame.Selection().ComputeVisibleSelectionInDOMTree());
+      frame, frame.Selection().GetSelectionInDOMTree());
+  selection_modifier.SetSelectionIsDirectional(
+      frame.Selection().IsDirectional());
   if (!selection_modifier.ModifyWithPageGranularity(alter, vertical_distance,
                                                     direction)) {
     return false;
@@ -1257,6 +1289,10 @@ bool ModifySelectionyWithPageGranularity(
           .SetCursorAlignOnScroll(alter == SelectionModifyAlteration::kMove
                                       ? CursorAlignOnScroll::kAlways
                                       : CursorAlignOnScroll::kIfNeeded)
+          .SetIsDirectional(alter == SelectionModifyAlteration::kExtend ||
+                            frame.GetEditor()
+                                .Behavior()
+                                .ShouldConsiderSelectionAsDirectional())
           .Build());
   return true;
 }
@@ -1268,7 +1304,7 @@ static bool ExecuteMovePageDown(LocalFrame& frame,
   unsigned distance = VerticalScrollDistance(frame);
   if (!distance)
     return false;
-  return ModifySelectionyWithPageGranularity(
+  return ModifySelectionWithPageGranularity(
       frame, SelectionModifyAlteration::kMove, distance,
       SelectionModifyVerticalDirection::kDown);
 }
@@ -1280,7 +1316,7 @@ static bool ExecuteMovePageDownAndModifySelection(LocalFrame& frame,
   unsigned distance = VerticalScrollDistance(frame);
   if (!distance)
     return false;
-  return ModifySelectionyWithPageGranularity(
+  return ModifySelectionWithPageGranularity(
       frame, SelectionModifyAlteration::kExtend, distance,
       SelectionModifyVerticalDirection::kDown);
 }
@@ -1292,7 +1328,7 @@ static bool ExecuteMovePageUp(LocalFrame& frame,
   unsigned distance = VerticalScrollDistance(frame);
   if (!distance)
     return false;
-  return ModifySelectionyWithPageGranularity(
+  return ModifySelectionWithPageGranularity(
       frame, SelectionModifyAlteration::kMove, distance,
       SelectionModifyVerticalDirection::kUp);
 }
@@ -1304,7 +1340,7 @@ static bool ExecuteMovePageUpAndModifySelection(LocalFrame& frame,
   unsigned distance = VerticalScrollDistance(frame);
   if (!distance)
     return false;
-  return ModifySelectionyWithPageGranularity(
+  return ModifySelectionWithPageGranularity(
       frame, SelectionModifyAlteration::kExtend, distance,
       SelectionModifyVerticalDirection::kUp);
 }
@@ -1695,7 +1731,10 @@ static bool CanReadClipboard(LocalFrame& frame, EditorCommandSource source) {
   bool default_value = settings &&
                        settings->GetJavaScriptCanAccessClipboard() &&
                        settings->GetDOMPasteAllowed();
-  return frame.GetEditor().Client().CanPaste(&frame, default_value);
+  if (!frame.GetContentSettingsClient())
+    return default_value;
+  return frame.GetContentSettingsClient()->AllowReadFromClipboard(
+      default_value);
 }
 
 static bool ExecutePaste(LocalFrame& frame,
@@ -1877,8 +1916,7 @@ static bool ExecuteSetMark(LocalFrame& frame,
                            Event*,
                            EditorCommandSource,
                            const String&) {
-  frame.GetEditor().SetMark(
-      frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated());
+  frame.GetEditor().SetMark();
   return true;
 }
 
@@ -1933,13 +1971,18 @@ static bool ExecuteSwapWithMark(LocalFrame& frame,
                                 Event*,
                                 EditorCommandSource,
                                 const String&) {
-  const VisibleSelection& mark = frame.GetEditor().Mark();
+  const VisibleSelection mark(frame.GetEditor().Mark());
   const VisibleSelection& selection =
       frame.Selection().ComputeVisibleSelectionInDOMTreeDeprecated();
+  const bool mark_is_directional = frame.GetEditor().MarkIsDirectional();
   if (mark.IsNone() || selection.IsNone())
     return false;
-  frame.Selection().SetSelection(mark.AsSelection());
-  frame.GetEditor().SetMark(selection);
+
+  frame.GetEditor().SetMark();
+  frame.Selection().SetSelection(mark.AsSelection(),
+                                 SetSelectionOptions::Builder()
+                                     .SetIsDirectional(mark_is_directional)
+                                     .Build());
   return true;
 }
 
@@ -1963,7 +2006,63 @@ static bool ExecuteTranspose(LocalFrame& frame,
                              Event*,
                              EditorCommandSource,
                              const String&) {
-  Transpose(frame);
+  Editor& editor = frame.GetEditor();
+  if (!editor.CanEdit())
+    return false;
+
+  Document* const document = frame.GetDocument();
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  document->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  const EphemeralRange& range = ComputeRangeForTranspose(frame);
+  if (range.IsNull())
+    return false;
+
+  // Transpose the two characters.
+  const String& text = PlainText(range);
+  if (text.length() != 2)
+    return false;
+  const String& transposed = text.Right(1) + text.Left(1);
+
+  if (DispatchBeforeInputInsertText(
+          EventTargetNodeForDocument(document), transposed,
+          InputEvent::InputType::kInsertTranspose,
+          new StaticRangeVector(1, StaticRange::Create(range))) !=
+      DispatchEventResult::kNotCanceled)
+    return false;
+
+  // 'beforeinput' event handler may destroy document->
+  if (frame.GetDocument() != document)
+    return false;
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  document->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  // 'beforeinput' event handler may change selection, we need to re-calculate
+  // range.
+  const EphemeralRange& new_range = ComputeRangeForTranspose(frame);
+  if (new_range.IsNull())
+    return false;
+
+  const String& new_text = PlainText(new_range);
+  if (new_text.length() != 2)
+    return false;
+  const String& new_transposed = new_text.Right(1) + new_text.Left(1);
+
+  const SelectionInDOMTree& new_selection =
+      SelectionInDOMTree::Builder().SetBaseAndExtent(new_range).Build();
+
+  // Select the two characters.
+  if (CreateVisibleSelection(new_selection) !=
+      frame.Selection().ComputeVisibleSelectionInDOMTree())
+    frame.Selection().SetSelectionAndEndTyping(new_selection);
+
+  // Insert the transposed characters.
+  editor.ReplaceSelectionWithText(new_transposed, false, false,
+                                  InputEvent::InputType::kInsertTranspose);
   return true;
 }
 
@@ -2071,7 +2170,10 @@ static bool PasteSupported(LocalFrame* frame) {
   const bool default_value = settings &&
                              settings->GetJavaScriptCanAccessClipboard() &&
                              settings->GetDOMPasteAllowed();
-  return frame->GetEditor().Client().CanPaste(frame, default_value);
+  if (!frame->GetContentSettingsClient())
+    return default_value;
+  return frame->GetContentSettingsClient()->AllowReadFromClipboard(
+      default_value);
 }
 
 static bool SupportedFromMenuOrKeyBinding(LocalFrame*) {
@@ -2133,7 +2235,7 @@ static bool EnableCaretInEditableText(LocalFrame& frame,
 static bool EnabledCopy(LocalFrame& frame, Event*, EditorCommandSource source) {
   if (!CanWriteClipboard(frame, source))
     return false;
-  return frame.GetEditor().CanDHTMLCopy() || frame.GetEditor().CanCopy();
+  return frame.GetEditor().CanDHTMLCopy(source) || frame.GetEditor().CanCopy();
 }
 
 static bool EnabledCut(LocalFrame& frame, Event*, EditorCommandSource source) {
@@ -2142,7 +2244,7 @@ static bool EnabledCut(LocalFrame& frame, Event*, EditorCommandSource source) {
   if (source == kCommandFromMenuOrKeyBinding &&
       !frame.Selection().SelectionHasFocus())
     return false;
-  return frame.GetEditor().CanDHTMLCut() || frame.GetEditor().CanCut();
+  return frame.GetEditor().CanDHTMLCut(source) || frame.GetEditor().CanCut();
 }
 
 static bool EnabledInEditableText(LocalFrame& frame,
@@ -2977,7 +3079,7 @@ bool Editor::ExecuteCommand(const String& command_name, const String& value) {
     return GetFrame().GetEventHandler().BubblingScroll(
         kScrollDownIgnoringWritingMode, kScrollByDocument);
 
-  if (command_name == "showGuessPanel") {
+  if (command_name == "ToggleSpellPanel") {
     // TODO(editing-dev): Use of updateStyleAndLayoutIgnorePendingStylesheets
     // needs to be audited. see http://crbug.com/590369 for more details.
     GetFrame().GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();

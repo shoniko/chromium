@@ -4,6 +4,7 @@
 
 package org.chromium.chromecast.shell;
 
+import android.app.Notification;
 import android.app.Service;
 import android.content.Intent;
 import android.media.AudioManager;
@@ -28,9 +29,10 @@ import org.chromium.ui.base.WindowAndroid;
 public class CastWebContentsService extends Service {
     private static final String TAG = "cr_CastWebService";
     private static final boolean DEBUG = true;
+    private static final int CAST_NOTIFICATION_ID = 100;
 
     private String mInstanceId;
-    private AudioManager mAudioManager;
+    private CastAudioManager mAudioManager;
     private WindowAndroid mWindow;
     private ContentViewCore mContentViewCore;
     private ContentView mContentView;
@@ -91,11 +93,17 @@ public class CastWebContentsService extends Service {
     }
 
     // Sets webContents to be the currently displayed webContents.
+    // TODO(thoren): Notification.Builder(Context) is deprecated in O. Use the (Context, String)
+    // constructor when CastWebContentsService starts supporting O.
+    @SuppressWarnings("deprecation")
     private void showWebContents(WebContents webContents) {
         if (DEBUG) Log.d(TAG, "showWebContents");
 
+        Notification notification = new Notification.Builder(this).build();
+        startForeground(CAST_NOTIFICATION_ID, notification);
+
         // TODO(derekjchow): productVersion
-        mContentViewCore = new ContentViewCore(this, "");
+        mContentViewCore = ContentViewCore.create(this, "");
         mContentView = ContentView.createContentView(this, mContentViewCore);
         mContentViewCore.initialize(ViewAndroidDelegate.createBasicDelegate(mContentView),
                 mContentView, webContents, mWindow);
@@ -106,6 +114,9 @@ public class CastWebContentsService extends Service {
     // Remove the currently displayed webContents. no-op if nothing is being displayed.
     private void detachWebContentsIfAny() {
         if (DEBUG) Log.d(TAG, "detachWebContentsIfAny");
+
+        stopForeground(true /*removeNotification*/ );
+
         if (mContentView != null) {
             mContentView = null;
             mContentViewCore = null;

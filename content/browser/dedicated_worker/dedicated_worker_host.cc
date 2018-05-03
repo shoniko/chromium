@@ -6,8 +6,9 @@
 #include <utility>
 
 #include "content/browser/dedicated_worker/dedicated_worker_host.h"
+
 #include "content/browser/interface_provider_filtering.h"
-#include "content/public/browser/render_frame_host.h"
+#include "content/browser/renderer_interface_binders.h"
 #include "content/public/browser/render_process_host.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/public/cpp/system/message_pipe.h"
@@ -32,7 +33,8 @@ class DedicatedWorkerHost : public service_manager::mojom::InterfaceProvider {
     if (!process)
       return;
 
-    // TODO(sammc): Dispatch interface requests.
+    BindWorkerInterface(interface_name, std::move(interface_pipe), process,
+                        origin_);
   }
 
  private:
@@ -59,7 +61,7 @@ class DedicatedWorkerFactoryImpl : public blink::mojom::DedicatedWorkerFactory {
     // with the request for |DedicatedWorkerFactory|, enforce that the worker's
     // origin either matches the creating document's origin, or is unique.
     mojo::MakeStrongBinding(
-        base::MakeUnique<DedicatedWorkerHost>(process_id_, origin),
+        std::make_unique<DedicatedWorkerHost>(process_id_, origin),
         FilterRendererExposedInterfaces(
             blink::mojom::kNavigation_DedicatedWorkerSpec, process_id_,
             std::move(request)));
@@ -75,12 +77,12 @@ class DedicatedWorkerFactoryImpl : public blink::mojom::DedicatedWorkerFactory {
 }  // namespace
 
 void CreateDedicatedWorkerHostFactory(
-    int process_id,
-    RenderFrameHost* frame,
-    blink::mojom::DedicatedWorkerFactoryRequest request) {
-  mojo::MakeStrongBinding(base::MakeUnique<DedicatedWorkerFactoryImpl>(
-                              process_id, frame->GetLastCommittedOrigin()),
-                          std::move(request));
+    blink::mojom::DedicatedWorkerFactoryRequest request,
+    RenderProcessHost* host,
+    const url::Origin& origin) {
+  mojo::MakeStrongBinding(
+      std::make_unique<DedicatedWorkerFactoryImpl>(host->GetID(), origin),
+      std::move(request));
 }
 
 }  // namespace content

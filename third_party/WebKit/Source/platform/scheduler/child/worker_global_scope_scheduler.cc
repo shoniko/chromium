@@ -4,6 +4,7 @@
 
 #include "platform/scheduler/child/worker_global_scope_scheduler.h"
 
+#include "platform/scheduler/child/web_task_runner_impl.h"
 #include "platform/scheduler/child/worker_scheduler.h"
 
 namespace blink {
@@ -11,8 +12,7 @@ namespace scheduler {
 
 WorkerGlobalScopeScheduler::WorkerGlobalScopeScheduler(
     WorkerScheduler* worker_scheduler) {
-  scoped_refptr<TaskQueue> task_queue = worker_scheduler->CreateTaskRunner();
-  unthrottled_task_runner_ = WebTaskRunnerImpl::Create(std::move(task_queue));
+  task_queue_ = worker_scheduler->CreateTaskRunner();
 }
 
 WorkerGlobalScopeScheduler::~WorkerGlobalScopeScheduler() {
@@ -22,7 +22,7 @@ WorkerGlobalScopeScheduler::~WorkerGlobalScopeScheduler() {
 }
 
 void WorkerGlobalScopeScheduler::Dispose() {
-  unthrottled_task_runner_->GetTaskQueue()->UnregisterTaskQueue();
+  task_queue_->ShutdownTaskQueue();
 #if DCHECK_IS_ON()
   is_disposed_ = true;
 #endif
@@ -56,11 +56,17 @@ scoped_refptr<WebTaskRunner> WorkerGlobalScopeScheduler::GetTaskRunner(
     case TaskType::kUnspecedTimer:
     case TaskType::kUnspecedLoading:
     case TaskType::kUnthrottled:
+    case TaskType::kInternalTest:
+    case TaskType::kInternalWebCrypto:
+    case TaskType::kInternalIndexedDB:
       // UnthrottledTaskRunner is generally discouraged in future.
       // TODO(nhiroki): Identify which tasks can be throttled / suspendable and
       // move them into other task runners. See also comments in
       // Get(LocalFrame). (https://crbug.com/670534)
-      return unthrottled_task_runner_;
+      return WebTaskRunnerImpl::Create(task_queue_, type);
+    case TaskType::kCount:
+      NOTREACHED();
+      break;
   }
   NOTREACHED();
   return nullptr;

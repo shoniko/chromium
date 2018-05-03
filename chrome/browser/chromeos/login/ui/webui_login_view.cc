@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 
+#include <memory>
+
+#include "ash/accelerators/accelerator_controller.h"
 #include "ash/focus_cycler.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_widget.h"
@@ -21,14 +24,13 @@
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/lock_screen_apps/state_controller.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
+#include "chrome/browser/chromeos/login/ui/login_display_webui.h"
 #include "chrome/browser/chromeos/login/ui/preloaded_web_view.h"
 #include "chrome/browser/chromeos/login/ui/preloaded_web_view_factory.h"
 #include "chrome/browser/chromeos/login/ui/web_contents_forced_title.h"
-#include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
@@ -173,8 +175,18 @@ WebUILoginView::WebUILoginView(const WebViewSettings& settings)
       ui::VKEY_S, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
       kAccelNameBootstrappingSlave;
 
-  for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
-    AddAccelerator(i->first);
+  for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i) {
+    if (!ash_util::IsRunningInMash()) {
+      // To make reset accelerator work while system tray is open, register it
+      // at accelerator controller.
+      ash::Shell::Get()->accelerator_controller()->Register({i->first}, this);
+    } else {
+      // TODO(crbug.com/782072): In mash, accelerators are not available if
+      // system tray is open.
+      NOTIMPLEMENTED();
+      AddAccelerator(i->first);
+    }
+  }
 
   if (!ash_util::IsRunningInMash())
     ash::Shell::Get()->system_tray_notifier()->AddSystemTrayFocusObserver(this);
@@ -194,6 +206,9 @@ WebUILoginView::~WebUILoginView() {
     ash::Shell::Get()->system_tray_notifier()->RemoveSystemTrayFocusObserver(
         this);
   }
+
+  if (!ash_util::IsRunningInMash())
+    ash::Shell::Get()->accelerator_controller()->UnregisterAll(this);
 
   // Clear any delegates we have set on the WebView.
   WebContents* web_contents = web_view()->GetWebContents();
@@ -247,7 +262,7 @@ void WebUILoginView::Init() {
   }
 
   if (!webui_login_) {
-    webui_login_ = base::MakeUnique<views::WebView>(signin_profile);
+    webui_login_ = std::make_unique<views::WebView>(signin_profile);
     webui_login_->set_owned_by_client();
     is_reusing_webview_ = false;
   }
@@ -384,6 +399,10 @@ void WebUILoginView::AboutToRequestFocusFromTabTraversal(bool reverse) {
   web_view()->web_contents()->FocusThroughTabTraversal(reverse);
   GetWidget()->Activate();
   web_view()->web_contents()->Focus();
+
+  content::WebUI* web_ui = GetWebUI();
+  if (web_ui)
+    web_ui->CallJavascriptFunctionUnsafe("cr.ui.Oobe.focusReturned");
 }
 
 void WebUILoginView::Observe(int type,
@@ -438,11 +457,11 @@ void WebUILoginView::OnVirtualKeyboardStateChanged(bool activated,
 ////////////////////////////////////////////////////////////////////////////////
 // keyboard::KeyboardControllerObserver:
 
-void WebUILoginView::OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) {
+void WebUILoginView::OnKeyboardAvailabilityChanging(const bool is_available) {
   if (!GetOobeUI())
     return;
   CoreOobeView* view = GetOobeUI()->GetCoreOobeView();
-  if (new_bounds.IsEmpty()) {
+  if (!is_available) {
     // Keyboard has been hidden.
     view->ShowControlBar(true);
     view->SetVirtualKeyboardShown(false);
@@ -452,8 +471,6 @@ void WebUILoginView::OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) {
     view->SetVirtualKeyboardShown(true);
   }
 }
-
-void WebUILoginView::OnKeyboardClosed() {}
 
 // WebUILoginView private: -----------------------------------------------------
 
@@ -591,7 +608,7 @@ bool WebUILoginView::MoveFocusToSystemTray(bool reverse) {
   // goes to the system tray, because the web-UI shelf has already been
   // traversed when we reach here.
   ash::Shelf* shelf = ash::Shelf::ForWindow(GetWidget()->GetNativeWindow());
-  if (!reverse && ash::ShelfWidget::IsUsingMdLoginShelf()) {
+  if (!reverse && ash::ShelfWidget::IsUsingViewsShelf()) {
     shelf->shelf_widget()->set_default_last_focusable_child(reverse);
     ash::Shell::Get()->focus_cycler()->FocusWidget(shelf->shelf_widget());
     return true;

@@ -59,7 +59,7 @@ class ImeListItemView : public ActionableView {
 
     TriView* tri_view = TrayPopupUtils::CreateDefaultRowView();
     AddChildView(tri_view);
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
 
     // |id_label| contains the IME short name (e.g., 'US', 'GB', 'IT').
     views::Label* id_label = TrayPopupUtils::CreateDefaultLabel();
@@ -101,7 +101,7 @@ class ImeListItemView : public ActionableView {
     SetAccessibleName(label_view->text());
   }
 
-  ~ImeListItemView() override {}
+  ~ImeListItemView() override = default;
 
   // ActionableView:
   bool PerformAction(const ui::Event& event) override {
@@ -141,15 +141,15 @@ class ImeListItemView : public ActionableView {
 // attached and the user is in TabletMode mode.
 class KeyboardStatusRow : public views::View {
  public:
-  KeyboardStatusRow() {}
-  ~KeyboardStatusRow() override {}
+  KeyboardStatusRow() = default;
+  ~KeyboardStatusRow() override = default;
 
   views::ToggleButton* toggle() const { return toggle_; }
   bool is_toggled() const { return toggle_->is_on(); }
 
   void Init(views::ButtonListener* listener) {
     TrayPopupUtils::ConfigureAsStickyHeader(this);
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
 
     TriView* tri_view = TrayPopupUtils::CreateDefaultRowView();
     AddChildView(tri_view);
@@ -189,7 +189,7 @@ ImeListView::ImeListView(SystemTrayItem* owner)
       should_focus_ime_after_selection_with_keyboard_(false),
       current_ime_view_(nullptr) {}
 
-ImeListView::~ImeListView() {}
+ImeListView::~ImeListView() = default;
 
 void ImeListView::Init(bool show_keyboard_toggle,
                        SingleImeBehavior single_ime_behavior) {
@@ -361,7 +361,7 @@ void ImeListView::FocusCurrentImeIfNeeded() {
 ImeListViewTestApi::ImeListViewTestApi(ImeListView* ime_list_view)
     : ime_list_view_(ime_list_view) {}
 
-ImeListViewTestApi::~ImeListViewTestApi() {}
+ImeListViewTestApi::~ImeListViewTestApi() = default;
 
 views::View* ImeListViewTestApi::GetToggleView() const {
   return ime_list_view_->keyboard_status_row_->toggle();

@@ -32,7 +32,9 @@ class PaletteTrayTestApi {
     return palette_tray_->bubble_.get();
   }
 
-  bool IsStylusWatcherActive() { return !!palette_tray_->watcher_; }
+  void OnStylusStateChanged(ui::StylusState state) {
+    palette_tray_->OnStylusStateChanged(state);
+  }
 
  private:
   PaletteTray* palette_tray_ = nullptr;

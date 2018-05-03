@@ -16,11 +16,13 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "content/browser/bad_message.h"
 #include "content/common/cache_storage/cache_storage_types.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "net/base/io_buffer.h"
 #include "net/disk_cache/disk_cache.h"
-#include "storage/common/quota/quota_status_code.h"
+#include "third_party/WebKit/common/quota/quota_types.mojom.h"
+#include "third_party/WebKit/public/platform/modules/cache_storage/cache_storage.mojom.h"
 
 namespace crypto {
 class SymmetricKey;
@@ -49,26 +51,34 @@ class CacheMetadata;
 class CacheResponse;
 }
 
+namespace cache_storage_cache_unittest {
+class TestCacheStorageCache;
+class CacheStorageCacheTest;
+}  // namespace cache_storage_cache_unittest
+
 // Represents a ServiceWorker Cache as seen in
 // https://slightlyoff.github.io/ServiceWorker/spec/service_worker/ The
 // asynchronous methods are executed serially. Callbacks to the public functions
 // will be called so long as the cache object lives.
 class CONTENT_EXPORT CacheStorageCache {
  public:
-  using ErrorCallback = base::OnceCallback<void(CacheStorageError)>;
+  using ErrorCallback =
+      base::OnceCallback<void(blink::mojom::CacheStorageError)>;
+  using BadMessageCallback =
+      base::OnceCallback<void(bad_message::BadMessageReason)>;
   using ResponseCallback =
-      base::OnceCallback<void(CacheStorageError,
+      base::OnceCallback<void(blink::mojom::CacheStorageError,
                               std::unique_ptr<ServiceWorkerResponse>,
                               std::unique_ptr<storage::BlobDataHandle>)>;
-  using Responses = std::vector<ServiceWorkerResponse>;
   using BlobDataHandles = std::vector<std::unique_ptr<storage::BlobDataHandle>>;
   using ResponsesCallback =
-      base::OnceCallback<void(CacheStorageError,
-                              std::unique_ptr<Responses>,
+      base::OnceCallback<void(blink::mojom::CacheStorageError,
+                              std::vector<ServiceWorkerResponse>,
                               std::unique_ptr<BlobDataHandles>)>;
   using Requests = std::vector<ServiceWorkerFetchRequest>;
   using RequestsCallback =
-      base::OnceCallback<void(CacheStorageError, std::unique_ptr<Requests>)>;
+      base::OnceCallback<void(blink::mojom::CacheStorageError,
+                              std::unique_ptr<Requests>)>;
   using SizeCallback = base::OnceCallback<void(int64_t)>;
   using SizePaddingCallback = base::OnceCallback<void(int64_t, int64_t)>;
 
@@ -104,15 +114,16 @@ class CONTENT_EXPORT CacheStorageCache {
              const CacheStorageCacheQueryParams& match_params,
              ResponseCallback callback);
 
-  // Returns CACHE_STORAGE_OK and matched responses in this cache. If there are
-  // no responses, returns CACHE_STORAGE_OK and an empty vector.
+  // Returns blink::mojom::CacheStorageError::kSuccess and matched
+  // responses in this cache. If there are no responses, returns
+  // blink::mojom::CacheStorageError::kSuccess and an empty vector.
   void MatchAll(std::unique_ptr<ServiceWorkerFetchRequest> request,
                 const CacheStorageCacheQueryParams& match_params,
                 ResponsesCallback callback);
 
   // Writes the side data (ex: V8 code cache) for the specified cache entry.
   // If it doesn't exist, or the |expected_response_time| differs from the
-  // entry's, CACHE_STORAGE_ERROR_NOT_FOUND is returned.
+  // entry's, blink::mojom::CacheStorageError::kErrorNotFound is returned.
   // Note: This "side data" is same meaning as "metadata" in HTTPCache. We use
   // "metadata" in cache_storage.proto for the pair of headers of a request and
   // a response. To avoid the confusion we use "side data" here.
@@ -136,12 +147,15 @@ class CONTENT_EXPORT CacheStorageCache {
   // TODO(nhiroki): This function should run all operations atomically.
   // http://crbug.com/486637
   void BatchOperation(const std::vector<CacheStorageBatchOperation>& operations,
-                      ErrorCallback callback);
+                      ErrorCallback callback,
+                      BadMessageCallback bad_message_callback);
   void BatchDidGetUsageAndQuota(
       const std::vector<CacheStorageBatchOperation>& operations,
       ErrorCallback callback,
-      int64_t space_required,
-      storage::QuotaStatusCode status_code,
+      BadMessageCallback bad_message_callback,
+      uint64_t space_required,
+      uint64_t side_data_size,
+      blink::mojom::QuotaStatusCode status_code,
       int64_t usage,
       int64_t quota);
   // Callback passed to operations. If |error| is a real error, invokes
@@ -149,12 +163,13 @@ class CONTENT_EXPORT CacheStorageCache {
   // completion.
   void BatchDidOneOperation(base::OnceClosure completion_closure,
                             ErrorCallback error_callback,
-                            CacheStorageError error);
+                            blink::mojom::CacheStorageError error);
   // Callback invoked once all BatchDidOneOperation() calls have run.
   // Invokes |error_callback|.
   void BatchDidAllOperations(ErrorCallback error_callback);
 
-  // Returns CACHE_STORAGE_OK and a vector of requests if there are no errors.
+  // Returns blink::mojom::CacheStorageError::kSuccess and a vector of
+  // requests if there are no errors.
   void Keys(std::unique_ptr<ServiceWorkerFetchRequest> request,
             const CacheStorageCacheQueryParams& options,
             RequestsCallback callback);
@@ -214,8 +229,8 @@ class CONTENT_EXPORT CacheStorageCache {
   };
 
   friend class base::RefCounted<CacheStorageCache>;
-  friend class TestCacheStorageCache;
-  friend class CacheStorageCacheTest;
+  friend class cache_storage_cache_unittest::TestCacheStorageCache;
+  friend class cache_storage_cache_unittest::CacheStorageCacheTest;
 
   struct PutContext;
   struct QueryCacheContext;
@@ -224,7 +239,7 @@ class CONTENT_EXPORT CacheStorageCache {
   using QueryTypes = int32_t;
   using QueryCacheResults = std::vector<QueryCacheResult>;
   using QueryCacheCallback =
-      base::OnceCallback<void(CacheStorageError,
+      base::OnceCallback<void(blink::mojom::CacheStorageError,
                               std::unique_ptr<QueryCacheResults>)>;
   using Entries = std::vector<disk_cache::Entry*>;
   using ScopedBackendPtr = std::unique_ptr<disk_cache::Backend>;
@@ -273,8 +288,8 @@ class CONTENT_EXPORT CacheStorageCache {
                  const CacheStorageCacheQueryParams& match_params,
                  ResponseCallback callback);
   void MatchDidMatchAll(ResponseCallback callback,
-                        CacheStorageError match_all_error,
-                        std::unique_ptr<Responses> match_all_responses,
+                        blink::mojom::CacheStorageError match_all_error,
+                        std::vector<ServiceWorkerResponse> match_all_responses,
                         std::unique_ptr<BlobDataHandles> match_all_handles);
 
   // MatchAll callbacks
@@ -283,7 +298,7 @@ class CONTENT_EXPORT CacheStorageCache {
                     ResponsesCallback callback);
   void MatchAllDidQueryCache(
       ResponsesCallback callback,
-      CacheStorageError error,
+      blink::mojom::CacheStorageError error,
       std::unique_ptr<QueryCacheResults> query_cache_results);
 
   // WriteSideData callbacks
@@ -292,7 +307,7 @@ class CONTENT_EXPORT CacheStorageCache {
                                 base::Time expected_response_time,
                                 scoped_refptr<net::IOBuffer> buffer,
                                 int buf_len,
-                                storage::QuotaStatusCode status_code,
+                                blink::mojom::QuotaStatusCode status_code,
                                 int64_t usage,
                                 int64_t quota);
 
@@ -301,14 +316,15 @@ class CONTENT_EXPORT CacheStorageCache {
                          base::Time expected_response_time,
                          scoped_refptr<net::IOBuffer> buffer,
                          int buf_len);
-  void WriteSideDataDidGetUsageAndQuota(ErrorCallback callback,
-                                        const GURL& url,
-                                        base::Time expected_response_time,
-                                        scoped_refptr<net::IOBuffer> buffer,
-                                        int buf_len,
-                                        storage::QuotaStatusCode status_code,
-                                        int64_t usage,
-                                        int64_t quota);
+  void WriteSideDataDidGetUsageAndQuota(
+      ErrorCallback callback,
+      const GURL& url,
+      base::Time expected_response_time,
+      scoped_refptr<net::IOBuffer> buffer,
+      int buf_len,
+      blink::mojom::QuotaStatusCode status_code,
+      int64_t usage,
+      int64_t quota);
   void WriteSideDataDidOpenEntry(ErrorCallback callback,
                                  base::Time expected_response_time,
                                  scoped_refptr<net::IOBuffer> buffer,
@@ -336,9 +352,9 @@ class CONTENT_EXPORT CacheStorageCache {
   void Put(const CacheStorageBatchOperation& operation, ErrorCallback callback);
   void PutImpl(std::unique_ptr<PutContext> put_context);
   void PutDidDeleteEntry(std::unique_ptr<PutContext> put_context,
-                         CacheStorageError error);
+                         blink::mojom::CacheStorageError error);
   void PutDidGetUsageAndQuota(std::unique_ptr<PutContext> put_context,
-                              storage::QuotaStatusCode status_code,
+                              blink::mojom::QuotaStatusCode status_code,
                               int64_t usage,
                               int64_t quota);
   void PutDidCreateEntry(std::unique_ptr<disk_cache::Entry*> entry_ptr,
@@ -347,6 +363,8 @@ class CONTENT_EXPORT CacheStorageCache {
   void PutDidWriteHeaders(std::unique_ptr<PutContext> put_context,
                           int expected_bytes,
                           int rv);
+  void PutWriteBlobToCache(std::unique_ptr<PutContext> put_context,
+                           int disk_cache_body_index);
   void PutDidWriteBlobToCache(std::unique_ptr<PutContext> put_context,
                               BlobToDiskCacheIDMap::KeyType blob_to_cache_key,
                               disk_cache::ScopedEntryPtr entry,
@@ -356,7 +374,7 @@ class CONTENT_EXPORT CacheStorageCache {
   // manager of any change from the last report, and sets cache_size_ to the new
   // size.
   void UpdateCacheSize(base::OnceClosure callback);
-  void UpdateCacheSizeGotSize(std::unique_ptr<CacheStorageCacheHandle>,
+  void UpdateCacheSizeGotSize(CacheStorageCacheHandle,
                               base::OnceClosure callback,
                               int current_cache_size);
 
@@ -368,7 +386,7 @@ class CONTENT_EXPORT CacheStorageCache {
                   ErrorCallback callback);
   void DeleteDidQueryCache(
       ErrorCallback callback,
-      CacheStorageError error,
+      blink::mojom::CacheStorageError error,
       std::unique_ptr<QueryCacheResults> query_cache_results);
 
   // Keys callbacks.
@@ -377,7 +395,7 @@ class CONTENT_EXPORT CacheStorageCache {
                 RequestsCallback callback);
   void KeysDidQueryCache(
       RequestsCallback callback,
-      CacheStorageError error,
+      blink::mojom::CacheStorageError error,
       std::unique_ptr<QueryCacheResults> query_cache_results);
 
   void CloseImpl(base::OnceClosure callback);
@@ -400,7 +418,7 @@ class CONTENT_EXPORT CacheStorageCache {
   void PaddingDidQueryCache(
       SizePaddingCallback callback,
       int cache_size,
-      CacheStorageError error,
+      blink::mojom::CacheStorageError error,
       std::unique_ptr<QueryCacheResults> query_cache_results);
 
   // Calculate the size (but not padding) of the cache.
@@ -408,14 +426,15 @@ class CONTENT_EXPORT CacheStorageCache {
 
   void InitBackend();
   void InitDidCreateBackend(base::OnceClosure callback,
-                            CacheStorageError cache_create_error);
+                            blink::mojom::CacheStorageError cache_create_error);
   void InitGotCacheSize(base::OnceClosure callback,
-                        CacheStorageError cache_create_error,
+                        blink::mojom::CacheStorageError cache_create_error,
                         int cache_size);
-  void InitGotCacheSizeAndPadding(base::OnceClosure callback,
-                                  CacheStorageError cache_create_error,
-                                  int64_t cache_size,
-                                  int64_t cache_padding);
+  void InitGotCacheSizeAndPadding(
+      base::OnceClosure callback,
+      blink::mojom::CacheStorageError cache_create_error,
+      int64_t cache_size,
+      int64_t cache_padding);
   void DeleteBackendCompletedIO();
 
   std::unique_ptr<storage::BlobDataHandle> PopulateResponseBody(
@@ -423,7 +442,7 @@ class CONTENT_EXPORT CacheStorageCache {
       ServiceWorkerResponse* response);
 
   // Virtual for testing.
-  virtual std::unique_ptr<CacheStorageCacheHandle> CreateCacheHandle();
+  virtual CacheStorageCacheHandle CreateCacheHandle();
 
   // Be sure to check |backend_state_| before use.
   std::unique_ptr<disk_cache::Backend> backend_;

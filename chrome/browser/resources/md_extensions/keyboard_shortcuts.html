@@ -7,6 +7,7 @@
 <link rel="import" href="chrome://resources/html/md_select_css.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
+<link rel="import" href="item_behavior.html">
 <link rel="import" href="shortcut_input.html">
 
 <dom-module id="extensions-keyboard-shortcuts">
@@ -16,21 +17,25 @@
         height: 100%;
       }
 
+      .shortcut-card {
+        @apply --cr-primary-text;
+        @apply --shadow-elevation-2dp;
+        background-color: white;
+        border-radius: 2px;
+        margin: 0 auto 16px auto;
+        padding-bottom: 8px;
+        width: var(--cr-toolbar-field-width);
+      }
+
+      .shortcut-card:last-of-type {
+        margin-bottom: 64px;
+      }
+
       #container {
+        box-sizing: border-box;
         height: 100%;
         overflow: overlay;
         padding-top: 24px;
-      }
-
-      .shortcut-card {
-        @apply(--cr-primary-text);
-        @apply(--shadow-elevation-2dp);
-        background-color: white;
-        margin: 0 auto 16px auto;
-        max-width: 928px;
-        min-width: 600px;
-        padding-bottom: 8px;
-        width: 90%;
       }
 
       .command-entry {
@@ -64,7 +69,7 @@
         display: flex;
         margin-bottom: 9px;
         padding: 16px var(--cr-section-padding);
-        @apply(--cr-title-text);
+        @apply --cr-title-text;
       }
 
       .icon {
@@ -84,15 +89,19 @@
       <template is="dom-repeat" items="[[calculateShownItems_(items.*)]]">
         <div class="shortcut-card">
           <div class="card-title">
-            <img class="icon" src="[[item.iconUrl]]">
+            <img class="icon" src="[[item.iconUrl]]"
+                alt$="[[appOrExtension(
+                    item.type,
+                    '$i18nPolymer{appIcon}',
+                    '$i18nPolymer{extensionIcon}')]]">
             <span>[[item.name]]</span>
           </div>
           <div class="card-controls">
             <template is="dom-repeat" items="[[item.commands]]" as="command">
               <div class="command-entry" command="[[command]]">
                 <span class="command-name">[[command.description]]</span>
-                <extensions-shortcut-input item="[[item.id]]"
-                    shortcut="[[command.keybinding]]"
+                <extensions-shortcut-input delegate="[[delegate]]"
+                    item="[[item.id]]" shortcut="[[command.keybinding]]"
                     command-name="[[command.name]]">
                 </extensions-shortcut-input>
                 <div class="md-select-wrapper">

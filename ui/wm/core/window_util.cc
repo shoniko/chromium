@@ -117,6 +117,27 @@ void SetWindowFullscreen(aura::Window* window, bool fullscreen) {
   }
 }
 
+bool WindowStateIs(aura::Window* window, ui::WindowShowState state) {
+  return window->GetProperty(aura::client::kShowStateKey) == state;
+}
+
+void SetWindowState(aura::Window* window, ui::WindowShowState state) {
+  window->SetProperty(aura::client::kShowStateKey, state);
+}
+
+void Unminimize(aura::Window* window) {
+  DCHECK_EQ(window->GetProperty(aura::client::kShowStateKey),
+            ui::SHOW_STATE_MINIMIZED);
+  window->SetProperty(
+      aura::client::kShowStateKey,
+      window->GetProperty(aura::client::kPreMinimizedShowStateKey));
+  // Clear the property only when the window is actually unminimized.
+  if (window->GetProperty(aura::client::kShowStateKey) !=
+      ui::SHOW_STATE_MINIMIZED) {
+    window->ClearProperty(aura::client::kPreMinimizedShowStateKey);
+  }
+}
+
 aura::Window* GetActivatableWindow(aura::Window* window) {
   ActivationClient* client = GetActivationClient(window->GetRootWindow());
   return client ? client->GetActivatableWindow(window) : NULL;

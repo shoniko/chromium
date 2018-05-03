@@ -45,8 +45,8 @@
 #include "bindings/core/v8/serialization/Transferables.h"
 #include "bindings/core/v8/serialization/UnpackedSerializedScriptValue.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/dom/MessagePort.h"
 #include "core/imagebitmap/ImageBitmap.h"
+#include "core/messaging/MessagePort.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "core/typed_arrays/DOMSharedArrayBuffer.h"
 #include "platform/SharedBuffer.h"
@@ -58,7 +58,6 @@
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/ByteOrder.h"
 #include "platform/wtf/CheckedNumeric.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/dtoa/utils.h"
 #include "platform/wtf/text/StringBuffer.h"
@@ -67,7 +66,7 @@
 
 namespace blink {
 
-RefPtr<SerializedScriptValue> SerializedScriptValue::Serialize(
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Serialize(
     v8::Isolate* isolate,
     v8::Local<v8::Value> value,
     const SerializeOptions& options,
@@ -76,23 +75,23 @@ RefPtr<SerializedScriptValue> SerializedScriptValue::Serialize(
                                                          options, exception);
 }
 
-RefPtr<SerializedScriptValue>
+scoped_refptr<SerializedScriptValue>
 SerializedScriptValue::SerializeAndSwallowExceptions(
     v8::Isolate* isolate,
     v8::Local<v8::Value> value) {
   DummyExceptionStateForTesting exception_state;
-  RefPtr<SerializedScriptValue> serialized =
+  scoped_refptr<SerializedScriptValue> serialized =
       Serialize(isolate, value, SerializeOptions(), exception_state);
   if (exception_state.HadException())
     return NullValue();
   return serialized;
 }
 
-RefPtr<SerializedScriptValue> SerializedScriptValue::Create() {
-  return WTF::AdoptRef(new SerializedScriptValue);
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create() {
+  return base::AdoptRef(new SerializedScriptValue);
 }
 
-RefPtr<SerializedScriptValue> SerializedScriptValue::Create(
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
     const String& data) {
   CheckedNumeric<size_t> data_buffer_size = data.length();
   data_buffer_size *= 2;
@@ -102,7 +101,7 @@ RefPtr<SerializedScriptValue> SerializedScriptValue::Create(
   DataBufferPtr data_buffer = AllocateBuffer(data_buffer_size.ValueOrDie());
   data.CopyTo(reinterpret_cast<UChar*>(data_buffer.get()), 0, data.length());
 
-  return WTF::AdoptRef(new SerializedScriptValue(
+  return base::AdoptRef(new SerializedScriptValue(
       std::move(data_buffer), data_buffer_size.ValueOrDie()));
 }
 
@@ -217,8 +216,9 @@ static void SwapWiredDataIfNeeded(uint8_t* buffer, size_t buffer_size) {
     uchars[i] = ntohs(uchars[i]);
 }
 
-RefPtr<SerializedScriptValue> SerializedScriptValue::Create(const char* data,
-                                                            size_t length) {
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
+    const char* data,
+    size_t length) {
   if (!data)
     return Create();
 
@@ -226,12 +226,12 @@ RefPtr<SerializedScriptValue> SerializedScriptValue::Create(const char* data,
   std::copy(data, data + length, data_buffer.get());
   SwapWiredDataIfNeeded(data_buffer.get(), length);
 
-  return WTF::AdoptRef(
+  return base::AdoptRef(
       new SerializedScriptValue(std::move(data_buffer), length));
 }
 
-RefPtr<SerializedScriptValue> SerializedScriptValue::Create(
-    RefPtr<const SharedBuffer> buffer) {
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
+    scoped_refptr<const SharedBuffer> buffer) {
   if (!buffer)
     return Create();
 
@@ -245,7 +245,7 @@ RefPtr<SerializedScriptValue> SerializedScriptValue::Create(
   });
   SwapWiredDataIfNeeded(data_buffer.get(), buffer->size());
 
-  return WTF::AdoptRef(
+  return base::AdoptRef(
       new SerializedScriptValue(std::move(data_buffer), buffer->size()));
 }
 
@@ -277,7 +277,7 @@ SerializedScriptValue::~SerializedScriptValue() {
   }
 }
 
-RefPtr<SerializedScriptValue> SerializedScriptValue::NullValue() {
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::NullValue() {
   // The format here may fall a bit out of date, because we support
   // deserializing SSVs written by old browser versions.
   static const uint8_t kNullData[] = {0xFF, 17, 0xFF, 13, '0', 0x00};
@@ -295,19 +295,6 @@ String SerializedScriptValue::ToWireString() const {
   if (string_size_bytes > data_buffer_size_)
     reinterpret_cast<char*>(destination)[string_size_bytes - 1] = '\0';
   return wire_string;
-}
-
-void SerializedScriptValue::ToWireBytes(Vector<char>& result) const {
-  DCHECK(result.IsEmpty());
-
-  size_t result_size = (data_buffer_size_ + 1) & ~1;
-  result.resize(result_size);
-  memcpy(result.data(), data_buffer_.get(), data_buffer_size_);
-
-  if (result_size > data_buffer_size_) {
-    DCHECK_EQ(result_size, data_buffer_size_ + 1);
-    result[data_buffer_size_] = 0;
-  }
 }
 
 SerializedScriptValue::ImageBitmapContentsArray
@@ -392,7 +379,7 @@ v8::Local<v8::Value> SerializedScriptValue::Deserialize(
 
 // static
 UnpackedSerializedScriptValue* SerializedScriptValue::Unpack(
-    RefPtr<SerializedScriptValue> value) {
+    scoped_refptr<SerializedScriptValue> value) {
   if (!value)
     return nullptr;
 #if DCHECK_IS_ON()
@@ -416,15 +403,16 @@ bool SerializedScriptValue::ExtractTransferables(
   if (value.IsEmpty() || value->IsUndefined())
     return true;
 
-  Vector<v8::Local<v8::Value>> transferable_array =
-      NativeValueTraits<IDLSequence<v8::Local<v8::Value>>>::NativeValue(
-          isolate, value, exception_state);
+  Vector<ScriptValue> transferable_array =
+      NativeValueTraits<IDLSequence<ScriptValue>>::NativeValue(isolate, value,
+                                                               exception_state);
   if (exception_state.HadException())
     return false;
 
   // Validate the passed array of transferables.
   uint32_t i = 0;
-  for (const auto& transferable_object : transferable_array) {
+  for (const auto& script_value : transferable_array) {
+    v8::Local<v8::Value> transferable_object = script_value.V8Value();
     // Validation of non-null objects, per HTML5 spec 10.3.3.
     if (IsUndefinedOrNull(transferable_object)) {
       exception_state.ThrowTypeError(

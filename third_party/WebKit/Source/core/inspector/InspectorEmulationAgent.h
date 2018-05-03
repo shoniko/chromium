@@ -5,10 +5,13 @@
 #ifndef InspectorEmulationAgent_h
 #define InspectorEmulationAgent_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/Emulation.h"
+#include "core/loader/FrameLoaderTypes.h"
 #include "platform/scheduler/renderer/web_view_scheduler.h"
+#include "platform/wtf/Optional.h"
 #include "platform/wtf/Time.h"
 
 namespace blink {
@@ -25,17 +28,8 @@ class RGBA;
 class CORE_EXPORT InspectorEmulationAgent final
     : public InspectorBaseAgent<protocol::Emulation::Metainfo>,
       public WebViewScheduler::VirtualTimeObserver {
-  WTF_MAKE_NONCOPYABLE(InspectorEmulationAgent);
-
  public:
-  class Client {
-   public:
-    virtual ~Client() {}
-
-    virtual void SetCPUThrottlingRate(double rate) {}
-  };
-
-  static InspectorEmulationAgent* Create(WebLocalFrameImpl*, Client*);
+  explicit InspectorEmulationAgent(WebLocalFrameImpl*);
   ~InspectorEmulationAgent() override;
 
   // protocol::Dispatcher::EmulationCommandHandler implementation.
@@ -49,11 +43,30 @@ class CORE_EXPORT InspectorEmulationAgent final
   protocol::Response setCPUThrottlingRate(double) override;
   protocol::Response setVirtualTimePolicy(
       const String& policy,
-      protocol::Maybe<int> virtual_time_budget_ms,
-      protocol::Maybe<int> max_virtual_time_task_starvation_count) override;
+      protocol::Maybe<double> virtual_time_budget_ms,
+      protocol::Maybe<int> max_virtual_time_task_starvation_count,
+      protocol::Maybe<bool> wait_for_navigation,
+      double* virtual_time_base_ms) override;
   protocol::Response setNavigatorOverrides(const String& platform) override;
   protocol::Response setDefaultBackgroundColorOverride(
       protocol::Maybe<protocol::DOM::RGBA>) override;
+  protocol::Response setDeviceMetricsOverride(
+      int width,
+      int height,
+      double device_scale_factor,
+      bool mobile,
+      protocol::Maybe<double> scale,
+      protocol::Maybe<int> screen_width,
+      protocol::Maybe<int> screen_height,
+      protocol::Maybe<int> position_x,
+      protocol::Maybe<int> position_y,
+      protocol::Maybe<bool> dont_set_visible_size,
+      protocol::Maybe<protocol::Emulation::ScreenOrientation>,
+      protocol::Maybe<protocol::Page::Viewport>) override;
+  protocol::Response clearDeviceMetricsOverride() override;
+
+  // InspectorInstrumentation API
+  void FrameStartedLoading(LocalFrame*, FrameLoadType);
 
   // InspectorBaseAgent overrides.
   protocol::Response disable() override;
@@ -66,13 +79,25 @@ class CORE_EXPORT InspectorEmulationAgent final
   void Trace(blink::Visitor*) override;
 
  private:
-  InspectorEmulationAgent(WebLocalFrameImpl*, Client*);
   WebViewImpl* GetWebViewImpl();
   void VirtualTimeBudgetExpired();
 
+  struct PendingVirtualTimePolicy {
+    WebViewScheduler::VirtualTimePolicy policy;
+    WTF::Optional<double> virtual_time_budget_ms;
+    WTF::Optional<int> max_virtual_time_task_starvation_count;
+  };
+  WTF::TimeTicks ApplyVirtualTimePolicy(
+      const PendingVirtualTimePolicy& new_policy);
+
   Member<WebLocalFrameImpl> web_local_frame_;
-  Client* client_;
-  bool virtual_time_observer_registered_;
+  bool virtual_time_setup_ = false;
+
+  // Supports a virtual time policy change scheduled to occur after any
+  // navigation has started.
+  WTF::Optional<PendingVirtualTimePolicy> pending_virtual_time_policy_;
+
+  DISALLOW_COPY_AND_ASSIGN(InspectorEmulationAgent);
 };
 
 }  // namespace blink

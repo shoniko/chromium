@@ -9,15 +9,32 @@
 
 /* eslint-disable no-console */
 
-/** @type {!{logToStderr: function(), notifyDone: function()}|undefined} */
+/** @type {!{logToStderr: function(), navigateSecondaryWindow: function(string), notifyDone: function()}|undefined} */
 self.testRunner;
 
-TestRunner.executeTestScript = function() {
+/**
+ * Only tests in /LayoutTests/http/tests/devtools/startup/ need to call
+ * this method because these tests need certain activities to be exercised
+ * in the inspected page prior to the DevTools session.
+ * @param {string} path
+ * @return {!Promise<undefined>}
+ */
+TestRunner.setupStartupTest = function(path) {
+  var absoluteURL = TestRunner.url(path);
+  self.testRunner.navigateSecondaryWindow(absoluteURL);
+  return new Promise(f => TestRunner._startupTestSetupFinished = () => {
+    TestRunner._initializeTargetForStartupTest();
+    delete TestRunner._startupTestSetupFinished;
+    f();
+  });
+};
+
+TestRunner._executeTestScript = function() {
   var testScriptURL = /** @type {string} */ (Runtime.queryParam('test'));
   fetch(testScriptURL)
       .then(data => data.text())
       .then(testScript => {
-        if (!self.testRunner || Runtime.queryParam('debugFrontend')) {
+        if (TestRunner._isDebugTest()) {
           TestRunner.addResult = console.log;
           TestRunner.completeTest = () => console.log('Test completed');
 
@@ -28,27 +45,28 @@ TestRunner.executeTestScript = function() {
             self.eval(`function test(){${testScript}}\n//# sourceURL=${testScriptURL}`);
           return;
         }
-        eval(`(function test(){${testScript}})()\n//# sourceURL=${testScriptURL}`);
+
+        // Convert the test script into an expression (if needed)
+        testScript = testScript.trimRight();
+        if (testScript.endsWith(';'))
+          testScript = testScript.slice(0, testScript.length - 1);
+
+        (async function() {
+          try {
+            await eval(testScript + `\n//# sourceURL=${testScriptURL}`);
+          } catch (err) {
+            TestRunner.addResult('TEST ENDED EARLY DUE TO UNCAUGHT ERROR:');
+            TestRunner.addResult(err && err.stack || err);
+            TestRunner.addResult('=== DO NOT COMMIT THIS INTO -expected.txt ===');
+            TestRunner.completeTest();
+          }
+        })();
       })
       .catch(error => {
         TestRunner.addResult(`Unable to execute test script because of error: ${error}`);
         TestRunner.completeTest();
       });
 };
-
-/**
- * Note: This is only needed to debug a test in release DevTools.
- * Usage: wrap the entire test with debugTest() and use dtrun test --debug-release
- * @param {!Function} testFunction
- * @return {!Function}
- */
-function debugReleaseTest(testFunction) {
-  return testRunner => {
-    TestRunner.addResult = console.log;
-    TestRunner.completeTest = () => console.log('Test completed');
-    window.test = () => testFunction(testRunner);
-  };
-}
 
 /** @type {!Array<string>} */
 TestRunner._results = [];
@@ -336,14 +354,33 @@ TestRunner._setupTestHelpers = function(target) {
   TestRunner.mainTarget = target;
 };
 
+/**
+ * @param {string} code
+ * @return {!Promise<*>}
+ */
+TestRunner.evaluateInPageRemoteObject = async function(code) {
+  var response = await TestRunner._evaluateInPage(code);
+  return TestRunner.runtimeModel.createRemoteObject(response.result);
+};
+
+/**
+ * @param {string} code
+ * @param {function(*, !Protocol.Runtime.ExceptionDetails=):void} callback
+ */
+TestRunner.evaluateInPage = async function(code, callback) {
+  var response = await TestRunner._evaluateInPage(code);
+  TestRunner.safeWrap(callback)(response.result.value, response.exceptionDetails);
+};
+
 /** @type {number} */
 TestRunner._evaluateInPageCounter = 0;
 
 /**
- * @param {string|!Function} code
- * @param {!Function} callback
+ * @param {string} code
+ * @return {!Promise<{response: !SDK.RemoteObject,
+ *   exceptionDetails: (!Protocol.Runtime.ExceptionDetails|undefined)}>}
  */
-TestRunner.evaluateInPage = async function(code, callback) {
+TestRunner._evaluateInPage = async function(code) {
   var lines = new Error().stack.split('at ');
 
   // Handles cases where the function is safe wrapped
@@ -359,22 +396,25 @@ TestRunner.evaluateInPage = async function(code, callback) {
   if (code.indexOf('sourceURL=') === -1)
     code += `//# sourceURL=${sourceURL}`;
   var response = await TestRunner.RuntimeAgent.invoke_evaluate({expression: code, objectGroup: 'console'});
-  if (!response[Protocol.Error]) {
-    TestRunner.safeWrap(callback)(
-        TestRunner.runtimeModel.createRemoteObject(response.result), response.exceptionDetails);
+  var error = response[Protocol.Error];
+  if (error) {
+    TestRunner.addResult('Error: ' + error);
+    TestRunner.completeTest();
+    return;
   }
+  return response;
 };
 
 /**
  * Doesn't append sourceURL to snippets evaluated in inspected page
  * to avoid churning test expectations
  * @param {string} code
- * @return {!Promise<undefined>}
+ * @return {!Promise<*>}
  */
 TestRunner.evaluateInPageAnonymously = async function(code) {
   var response = await TestRunner.RuntimeAgent.invoke_evaluate({expression: code, objectGroup: 'console'});
   if (!response[Protocol.Error])
-    return Promise.resolve();
+    return response.result.value;
   TestRunner.addResult(
       'Error: ' +
       (response.exceptionDetails && response.exceptionDetails.text || 'exception from evaluateInPageAnonymously.'));
@@ -382,8 +422,8 @@ TestRunner.evaluateInPageAnonymously = async function(code) {
 };
 
 /**
- * @param {string|!Function} code
- * @return {!Promise<!SDK.RemoteObject>}
+ * @param {string} code
+ * @return {!Promise<*>}
  */
 TestRunner.evaluateInPagePromise = function(code) {
   return new Promise(success => TestRunner.evaluateInPage(code, success));
@@ -391,7 +431,7 @@ TestRunner.evaluateInPagePromise = function(code) {
 
 /**
  * @param {string} code
- * @return {!Promise<!SDK.RemoteObject|undefined>}
+ * @return {!Promise<*>}
  */
 TestRunner.evaluateInPageAsync = async function(code) {
   var response = await TestRunner.RuntimeAgent.invoke_evaluate(
@@ -399,7 +439,7 @@ TestRunner.evaluateInPageAsync = async function(code) {
 
   var error = response[Protocol.Error];
   if (!error && !response.exceptionDetails)
-    return TestRunner.runtimeModel.createRemoteObject(response.result);
+    return response.result.value;
   TestRunner.addResult(
       'Error: ' +
       (error || response.exceptionDetails && response.exceptionDetails.text || 'exception while evaluation in page.'));
@@ -409,7 +449,7 @@ TestRunner.evaluateInPageAsync = async function(code) {
 /**
  * @param {string} name
  * @param {!Array<*>} args
- * @return {!Promise<!SDK.RemoteObject|undefined>}
+ * @return {!Promise<*>}
  */
 TestRunner.callFunctionInPageAsync = function(name, args) {
   args = args || [];
@@ -429,7 +469,7 @@ TestRunner.evaluateInPageWithTimeout = function(code) {
  * @param {function(*):void} callback
  */
 TestRunner.evaluateFunctionInOverlay = function(func, callback) {
-  var expression = 'testRunner.evaluateInWebInspectorOverlay("(" + ' + func + ' + ")()")';
+  var expression = 'internals.evaluateInInspectorOverlay("(" + ' + func + ' + ")()")';
   var mainContext = TestRunner.runtimeModel.executionContexts()[0];
   mainContext
       .evaluate(
@@ -468,19 +508,25 @@ TestRunner.deprecatedRunAfterPendingDispatches = function(callback) {
  * are relative to the test file and not the inspected page
  * (i.e. http/tests/devtools/resources/inspected-page.html).
  * @param {string} html
- * @return {!Promise<undefined>}
+ * @return {!Promise<*>}
  */
 TestRunner.loadHTML = function(html) {
-  var testPath = TestRunner.url();
-  if (!html.includes('<base'))
-    html = `<base href="${testPath}">` + html;
+  if (!html.includes('<base')) {
+    // <!DOCTYPE...> tag needs to be first
+    var doctypeRegex = /(<!DOCTYPE.*?>)/;
+    var baseTag = `<base href="${TestRunner.url()}">`;
+    if (html.match(doctypeRegex))
+      html = html.replace(doctypeRegex, '$1' + baseTag);
+    else
+      html = baseTag + html;
+  }
   html = html.replace(/'/g, '\\\'').replace(/\n/g, '\\n');
-  return TestRunner.evaluateInPageAnonymously(`document.write('${html}');document.close();`);
+  return TestRunner.evaluateInPageAnonymously(`document.write(\`${html}\`);document.close();`);
 };
 
 /**
  * @param {string} path
- * @return {!Promise<!SDK.RemoteObject|undefined>}
+ * @return {!Promise<*>}
  */
 TestRunner.addScriptTag = function(path) {
   return TestRunner.evaluateInPageAsync(`
@@ -495,7 +541,7 @@ TestRunner.addScriptTag = function(path) {
 
 /**
  * @param {string} path
- * @return {!Promise<!SDK.RemoteObject|undefined>}
+ * @return {!Promise<*>}
  */
 TestRunner.addStylesheetTag = function(path) {
   return TestRunner.evaluateInPageAsync(`
@@ -509,7 +555,8 @@ TestRunner.addStylesheetTag = function(path) {
       var resolve;
       var promise = new Promise(r => resolve = r);
       function onload() {
-        // Force style recalc
+        // TODO(chenwilliam): It shouldn't be necessary to force
+        // style recalc here but some tests rely on it.
         window.getComputedStyle(document.body).color;
         resolve();
       }
@@ -517,10 +564,28 @@ TestRunner.addStylesheetTag = function(path) {
     })();
   `);
 };
+
+/**
+ * @param {string} path
+ * @return {!Promise<*>}
+ */
+TestRunner.addHTMLImport = function(path) {
+  return TestRunner.evaluateInPageAsync(`
+    (function(){
+      var link = document.createElement('link');
+      link.rel = 'import';
+      link.href = '${path}';
+      var promise = new Promise(r => link.onload = r);
+      document.body.append(link);
+      return promise;
+    })();
+  `);
+};
+
 /**
  * @param {string} path
  * @param {!Object|undefined} options
- * @return {!Promise<!SDK.RemoteObject|undefined>}
+ * @return {!Promise<*>}
  */
 TestRunner.addIframe = function(path, options = {}) {
   options.id = options.id || '';
@@ -541,9 +606,20 @@ TestRunner.addIframe = function(path, options = {}) {
 TestRunner._pendingInits = 0;
 
 /**
+ * The old test framework executed certain snippets in the inspected page
+ * context as part of loading a test helper file.
+ *
+ * This is deprecated because:
+ * 1) it makes the testing API less intuitive (need to read the various *TestRunner.js
+ * files to know which helper functions are available in the inspected page).
+ * 2) it complicates the test framework's module loading process.
+ *
+ * In most cases, this is used to set up inspected page functions (e.g. makeSimpleXHR)
+ * which should become a *TestRunner method (e.g. NetworkTestRunner.makeSimpleXHR)
+ * that calls evaluateInPageAnonymously(...).
  * @param {string} code
  */
-TestRunner.initAsync = async function(code) {
+TestRunner.deprecatedInitAsync = async function(code) {
   TestRunner._pendingInits++;
   await TestRunner.RuntimeAgent.invoke_evaluate({expression: code, objectGroup: 'console'});
   TestRunner._pendingInits--;
@@ -880,14 +956,22 @@ TestRunner._pageNavigated = function() {
  * @param {function():void} callback
  */
 TestRunner.hardReloadPage = function(callback) {
-  TestRunner._innerReloadPage(true, callback);
+  TestRunner._innerReloadPage(true, undefined, callback);
 };
 
 /**
  * @param {function():void} callback
  */
 TestRunner.reloadPage = function(callback) {
-  TestRunner._innerReloadPage(false, callback);
+  TestRunner._innerReloadPage(false, undefined, callback);
+};
+
+/**
+ * @param {(string|undefined)} injectedScript
+ * @param {function():void} callback
+ */
+TestRunner.reloadPageWithInjectedScript = function(injectedScript, callback) {
+  TestRunner._innerReloadPage(false, injectedScript, callback);
 };
 
 /**
@@ -899,12 +983,13 @@ TestRunner.reloadPagePromise = function() {
 
 /**
  * @param {boolean} hardReload
+ * @param {(string|undefined)} injectedScript
  * @param {function():void} callback
  */
-TestRunner._innerReloadPage = function(hardReload, callback) {
+TestRunner._innerReloadPage = function(hardReload, injectedScript, callback) {
   TestRunner._pageLoadedCallback = TestRunner.safeWrap(callback);
   TestRunner.resourceTreeModel.addEventListener(SDK.ResourceTreeModel.Events.Load, TestRunner.pageLoaded);
-  TestRunner.resourceTreeModel.reloadPage(hardReload);
+  TestRunner.resourceTreeModel.reloadPage(hardReload, injectedScript);
 };
 
 TestRunner.pageLoaded = function() {
@@ -913,10 +998,23 @@ TestRunner.pageLoaded = function() {
   TestRunner._handlePageLoaded();
 };
 
-TestRunner._handlePageLoaded = function() {
+TestRunner._handlePageLoaded = async function() {
+  await TestRunner.waitForExecutionContext(/** @type {!SDK.RuntimeModel} */ (TestRunner.runtimeModel));
   if (TestRunner._pageLoadedCallback) {
     var callback = TestRunner._pageLoadedCallback;
     delete TestRunner._pageLoadedCallback;
+    callback();
+  }
+};
+
+/**
+ * @param {function():void} callback
+ */
+TestRunner.waitForPageLoad = function(callback) {
+  TestRunner.resourceTreeModel.addEventListener(SDK.ResourceTreeModel.Events.Load, onLoaded);
+
+  function onLoaded() {
+    TestRunner.resourceTreeModel.removeEventListener(SDK.ResourceTreeModel.Events.Load, onLoaded);
     callback();
   }
 };
@@ -1187,10 +1285,7 @@ TestRunner.waitForUISourceCodeRemoved = function(callback) {
  * @return {string}
  */
 TestRunner.url = function(url = '') {
-  // TODO(chenwilliam): only new-style tests will have a test queryParam;
-  // remove inspectedURL() after all tests have been migrated to new test framework.
-  var testScriptURL =
-      /** @type {string} */ (Runtime.queryParam('test')) || SDK.targetManager.mainTarget().inspectedURL();
+  var testScriptURL = /** @type {string} */ (Runtime.queryParam('test'));
 
   // This handles relative (e.g. "../file"), root (e.g. "/resource"),
   // absolute (e.g. "http://", "data:") and empty (e.g. "") paths
@@ -1235,7 +1330,9 @@ TestRunner._consoleOutputHook = function(messageType) {
  * messages are shown in the right places, instead of having all of the console
  * messages printed at the top of the test expectation file (default behavior).
  */
-TestRunner.printDevToolsConsole = function() {
+TestRunner._printDevToolsConsole = function() {
+  if (TestRunner._isDebugTest())
+    return;
   console.log = TestRunner._consoleOutputHook.bind(TestRunner, 'log');
   console.error = TestRunner._consoleOutputHook.bind(TestRunner, 'error');
   console.info = TestRunner._consoleOutputHook.bind(TestRunner, 'info');
@@ -1245,8 +1342,8 @@ TestRunner.printDevToolsConsole = function() {
  * @param {string} querySelector
  */
 TestRunner.dumpInspectedPageElementText = async function(querySelector) {
-  var remoteObject = await TestRunner.evaluateInPageAsync(`document.querySelector('${querySelector}').innerText`);
-  TestRunner.addResult(remoteObject.value);
+  var value = await TestRunner.evaluateInPageAsync(`document.querySelector('${querySelector}').innerText`);
+  TestRunner.addResult(value);
 };
 
 /** @type {boolean} */
@@ -1255,7 +1352,7 @@ TestRunner._startedTest = false;
 /**
  * @implements {SDK.TargetManager.Observer}
  */
-TestRunner.TestObserver = class {
+TestRunner._TestObserver = class {
   /**
    * @param {!SDK.Target} target
    * @override
@@ -1265,7 +1362,16 @@ TestRunner.TestObserver = class {
       return;
     TestRunner._startedTest = true;
     TestRunner._setupTestHelpers(target);
-    TestRunner.runTest();
+    if (TestRunner._isStartupTest())
+      return;
+    TestRunner
+        .loadHTML(`
+      <head>
+        <base href="${TestRunner.url()}">
+      </head>
+      <body>
+      </body>
+    `).then(() => TestRunner._executeTestScript());
   }
 
   /**
@@ -1276,34 +1382,49 @@ TestRunner.TestObserver = class {
   }
 };
 
-TestRunner.runTest = async function() {
-  var testPath = TestRunner.url();
-  await TestRunner.loadHTML(`
-    <head>
-      <base href="${testPath}">
-    </head>
-    <body>
-    </body>
-  `);
-  TestRunner.executeTestScript();
+/**
+ * @return {boolean}
+ */
+TestRunner._isDebugTest = function() {
+  return !self.testRunner || !!Runtime.queryParam('debugFrontend');
 };
 
-// Old-style tests start test using inspector-test.js
-if (Runtime.queryParam('test'))
-  SDK.targetManager.observeTargets(new TestRunner.TestObserver());
-
-(function() {
 /**
+ * @return {boolean}
+ */
+TestRunner._isStartupTest = function() {
+  return Runtime.queryParam('test').includes('/startup/');
+};
+
+(async function() {
+  /**
    * @param {string|!Event} message
    * @param {string} source
    * @param {number} lineno
    * @param {number} colno
    * @param {!Error} error
    */
-function completeTestOnError(message, source, lineno, colno, error) {
-  TestRunner.addResult('TEST ENDED IN ERROR: ' + error.stack);
-  TestRunner.completeTest();
-}
+  function completeTestOnError(message, source, lineno, colno, error) {
+    TestRunner.addResult('TEST ENDED IN ERROR: ' + error.stack);
+    TestRunner.completeTest();
+  }
 
-self['onerror'] = completeTestOnError;
+  self['onerror'] = completeTestOnError;
+  TestRunner._printDevToolsConsole();
+  SDK.targetManager.observeTargets(new TestRunner._TestObserver());
+  if (!TestRunner._isStartupTest())
+    return;
+  /**
+   * Startup test initialization:
+   * 1. Wait for DevTools app UI to load
+   * 2. Execute test script, the first line will be TestRunner.setupStartupTest(...) which:
+   *    A. Navigate secondary window
+   *    B. After preconditions occur, secondary window calls testRunner.inspectSecondaryWindow()
+   * 3. Backend executes TestRunner._startupTestSetupFinished() which calls _initializeTarget()
+   */
+  TestRunner._initializeTargetForStartupTest =
+      TestRunner.override(Main.Main._instanceForTest, '_initializeTarget', () => undefined)
+          .bind(Main.Main._instanceForTest);
+  await TestRunner.addSnifferPromise(Main.Main._instanceForTest, '_showAppUI');
+  TestRunner._executeTestScript();
 })();

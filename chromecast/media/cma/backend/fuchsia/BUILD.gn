@@ -8,7 +8,7 @@ import("//testing/test.gni")
 
 assert(is_fuchsia)
 
-source_set("fuchsia") {
+cast_source_set("fuchsia") {
   sources = [
     "cast_media_shlib_fuchsia.cc",
     "fuchsia_volume_control.cc",
@@ -24,9 +24,11 @@ source_set("fuchsia") {
     "//chromecast/public/media",
     "//media",
   ]
+
+  libs = [ "media_client" ]
 }
 
-source_set("unit_tests") {
+cast_source_set("unit_tests") {
   testonly = true
   sources = [
     "mixer_output_stream_fuchsia_unittest.cc",

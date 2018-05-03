@@ -102,6 +102,7 @@
 <translation id="3106379468611574572">คอมพิวเตอร์ระยะไกลไม่ตอบสนองคำขอการเชื่อมต่อ โปรดตรวจยืนยันว่าคอมพิวเตอร์ดังกล่าวออนไลน์อยู่และลองอีกครั้ง</translation>
 <translation id="310979712355504754">ลบทั้งหมด</translation>
 <translation id="3150823315463303127">โฮสต์ไม่สามารถอ่านนโยบายได้</translation>
+<translation id="3171922709365450819">ไคลเอ็นต์นี้ไม่รองรับอุปกรณ์นี้เพราะต้องมีการตรวจสอบสิทธิ์จากบุคคลที่สาม</translation>
 <translation id="3194245623920924351">Chrome Remote Desktop</translation>
 <translation id="3197730452537982411">Remote Desktop</translation>
 <translation id="324272851072175193">ส่งอีเมลวิธีการเหล่านี้</translation>
@@ -155,7 +156,7 @@
 <translation id="4430915108080446161">กำลังสร้างรหัสการเข้าถึง...</translation>
 <translation id="4472575034687746823">เริ่มต้น</translation>
 <translation id="4481276415609939789">คุณไม่มีคอมพิวเตอร์ที่ได้ลงทะเบียนไว้ หากต้องการเปิดใช้งานการเชื่อมต่อระยะไกลกับคอมพิวเตอร์ ให้ติดตั้ง Chromoting ที่คอมพิวเตอร์ที่ต้องการใช้งานและคลิก "<ph name="BUTTON_NAME" />"</translation>
-<translation id="4513946894732546136">ความคิดเห็น</translation>
+<translation id="4513946894732546136">ข้อเสนอแนะ</translation>
 <translation id="4517233780764084060">หมายเหตุ: เพื่อให้มั่นใจว่าทุกแป้นพิมพ์ลัดพร้อมใช้งาน คุณสามารถกำหนดค่า Chromoting เป็น "เปิดเป็นหน้าต่าง"</translation>
 <translation id="4563926062592110512">ไคลเอ็นต์ที่ยกเลิกการเชื่อมต่อ: <ph name="CLIENT_USERNAME" /></translation>
 <translation id="4572065712096155137">เข้าถึง</translation>
@@ -337,6 +338,7 @@
 <translation id="8998327464021325874">Chrome Remote Desktop Host Controller</translation>
 <translation id="9016232822027372900">ยังต้องการเชื่อมต่อ</translation>
 <translation id="906458777597946297">ขยายหน้าต่างเต็มหน้าจอ</translation>
+<translation id="9111855907838866522">คุณเชื่อมต่อกับอุปกรณ์ระยะไกลแล้ว โปรดใช้ 4 นิ้วแตะหน้าจอเพื่อเปิดเมนู</translation>
 <translation id="9126115402994542723">อย่าขอ PIN อีกเมื่อเชื่อมต่อไปยังโฮสต์นี้จากอุปกรณ์เครื่องนี้</translation>
 <translation id="9149580767411232853">แสดงเดสก์ท็อประยะไกลทั้งหมด</translation>
 <translation id="9149992051684092333">หากต้องการเริ่มการแชร์เดสก์ท็อปของคุณ โปรดให้รหัสการเข้าถึงที่ด้านล่างนี้แก่บุคคลที่จะให้ความช่วยเหลือคุณ</translation>

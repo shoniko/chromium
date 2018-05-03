@@ -18,13 +18,13 @@ void AppCacheUpdateJob::UpdateURLLoaderRequest::Start() {
   if (AppCacheRequestHandler::IsRunningInTests())
     return;
 
-  mojom::URLLoaderClientPtr client;
+  network::mojom::URLLoaderClientPtr client;
   client_binding_.Bind(mojo::MakeRequest(&client));
 
-  DCHECK(loader_factory_getter_->GetNetworkFactory()->get());
-  loader_factory_getter_->GetNetworkFactory()->get()->CreateLoaderAndStart(
-      mojo::MakeRequest(&url_loader_), -1, -1, mojom::kURLLoadOptionNone,
-      request_, std::move(client),
+  DCHECK(loader_factory_getter_->GetNetworkFactory());
+  loader_factory_getter_->GetNetworkFactory()->CreateLoaderAndStart(
+      mojo::MakeRequest(&url_loader_), -1, -1,
+      network::mojom::kURLLoadOptionNone, request_, std::move(client),
       net::MutableNetworkTrafficAnnotationTag(GetTrafficAnnotation()));
 }
 
@@ -88,16 +88,16 @@ int AppCacheUpdateJob::UpdateURLLoaderRequest::Cancel() {
   url_loader_ = nullptr;
   handle_watcher_.Cancel();
   handle_.reset();
-  response_ = ResourceResponseHead();
+  response_ = network::ResourceResponseHead();
   http_response_info_.reset(nullptr);
   read_requested_ = false;
   return 0;
 }
 
 void AppCacheUpdateJob::UpdateURLLoaderRequest::OnReceiveResponse(
-    const ResourceResponseHead& response_head,
+    const network::ResourceResponseHead& response_head,
     const base::Optional<net::SSLInfo>& ssl_info,
-    mojom::DownloadedTempFilePtr downloaded_file) {
+    network::mojom::DownloadedTempFilePtr downloaded_file) {
   response_ = response_head;
 
   // TODO(ananta/michaeln)
@@ -120,7 +120,7 @@ void AppCacheUpdateJob::UpdateURLLoaderRequest::OnReceiveResponse(
 
 void AppCacheUpdateJob::UpdateURLLoaderRequest::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
-    const ResourceResponseHead& response_head) {
+    const network::ResourceResponseHead& response_head) {
   response_ = response_head;
   fetcher_->OnReceivedRedirect(redirect_info);
 }
@@ -161,7 +161,7 @@ void AppCacheUpdateJob::UpdateURLLoaderRequest::OnStartLoadingResponseBody(
 }
 
 void AppCacheUpdateJob::UpdateURLLoaderRequest::OnComplete(
-    const ResourceRequestCompletionStatus& status) {
+    const network::URLLoaderCompletionStatus& status) {
   response_status_ = status;
   // We inform the URLFetcher about a failure only here. For the success case
   // OnResponseCompleted() is invoked by URLFetcher::OnReadCompleted().

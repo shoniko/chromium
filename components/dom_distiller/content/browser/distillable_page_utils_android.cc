@@ -27,17 +27,20 @@ void OnIsPageDistillableResult(const JavaRef<jobject>& callback,
 
 void OnIsPageDistillableUpdate(const JavaRef<jobject>& callback,
                                bool isDistillable,
-                               bool isLast) {
+                               bool isLast,
+                               bool isMobileFriendly) {
   Java_DistillablePageUtils_callOnIsPageDistillableUpdate(
-      base::android::AttachCurrentThread(), callback, isDistillable, isLast);
+      base::android::AttachCurrentThread(), callback, isDistillable, isLast,
+      isMobileFriendly);
 }
 }  // namespace
 
-static void IsPageDistillable(JNIEnv* env,
-                              const JavaParamRef<jclass>& jcaller,
-                              const JavaParamRef<jobject>& webContents,
-                              jboolean is_mobile_optimized,
-                              const JavaParamRef<jobject>& callback) {
+static void JNI_DistillablePageUtils_IsPageDistillable(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& jcaller,
+    const JavaParamRef<jobject>& webContents,
+    jboolean is_mobile_optimized,
+    const JavaParamRef<jobject>& callback) {
   content::WebContents* web_contents(
       content::WebContents::FromJavaWebContents(webContents));
 
@@ -53,10 +56,11 @@ static void IsPageDistillable(JNIEnv* env,
                                ScopedJavaGlobalRef<jobject>(env, callback)));
 }
 
-static void SetDelegate(JNIEnv* env,
-                        const JavaParamRef<jclass>& jcaller,
-                        const JavaParamRef<jobject>& webContents,
-                        const JavaParamRef<jobject>& callback) {
+static void JNI_DistillablePageUtils_SetDelegate(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& jcaller,
+    const JavaParamRef<jobject>& webContents,
+    const JavaParamRef<jobject>& callback) {
   content::WebContents* web_contents(
       content::WebContents::FromJavaWebContents(webContents));
   if (!web_contents) {

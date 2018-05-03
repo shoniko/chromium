@@ -22,7 +22,7 @@ InspectorTaskRunner::IgnoreInterruptsScope::~IgnoreInterruptsScope() {
 InspectorTaskRunner::InspectorTaskRunner()
     : ignore_interrupts_(false), killed_(false) {}
 
-InspectorTaskRunner::~InspectorTaskRunner() {}
+InspectorTaskRunner::~InspectorTaskRunner() = default;
 
 void InspectorTaskRunner::AppendTask(Task task) {
   MutexLocker lock(mutex_);
@@ -66,7 +66,7 @@ void InspectorTaskRunner::RunAllTasksDontWait() {
     Task task = TakeNextTask(kDontWaitForTask);
     if (!task)
       return;
-    task();
+    std::move(task).Run();
   }
 }
 

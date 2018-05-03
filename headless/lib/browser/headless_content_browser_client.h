@@ -7,6 +7,7 @@
 
 #include "content/public/browser/content_browser_client.h"
 #include "headless/lib/browser/headless_resource_dispatcher_host_delegate.h"
+#include "headless/public/headless_browser.h"
 
 namespace headless {
 
@@ -64,7 +65,7 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
 
   bool AllowSetCookie(const GURL& url,
                       const GURL& first_party,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       content::ResourceContext* context,
                       int render_process_id,
                       int render_frame_id,
@@ -76,6 +77,10 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
   std::unique_ptr<base::Value> GetPackagedServicesServiceManifestOverlay();
 
   HeadlessBrowserImpl* browser_;  // Not owned.
+
+  // We store the callback here because we may call it from the I/O thread.
+  HeadlessBrowser::Options::AppendCommandLineFlagsCallback
+      append_command_line_flags_callback_;
 
   std::unique_ptr<HeadlessResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;

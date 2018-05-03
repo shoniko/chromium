@@ -28,9 +28,6 @@ class VIEWS_EXPORT PlatformStyle {
   static const int kMinLabelButtonWidth;
   static const int kMinLabelButtonHeight;
 
-  // Whether dialog-default buttons are given a bold font style.
-  static const bool kDefaultLabelButtonHasBoldFont;
-
   // Whether the default button for a dialog can be the Cancel button.
   static const bool kDialogDefaultButtonCanBeCancel;
 
@@ -57,20 +54,12 @@ class VIEWS_EXPORT PlatformStyle {
   // Whether ripples should be used for visual feedback on control activation.
   static const bool kUseRipples;
 
-  // Whether to mirror the arrow of bubble dialogs in RTL, such that the bubble
-  // opens in the opposite direction.
-  static const bool kMirrorBubbleArrowInRTLByDefault;
-
   // Whether to scroll text fields to the beginning when they gain or lose
   // focus.
   static const bool kTextfieldScrollsToStartOnFocusChange;
 
   // Creates the default scrollbar for the given orientation.
   static std::unique_ptr<ScrollBar> CreateScrollBar(bool is_horizontal);
-
-  // Returns the current text color for the current button state.
-  static SkColor TextColorForButton(const ButtonColorByState& color_by_state,
-                                    const LabelButton& button);
 
   // Applies platform styles to |label| and fills |color_by_state| with the text
   // colors for normal, pressed, hovered, and disabled states, if the colors for

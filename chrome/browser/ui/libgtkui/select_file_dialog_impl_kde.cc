@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <X11/Xlib.h>
 #include <gdk/gdkx.h>
 #include <gtk/gtk.h>
 #include <stddef.h>
@@ -15,7 +14,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/nix/mime_util_xdg.h"
 #include "base/nix/xdg_util.h"
 #include "base/process/launch.h"
@@ -30,6 +28,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/x/x11.h"
 #include "ui/strings/grit/ui_strings.h"
 
 
@@ -242,7 +241,7 @@ void SelectFileDialogImplKDE::SelectFileImpl(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   type_ = type;
 
-  XID window_xid = None;
+  XID window_xid = x11::None;
   if (owning_window && owning_window->GetHost()) {
     // |owning_window| can be null when user right-clicks on a downloadable item
     // and chooses 'Open Link in New Tab' when 'Ask where to save each file
@@ -321,7 +320,7 @@ SelectFileDialogImplKDE::CallKDialogOutput(const KDialogParams& params) {
                         params.parent, params.file_operation,
                         params.multiple_selection, &command_line);
 
-  auto results = base::MakeUnique<KDialogOutputParams>();
+  auto results = std::make_unique<KDialogOutputParams>();
   // Get output from KDialog
   base::GetAppOutputWithExitCode(command_line, &results->output,
                                  &results->exit_code);
@@ -341,11 +340,11 @@ void SelectFileDialogImplKDE::GetKDialogCommandLine(
   CHECK(command_line);
 
   // Attach to the current Chrome window.
-  if (parent != None) {
+  if (parent != x11::None) {
     command_line->AppendSwitchNative(
-        desktop_ == base::nix::DESKTOP_ENVIRONMENT_KDE3 ?
-            "--embed" : "--attach",
-        base::Uint64ToString(parent));
+        desktop_ == base::nix::DESKTOP_ENVIRONMENT_KDE3 ? "--embed"
+                                                        : "--attach",
+        base::NumberToString(parent));
   }
 
   // Set the correct title for the dialog.

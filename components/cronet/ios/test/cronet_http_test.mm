@@ -7,6 +7,9 @@
 
 #include <stdint.h>
 
+#include "TargetConditionals.h"
+
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
@@ -103,38 +106,6 @@ TEST_F(HttpTest, NSURLSessionReceivesData) {
   EXPECT_EQ(nil, [delegate_ error]);
   EXPECT_STREQ(grpc_support::kSimpleBodyValue,
                base::SysNSStringToUTF8([delegate_ responseBody]).c_str());
-}
-
-TEST_F(HttpTest, NSURLSessionReceivesBigHttpDataLoop) {
-  int iterations = 50;
-  long size = 10 * 1024 * 1024;
-  LOG(INFO) << "Downloading " << size << " bytes " << iterations << " times.";
-  NSTimeInterval elapsed_avg = 0;
-  NSTimeInterval elapsed_max = 0;
-  NSURL* url = net::NSURLWithGURL(GURL(TestServer::PrepareBigDataURL(size)));
-  for (int i = 0; i < iterations; ++i) {
-    [delegate_ reset];
-    __block BOOL block_used = NO;
-    NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
-    [Cronet setRequestFilterBlock:^(NSURLRequest* request) {
-      block_used = YES;
-      EXPECT_EQ([request URL], url);
-      return YES;
-    }];
-    NSDate* start = [NSDate date];
-    StartDataTaskAndWaitForCompletion(task);
-    NSTimeInterval elapsed = -[start timeIntervalSinceNow];
-    elapsed_avg += elapsed;
-    if (elapsed > elapsed_max)
-      elapsed_max = elapsed;
-    EXPECT_TRUE(block_used);
-    EXPECT_EQ(nil, [delegate_ error]);
-    EXPECT_EQ(size, [delegate_ totalBytesReceived]);
-  }
-  // Release the response buffer.
-  TestServer::ReleaseBigDataURL();
-  LOG(INFO) << "Elapsed Average:" << elapsed_avg * 1000 / iterations
-            << "ms Max:" << elapsed_max * 1000 << "ms";
 }
 
 TEST_F(HttpTest, GetGlobalMetricsDeltas) {
@@ -452,5 +423,101 @@ TEST_F(HttpTest, PostRequest) {
                base::SysNSStringToUTF8(response_body).c_str());
   ASSERT_TRUE(block_used);
 }
+
+// iOS Simulator doesn't support changing thread priorities.
+// Therefore, run these tests only on a physical device.
+#if TARGET_OS_SIMULATOR
+#define MAYBE_ChangeThreadPriorityAfterStart \
+  DISABLED_ChangeThreadPriorityAfterStart
+#define MAYBE_ChangeThreadPriorityBeforeStart \
+  DISABLED_ChangeThreadPriorityBeforeStart
+#else
+#define MAYBE_ChangeThreadPriorityAfterStart ChangeThreadPriorityAfterStart
+#define MAYBE_ChangeThreadPriorityBeforeStart ChangeThreadPriorityBeforeStart
+#endif  // TARGET_OS_SIMULATOR
+
+// Tests that the network thread priority can be changed after
+// Cronet has been started.
+TEST_F(HttpTest, MAYBE_ChangeThreadPriorityAfterStart) {
+  // Get current (default) priority of the network thread.
+  __block double default_priority;
+  PostBlockToNetworkThread(FROM_HERE, ^{
+    default_priority = NSThread.threadPriority;
+  });
+
+  // Modify the network thread priority.
+  const double new_priority = 1.0;
+  [Cronet setNetworkThreadPriority:new_priority];
+
+  // Get modified priority of the network thread.
+  dispatch_semaphore_t lock = dispatch_semaphore_create(0);
+  __block double actual_priority;
+  PostBlockToNetworkThread(FROM_HERE, ^{
+    actual_priority = NSThread.threadPriority;
+    dispatch_semaphore_signal(lock);
+  });
+
+  // Wait until the posted tasks are completed.
+  dispatch_semaphore_wait(lock, DISPATCH_TIME_FOREVER);
+
+  EXPECT_EQ(0.5, default_priority);
+
+  // Check that the priority was modified and is close to the set priority.
+  EXPECT_TRUE(abs(actual_priority - new_priority) < 0.01)
+      << "Unexpected thread priority. Expected " << new_priority << " but got "
+      << actual_priority;
+}
+
+// Tests that the network thread priority can be changed before
+// Cronet has been started.
+TEST_F(HttpTest, MAYBE_ChangeThreadPriorityBeforeStart) {
+  // Start a new Cronet engine modifying the network thread priority before the
+  // start.
+  [Cronet shutdownForTesting];
+  const double new_priority = 0.8;
+  [Cronet setNetworkThreadPriority:new_priority];
+  [Cronet start];
+
+  // Get modified priority of the network thread.
+  dispatch_semaphore_t lock = dispatch_semaphore_create(0);
+  __block double actual_priority;
+  PostBlockToNetworkThread(FROM_HERE, ^{
+    actual_priority = NSThread.threadPriority;
+    dispatch_semaphore_signal(lock);
+  });
+
+  // Wait until the posted task is completed.
+  dispatch_semaphore_wait(lock, DISPATCH_TIME_FOREVER);
+
+  // Check that the priority was modified and is close to the set priority.
+  EXPECT_TRUE(abs(actual_priority - new_priority) < 0.01)
+      << "Unexpected thread priority. Expected " << new_priority << " but got "
+      << actual_priority;
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+TEST_F(HttpTest, LegacyApi) {
+  NSURL* url = net::NSURLWithGURL(GURL(grpc_support::kTestServerSimpleUrl));
+
+  __block BOOL block_used = NO;
+  [Cronet setRequestFilterBlock:^(NSURLRequest* request) {
+    block_used = YES;
+    EXPECT_EQ(request.URL, url);
+    return YES;
+  }];
+
+  NSURLRequest* request = [NSURLRequest requestWithURL:url];
+  NSError* err;
+  NSHTTPURLResponse* response;
+  [NSURLConnection sendSynchronousRequest:request
+                        returningResponse:&response
+                                    error:&err];
+
+  EXPECT_EQ(200, [response statusCode]);
+  EXPECT_TRUE(block_used);
+  EXPECT_FALSE(err);
+}
+#pragma clang diagnostic pop
 
 }  // namespace cronet

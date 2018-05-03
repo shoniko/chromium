@@ -35,11 +35,14 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
+
+#include "base/macros.h"
 #include "core/exported/WebViewImpl.h"
 #include "core/frame/Settings.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/runtime_enabled_features.h"
 #include "platform/scroll/ScrollbarTheme.h"
+#include "platform/testing/UseMockScrollbarSettings.h"
 #include "platform/testing/WebLayerTreeViewImplForTesting.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebMouseEvent.h"
@@ -158,45 +161,9 @@ WebRemoteFrameImpl* CreateRemoteChild(WebRemoteFrame& parent,
                                       scoped_refptr<SecurityOrigin> = nullptr,
                                       TestWebRemoteFrameClient* = nullptr);
 
-// Forces to use mocked overlay scrollbars instead of the default native theme
-// scrollbars to avoid crash in Chromium code when it tries to load UI
-// resources that are not available when running blink unit tests, and to
-// ensure consistent layout regardless of differences between scrollbar themes.
-// WebViewHelper includes this, so this is only needed if a test doesn't use
-// WebViewHelper or the test needs a bigger scope of mock scrollbar settings
-// than the scope of WebViewHelper.
-class UseMockScrollbarSettings {
- public:
-  UseMockScrollbarSettings()
-      : original_mock_scrollbar_enabled_(Settings::MockScrollbarsEnabled()),
-        original_overlay_scrollbars_enabled_(
-            RuntimeEnabledFeatures::OverlayScrollbarsEnabled()) {
-    Settings::SetMockScrollbarsEnabled(true);
-    RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(true);
-  }
-
-  UseMockScrollbarSettings(bool use_mock, bool use_overlay)
-      : original_mock_scrollbar_enabled_(Settings::MockScrollbarsEnabled()),
-        original_overlay_scrollbars_enabled_(
-            RuntimeEnabledFeatures::OverlayScrollbarsEnabled()) {
-    Settings::SetMockScrollbarsEnabled(use_mock);
-    RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(use_overlay);
-  }
-
-  ~UseMockScrollbarSettings() {
-    Settings::SetMockScrollbarsEnabled(original_mock_scrollbar_enabled_);
-    RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(
-        original_overlay_scrollbars_enabled_);
-  }
-
- private:
-  bool original_mock_scrollbar_enabled_;
-  bool original_overlay_scrollbars_enabled_;
-};
-
 class TestWebWidgetClient : public WebWidgetClient {
  public:
-  ~TestWebWidgetClient() override {}
+  ~TestWebWidgetClient() override = default;
 
   // WebWidgetClient:
   bool AllowsBrokenNullLayerTreeView() const override { return true; }
@@ -210,7 +177,7 @@ class TestWebViewWidgetClient : public TestWebWidgetClient {
  public:
   explicit TestWebViewWidgetClient(TestWebViewClient& test_web_view_client)
       : test_web_view_client_(test_web_view_client) {}
-  ~TestWebViewWidgetClient() override {}
+  ~TestWebViewWidgetClient() override = default;
 
   // TestWebViewWidgetClient:
   WebLayerTreeView* InitializeLayerTreeView() override;
@@ -223,7 +190,7 @@ class TestWebViewWidgetClient : public TestWebWidgetClient {
 
 class TestWebViewClient : public WebViewClient {
  public:
-  ~TestWebViewClient() override {}
+  ~TestWebViewClient() override = default;
 
   WebLayerTreeViewImplForTesting* GetLayerTreeViewForTesting();
 
@@ -245,8 +212,6 @@ class TestWebViewClient : public WebViewClient {
 // Convenience class for handling the lifetime of a WebView and its associated
 // mainframe in tests.
 class WebViewHelper {
-  WTF_MAKE_NONCOPYABLE(WebViewHelper);
-
  public:
   WebViewHelper();
   ~WebViewHelper();
@@ -269,7 +234,7 @@ class WebViewHelper {
   WebViewImpl* Initialize(TestWebFrameClient* = nullptr,
                           TestWebViewClient* = nullptr,
                           TestWebWidgetClient* = nullptr,
-                          void (*update_settings_func)(WebSettings*) = 0);
+                          void (*update_settings_func)(WebSettings*) = nullptr);
 
   // Same as Initialize() but also performs the initial load of the url. Only
   // returns once the load is complete.
@@ -297,7 +262,7 @@ class WebViewHelper {
 
   void Reset();
 
-  WebViewImpl* WebView() const { return web_view_; }
+  WebViewImpl* GetWebView() const { return web_view_; }
 
   WebLocalFrameImpl* LocalMainFrame() const;
   WebRemoteFrameImpl* RemoteMainFrame() const;
@@ -305,13 +270,15 @@ class WebViewHelper {
   void SetViewportSize(const WebSize&);
 
  private:
-  void InitializeWebView(TestWebViewClient*);
+  void InitializeWebView(TestWebViewClient*, class WebView* opener);
 
   WebViewImpl* web_view_;
   UseMockScrollbarSettings mock_scrollbar_settings_;
   // Non-null if the WebViewHelper owns the TestWebViewClient.
   std::unique_ptr<TestWebViewClient> owned_test_web_view_client_;
   TestWebViewClient* test_web_view_client_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebViewHelper);
 };
 
 // Minimal implementation of WebFrameClient needed for unit tests that load
@@ -320,7 +287,7 @@ class WebViewHelper {
 class TestWebFrameClient : public WebFrameClient {
  public:
   TestWebFrameClient();
-  ~TestWebFrameClient() override {}
+  ~TestWebFrameClient() override = default;
 
   static bool IsLoading() { return loads_in_progress_ > 0; }
 
@@ -339,7 +306,7 @@ class TestWebFrameClient : public WebFrameClient {
                                   const WebString& name,
                                   const WebString& fallback_name,
                                   WebSandboxFlags,
-                                  const WebParsedFeaturePolicy&,
+                                  const ParsedFeaturePolicy&,
                                   const WebFrameOwnerProperties&) override;
   void DidStartLoading(bool) override;
   void DidStopLoading() override;
@@ -376,7 +343,7 @@ class TestWebFrameClient : public WebFrameClient {
 class TestWebRemoteFrameClient : public WebRemoteFrameClient {
  public:
   TestWebRemoteFrameClient();
-  ~TestWebRemoteFrameClient() override {}
+  ~TestWebRemoteFrameClient() override = default;
 
   WebRemoteFrame* Frame() const { return frame_; }
   // Pass ownership of the TestWebFrameClient to |self_owned| here if the

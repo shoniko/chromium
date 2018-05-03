@@ -21,6 +21,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "content/browser/child_process_security_policy_impl.h"
+#include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/frame_host/render_frame_proxy_host.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -30,7 +31,6 @@
 #include "content/browser/webui/web_ui_impl.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/input_messages.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
@@ -47,6 +47,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/controllable_http_response.h"
 #include "content/public/test/test_frame_navigation_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -200,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, NoScriptAccessAfterSwapOut) {
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Open a same-site link in a new window.
   ShellAddedObserver new_shell_observer;
@@ -277,7 +278,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a rel=noreferrer + target=blank link.
   ShellAddedObserver new_shell_observer;
@@ -302,10 +303,6 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
 
   // Wait for the cross-site transition in the new tab to finish.
   WaitForLoadStop(new_shell->web_contents());
-  WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
-      new_shell->web_contents());
-  EXPECT_FALSE(web_contents->GetRenderManagerForTesting()->
-      pending_render_view_host());
 
   // Should have a new SiteInstance.
   scoped_refptr<SiteInstance> noref_blank_site_instance(
@@ -323,7 +320,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a rel=noreferrer + target=blank link.
   ShellAddedObserver new_shell_observer;
@@ -348,10 +345,6 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
 
   // Wait for the cross-site transition in the new tab to finish.
   WaitForLoadStop(new_shell->web_contents());
-  WebContentsImpl* web_contents =
-      static_cast<WebContentsImpl*>(new_shell->web_contents());
-  EXPECT_FALSE(
-      web_contents->GetRenderManagerForTesting()->pending_render_view_host());
 
   // Check that the referrer is set correctly.
   std::string expected_referrer =
@@ -398,10 +391,6 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
 
   // Wait for the cross-site transition in the new tab to finish.
   WaitForLoadStop(new_shell->web_contents());
-  WebContentsImpl* web_contents =
-      static_cast<WebContentsImpl*>(new_shell->web_contents());
-  EXPECT_FALSE(
-      web_contents->GetRenderManagerForTesting()->pending_render_view_host());
 
   EXPECT_EQ("/title2.html",
             new_shell->web_contents()->GetLastCommittedURL().path());
@@ -442,7 +431,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a same-site rel=noreferrer + target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -468,10 +457,6 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
 
   // Wait for the cross-site transition in the new tab to finish.
   WaitForLoadStop(new_shell->web_contents());
-  WebContentsImpl* web_contents =
-      static_cast<WebContentsImpl*>(new_shell->web_contents());
-  EXPECT_FALSE(
-      web_contents->GetRenderManagerForTesting()->pending_render_view_host());
 
   // Should have a new SiteInstance (in a new BrowsingInstance).
   scoped_refptr<SiteInstance> noref_blank_site_instance(
@@ -490,7 +475,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a same-site rel=noopener + target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -517,10 +502,6 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
 
   // Wait for the cross-site transition in the new tab to finish.
   WaitForLoadStop(new_shell->web_contents());
-  WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
-      new_shell->web_contents());
-  EXPECT_FALSE(web_contents->GetRenderManagerForTesting()->
-      pending_render_view_host());
 
   // Should have a new SiteInstance (in a new BrowsingInstance).
   scoped_refptr<SiteInstance> noref_blank_site_instance(
@@ -541,7 +522,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=blank link.
   ShellAddedObserver new_shell_observer;
@@ -580,7 +561,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a rel=noreferrer link.
   bool success = false;
@@ -617,7 +598,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a rel=noreferrer link.
   bool success = false;
@@ -655,7 +636,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -729,7 +710,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, MAYBE_DisownOpener) {
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=_blank link.
   ShellAddedObserver new_shell_observer;
@@ -823,7 +804,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Open a popup using window.open with a 'foo' window.name.
   Shell* new_shell = OpenPopup(shell(), GURL(url::kAboutBlankURL), "foo");
@@ -886,7 +867,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebContents* opener_contents = shell()->web_contents();
   scoped_refptr<SiteInstance> orig_site_instance(
       opener_contents->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
   RenderFrameHostManager* opener_manager = static_cast<WebContentsImpl*>(
       opener_contents)->GetRenderManagerForTesting();
 
@@ -1023,7 +1004,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebContents* opener_contents = shell()->web_contents();
   scoped_refptr<SiteInstance> orig_site_instance(
       opener_contents->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
   RenderFrameHostManager* opener_manager = static_cast<WebContentsImpl*>(
       opener_contents)->GetRenderManagerForTesting();
 
@@ -1106,7 +1087,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebContents* orig_contents = shell()->web_contents();
   scoped_refptr<SiteInstance> orig_site_instance(
       orig_contents->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -1190,7 +1171,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
 
   // Ensure that the original renderer process exited cleanly without crashing.
   exit_observer.Wait();
-  EXPECT_EQ(true, exit_observer.did_exit_normally());
+  EXPECT_TRUE(exit_observer.did_exit_normally());
 }
 
 // Test that opening a new window in the same SiteInstance and then navigating
@@ -1206,7 +1187,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -1261,7 +1242,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, ClickLinkAfter204Error) {
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Load a cross-site page that fails with a 204 error.
   EXPECT_TRUE(
@@ -1496,6 +1477,220 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerSpoofingTest,
   // The visible entry should be null, resulting in about:blank in the address
   // bar.
   EXPECT_FALSE(contents->GetController().GetVisibleEntry());
+}
+
+// Ensures that a pending navigation's URL  is no longer visible after the
+// speculative RFH is discarded due to a concurrent renderer-initiated
+// navigation.  See https://crbug.com/760342.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
+                       ResetVisibleURLOnCrossProcessNavigationInterrupted) {
+  if (!IsBrowserSideNavigationEnabled())
+    return;
+  const std::string kVictimPath = "/victim.html";
+  const std::string kAttackPath = "/attack.html";
+  ControllableHttpResponse victim_response(embedded_test_server(), kVictimPath);
+  ControllableHttpResponse attack_response(embedded_test_server(), kAttackPath);
+  EXPECT_TRUE(embedded_test_server()->Start());
+
+  const GURL kVictimURL = embedded_test_server()->GetURL("a.com", kVictimPath);
+  const GURL kAttackURL = embedded_test_server()->GetURL("b.com", kAttackPath);
+
+  // First navigate to the attacker page. This page will be cross-site compared
+  // to the next navigations we will attempt.
+  const GURL kAttackInitialURL =
+      embedded_test_server()->GetURL("b.com", "/title1.html");
+  NavigateToURL(shell(), kAttackInitialURL);
+  EXPECT_EQ(kAttackInitialURL, shell()->web_contents()->GetVisibleURL());
+
+  // Now, start a browser-initiated cross-site navigation to a new page that
+  // will hang at ready to commit stage.
+  TestNavigationManager victim_navigation(shell()->web_contents(), kVictimURL);
+  shell()->LoadURL(kVictimURL);
+  EXPECT_TRUE(victim_navigation.WaitForRequestStart());
+  victim_navigation.ResumeNavigation();
+
+  victim_response.WaitForRequest();
+  victim_response.Send(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/html; charset=utf-8\r\n"
+      "\r\n");
+  EXPECT_TRUE(victim_navigation.WaitForResponse());
+  victim_navigation.ResumeNavigation();
+
+  // The navigation is ready to commit: it has been handed to the speculative
+  // RenderFrameHost for commit.
+  RenderFrameHostImpl* speculative_rfh =
+      static_cast<WebContentsImpl*>(shell()->web_contents())
+          ->GetFrameTree()
+          ->root()
+          ->render_manager()
+          ->speculative_frame_host();
+  CHECK(speculative_rfh);
+  EXPECT_TRUE(speculative_rfh->is_loading());
+
+  // Since we have a browser-initiated pending navigation, the navigation URL is
+  // showing in the address bar.
+  EXPECT_EQ(kVictimURL, shell()->web_contents()->GetVisibleURL());
+
+  // The attacker page requests a navigation to a new document while the
+  // browser-initiated navigation hasn't committed yet.
+  TestNavigationManager attack_navigation(shell()->web_contents(), kAttackURL);
+  EXPECT_TRUE(ExecuteScriptWithoutUserGesture(
+      shell()->web_contents(),
+      "location.href = \"" + kAttackURL.spec() + "\";"));
+  EXPECT_TRUE(attack_navigation.WaitForRequestStart());
+
+  // This deletes the speculative RenderFrameHost that was supposed to commit
+  // the browser-initiated navigation.
+  speculative_rfh = static_cast<WebContentsImpl*>(shell()->web_contents())
+                        ->GetFrameTree()
+                        ->root()
+                        ->render_manager()
+                        ->speculative_frame_host();
+  EXPECT_FALSE(speculative_rfh);
+
+  // The URL of the browser-initiated navigation should no longer be shown in
+  // the address bar since the RenderFrameHost that was supposed to commit it
+  // has been discarded. Instead, we should be showing the URL of the current
+  // page as we do not show the URL of pending navigations when they are
+  // renderer-initiated.
+  EXPECT_NE(kVictimURL, shell()->web_contents()->GetVisibleURL());
+  EXPECT_EQ(kAttackInitialURL, shell()->web_contents()->GetVisibleURL());
+
+  // The attacker navigation results in a 204.
+  attack_navigation.ResumeNavigation();
+  attack_response.WaitForRequest();
+  attack_response.Send(
+      "HTTP/1.1 204 OK\r\n"
+      "Connection: close\r\n"
+      "\r\n");
+  attack_navigation.WaitForNavigationFinished();
+  speculative_rfh = static_cast<WebContentsImpl*>(shell()->web_contents())
+                        ->GetFrameTree()
+                        ->root()
+                        ->render_manager()
+                        ->speculative_frame_host();
+  EXPECT_FALSE(speculative_rfh);
+
+  // We are still showing the URL of the current page.
+  EXPECT_EQ(kAttackInitialURL, shell()->web_contents()->GetVisibleURL());
+}
+
+// Ensures that deleting a speculative RenderFrameHost trying to commit a
+// navigation to the pending NavigationEntry will not crash if it happens
+// because a new navigation to the same pending NavigationEntry started. This is
+// a regression test for crbug.com/796135.
+IN_PROC_BROWSER_TEST_F(
+    RenderFrameHostManagerTest,
+    DeleteSpeculativeRFHPedningCommitOfPendingEntryOnInterrupted) {
+  const std::string kOriginalPath = "/original.html";
+  const std::string kFirstRedirectPath = "/redirect1.html";
+  const std::string kSecondRedirectPath = "/reidrect2.html";
+  ControllableHttpResponse original_response1(embedded_test_server(),
+                                              kOriginalPath);
+  ControllableHttpResponse original_response2(embedded_test_server(),
+                                              kOriginalPath);
+  ControllableHttpResponse original_response3(embedded_test_server(),
+                                              kOriginalPath);
+  ControllableHttpResponse first_redirect_response(embedded_test_server(),
+                                                   kFirstRedirectPath);
+  ControllableHttpResponse second_redirect_response(embedded_test_server(),
+                                                    kSecondRedirectPath);
+  EXPECT_TRUE(embedded_test_server()->Start());
+
+  const GURL kOriginalURL =
+      embedded_test_server()->GetURL("a.com", kOriginalPath);
+  const GURL kFirstRedirectURL =
+      embedded_test_server()->GetURL("b.com", kFirstRedirectPath);
+  const GURL kSecondRedirectURL =
+      embedded_test_server()->GetURL("c.com", kSecondRedirectPath);
+
+  // First navigate to the initial URL. This page will have a cross-site
+  // redirect.
+  shell()->LoadURL(kOriginalURL);
+  original_response1.WaitForRequest();
+  original_response1.Send(
+      "HTTP/1.1 302 FOUND\r\n"
+      "Location: " +
+      kFirstRedirectURL.spec() +
+      "\r\n"
+      "\r\n");
+  original_response1.Done();
+  first_redirect_response.WaitForRequest();
+  first_redirect_response.Send(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/html; charset=utf-8\r\n"
+      "\r\n");
+  first_redirect_response.Send(
+      "<html>"
+      "<body></body>"
+      "</html>");
+  first_redirect_response.Done();
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  EXPECT_EQ(kFirstRedirectURL, shell()->web_contents()->GetVisibleURL());
+
+  // Now reload the original request, but redirect to yet another site.
+  TestNavigationManager first_reload(shell()->web_contents(), kOriginalURL);
+  shell()->web_contents()->GetController().Reload(
+      ReloadType::ORIGINAL_REQUEST_URL, false);
+  EXPECT_TRUE(first_reload.WaitForRequestStart());
+  first_reload.ResumeNavigation();
+
+  original_response2.WaitForRequest();
+  original_response2.Send(
+      "HTTP/1.1 302 FOUND\r\n"
+      "Location: " +
+      kSecondRedirectURL.spec() +
+      "\r\n"
+      "\r\n");
+  original_response2.Done();
+  second_redirect_response.WaitForRequest();
+  second_redirect_response.Send(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/html; charset=utf-8\r\n"
+      "\r\n");
+  EXPECT_TRUE(first_reload.WaitForResponse());
+  first_reload.ResumeNavigation();
+
+  // The navigation is ready to commit: it has been handed to the speculative
+  // RenderFrameHost for commit.
+  RenderFrameHostImpl* speculative_rfh =
+      static_cast<WebContentsImpl*>(shell()->web_contents())
+          ->GetFrameTree()
+          ->root()
+          ->render_manager()
+          ->speculative_frame_host();
+  CHECK(speculative_rfh);
+  EXPECT_TRUE(speculative_rfh->is_loading());
+
+  // The user requests a new reload while the previous reload hasn't committed
+  // yet. The navigation start deletes the speculative RenderFrameHost that was
+  // supposed to commit the browser-initiated navigation. This should not crash.
+  TestNavigationManager second_reload(shell()->web_contents(), kOriginalURL);
+  shell()->web_contents()->GetController().Reload(
+      ReloadType::ORIGINAL_REQUEST_URL, false);
+  EXPECT_TRUE(second_reload.WaitForRequestStart());
+  speculative_rfh = static_cast<WebContentsImpl*>(shell()->web_contents())
+                        ->GetFrameTree()
+                        ->root()
+                        ->render_manager()
+                        ->speculative_frame_host();
+  EXPECT_FALSE(speculative_rfh);
+
+  // The second reload results in a 204.
+  second_reload.ResumeNavigation();
+  original_response3.WaitForRequest();
+  original_response3.Send(
+      "HTTP/1.1 204 OK\r\n"
+      "Connection: close\r\n"
+      "\r\n");
+  second_reload.WaitForNavigationFinished();
+  speculative_rfh = static_cast<WebContentsImpl*>(shell()->web_contents())
+                        ->GetFrameTree()
+                        ->root()
+                        ->render_manager()
+                        ->speculative_frame_host();
+  EXPECT_FALSE(speculative_rfh);
 }
 
 // Test for crbug.com/9682.  We should not show the URL for a pending renderer-
@@ -1831,57 +2026,15 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Ensure that such URLs can still work as the initial navigation of a tab.
   // We postpone the initial navigation of the tab using an empty GURL, so that
   // we can add a watcher for crashes.
-  Shell* shell2 = Shell::CreateNewWindow(
-      shell()->web_contents()->GetBrowserContext(), GURL(), NULL, gfx::Size());
+  Shell* shell2 =
+      Shell::CreateNewWindow(shell()->web_contents()->GetBrowserContext(),
+                             GURL(), nullptr, gfx::Size());
   RenderProcessHostWatcher crash_observer2(
       shell2->web_contents(),
       RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
   EXPECT_TRUE(
       NavigateToURLAndExpectNoCommit(shell2, GURL(kChromeUIKillURL)));
   crash_observer2.Wait();
-}
-
-// Ensure that renderer-side debug URLs don't take effect on crashed renderers,
-// even when going back/forward.
-// See https://crbug.com/477606.
-
-// This test is flaky on Android. crbug.com/585327
-#if defined(OS_ANDROID)
-#define MAYBE_IgnoreForwardToRendererDebugURLsWhenCrashed \
-    DISABLED_IgnoreForwardToRendererDebugURLsWhenCrashed
-#else
-#define MAYBE_IgnoreForwardToRendererDebugURLsWhenCrashed \
-    IgnoreForwardToRendererDebugURLsWhenCrashed
-#endif
-IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
-                       MAYBE_IgnoreForwardToRendererDebugURLsWhenCrashed) {
-  // Visit a WebUI page with bindings.
-  GURL webui_url = GURL(std::string(kChromeUIScheme) + "://" +
-                        std::string(kChromeUIGpuHost));
-  NavigateToURL(shell(), webui_url);
-  EXPECT_TRUE(ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(
-      shell()->web_contents()->GetMainFrame()->GetProcess()->GetID()));
-
-  // Visit a debug URL that manages to commit, then go back.
-  NavigateToURL(shell(), GURL(kChromeUIDumpURL));
-  TestNavigationObserver back_nav_load_observer(shell()->web_contents());
-  shell()->web_contents()->GetController().GoBack();
-  back_nav_load_observer.Wait();
-
-  // Crash the renderer of the WebUI page.
-  RenderProcessHostWatcher crash_observer(
-      shell()->web_contents(),
-      RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  EXPECT_TRUE(
-      NavigateToURLAndExpectNoCommit(shell(), GURL(kChromeUICrashURL)));
-  crash_observer.Wait();
-
-  // Going forward with no live renderer should have no effect, and should not
-  // crash.
-  EXPECT_TRUE(shell()->web_contents()->GetController().CanGoForward());
-  shell()->web_contents()->GetController().GoForward();
-  EXPECT_FALSE(shell()->web_contents()->GetController().GetPendingEntry());
-  EXPECT_TRUE(shell()->web_contents()->GetController().CanGoForward());
 }
 
 // Ensure that pending_and_current_web_ui_ is cleared when a URL commits.
@@ -1971,7 +2124,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, WebUIGetsBindings) {
 
   // Open a new tab. Initially it gets a render view in the original tab's
   // current site instance.
-  TestNavigationObserver nav_observer(NULL);
+  TestNavigationObserver nav_observer(nullptr);
   nav_observer.StartWatchingNewWebContents();
   ShellAddedObserver shao;
   OpenUrlViaClickTarget(shell(), url2);
@@ -2050,7 +2203,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebUIImpl* web_ui = rfh->web_ui();
 
   EXPECT_TRUE(web_ui->CanCallJavascript());
-  auto handler_owner = base::MakeUnique<TestWebUIMessageHandler>();
+  auto handler_owner = std::make_unique<TestWebUIMessageHandler>();
   TestWebUIMessageHandler* handler = handler_owner.get();
 
   web_ui->AddMessageHandler(std::move(handler_owner));
@@ -2875,33 +3028,21 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
       shell()->web_contents());
   RenderFrameHostImpl* next_rfh =
-      IsBrowserSideNavigationEnabled()
-          ? web_contents->GetRenderManagerForTesting()->speculative_frame_host()
-          : web_contents->GetRenderManagerForTesting()->pending_frame_host();
+      web_contents->GetRenderManagerForTesting()->speculative_frame_host();
   ASSERT_TRUE(next_rfh);
 
   // Navigate to the same new site and verify that we commit in the same RFH.
   GURL cross_site_url2(embedded_test_server()->GetURL("b.com", "/title2.html"));
   TestNavigationObserver navigation_observer(web_contents, 1);
   shell()->LoadURL(cross_site_url2);
-  if (IsBrowserSideNavigationEnabled()) {
-    EXPECT_EQ(
-        next_rfh,
-        web_contents->GetRenderManagerForTesting()->speculative_frame_host());
-  } else {
-    EXPECT_EQ(next_rfh,
-              web_contents->GetRenderManagerForTesting()->pending_frame_host());
-  }
+  EXPECT_EQ(
+      next_rfh,
+      web_contents->GetRenderManagerForTesting()->speculative_frame_host());
   navigation_observer.Wait();
   EXPECT_EQ(cross_site_url2, web_contents->GetLastCommittedURL());
   EXPECT_EQ(next_rfh, web_contents->GetMainFrame());
-  if (IsBrowserSideNavigationEnabled()) {
-    EXPECT_FALSE(
-        web_contents->GetRenderManagerForTesting()->speculative_frame_host());
-  } else {
-    EXPECT_FALSE(
-        web_contents->GetRenderManagerForTesting()->pending_frame_host());
-  }
+  EXPECT_FALSE(
+      web_contents->GetRenderManagerForTesting()->speculative_frame_host());
 
   ResourceDispatcherHost::Get()->SetDelegate(nullptr);
 }
@@ -3195,13 +3336,10 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, LastCommittedOrigin) {
   RenderFrameDeletedObserver deleted_observer(rfh_a);
   shell()->LoadURL(url_b);
 
-  // The pending RFH shouln't have a last committed origin (the default value
-  // is a unique origin). The current RFH shouldn't change its last committed
-  // origin before commit.
-  RenderFrameHostImpl* rfh_b =
-      IsBrowserSideNavigationEnabled()
-          ? root->render_manager()->speculative_frame_host()
-          : root->render_manager()->pending_frame_host();
+  // The speculative RFH shouln't have a last committed origin (the default
+  // value is a unique origin). The current RFH shouldn't change its last
+  // committed origin before commit.
+  RenderFrameHostImpl* rfh_b = root->render_manager()->speculative_frame_host();
   EXPECT_EQ("null", rfh_b->GetLastCommittedOrigin().Serialize());
   EXPECT_EQ(url::Origin::Create(url_a), rfh_a->GetLastCommittedOrigin());
 
@@ -3468,6 +3606,87 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   EXPECT_EQ(url, grandchild->current_url());
   ASSERT_EQ(1U, grandchild->child_count());
   EXPECT_EQ(child_url, grandchild->child_at(0)->current_url());
+}
+
+// Ensures that we don't reset a speculative RFH if a JavaScript URL is loaded
+// while there's an ongoing cross-process navigation. See
+// https://crbug.com/793432.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
+                       JavaScriptLoadDoesntResetSpeculativeRFH) {
+  if (!IsBrowserSideNavigationEnabled())
+    return;
+  EXPECT_TRUE(embedded_test_server()->Start());
+
+  GURL site1 = embedded_test_server()->GetURL("a.com", "/title1.html");
+  GURL site2 = embedded_test_server()->GetURL("b.com", "/title2.html");
+
+  NavigateToURL(shell(), site1);
+
+  TestNavigationManager cross_site_navigation(shell()->web_contents(), site2);
+  shell()->LoadURL(site2);
+  EXPECT_TRUE(cross_site_navigation.WaitForRequestStart());
+
+  RenderFrameHostImpl* speculative_rfh =
+      static_cast<WebContentsImpl*>(shell()->web_contents())
+          ->GetFrameTree()
+          ->root()
+          ->render_manager()
+          ->speculative_frame_host();
+  CHECK(speculative_rfh);
+  shell()->web_contents()->GetController().LoadURL(
+      GURL("javascript:(0)"), Referrer(), ui::PAGE_TRANSITION_TYPED,
+      std::string());
+
+  cross_site_navigation.ResumeNavigation();
+  // No crash means everything worked!
+}
+
+// Test that unrelated browsing contexts cannot find each other's windows,
+// even when they end up using the same renderer process (e.g. because of
+// hitting a process limit).  See also https://crbug.com/718489.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
+                       ProcessReuseVsBrowsingInstance) {
+  // Set max renderers to 1 to force reusing a renderer process between two
+  // unrelated tabs.
+  RenderProcessHost::SetMaxRendererProcessCount(1);
+
+  // Navigate 2 tabs to a web page (regular web pages can share renderers
+  // among themselves without any restrictions, unlike extensions, apps, etc.).
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url1(embedded_test_server()->GetURL("/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url1));
+  RenderFrameHost* tab1 = shell()->web_contents()->GetMainFrame();
+  EXPECT_EQ(url1, tab1->GetLastCommittedURL());
+  GURL url2(embedded_test_server()->GetURL("/title2.html"));
+  Shell* shell2 = Shell::CreateNewWindow(
+      shell()->web_contents()->GetBrowserContext(), url2, nullptr, gfx::Size());
+  EXPECT_TRUE(NavigateToURL(shell2, url2));
+  RenderFrameHost* tab2 = shell2->web_contents()->GetMainFrame();
+  EXPECT_EQ(url2, tab2->GetLastCommittedURL());
+
+  // Sanity-check test setup: 2 frames share a renderer process, but are not in
+  // a related browsing instance.
+  if (!AreAllSitesIsolatedForTesting())
+    EXPECT_EQ(tab1->GetProcess(), tab2->GetProcess());
+  EXPECT_FALSE(
+      tab1->GetSiteInstance()->IsRelatedSiteInstance(tab2->GetSiteInstance()));
+
+  // Name the 2 frames.
+  EXPECT_TRUE(ExecuteScript(tab1, "window.name = 'tab1';"));
+  EXPECT_TRUE(ExecuteScript(tab2, "window.name = 'tab2';"));
+
+  // Verify that |tab1| cannot find named frames belonging to |tab2| (i.e. that
+  // window.open will end up creating a new tab rather than returning the old
+  // |tab2| tab).
+  WebContentsAddedObserver new_contents_observer;
+  std::string location_of_opened_window;
+  EXPECT_TRUE(ExecuteScriptAndExtractString(
+      tab1,
+      "var w = window.open('', 'tab2');\n"
+      "window.domAutomationController.send(w.location.href);",
+      &location_of_opened_window));
+  EXPECT_EQ(url::kAboutBlankURL, location_of_opened_window);
+  EXPECT_TRUE(new_contents_observer.GetWebContents());
 }
 
 }  // namespace content

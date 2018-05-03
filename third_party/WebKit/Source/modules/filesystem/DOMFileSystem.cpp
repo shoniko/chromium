@@ -31,7 +31,7 @@
 #include "modules/filesystem/DOMFileSystem.h"
 
 #include <memory>
-#include "core/fileapi/BlobCallback.h"
+
 #include "core/probe/CoreProbes.h"
 #include "modules/filesystem/DOMFilePath.h"
 #include "modules/filesystem/DirectoryEntry.h"
@@ -44,7 +44,6 @@
 #include "platform/FileMetadata.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/Platform.h"
@@ -57,13 +56,13 @@ namespace blink {
 namespace {
 
 void RunCallback(ExecutionContext* execution_context,
-                 WTF::Closure task,
+                 base::OnceClosure task,
                  std::unique_ptr<int> identifier) {
   if (!execution_context)
     return;
   DCHECK(execution_context->IsContextThread());
   probe::AsyncTask async_task(execution_context, identifier.get());
-  task();
+  std::move(task).Run();
 }
 
 }  // namespace
@@ -192,7 +191,7 @@ void DOMFileSystem::CreateWriter(const FileEntry* file_entry,
 }
 
 void DOMFileSystem::CreateFile(const FileEntry* file_entry,
-                               BlobCallback* success_callback,
+                               FileCallback* success_callback,
                                ErrorCallbackBase* error_callback) {
   KURL file_system_url = CreateFileSystemURL(file_entry);
   if (!FileSystem()) {
@@ -207,14 +206,17 @@ void DOMFileSystem::CreateFile(const FileEntry* file_entry,
 }
 
 void DOMFileSystem::ScheduleCallback(ExecutionContext* execution_context,
-                                     WTF::Closure task) {
+                                     base::OnceClosure task) {
+  if (!execution_context)
+    return;
+
   DCHECK(execution_context->IsContextThread());
 
-  std::unique_ptr<int> identifier = WTF::MakeUnique<int>(0);
+  std::unique_ptr<int> identifier = std::make_unique<int>(0);
   probe::AsyncTaskScheduled(execution_context, TaskNameForInstrumentation(),
                             identifier.get());
-  TaskRunnerHelper::Get(TaskType::kFileReading, execution_context)
-      ->PostTask(BLINK_FROM_HERE,
+  execution_context->GetTaskRunner(TaskType::kFileReading)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&RunCallback, WrapWeakPersistent(execution_context),
                            WTF::Passed(std::move(task)),
                            WTF::Passed(std::move(identifier))));

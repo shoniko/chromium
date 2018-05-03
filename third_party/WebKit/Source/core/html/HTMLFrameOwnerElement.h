@@ -38,7 +38,7 @@ namespace blink {
 class ExceptionState;
 class Frame;
 class LayoutEmbeddedContent;
-class PluginView;
+class WebPluginContainerImpl;
 
 class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
                                           public FrameOwner {
@@ -62,9 +62,6 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   virtual void SetCollapsed(bool) {}
 
   Document* getSVGDocument(ExceptionState&) const;
-
-  virtual bool LoadedNonEmptyDocument() const { return false; }
-  virtual void DidLoadNonEmptyDocument() {}
 
   void SetEmbeddedContentView(EmbeddedContentView*);
   EmbeddedContentView* ReleaseEmbeddedContentView();
@@ -96,10 +93,12 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   Frame* ContentFrame() const final { return content_frame_; }
   void SetContentFrame(Frame&) final;
   void ClearContentFrame() final;
+  void AddResourceTiming(const ResourceTimingInfo&) final;
   void DispatchLoad() final;
   SandboxFlags GetSandboxFlags() const final { return sandbox_flags_; }
   bool CanRenderFallbackContent() const override { return false; }
   void RenderFallbackContent() override {}
+  void IntrinsicDimensionsChanged() override { NOTREACHED(); }
   AtomicString BrowsingContextContainerName() const override {
     return getAttribute(HTMLNames::nameAttr);
   }
@@ -110,7 +109,7 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   bool AllowPaymentRequest() const override { return false; }
   bool IsDisplayNone() const override { return !embedded_content_view_; }
   AtomicString Csp() const override { return g_null_atom; }
-  const WebParsedFeaturePolicy& ContainerPolicy() const override;
+  const ParsedFeaturePolicy& ContainerPolicy() const override;
 
   // For unit tests, manually trigger the UpdateContainerPolicy method.
   void UpdateContainerPolicyForTests() { UpdateContainerPolicy(); }
@@ -126,14 +125,15 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
                               bool replace_current_item);
   bool IsKeyboardFocusable() const override;
 
-  void DisposePluginSoon(PluginView*);
+  void DisposePluginSoon(WebPluginContainerImpl*);
   void FrameOwnerPropertiesChanged();
 
   // Return the origin which is to be used for feature policy container
   // policies, as "the origin of the URL in the frame's src attribute" (see
   // https://wicg.github.io/feature-policy/#iframe-allow-attribute).
   // This method is intended to be overridden by specific frame classes.
-  virtual scoped_refptr<SecurityOrigin> GetOriginForFeaturePolicy() const {
+  virtual scoped_refptr<const SecurityOrigin> GetOriginForFeaturePolicy()
+      const {
     return SecurityOrigin::CreateUnique();
   }
 
@@ -145,7 +145,7 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   // TODO(loonybear): remove the boolean once the space separated feature list
   // syntax is deprecated.
   // https://crbug.com/761009.
-  virtual Vector<WebParsedFeaturePolicyDeclaration> ConstructContainerPolicy(
+  virtual ParsedFeaturePolicy ConstructContainerPolicy(
       Vector<String>* /*  messages */,
       bool* /* old_syntax */) const = 0;
 
@@ -170,7 +170,7 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   Member<EmbeddedContentView> embedded_content_view_;
   SandboxFlags sandbox_flags_;
 
-  WebParsedFeaturePolicy container_policy_;
+  ParsedFeaturePolicy container_policy_;
 };
 
 DEFINE_ELEMENT_TYPE_CASTS(HTMLFrameOwnerElement, IsFrameOwnerElement());

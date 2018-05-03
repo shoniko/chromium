@@ -11,7 +11,6 @@
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
@@ -45,6 +44,7 @@
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/keyboard/content/keyboard_constants.h"
+#include "ui/keyboard/content/keyboard_content_util.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/keyboard/keyboard_switches.h"
@@ -77,7 +77,8 @@ class WindowBoundsChangeObserver : public aura::WindowObserver {
  private:
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override {
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override {
     ui_->UpdateInsetsForWindow(window);
   }
   void OnWindowDestroyed(aura::Window* window) override {
@@ -193,7 +194,7 @@ class AshKeyboardControllerObserver
   ~AshKeyboardControllerObserver() override {}
 
   // KeyboardControllerObserver:
-  void OnKeyboardBoundsChanging(const gfx::Rect& bounds) override {
+  void OnKeyboardVisibleBoundsChanging(const gfx::Rect& bounds) override {
     extensions::EventRouter* router = extensions::EventRouter::Get(context_);
 
     if (!router->HasEventListener(
@@ -210,7 +211,7 @@ class AshKeyboardControllerObserver
     new_bounds->SetInteger("height", bounds.height());
     event_args->Append(std::move(new_bounds));
 
-    auto event = base::MakeUnique<extensions::Event>(
+    auto event = std::make_unique<extensions::Event>(
         extensions::events::VIRTUAL_KEYBOARD_PRIVATE_ON_BOUNDS_CHANGED,
         virtual_keyboard_private::OnBoundsChanged::kEventName,
         std::move(event_args), context_);
@@ -225,10 +226,10 @@ class AshKeyboardControllerObserver
       return;
     }
 
-    auto event = base::MakeUnique<extensions::Event>(
+    auto event = std::make_unique<extensions::Event>(
         extensions::events::VIRTUAL_KEYBOARD_PRIVATE_ON_KEYBOARD_CLOSED,
         virtual_keyboard_private::OnKeyboardClosed::kEventName,
-        base::MakeUnique<base::ListValue>(), context_);
+        std::make_unique<base::ListValue>(), context_);
     router->BroadcastEvent(std::move(event));
   }
 
@@ -396,7 +397,8 @@ void ChromeKeyboardUI::ResetInsets() {
 
 void ChromeKeyboardUI::OnWindowBoundsChanged(aura::Window* window,
                                              const gfx::Rect& old_bounds,
-                                             const gfx::Rect& new_bounds) {
+                                             const gfx::Rect& new_bounds,
+                                             ui::PropertyChangeReason reason) {
   SetShadowAroundKeyboard();
 }
 

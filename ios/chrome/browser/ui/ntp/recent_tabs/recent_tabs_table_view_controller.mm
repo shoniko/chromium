@@ -24,6 +24,7 @@
 #import "ios/chrome/browser/ui/authentication/signin_promo_view_consumer.h"
 #import "ios/chrome/browser/ui/authentication/signin_promo_view_mediator.h"
 #include "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/browser/ui/commands/show_signin_command.h"
 #import "ios/chrome/browser/ui/context_menu/context_menu_coordinator.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/recent_tabs_handset_view_controller.h"
 #include "ios/chrome/browser/ui/ntp/recent_tabs/synced_sessions.h"
@@ -36,9 +37,12 @@
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_in_sync_off_view.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_in_sync_on_no_sessions_view.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/spacers_view.h"
+#import "ios/chrome/browser/ui/settings/sync_utils/sync_presenter.h"
+#import "ios/chrome/browser/ui/signin_interaction/public/signin_presenter.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/url_loader.h"
 #import "ios/chrome/browser/ui/util/constraints_ui_util.h"
+#import "ios/chrome/browser/ui/util/top_view_controller.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/web/public/referrer.h"
@@ -49,10 +53,13 @@
 #error "This file requires ARC support."
 #endif
 
-namespace {
-
 // Key for saving collapsed session state in the UserDefaults.
 NSString* const kCollapsedSectionsKey = @"ChromeRecentTabsCollapsedSections";
+// Accessibility identifier for the main view.
+NSString* const kRecentTabsTableViewControllerAccessibilityIdentifier =
+    @"recent_tabs_view_controller";
+
+namespace {
 
 // Key for saving whether the Other Device section is collapsed.
 NSString* const kOtherDeviceCollapsedKey = @"OtherDevicesCollapsed";
@@ -91,7 +98,9 @@ enum CellType {
 
 }  // namespace
 
-@interface RecentTabsTableViewController ()<SigninPromoViewConsumer> {
+@interface RecentTabsTableViewController ()<SigninPromoViewConsumer,
+                                            SigninPresenter,
+                                            SyncPresenter> {
   ios::ChromeBrowserState* _browserState;  // weak
   // The service that manages the recently closed tabs.
   sessions::TabRestoreService* _tabRestoreService;  // weak
@@ -190,7 +199,8 @@ enum CellType {
 
 - (void)viewDidLoad {
   [super viewDidLoad];
-  self.view.accessibilityIdentifier = @"recent_tabs_view_controller";
+  self.view.accessibilityIdentifier =
+      kRecentTabsTableViewControllerAccessibilityIdentifier;
   self.tableView.rowHeight = UITableViewAutomaticDimension;
   self.tableView.estimatedRowHeight =
       [SessionTabDataView desiredHeightInUITableViewCell];
@@ -515,9 +525,10 @@ enum CellType {
 #pragma mark - Distant Sessions helpers
 
 - (void)refreshUserState:(SessionsSyncUserState)newSessionState {
-  if (newSessionState == _sessionState &&
-      _sessionState !=
-          SessionsSyncUserState::USER_SIGNED_IN_SYNC_ON_WITH_SESSIONS) {
+  if ((newSessionState == _sessionState &&
+       _sessionState !=
+           SessionsSyncUserState::USER_SIGNED_IN_SYNC_ON_WITH_SESSIONS) ||
+      _signinPromoViewMediator.isSigninInProgress) {
     // No need to refresh the sections.
     return;
   }
@@ -621,12 +632,12 @@ enum CellType {
     // Get view coordinates in local space.
     CGPoint viewCoordinate = [longPressGesture locationInView:self.tableView];
     params.location = viewCoordinate;
-    params.view.reset(self.tableView);
+    params.view = self.tableView;
 
     // Present sheet/popover using controller that is added to view hierarchy.
-    UIViewController* topController = [params.view window].rootViewController;
-    while (topController.presentedViewController)
-      topController = topController.presentedViewController;
+    // TODO(crbug.com/754642): Remove TopPresentedViewController().
+    UIViewController* topController =
+        top_view_controller::TopPresentedViewController();
 
     _contextMenuCoordinator =
         [[ContextMenuCoordinator alloc] initWithBaseViewController:topController
@@ -797,7 +808,7 @@ enum CellType {
     case CELL_OTHER_DEVICES_SIGNED_IN_SYNC_OFF:
       subview = [[SignedInSyncOffView alloc] initWithFrame:CGRectZero
                                               browserState:_browserState
-                                                dispatcher:self.dispatcher];
+                                                 presenter:self];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
       break;
     case CELL_OTHER_DEVICES_SIGNED_IN_SYNC_ON_NO_SESSIONS:
@@ -810,7 +821,7 @@ enum CellType {
             initWithBrowserState:_browserState
                      accessPoint:signin_metrics::AccessPoint::
                                      ACCESS_POINT_RECENT_TABS
-                      dispatcher:self.dispatcher];
+                       presenter:self /* id<SigninPresenter> */];
         _signinPromoViewMediator.consumer = self;
       }
       contentViewTopMargin = kSigninPromoViewTopMargin;
@@ -827,8 +838,7 @@ enum CellType {
       [configurator configureSigninPromoView:signinPromoView];
       subview = signinPromoView;
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-      base::RecordAction(
-          base::UserMetricsAction("Signin_Impression_FromRecentTabs"));
+      [_signinPromoViewMediator signinPromoViewVisible];
       break;
     }
     case CELL_OTHER_DEVICES_SYNC_IN_PROGRESS:
@@ -1000,6 +1010,8 @@ enum CellType {
             (SigninPromoViewConfigurator*)configurator
                              identityChanged:(BOOL)identityChanged {
   DCHECK(_signinPromoViewMediator);
+  if ([self sectionIsCollapsed:kOtherDeviceCollapsedKey])
+    return;
   NSInteger sectionIndex =
       [self sectionIndexForSectionType:OTHER_DEVICES_SECTION];
   DCHECK(sectionIndex != NSNotFound);
@@ -1017,6 +1029,36 @@ enum CellType {
   DCHECK([subview isKindOfClass:[SigninPromoView class]]);
   SigninPromoView* signinPromoView = (SigninPromoView*)subview;
   [configurator configureSigninPromoView:signinPromoView];
+}
+
+- (void)signinDidFinish {
+  [self.delegate refreshSessionsViewRecentTabsTableViewController:self];
+}
+
+#pragma mark - SyncPresenter
+
+- (void)showReauthenticateSignin {
+  [self.dispatcher
+              showSignin:
+                  [[ShowSigninCommand alloc]
+                      initWithOperation:AUTHENTICATION_OPERATION_REAUTHENTICATE
+                            accessPoint:signin_metrics::AccessPoint::
+                                            ACCESS_POINT_UNKNOWN]
+      baseViewController:self];
+}
+
+- (void)showSyncSettings {
+  [self.dispatcher showSyncSettingsFromViewController:self];
+}
+
+- (void)showSyncPassphraseSettings {
+  [self.dispatcher showSyncPassphraseSettingsFromViewController:self];
+}
+
+#pragma mark - SigninPresenter
+
+- (void)showSignin:(ShowSigninCommand*)command {
+  [self.dispatcher showSignin:command baseViewController:self];
 }
 
 @end

@@ -22,6 +22,7 @@
 #ifndef InlineBox_h
 #define InlineBox_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/layout/api/LineLayoutBoxModel.h"
 #include "core/layout/api/LineLayoutItem.h"
@@ -51,8 +52,6 @@ static inline bool IsLineOverSide(LineVerticalPositionType type) {
 // InlineBox represents a rectangle that occurs on a line.  It corresponds to
 // some LayoutObject (i.e., it represents a portion of that LayoutObject).
 class CORE_EXPORT InlineBox : public DisplayItemClient {
-  WTF_MAKE_NONCOPYABLE(InlineBox);
-
  public:
   InlineBox(LineLayoutItem obj)
       : next_(nullptr),
@@ -80,7 +79,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
         logical_width_(logical_width),
         bitfields_(first_line, constructed, dirty, extracted, is_horizontal) {}
 
-  virtual ~InlineBox();
+  ~InlineBox() override;
 
   virtual void Destroy();
 
@@ -125,8 +124,9 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
   void ShowTreeForThis() const;
   void ShowLineTreeForThis() const;
 
-  virtual void ShowBox(int = 0) const;
-  virtual void ShowLineTreeAndMark(const InlineBox* = nullptr,
+  virtual void DumpBox(StringBuilder&) const;
+  virtual void DumpLineTreeAndMark(StringBuilder&,
+                                   const InlineBox* = nullptr,
                                    const char* = nullptr,
                                    const InlineBox* = nullptr,
                                    const char* = nullptr,
@@ -139,6 +139,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
   // DisplayItemClient methods
   String DebugName() const override;
   LayoutRect VisualRect() const override;
+  LayoutRect PartialInvalidationRect() const override;
 
   bool IsText() const { return bitfields_.IsText(); }
   void SetIsText(bool is_text) { bitfields_.SetIsText(is_text); }
@@ -352,10 +353,11 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
            GetLineLayoutItem().Parent().IsBox();
   }
   EVerticalAlign VerticalAlign() const {
-    return IsAnonymousInline() ? ComputedStyle::InitialVerticalAlign()
-                               : GetLineLayoutItem()
-                                     .Style(bitfields_.FirstLine())
-                                     ->VerticalAlign();
+    return IsAnonymousInline()
+               ? ComputedStyleInitialValues::InitialVerticalAlign()
+               : GetLineLayoutItem()
+                     .Style(bitfields_.FirstLine())
+                     ->VerticalAlign();
   }
 
   // Use with caution! The type is not checked!
@@ -368,11 +370,6 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
   // Physical location of the top-left corner of the box in the containing
   // block.
   LayoutPoint PhysicalLocation() const;
-
-  // Converts from a rect in the logical space of the InlineBox to one in the
-  // physical space of the containing block. The logical space of an InlineBox
-  // may be transposed for vertical text and flipped for right-to-left text.
-  void LogicalRectToPhysicalRect(LayoutRect&) const;
 
   // TODO(szager): The Rect versions should return a rect, not modify the
   // argument.
@@ -523,6 +520,8 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
 #if DCHECK_IS_ON()
   bool has_bad_parent_ = false;
 #endif
+
+  DISALLOW_COPY_AND_ASSIGN(InlineBox);
 };
 
 #if !DCHECK_IS_ON()
@@ -542,6 +541,10 @@ inline void InlineBox::SetHasBadParent() {
 // Allow equality comparisons of InlineBox's by reference or pointer,
 // interchangeably.
 DEFINE_COMPARISON_OPERATORS_WITH_REFERENCES(InlineBox)
+
+// TODO(layout-dev): Once LayoutNG supports inline layout, we should remove
+// |CanUseInlineBox()|.
+bool CanUseInlineBox(const LayoutObject&);
 
 }  // namespace blink
 

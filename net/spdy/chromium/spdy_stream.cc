@@ -15,7 +15,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "net/log/net_log.h"
@@ -56,10 +55,6 @@ std::unique_ptr<base::Value> NetLogSpdyStreamWindowUpdateCallback(
   return std::move(dict);
 }
 
-bool ContainsUppercaseAscii(SpdyStringPiece str) {
-  return std::any_of(str.begin(), str.end(), base::IsAsciiUpper<char>);
-}
-
 }  // namespace
 
 // A wrapper around a stream that calls into ProduceHeadersFrame().
@@ -70,7 +65,7 @@ class SpdyStream::HeadersBufferProducer : public SpdyBufferProducer {
     DCHECK(stream_.get());
   }
 
-  ~HeadersBufferProducer() override {}
+  ~HeadersBufferProducer() override = default;
 
   std::unique_ptr<SpdyBuffer> ProduceBuffer() override {
     if (!stream_.get()) {
@@ -458,6 +453,12 @@ void SpdyStream::OnHeadersReceived(const SpdyHeaderBlock& response_headers,
       session_->ResetStream(stream_id_, ERROR_CODE_PROTOCOL_ERROR, error);
       break;
   }
+}
+
+bool SpdyStream::ShouldRetryRSTPushStream() {
+  // Retry if the stream is a pushed stream, has been claimed, but did not yet
+  // receive response headers
+  return (response_headers_.empty() && type_ == SPDY_PUSH_STREAM && delegate_);
 }
 
 void SpdyStream::OnPushPromiseHeadersReceived(SpdyHeaderBlock headers) {
@@ -879,14 +880,6 @@ void SpdyStream::SaveResponseHeaders(const SpdyHeaderBlock& response_headers) {
 
   for (SpdyHeaderBlock::const_iterator it = response_headers.begin();
        it != response_headers.end(); ++it) {
-    // Disallow uppercase headers.
-    if (ContainsUppercaseAscii(it->first)) {
-      session_->ResetStream(
-          stream_id_, ERROR_CODE_PROTOCOL_ERROR,
-          "Upper case characters in header: " + it->first.as_string());
-      return;
-    }
-
     response_headers_.insert(*it);
   }
 

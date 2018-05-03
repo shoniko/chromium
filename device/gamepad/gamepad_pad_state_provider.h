@@ -27,6 +27,7 @@ enum GamepadSource {
   GAMEPAD_SOURCE_MAC_GC,
   GAMEPAD_SOURCE_MAC_HID,
   GAMEPAD_SOURCE_MAC_XBOX,
+  GAMEPAD_SOURCE_OCULUS,
   GAMEPAD_SOURCE_OPENVR,
   GAMEPAD_SOURCE_TEST,
   GAMEPAD_SOURCE_WIN_XINPUT,
@@ -82,6 +83,11 @@ class DEVICE_GAMEPAD_EXPORT GamepadPadStateProvider {
   // been encountered before one of the remaining slots will be reserved for it.
   // If no slots are available will return NULL.
   PadState* GetPadState(GamepadSource source, int source_id);
+
+  // Gets a PadState object for a connected gamepad by specifying its index in
+  // the pad_states_ array. Returns NULL if there is no connected gamepad at
+  // that index.
+  PadState* GetConnectedPadState(int pad_index);
 
  protected:
   void ClearPadState(PadState& state);

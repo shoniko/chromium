@@ -16,6 +16,7 @@
 #include "net/quic/core/quic_spdy_client_session_base.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/core/tls_client_handshaker.h"
 #include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_spdy_session_peer.h"
@@ -62,7 +63,7 @@ class MockQuicClientSessionBase : public QuicSpdyClientSessionBase {
   MOCK_METHOD5(WritevData,
                QuicConsumedData(QuicStream* stream,
                                 QuicStreamId id,
-                                QuicIOVector data,
+                                size_t write_length,
                                 QuicStreamOffset offset,
                                 StreamSendingState fin));
   MOCK_METHOD3(SendRstStream,
@@ -111,11 +112,11 @@ class MockQuicClientSessionBase : public QuicSpdyClientSessionBase {
 
   using QuicSession::ActivateStream;
 
-  // Returns a QuicConsumedData that indicates all of |data| (and |fin| if set)
-  // has been consumed.
+  // Returns a QuicConsumedData that indicates all of |write_length| (and |fin|
+  // if set) has been consumed.
   static QuicConsumedData ConsumeAllData(
       QuicStreamId id,
-      const QuicIOVector& data,
+      size_t write_length,
       QuicStreamOffset offset,
       bool fin,
       QuicAckListenerInterface* ack_listener);
@@ -154,11 +155,14 @@ class QuicChromiumClientStreamTest
     : public ::testing::TestWithParam<QuicTransportVersion> {
  public:
   QuicChromiumClientStreamTest()
-      : crypto_config_(crypto_test_utils::ProofVerifierForTesting()),
-        session_(new MockQuicConnection(&helper_,
-                                        &alarm_factory_,
-                                        Perspective::IS_CLIENT,
-                                        SupportedTransportVersions(GetParam())),
+      : crypto_config_(crypto_test_utils::ProofVerifierForTesting(),
+                       TlsClientHandshaker::CreateSslCtx()),
+        session_(new MockQuicConnection(
+                     &helper_,
+                     &alarm_factory_,
+                     Perspective::IS_CLIENT,
+                     SupportedVersions(
+                         ParsedQuicVersion(PROTOCOL_QUIC_CRYPTO, GetParam()))),
                  &push_promise_index_) {
     stream_ = new QuicChromiumClientStream(kTestStreamId, &session_,
                                            NetLogWithSource());
@@ -324,7 +328,8 @@ TEST_P(QuicChromiumClientStreamTest, HandleAfterConnectionClose) {
 
 TEST_P(QuicChromiumClientStreamTest, HandleAfterStreamReset) {
   // Verify that the Handle still behaves correctly after the stream is reset.
-  QuicRstStreamFrame rst(kTestStreamId, QUIC_STREAM_CANCELLED, 0);
+  QuicRstStreamFrame rst(kInvalidControlFrameId, kTestStreamId,
+                         QUIC_STREAM_CANCELLED, 0);
   EXPECT_CALL(session_,
               SendRstStream(kTestStreamId, QUIC_RST_ACKNOWLEDGEMENT, 0));
   stream_->OnStreamReset(rst);
@@ -599,9 +604,14 @@ TEST_P(QuicChromiumClientStreamTest, WritevStreamData) {
       new StringIOBuffer("Just a small payload"));
 
   // All data written.
-  EXPECT_CALL(session_, WritevData(stream_, stream_->id(), _, _, _))
-      .WillOnce(Return(QuicConsumedData(buf1->size(), false)))
-      .WillOnce(Return(QuicConsumedData(buf2->size(), true)));
+  if (session_.can_use_slices()) {
+    EXPECT_CALL(session_, WritevData(stream_, stream_->id(), _, _, _))
+        .WillOnce(Return(QuicConsumedData(buf1->size() + buf2->size(), true)));
+  } else {
+    EXPECT_CALL(session_, WritevData(stream_, stream_->id(), _, _, _))
+        .WillOnce(Return(QuicConsumedData(buf1->size(), false)))
+        .WillOnce(Return(QuicConsumedData(buf2->size(), true)));
+  }
   TestCompletionCallback callback;
   EXPECT_EQ(
       OK, handle_->WritevStreamData({buf1, buf2}, {buf1->size(), buf2->size()},
@@ -614,11 +624,16 @@ TEST_P(QuicChromiumClientStreamTest, WritevStreamDataAsync) {
       new StringIOBuffer("Just a small payload"));
 
   // Only a part of the data is written.
-  EXPECT_CALL(session_, WritevData(stream_, stream_->id(), _, _, _))
-      // First piece of data is written.
-      .WillOnce(Return(QuicConsumedData(buf1->size(), false)))
-      // Second piece of data is queued.
-      .WillOnce(Return(QuicConsumedData(0, false)));
+  if (session_.can_use_slices()) {
+    EXPECT_CALL(session_, WritevData(stream_, stream_->id(), _, _, _))
+        .WillOnce(Return(QuicConsumedData(buf1->size(), false)));
+  } else {
+    EXPECT_CALL(session_, WritevData(stream_, stream_->id(), _, _, _))
+        // First piece of data is written.
+        .WillOnce(Return(QuicConsumedData(buf1->size(), false)))
+        // Second piece of data is queued.
+        .WillOnce(Return(QuicConsumedData(0, false)));
+  }
   TestCompletionCallback callback;
   EXPECT_EQ(ERR_IO_PENDING,
             handle_->WritevStreamData({buf1.get(), buf2.get()},

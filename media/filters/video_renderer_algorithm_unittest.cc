@@ -80,11 +80,11 @@ class VideoRendererAlgorithmTest : public testing::Test {
     tick_clock_->Advance(base::TimeDelta::FromMicroseconds(10000));
     time_source_.set_tick_clock_for_testing(tick_clock_.get());
   }
-  ~VideoRendererAlgorithmTest() override {}
+  ~VideoRendererAlgorithmTest() override = default;
 
   scoped_refptr<VideoFrame> CreateFrame(base::TimeDelta timestamp) {
     const gfx::Size natural_size(8, 8);
-    return frame_pool_.CreateFrame(PIXEL_FORMAT_YV12, natural_size,
+    return frame_pool_.CreateFrame(PIXEL_FORMAT_I420, natural_size,
                                    gfx::Rect(natural_size), natural_size,
                                    timestamp);
   }
@@ -1216,6 +1216,34 @@ TEST_F(VideoRendererAlgorithmTest, CadenceCalculations) {
   ASSERT_EQ("[60]", GetCadence(1, NTSC(60)));
 }
 
+TEST_F(VideoRendererAlgorithmTest, RemoveExpiredFramesWithoutRendering) {
+  TickGenerator tg(tick_clock_->NowTicks(), 50);
+
+  // Removing expired frames before anything is enqueued should do nothing.
+  ASSERT_EQ(0u, algorithm_.RemoveExpiredFrames(tg.current()));
+
+  // First verify that frames without a duration are always effective when only
+  // one frame is present in the queue.
+  algorithm_.EnqueueFrame(CreateFrame(tg.interval(0)));
+  ASSERT_EQ(0u, algorithm_.RemoveExpiredFrames(tg.current()));
+  EXPECT_EQ(1u, EffectiveFramesQueued());
+
+  ASSERT_EQ(0u, algorithm_.RemoveExpiredFrames(tg.current() + tg.interval(3)));
+  EXPECT_EQ(1u, EffectiveFramesQueued());
+
+  algorithm_.Reset();
+
+  // Now try a frame with duration information, this frame should not be counted
+  // as effective since we know the duration of it. It is not removed since we
+  // only have one frame in the queue though.
+  auto frame = CreateFrame(tg.interval(0));
+  frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
+                                  tg.interval(1));
+  algorithm_.EnqueueFrame(frame);
+  ASSERT_EQ(0u, algorithm_.RemoveExpiredFrames(tg.current() + tg.interval(3)));
+  EXPECT_EQ(0u, EffectiveFramesQueued());
+}
+
 TEST_F(VideoRendererAlgorithmTest, RemoveExpiredFrames) {
   TickGenerator tg(tick_clock_->NowTicks(), 50);
 
@@ -1334,38 +1362,39 @@ TEST_F(VideoRendererAlgorithmTest, RemoveExpiredFramesCadence) {
   EXPECT_EQ(0u, EffectiveFramesQueued());
 }
 
-// Test runs too slowly on debug builds.
-// TODO(fuchsia): Also runs too slowly on Fuchsia, this should be investigated,
-// see https://crbug.com/767166.
-#if defined(NDEBUG) && !defined(OS_FUCHSIA)
-TEST_F(VideoRendererAlgorithmTest, CadenceBasedTest) {
-  // Common display rates.
-  const double kDisplayRates[] = {
-      NTSC(24), 24, NTSC(25), 25, NTSC(30), 30,  48,
-      NTSC(50), 50, NTSC(60), 60, 75,       120, 144,
-  };
+class VideoRendererAlgorithmCadenceTest
+    : public VideoRendererAlgorithmTest,
+      public ::testing::WithParamInterface<::testing::tuple<double, double>> {};
 
-  // List of common frame rate values. Values pulled from local test media,
-  // videostack test matrix, and Wikipedia.
-  const double kTestRates[] = {
-      1,        10, 12.5,  15,  NTSC(24), 24,  NTSC(25), 25,
-      NTSC(30), 30, 30.12, 48,  NTSC(50), 50,  58.74,    NTSC(60),
-      60,       72, 90,    100, 120,      144, 240,      300,
-  };
+TEST_P(VideoRendererAlgorithmCadenceTest, CadenceTest) {
+  double display_rate = std::tr1::get<0>(GetParam());
+  double frame_rate = std::tr1::get<1>(GetParam());
 
-  for (double display_rate : kDisplayRates) {
-    for (double frame_rate : kTestRates) {
-      TickGenerator frame_tg(base::TimeTicks(), frame_rate);
-      TickGenerator display_tg(tick_clock_->NowTicks(), display_rate);
-      RunFramePumpTest(
-          true, &frame_tg, &display_tg,
-          [](const scoped_refptr<VideoFrame>& frame, size_t frames_dropped) {});
-      if (HasFatalFailure())
-        return;
-    }
-  }
+  TickGenerator frame_tg(base::TimeTicks(), frame_rate);
+  TickGenerator display_tg(tick_clock_->NowTicks(), display_rate);
+  RunFramePumpTest(
+      true, &frame_tg, &display_tg,
+      [](const scoped_refptr<VideoFrame>& frame, size_t frames_dropped) {});
 }
-#endif  // defined(NDEBUG) && !defined(OS_FUCHSIA)
+
+// Common display rates.
+const double kDisplayRates[] = {
+    NTSC(24), 24, NTSC(25), 25, NTSC(30), 30,  48,
+    NTSC(50), 50, NTSC(60), 60, 75,       120, 144,
+};
+
+// List of common frame rate values. Values pulled from local test media,
+// videostack test matrix, and Wikipedia.
+const double kTestRates[] = {
+    1,        10, 12.5,  15,  NTSC(24), 24,  NTSC(25), 25,
+    NTSC(30), 30, 30.12, 48,  NTSC(50), 50,  58.74,    NTSC(60),
+    60,       72, 90,    100, 120,      144, 240,      300,
+};
+
+INSTANTIATE_TEST_CASE_P(,
+                        VideoRendererAlgorithmCadenceTest,
+                        ::testing::Combine(::testing::ValuesIn(kDisplayRates),
+                                           ::testing::ValuesIn(kTestRates)));
 
 // Rotate through various playback rates and ensure algorithm adapts correctly.
 TEST_F(VideoRendererAlgorithmTest, VariablePlaybackRateCadence) {
@@ -1575,6 +1604,20 @@ TEST_F(VideoRendererAlgorithmTest, CadenceForFutureFrames) {
   EXPECT_EQ(1u, frames_queued());
   EXPECT_EQ(tg.interval(12), rendered_frame->timestamp());
   ASSERT_TRUE(is_using_cadence());
+}
+
+TEST_F(VideoRendererAlgorithmTest, InfiniteDurationMetadata) {
+  TickGenerator tg(tick_clock_->NowTicks(), 50);
+
+  auto frame = CreateFrame(kInfiniteDuration);
+  frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
+                                  tg.interval(1));
+  algorithm_.EnqueueFrame(frame);
+
+  // This should not crash or fail.
+  size_t frames_dropped = 0;
+  frame = RenderAndStep(&tg, &frames_dropped);
+  EXPECT_TRUE(algorithm_.average_frame_duration().is_zero());
 }
 
 }  // namespace media

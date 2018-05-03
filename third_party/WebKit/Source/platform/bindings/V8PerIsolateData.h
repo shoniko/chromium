@@ -28,6 +28,7 @@
 
 #include <memory>
 
+#include "base/time/default_tick_clock.h"
 #include "gin/public/isolate_holder.h"
 #include "gin/public/v8_idle_task_runner.h"
 #include "platform/PlatformExport.h"
@@ -48,7 +49,6 @@ class ActiveScriptWrappableBase;
 class DOMDataStore;
 class StringCache;
 class V8PrivateProperty;
-class WebTaskRunner;
 struct WrapperTypeInfo;
 
 typedef WTF::Vector<DOMDataStore*> DOMDataStoreList;
@@ -64,14 +64,6 @@ class PLATFORM_EXPORT V8PerIsolateData {
     kTakeSnapshot,
     kDontUseSnapshot,
     kUseSnapshot,
-  };
-
-  class EndOfScopeTask {
-    USING_FAST_MALLOC(EndOfScopeTask);
-
-   public:
-    virtual ~EndOfScopeTask() {}
-    virtual void Run() = 0;
   };
 
   // Disables the UseCounter.
@@ -107,8 +99,7 @@ class PLATFORM_EXPORT V8PerIsolateData {
     virtual ~Data() = default;
   };
 
-  static v8::Isolate* Initialize(WebTaskRunner*,
-                                 const intptr_t* reference_table,
+  static v8::Isolate* Initialize(scoped_refptr<base::SingleThreadTaskRunner>,
                                  V8ContextSnapshotMode);
 
   static V8PerIsolateData* From(v8::Isolate* isolate) {
@@ -193,7 +184,7 @@ class PLATFORM_EXPORT V8PerIsolateData {
   // to C++ from script, after executing a script task (e.g. callback,
   // event) or microtasks (e.g. promise). This is explicitly needed for
   // Indexed DB transactions per spec, but should in general be avoided.
-  void AddEndOfScopeTask(std::unique_ptr<EndOfScopeTask>);
+  void AddEndOfScopeTask(base::OnceClosure);
   void RunEndOfScopeTasks();
   void ClearEndOfScopeTasks();
 
@@ -243,10 +234,9 @@ class PLATFORM_EXPORT V8PerIsolateData {
   }
 
  private:
-  V8PerIsolateData(WebTaskRunner*,
-                   const intptr_t* reference_table,
+  V8PerIsolateData(scoped_refptr<base::SingleThreadTaskRunner>,
                    V8ContextSnapshotMode);
-  explicit V8PerIsolateData(const intptr_t* reference_table);
+  V8PerIsolateData();
   ~V8PerIsolateData();
 
   // A really simple hash function, which makes lookups faster. The set of
@@ -298,7 +288,7 @@ class PLATFORM_EXPORT V8PerIsolateData {
 
   std::unique_ptr<StringCache> string_cache_;
   std::unique_ptr<V8PrivateProperty> private_property_;
-  RefPtr<ScriptState> script_regexp_script_state_;
+  scoped_refptr<ScriptState> script_regexp_script_state_;
 
   bool constructor_mode_;
   friend class ConstructorMode;
@@ -309,7 +299,7 @@ class PLATFORM_EXPORT V8PerIsolateData {
   bool is_handling_recursion_level_error_;
   bool is_reporting_exception_;
 
-  Vector<std::unique_ptr<EndOfScopeTask>> end_of_scope_tasks_;
+  Vector<base::OnceClosure> end_of_scope_tasks_;
   std::unique_ptr<Data> thread_debugger_;
 
   Persistent<ActiveScriptWrappableSet> active_script_wrappables_;

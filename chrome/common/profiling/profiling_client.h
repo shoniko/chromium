@@ -17,9 +17,9 @@ namespace profiling {
 
 class MemlogSenderPipe;
 
-// The MemlogClient listens on the interface for a StartProfiling message. On
+// The ProfilingClient listens on the interface for a StartProfiling message. On
 // receiving the message, it begins profiling the current process.
-// It is also possible to use the MemlogClient to begin profiling the current
+// It is also possible to use the ProfilingClient to begin profiling the current
 // process without connecting to the service manager interface, if the caller
 // has a |sender_pipe| to pass to StartProfiling.
 class ProfilingClient : public mojom::ProfilingClient {
@@ -27,8 +27,9 @@ class ProfilingClient : public mojom::ProfilingClient {
   ProfilingClient();
   ~ProfilingClient() override;
 
-  // mojom::MemlogClient overrides:
-  void StartProfiling(mojo::ScopedHandle memlog_sender_pipe) override;
+  // mojom::ProfilingClient overrides:
+  void StartProfiling(mojo::ScopedHandle memlog_sender_pipe,
+                      mojom::StackMode stack_mode) override;
   void FlushMemlogPipe(uint32_t barrier_id) override;
 
   void OnServiceManagerConnected(content::ServiceManagerConnection* connection);
@@ -37,6 +38,8 @@ class ProfilingClient : public mojom::ProfilingClient {
  private:
   // The most recent client request is bound and kept alive.
   mojo::Binding<mojom::ProfilingClient> binding_;
+
+  bool started_profiling_;
 
   std::unique_ptr<MemlogSenderPipe> memlog_sender_pipe_;
 };

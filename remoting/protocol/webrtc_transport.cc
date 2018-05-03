@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -78,7 +79,7 @@ void UpdateCodecParameters(SdpMessage* sdp_message, bool incoming) {
   // underlying bug is fixed to handle high load at high bitrate.
   if (sdp_message->has_video()) {
     const char* kParameters =
-        "x-google-min-bitrate=0; x-google-max-bitrate=20000";
+        "x-google-min-bitrate=1000; x-google-max-bitrate=20000";
     bool param_added = sdp_message->AddCodecParameter("VP8", kParameters);
     param_added |= sdp_message->AddCodecParameter("VP9", kParameters);
     param_added |= sdp_message->AddCodecParameter("H264", kParameters);
@@ -131,7 +132,7 @@ class CreateSessionDescriptionObserver
   explicit CreateSessionDescriptionObserver(
       const ResultCallback& result_callback)
       : result_callback_(result_callback) {}
-  ~CreateSessionDescriptionObserver() override {}
+  ~CreateSessionDescriptionObserver() override = default;
 
  private:
   ResultCallback result_callback_;
@@ -164,7 +165,7 @@ class SetSessionDescriptionObserver
  protected:
   explicit SetSessionDescriptionObserver(const ResultCallback& result_callback)
       : result_callback_(result_callback) {}
-  ~SetSessionDescriptionObserver() override {}
+  ~SetSessionDescriptionObserver() override = default;
 
  private:
   ResultCallback result_callback_;
@@ -209,7 +210,14 @@ class WebrtcTransport::PeerConnectionWrapper
     peer_connection_ = peer_connection_factory_->CreatePeerConnection(
         rtc_config, &constraints, std::move(port_allocator), nullptr, this);
   }
+
+// TODO(sakal): Remove this ifdef after migration to virtual PeerConnection
+// observer is complete.
+#ifdef VIRTUAL_PEERCONNECTION_OBSERVER_DESTRUCTOR
+  ~PeerConnectionWrapper() override {
+#else
   virtual ~PeerConnectionWrapper() {
+#endif
     // PeerConnection creates threads internally, which are stopped when the
     // connection is closed. Thread.Stop() is a blocking operation.
     // See crbug.com/660081.
@@ -331,7 +339,7 @@ std::unique_ptr<MessagePipe> WebrtcTransport::CreateOutgoingChannel(
     const std::string& name) {
   webrtc::DataChannelInit config;
   config.reliable = true;
-  return base::MakeUnique<WebrtcDataStreamAdapter>(
+  return std::make_unique<WebrtcDataStreamAdapter>(
       peer_connection()->CreateDataChannel(name, &config));
 }
 
@@ -489,7 +497,9 @@ void WebrtcTransport::OnLocalSessionDescriptionCreated(
 
   SdpMessage sdp_message(description_sdp);
   UpdateCodecParameters(&sdp_message, /*incoming=*/false);
-  if (!preferred_video_codec_.empty()) {
+  if (preferred_video_codec_.empty()) {
+    sdp_message.PreferVideoCodec("VP8");
+  } else {
     sdp_message.PreferVideoCodec(preferred_video_codec_);
   }
   description_sdp = sdp_message.ToString();
@@ -593,7 +603,7 @@ void WebrtcTransport::OnDataChannel(
   DCHECK(thread_checker_.CalledOnValidThread());
   event_handler_->OnWebrtcTransportIncomingDataChannel(
       data_channel->label(),
-      base::MakeUnique<WebrtcDataStreamAdapter>(data_channel));
+      std::make_unique<WebrtcDataStreamAdapter>(data_channel));
 }
 
 void WebrtcTransport::OnRenegotiationNeeded() {
@@ -737,8 +747,11 @@ void WebrtcTransport::Close(ErrorCode error) {
     event_handler_->OnWebrtcTransportError(error);
 }
 
-void WebrtcTransport::SetPreferredVideoCodec(const std::string& codec) {
-  preferred_video_codec_ = codec;
+void WebrtcTransport::ApplySessionOptions(const SessionOptions& options) {
+  base::Optional<std::string> video_codec = options.Get("Video-Codec");
+  if (video_codec) {
+    preferred_video_codec_ = *video_codec;
+  }
 }
 
 }  // namespace protocol

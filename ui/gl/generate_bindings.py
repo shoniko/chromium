@@ -37,6 +37,7 @@ array instead of the names array. Each version has the following keys:
    extensions: Extra Extensions for which the function is bound. Only needed
                in some cases where the extension cannot be parsed from the
                headers.
+   explicit_only: if True, only extensions in 'extensions' are considered.
    is_optional: True if the GetProcAddress can return NULL for the
                 function.  This may happen for example when functions
                 are added to a new version of an extension, but the
@@ -160,17 +161,10 @@ GL_FUNCTIONS = [
   'arguments':
       'GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha', },
 { 'return_type': 'void',
-  'names': ['glBlitFramebuffer'],
-  'arguments': 'GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, '
-               'GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, '
-               'GLbitfield mask, GLenum filter', },
-{ 'return_type': 'void',
-  'names': ['glBlitFramebufferANGLE', 'glBlitFramebuffer'],
-  'arguments': 'GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, '
-               'GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, '
-               'GLbitfield mask, GLenum filter', },
-{ 'return_type': 'void',
-  'names': ['glBlitFramebufferEXT', 'glBlitFramebuffer'],
+  'versions' : [{'name': 'glBlitFramebuffer',
+                 'extensions': ['GL_ARB_framebuffer_object']},
+                {'name': 'glBlitFramebufferANGLE'},
+                {'name': 'glBlitFramebufferEXT'}],
   'arguments': 'GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, '
                'GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, '
                'GLbitfield mask, GLenum filter', },
@@ -522,7 +516,9 @@ GL_FUNCTIONS = [
   'names': ['glFlush'],
   'arguments': 'void', },
 { 'return_type': 'void',
-  'names': ['glFlushMappedBufferRange'],
+  'versions': [{'name': 'glFlushMappedBufferRange',
+                'extensions': ['GL_ARB_map_buffer_range']},
+               {'name': 'glFlushMappedBufferRangeEXT'}],
   'arguments': 'GLenum target, GLintptr offset, GLsizeiptr length', },
 { 'return_type': 'void',
   'names': ['glFramebufferRenderbufferEXT', 'glFramebufferRenderbuffer'],
@@ -535,12 +531,8 @@ GL_FUNCTIONS = [
       'GLenum target, GLenum attachment, GLenum textarget, GLuint texture, '
       'GLint level', },
 { 'return_type': 'void',
-  'names': ['glFramebufferTexture2DMultisampleEXT'],
-  'arguments':
-      'GLenum target, GLenum attachment, GLenum textarget, GLuint texture, '
-      'GLint level, GLsizei samples', },
-{ 'return_type': 'void',
-  'names': ['glFramebufferTexture2DMultisampleIMG'],
+ 'versions': [{'name': 'glFramebufferTexture2DMultisampleEXT'},
+              {'name': 'glFramebufferTexture2DMultisampleIMG'}],
   'arguments':
       'GLenum target, GLenum attachment, GLenum textarget, GLuint texture, '
       'GLint level, GLsizei samples', },
@@ -1355,19 +1347,19 @@ GL_FUNCTIONS = [
   'arguments':
       'GLenum target, GLenum internalformat, GLsizei width, GLsizei height', },
 { 'return_type': 'void',
-  'names': ['glRenderbufferStorageMultisample'],
+ 'versions' : [{'name': 'glRenderbufferStorageMultisample',
+                'extensions': ['GL_ARB_framebuffer_object']},
+               {'name': 'glRenderbufferStorageMultisampleANGLE'},
+               {'name': 'glRenderbufferStorageMultisampleEXT',
+                'extensions': ['GL_EXT_framebuffer_multisample'],
+                'explicit_only': True}],
   'arguments': 'GLenum target, GLsizei samples, GLenum internalformat, '
                'GLsizei width, GLsizei height', },
 { 'return_type': 'void',
-  'names': ['glRenderbufferStorageMultisampleANGLE'],
-  'arguments': 'GLenum target, GLsizei samples, GLenum internalformat, '
-               'GLsizei width, GLsizei height', },
-{ 'return_type': 'void',
-  'names': ['glRenderbufferStorageMultisampleEXT'],
-  'arguments': 'GLenum target, GLsizei samples, GLenum internalformat, '
-               'GLsizei width, GLsizei height', },
-{ 'return_type': 'void',
-  'names': ['glRenderbufferStorageMultisampleIMG'],
+ 'versions' : [{'name': 'glRenderbufferStorageMultisampleEXT',
+                'extensions': ['GL_EXT_multisampled_render_to_texture'],
+                'explicit_only': True},
+               {'name': 'glRenderbufferStorageMultisampleIMG'}],
   'arguments': 'GLenum target, GLsizei samples, GLenum internalformat, '
                'GLsizei width, GLsizei height', },
 { 'return_type': 'void',
@@ -1805,6 +1797,9 @@ GL_FUNCTIONS = [
                  'extensions': ['GL_ARB_sync'] }],
   'arguments':
     'GLsync sync, GLbitfield flags, GLuint64 timeout', },
+{ 'return_type': 'void',
+  'names': ['glWindowRectanglesEXT'],
+  'arguments': 'GLenum mode, GLsizei n, const GLint* box', },
 ]
 
 OSMESA_FUNCTIONS = [
@@ -1900,9 +1895,9 @@ EGL_FUNCTIONS = [
                  'extensions': ['EGL_KHR_stream'] }],
   'arguments': 'EGLDisplay dpy, const EGLint* attrib_list' },
 { 'return_type': 'EGLBoolean',
-    'versions': [{'name': 'eglCreateStreamProducerD3DTextureNV12ANGLE',
+    'versions': [{'name': 'eglCreateStreamProducerD3DTextureANGLE',
                   'extensions':
-                      ['EGL_ANGLE_stream_producer_d3d_texture_nv12']}],
+                      ['EGL_ANGLE_stream_producer_d3d_texture']}],
   'arguments':
       'EGLDisplay dpy, EGLStreamKHR stream, EGLAttrib* attrib_list', },
 { 'return_type': 'EGLSyncKHR',
@@ -1946,6 +1941,16 @@ EGL_FUNCTIONS = [
                      'GL_CHROMIUM_egl_android_native_fence_sync_hack']}],
   'arguments':
       'EGLDisplay dpy, EGLSyncKHR sync' },
+{ 'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglExportDMABUFImageMESA',
+                 'extensions': ['EGL_MESA_image_dma_buf_export'] }],
+  'arguments': 'EGLDisplay dpy, EGLImageKHR image, int* fds, EGLint* strides, '
+               'EGLint* offsets', },
+{ 'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglExportDMABUFImageQueryMESA',
+                 'extensions': ['EGL_MESA_image_dma_buf_export'] }],
+  'arguments': 'EGLDisplay dpy, EGLImageKHR image, int* fourcc, '
+               'int* num_planes, EGLuint64KHR* modifiers', },
 { 'return_type': 'EGLBoolean',
   'versions': [{ 'name': 'eglGetCompositorTimingANDROID',
                  'extensions': [
@@ -2125,9 +2130,9 @@ EGL_FUNCTIONS = [
   'arguments':
       'EGLDisplay dpy, EGLStreamKHR stream', },
 { 'return_type': 'EGLBoolean',
-    'versions': [{ 'name': 'eglStreamPostD3DTextureNV12ANGLE',
+    'versions': [{ 'name': 'eglStreamPostD3DTextureANGLE',
                    'extensions':
-                       ['EGL_ANGLE_stream_producer_d3d_texture_nv12']}],
+                       ['EGL_ANGLE_stream_producer_d3d_texture']}],
   'arguments':
       'EGLDisplay dpy, EGLStreamKHR stream, void* texture, '
       'const EGLAttrib* attrib_list', },
@@ -2596,7 +2601,8 @@ def GenerateMockHeader(file, functions, set_name):
     # For now gmock supports at most 10 args.
     if arg_count <= 10:
       file.write('  MOCK_METHOD%d(%s, %s(%s));\n' %
-          (arg_count, func['known_as'][2:], func['return_type'], args))
+          (arg_count, func['known_as'][len(set_name):], func['return_type'],
+           args))
     else:
       file.write('  // TODO(zmo): crbug.com/456340\n')
       file.write('  // %s cannot be mocked because it has %d args.\n' %
@@ -2679,7 +2685,8 @@ namespace gl {
 
   file.write('\n')
   if set_name != 'gl':
-    file.write('Driver%s g_driver_%s;\n' % (set_name.upper(), set_name.lower()))
+    file.write('Driver%s g_driver_%s;  // Exists in .bss\n' % (
+        set_name.upper(), set_name.lower()))
   file.write('\n')
 
   # Write stub functions that take the place of some functions before a context
@@ -2703,6 +2710,12 @@ namespace gl {
   file.write('\n')
   file.write('void Driver%s::InitializeStaticBindings() {\n' %
              set_name.upper())
+  file.write('  // Ensure struct has been zero-initialized.\n')
+  file.write('  char* this_bytes = reinterpret_cast<char*>(this);\n')
+  file.write('  DCHECK(this_bytes[0] == 0);\n');
+  file.write('  DCHECK('
+             'memcmp(this_bytes, this_bytes + 1, sizeof(*this) - 1) == 0);\n');
+  file.write('\n')
 
   def WriteFuncBinding(file, known_as, version_name):
     file.write(
@@ -2712,8 +2725,6 @@ namespace gl {
   for func in functions:
     if 'static_binding' in func:
       WriteFuncBinding(file, func['known_as'], func['static_binding'])
-    else:
-      file.write('  fn.%sFn = 0;\n' % func['known_as'])
 
   def GetGLVersionCondition(gl_version):
     if GLVersionBindAlways(gl_version):
@@ -2954,6 +2965,15 @@ void DriverEGL::InitializeExtensionBindings() {
 
   # Write NoContextGLApi functions
   if set_name.upper() == "GL":
+    file.write('\n')
+    file.write('namespace {\n')
+    file.write('void NoContextHelper(const char* method_name) {\n')
+    no_context_error = ('<< "Trying to call " << method_name << " without '
+                        'current GL context"')
+    file.write('  NOTREACHED() %s;\n' % no_context_error)
+    file.write('  LOG(ERROR) %s;\n' % no_context_error)
+    file.write('}\n')
+    file.write('}  // namespace\n')
     for func in functions:
       function_name = func['known_as']
       return_type = func['return_type']
@@ -2962,9 +2982,7 @@ void DriverEGL::InitializeExtensionBindings() {
       file.write('%s NoContextGLApi::%sFn(%s) {\n' %
           (return_type, function_name, arguments))
       argument_names = MakeArgNames(arguments)
-      no_context_error = "Trying to call %s() without current GL context" % function_name
-      file.write('  NOTREACHED() <<  "%s";\n' % no_context_error)
-      file.write('  LOG(ERROR) <<  "%s";\n' % no_context_error)
+      file.write('  NoContextHelper("%s");\n' % function_name)
       default_value = { 'GLenum': 'static_cast<GLenum>(0)',
                         'GLuint': '0U',
                         'GLint': '0',
@@ -3014,7 +3032,7 @@ def GenerateMockBindingsHeader(file, functions):
         (func['return_type'], func['name'], func['arguments']))
 
 
-def GenerateMockBindingsSource(file, functions):
+def GenerateMockBindingsSource(file, functions, set_name):
   """Generates functions that invoke MockGLInterface members and a
   GetGLProcAddress function that returns addresses to those functions."""
 
@@ -3023,18 +3041,20 @@ def GenerateMockBindingsSource(file, functions):
 
 #include <string.h>
 
-#include "ui/gl/gl_mock.h"
+#include "ui/gl/%s_mock.h"
 
-namespace gl {
-
+namespace {
 // This is called mainly to prevent the compiler combining the code of mock
 // functions with identical contents, so that their function pointers will be
 // different.
 void MakeFunctionUnique(const char *func_name) {
     VLOG(2) << "Calling mock " << func_name;
 }
+}  // namespace
 
-""")
+namespace gl {
+""" % (set_name,))
+
   # Write functions that trampoline into the set MockGLInterface instance.
   uniquely_named_functions = GetUniquelyNamedFunctions(functions)
   sorted_function_names = sorted(uniquely_named_functions.iterkeys())
@@ -3042,14 +3062,15 @@ void MakeFunctionUnique(const char *func_name) {
   for key in sorted_function_names:
     func = uniquely_named_functions[key]
     file.write('\n')
-    file.write('%s GL_BINDING_CALL MockGLInterface::Mock_%s(%s) {\n' %
-        (func['return_type'], func['name'], func['arguments']))
+    file.write('%s GL_BINDING_CALL Mock%sInterface::Mock_%s(%s) {\n' %
+        (func['return_type'], set_name.upper(), func['name'],
+         func['arguments']))
     file.write('  MakeFunctionUnique("%s");\n' % func['name'])
-    arg_re = r'(const )?[a-zA-Z0-9]+((\s*const\s*)?\*)* ([a-zA-Z0-9]+)'
+    arg_re = r'(const |struct )*[a-zA-Z0-9]+((\s*const\s*)?\*)* ([a-zA-Z0-9]+)'
     argument_names = re.sub(arg_re, r'\4', func['arguments'])
     if argument_names == 'void':
       argument_names = ''
-    function_name = func['known_as'][2:]
+    function_name = func['known_as'][len(set_name):]
     if func['return_type'] == 'void':
       file.write('  interface_->%s(%s);\n' %
           (function_name, argument_names))
@@ -3069,7 +3090,8 @@ void MakeFunctionUnique(const char *func_name) {
   # Write a function to lookup a mock GL function based on its name.
   file.write('\n')
   file.write('GLFunctionPointerType GL_BINDING_CALL ' +
-      'MockGLInterface::GetGLProcAddress(const char* name) {\n')
+             'Mock%sInterface::GetGLProcAddress(const char* name) {\n' % (
+                 set_name.upper(),))
   for key in sorted_function_names:
     name = uniquely_named_functions[key]['name']
     file.write('  if (strcmp(name, "%s") == 0)\n' % name)
@@ -3313,7 +3335,10 @@ def FillExtensionsFromHeaders(functions, extension_headers, extra_extensions):
         print "[%s] Specified extra extensions for binding: %s" % (
             name, ', '.join(diff))
 
-      all_extensions = extensions_from_headers.union(explicit_extensions)
+      if version.get('explicit_only', False):
+        all_extensions = explicit_extensions
+      else:
+        all_extensions = extensions_from_headers.union(explicit_extensions)
       if len(all_extensions):
         version['extensions'] = all_extensions
 
@@ -3461,7 +3486,25 @@ def main(argv):
 
     source_file = open(os.path.join(directory, 'gl_bindings_autogen_mock.cc'),
                        'wb')
-    GenerateMockBindingsSource(source_file, GL_FUNCTIONS)
+    GenerateMockBindingsSource(source_file, GL_FUNCTIONS, 'gl')
+    source_file.close()
+    ClangFormat(source_file.name)
+
+    header_file = open(
+        os.path.join(directory, 'gl_mock_autogen_egl.h'), 'wb')
+    GenerateMockHeader(header_file, EGL_FUNCTIONS, 'egl')
+    header_file.close()
+    ClangFormat(header_file.name)
+
+    header_file = open(os.path.join(directory, 'egl_bindings_autogen_mock.h'),
+                       'wb')
+    GenerateMockBindingsHeader(header_file, EGL_FUNCTIONS)
+    header_file.close()
+    ClangFormat(header_file.name)
+
+    source_file = open(os.path.join(directory, 'egl_bindings_autogen_mock.cc'),
+                       'wb')
+    GenerateMockBindingsSource(source_file, EGL_FUNCTIONS, 'egl')
     source_file.close()
     ClangFormat(source_file.name)
 

@@ -10,7 +10,6 @@
 #include <map>
 #include <string>
 
-#import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "components/payments/core/payment_instrument.h"
@@ -57,11 +56,12 @@ class IOSPaymentInstrument : public PaymentInstrument {
   void RecordUse() override;
   base::string16 GetLabel() const override;
   base::string16 GetSublabel() const override;
-  bool IsValidForModifier(
-      const std::vector<std::string>& supported_methods,
-      const std::vector<std::string>& supported_networks,
-      const std::set<autofill::CreditCard::CardType>& supported_types,
-      bool supported_types_specified) const override;
+  bool IsValidForModifier(const std::vector<std::string>& methods,
+                          bool supported_networks_specified,
+                          const std::set<std::string>& supported_networks,
+                          bool supported_types_specified,
+                          const std::set<autofill::CreditCard::CardType>&
+                              supported_types) const override;
 
   // Given that the icon for the iOS payment instrument can only be determined
   // at run-time, the icon is obtained using this UIImage object rather than
@@ -72,7 +72,7 @@ class IOSPaymentInstrument : public PaymentInstrument {
   std::string method_name_;
   GURL universal_link_;
   std::string app_name_;
-  base::scoped_nsobject<UIImage> icon_image_;
+  UIImage* icon_image_;
 
   id<PaymentRequestUIDelegate> payment_request_ui_delegate_;
 

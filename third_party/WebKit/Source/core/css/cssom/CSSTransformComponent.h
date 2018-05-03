@@ -5,6 +5,7 @@
 #ifndef CSSTransformComponent_h
 #define CSSTransformComponent_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSFunctionValue.h"
 #include "platform/bindings/ScriptWrappable.h"
@@ -20,7 +21,6 @@ class ExceptionState;
 // before they can be used as a value for properties like "transform".
 // See CSSTransformComponent.idl for more information about this class.
 class CORE_EXPORT CSSTransformComponent : public ScriptWrappable {
-  WTF_MAKE_NONCOPYABLE(CSSTransformComponent);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -33,7 +33,7 @@ class CORE_EXPORT CSSTransformComponent : public ScriptWrappable {
     kTranslationType,
   };
 
-  virtual ~CSSTransformComponent() {}
+  virtual ~CSSTransformComponent() = default;
 
   // Blink-internal ways of creating CSSTransformComponents.
   static CSSTransformComponent* FromCSSValue(const CSSValue&);
@@ -41,12 +41,7 @@ class CORE_EXPORT CSSTransformComponent : public ScriptWrappable {
   // Getters and setters for attributes defined in the IDL.
   bool is2D() const { return is2D_; }
   virtual void setIs2D(bool is2D) { is2D_ = is2D; }
-  virtual String toString() const {
-    const CSSValue* result = ToCSSValue();
-    // TODO(meade): Remove this once all the number and length types are
-    // rewritten.
-    return result ? result->CssText() : "";
-  }
+  String toString() const;
 
   // Internal methods.
   virtual TransformComponentType GetType() const = 0;
@@ -58,6 +53,7 @@ class CORE_EXPORT CSSTransformComponent : public ScriptWrappable {
 
  private:
   bool is2D_;
+  DISALLOW_COPY_AND_ASSIGN(CSSTransformComponent);
 };
 
 }  // namespace blink

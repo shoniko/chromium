@@ -14,9 +14,18 @@ argument:
 json is written to that file in the format detailed here:
 https://www.chromium.org/developers/the-json-test-results-format
 
+Optional argument:
+
+  --isolated-script-test-filter=[TEST_NAMES]
+
+is a double-colon-separated ("::") list of test names, to run just that subset
+of tests. This list is parsed by this harness and sent down via the
+--story-filter argument.
+
 This script is intended to be the base command invoked by the isolate,
 followed by a subsequent Python script. It could be generalized to
 invoke an arbitrary executable.
+
 """
 
 import argparse
@@ -48,6 +57,8 @@ def main():
       '--isolated-script-test-chartjson-output', required=False)
   parser.add_argument(
       '--isolated-script-test-perf-output', required=False)
+  parser.add_argument(
+      '--isolated-script-test-filter', type=str, required=False)
   parser.add_argument('--xvfb', help='Start xvfb.', action='store_true')
   parser.add_argument('--output-format', action='append')
   args, rest_args = parser.parse_known_args()
@@ -74,6 +85,8 @@ def main():
 
 def run_benchmark(args, rest_args):
   env = os.environ.copy()
+  env['CHROME_HEADLESS'] = '1'
+
   # Assume we want to set up the sandbox environment variables all the
   # time; doing so is harmless on non-Linux platforms and is needed
   # all the time on Linux.
@@ -87,8 +100,16 @@ def run_benchmark(args, rest_args):
   json_test_results = None
 
   results = None
+  cmd_args = rest_args
+  if args.isolated_script_test_filter:
+    filter_list = common.extract_filter_list(args.isolated_script_test_filter)
+    # Need to convert this to a valid regex.
+    filter_regex = '(' + '|'.join(filter_list) + ')'
+    cmd_args = cmd_args + [
+      '--story-filter=' + filter_regex
+    ]
   try:
-    cmd = [sys.executable] + rest_args + [
+    cmd = [sys.executable] + cmd_args + [
       '--output-dir', tempfile_dir,
       '--output-format=json-test-results',
     ]

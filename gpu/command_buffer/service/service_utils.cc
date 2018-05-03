@@ -8,6 +8,7 @@
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/config/gpu_finch_features.h"
 #include "ui/gl/gl_switches.h"
 
 #if defined(USE_EGL)
@@ -18,7 +19,7 @@ namespace gpu {
 namespace gles2 {
 
 gl::GLContextAttribs GenerateGLContextAttribs(
-    const ContextCreationAttribHelper& attribs_helper,
+    const ContextCreationAttribs& attribs_helper,
     const ContextGroup* context_group) {
   DCHECK(context_group != nullptr);
   gl::GLContextAttribs attribs;
@@ -33,6 +34,7 @@ gl::GLContextAttribs GenerateGLContextAttribs(
     attribs.global_texture_share_group = true;
 
     attribs.robust_resource_initialization = true;
+    attribs.robust_buffer_access = true;
 
     // Request a specific context version instead of always 3.0
     if (IsWebGL2OrES3ContextType(attribs_helper.context_type)) {
@@ -70,7 +72,8 @@ bool UsePassthroughCommandDecoder(const base::CommandLine* command_line) {
     return false;
   } else {
     // Unrecognized or missing switch, use the default.
-    return false;
+    return base::FeatureList::IsEnabled(
+        features::kDefaultPassthroughCommandDecoder);
   }
 }
 

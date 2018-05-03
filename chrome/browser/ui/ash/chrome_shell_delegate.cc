@@ -12,8 +12,7 @@
 #include "ash/accelerators/magnifier_key_scroller.h"
 #include "ash/accelerators/spoken_feedback_toggler.h"
 #include "ash/accessibility/accessibility_delegate.h"
-#include "ash/accessibility_types.h"
-#include "ash/content/gpu_support_impl.h"
+#include "ash/public/cpp/accessibility_types.h"
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_controller.h"
 #include "ash/wallpaper/wallpaper_delegate.h"
@@ -32,7 +31,7 @@
 #include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/browser/chromeos/background/ash_wallpaper_delegate.h"
 #include "chrome/browser/chromeos/display/display_configuration_observer.h"
-#include "chrome/browser/chromeos/display/display_preferences.h"
+#include "chrome/browser/chromeos/display/display_prefs.h"
 #include "chrome/browser/chromeos/policy/display_rotation_default_handler.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -41,12 +40,12 @@
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/sync/sync_error_notifier_factory_ash.h"
 #include "chrome/browser/ui/ash/chrome_keyboard_ui.h"
+#include "chrome/browser/ui/ash/chrome_screenshot_grabber.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
-#include "chrome/browser/ui/ash/networking_config_delegate_chromeos.h"
+#include "chrome/browser/ui/ash/network/networking_config_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/session_controller_client.h"
 #include "chrome/browser/ui/ash/session_util.h"
-#include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -57,7 +56,6 @@
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
-#include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/prefs/pref_service.h"
@@ -68,8 +66,6 @@
 #include "content/public/common/url_constants.h"
 #include "services/ui/public/cpp/input_devices/input_device_controller_client.h"
 #include "ui/aura/window.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "url/url_constants.h"
 
 using chromeos::AccessibilityManager;
@@ -98,23 +94,8 @@ void InitAfterFirstSessionStart() {
 
 class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
  public:
-  AccessibilityDelegateImpl() {
-    ash::Shell::Get()->AddShellObserver(AccessibilityManager::Get());
-  }
-  ~AccessibilityDelegateImpl() override {
-    ash::Shell::Get()->RemoveShellObserver(AccessibilityManager::Get());
-  }
-
-  bool IsSpokenFeedbackEnabled() const override {
-    DCHECK(AccessibilityManager::Get());
-    return AccessibilityManager::Get()->IsSpokenFeedbackEnabled();
-  }
-
-  void ToggleSpokenFeedback(
-      ash::AccessibilityNotificationVisibility notify) override {
-    DCHECK(AccessibilityManager::Get());
-    AccessibilityManager::Get()->ToggleSpokenFeedback(notify);
-  }
+  AccessibilityDelegateImpl() = default;
+  ~AccessibilityDelegateImpl() override = default;
 
   void SetMagnifierEnabled(bool enabled) override {
     DCHECK(chromeos::MagnificationManager::Get());
@@ -126,16 +107,6 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     return chromeos::MagnificationManager::Get()->IsMagnifierEnabled();
   }
 
-  void SetAutoclickEnabled(bool enabled) override {
-    DCHECK(AccessibilityManager::Get());
-    return AccessibilityManager::Get()->EnableAutoclick(enabled);
-  }
-
-  bool IsAutoclickEnabled() const override {
-    DCHECK(AccessibilityManager::Get());
-    return AccessibilityManager::Get()->IsAutoclickEnabled();
-  }
-
   void SetVirtualKeyboardEnabled(bool enabled) override {
     DCHECK(AccessibilityManager::Get());
     return AccessibilityManager::Get()->EnableVirtualKeyboard(enabled);
@@ -144,16 +115,6 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
   bool IsVirtualKeyboardEnabled() const override {
     DCHECK(AccessibilityManager::Get());
     return AccessibilityManager::Get()->IsVirtualKeyboardEnabled();
-  }
-
-  void SetMonoAudioEnabled(bool enabled) override {
-    DCHECK(AccessibilityManager::Get());
-    return AccessibilityManager::Get()->EnableMonoAudio(enabled);
-  }
-
-  bool IsMonoAudioEnabled() const override {
-    DCHECK(AccessibilityManager::Get());
-    return AccessibilityManager::Get()->IsMonoAudioEnabled();
   }
 
   void SetCaretHighlightEnabled(bool enabled) override {
@@ -253,52 +214,6 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     return std::numeric_limits<double>::min();
   }
 
-  void TriggerAccessibilityAlert(ash::AccessibilityAlert alert) override {
-    Profile* profile = ProfileManager::GetActiveUserProfile();
-    if (profile) {
-      int msg = 0;
-      switch (alert) {
-        case ash::A11Y_ALERT_CAPS_ON:
-          msg = IDS_A11Y_ALERT_CAPS_ON;
-          break;
-        case ash::A11Y_ALERT_CAPS_OFF:
-          msg = IDS_A11Y_ALERT_CAPS_OFF;
-          break;
-        case ash::A11Y_ALERT_SCREEN_ON:
-          // Enable automation manager when alert is screen-on, as it is
-          // previously disabled by alert screen-off.
-          SetAutomationManagerEnabled(profile, true);
-          msg = IDS_A11Y_ALERT_SCREEN_ON;
-          break;
-        case ash::A11Y_ALERT_SCREEN_OFF:
-          msg = IDS_A11Y_ALERT_SCREEN_OFF;
-          break;
-        case ash::A11Y_ALERT_WINDOW_NEEDED:
-          msg = IDS_A11Y_ALERT_WINDOW_NEEDED;
-          break;
-        case ash::A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED:
-          msg = IDS_A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED;
-          break;
-        case ash::A11Y_ALERT_NONE:
-          msg = 0;
-          break;
-      }
-
-      if (msg) {
-        AutomationManagerAura::GetInstance()->HandleAlert(
-            profile, l10n_util::GetStringUTF8(msg));
-        // After handling the alert, if the alert is screen-off, we should
-        // disable automation manager to handle any following a11y events.
-        if (alert == ash::A11Y_ALERT_SCREEN_OFF)
-          SetAutomationManagerEnabled(profile, false);
-      }
-    }
-  }
-
-  ash::AccessibilityAlert GetLastAccessibilityAlert() override {
-    return ash::A11Y_ALERT_NONE;
-  }
-
   void OnTwoFingerTouchStart() override {
     DCHECK(AccessibilityManager::Get());
     AccessibilityManager::Get()->OnTwoFingerTouchStart();
@@ -319,31 +234,7 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     AccessibilityManager::Get()->PlaySpokenFeedbackToggleCountdown(tick_count);
   }
 
-  void PlayEarcon(int sound_key) override {
-    DCHECK(AccessibilityManager::Get());
-    AccessibilityManager::Get()->PlayEarcon(
-        sound_key, chromeos::PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
-  }
-
-  base::TimeDelta PlayShutdownSound() const override {
-    return AccessibilityManager::Get()->PlayShutdownSound();
-  }
-
-  void HandleAccessibilityGesture(ui::AXGesture gesture) override {
-    AccessibilityManager::Get()->HandleAccessibilityGesture(gesture);
-  }
-
  private:
-  void SetAutomationManagerEnabled(content::BrowserContext* context,
-                                   bool enabled) {
-    DCHECK(context);
-    AutomationManagerAura* manager = AutomationManagerAura::GetInstance();
-    if (enabled)
-      manager->Enable(context);
-    else
-      manager->Disable();
-  }
-
   DISALLOW_COPY_AND_ASSIGN(AccessibilityDelegateImpl);
 };
 
@@ -351,7 +242,7 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
 
 ChromeShellDelegate::ChromeShellDelegate()
     : networking_config_delegate_(
-          base::MakeUnique<chromeos::NetworkingConfigDelegateChromeos>()) {
+          std::make_unique<chromeos::NetworkingConfigDelegateChromeos>()) {
   PlatformInit();
 }
 
@@ -388,7 +279,9 @@ void ChromeShellDelegate::PreInit() {
 
   bool first_run_after_boot = base::CommandLine::ForCurrentProcess()->HasSwitch(
       chromeos::switches::kFirstExecAfterBoot);
-  chromeos::LoadDisplayPreferences(first_run_after_boot);
+  display_prefs_ = std::make_unique<chromeos::DisplayPrefs>(
+      g_browser_process->local_state());
+  display_prefs_->LoadDisplayPreferences(first_run_after_boot);
   // Object owns itself, and deletes itself when Observer::OnShutdown is called:
   new policy::DisplayRotationDefaultHandler();
   // Set the observer now so that we can save the initial state
@@ -434,15 +327,6 @@ void ChromeShellDelegate::OpenUrlFromArc(const GURL& url) {
       displayer.browser()->window()->GetNativeWindow());
 }
 
-ash::GPUSupport* ChromeShellDelegate::CreateGPUSupport() {
-  // Chrome uses real GPU support.
-  return new ash::GPUSupportImpl;
-}
-
-base::string16 ChromeShellDelegate::GetProductName() const {
-  return l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-}
-
 void ChromeShellDelegate::OpenKeyboardShortcutHelpPage() const {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   Browser* browser = chrome::FindTabbedBrowser(profile, false);
@@ -454,19 +338,14 @@ void ChromeShellDelegate::OpenKeyboardShortcutHelpPage() const {
 
   browser->window()->Activate();
 
-  chrome::NavigateParams params(browser, GURL(kKeyboardShortcutHelpPageUrl),
-                                ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  NavigateParams params(browser, GURL(kKeyboardShortcutHelpPageUrl),
+                        ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::SINGLETON_TAB;
-  chrome::Navigate(&params);
-}
-
-gfx::Image ChromeShellDelegate::GetDeprecatedAcceleratorImage() const {
-  return ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-      IDR_BLUETOOTH_KEYBOARD);
+  Navigate(&params);
 }
 
 std::unique_ptr<keyboard::KeyboardUI> ChromeShellDelegate::CreateKeyboardUI() {
-  return base::MakeUnique<ChromeKeyboardUI>(
+  return std::make_unique<ChromeKeyboardUI>(
       ProfileManager::GetActiveUserProfile());
 }
 
@@ -477,6 +356,11 @@ ash::AccessibilityDelegate* ChromeShellDelegate::CreateAccessibilityDelegate() {
 ash::NetworkingConfigDelegate*
 ChromeShellDelegate::GetNetworkingConfigDelegate() {
   return networking_config_delegate_.get();
+}
+
+std::unique_ptr<ash::ScreenshotDelegate>
+ChromeShellDelegate::CreateScreenshotDelegate() {
+  return std::make_unique<ChromeScreenshotGrabber>();
 }
 
 std::unique_ptr<ash::WallpaperDelegate>

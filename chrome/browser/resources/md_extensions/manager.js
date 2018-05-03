@@ -32,15 +32,20 @@ cr.define('extensions', function() {
   const Manager = Polymer({
     is: 'extensions-manager',
 
-    behaviors: [I18nBehavior],
-
     properties: {
-      /** @type {extensions.Toolbar} */
-      toolbar: Object,
+      canLoadUnpacked: {
+        type: Boolean,
+        value: false,
+      },
 
       // This is not typed because it implements multiple interfaces, and is
       // passed to different elements as different types.
-      delegate: Object,
+      delegate: {
+        type: Object,
+        value: function() {
+          return extensions.Service.getInstance();
+        },
+      },
 
       isGuest_: {
         type: Boolean,
@@ -50,6 +55,22 @@ cr.define('extensions', function() {
       },
 
       inDevMode: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('inDevMode'),
+      },
+
+      devModeControlledByPolicy: {
+        type: Boolean,
+        value: false,
+      },
+
+      /** @private */
+      isSupervised_: {
+        type: Boolean,
+        value: false,
+      },
+
+      incognitoAvailable_: {
         type: Boolean,
         value: false,
       },
@@ -76,21 +97,11 @@ cr.define('extensions', function() {
        */
       detailViewItem_: Object,
 
-      /** @type {!Array<!chrome.developerPrivate.ExtensionInfo>} */
-      extensions: {
-        type: Array,
-        value: function() {
-          return [];
-        },
-      },
+      /** @private {!Array<!chrome.developerPrivate.ExtensionInfo>} */
+      extensions_: Array,
 
-      /** @type {!Array<!chrome.developerPrivate.ExtensionInfo>} */
-      apps: {
-        type: Array,
-        value: function() {
-          return [];
-        },
-      },
+      /** @private {!Array<!chrome.developerPrivate.ExtensionInfo>} */
+      apps_: Array,
 
       /**
        * Prevents page content from showing before data is first loaded.
@@ -106,6 +117,12 @@ cr.define('extensions', function() {
 
       /** @private */
       showLoadErrorDialog_: Boolean,
+
+      /** @private */
+      showInstallWarningsDialog_: Boolean,
+
+      /** @private {?Array<string>} */
+      installWarnings_: Array,
 
       /** @private */
       showOptionsDialog_: Boolean,
@@ -128,8 +145,13 @@ cr.define('extensions', function() {
       // </if>
     },
 
+    listeners: {
+      'load-error': 'onLoadError_',
+      'view-exit-finish': 'onViewExitFinish_',
+    },
+
     /**
-     * The current page being shown. Default to null, and initPage will figure
+     * The current page being shown. Default to null, and initPage_ will figure
      * out the initial page based on url.
      * @private {?PageState}
      */
@@ -143,15 +165,32 @@ cr.define('extensions', function() {
     navigationListener_: null,
 
     /** @override */
-    created: function() {
-      this.readyPromiseResolver = new PromiseResolver();
-    },
-
-    /** @override */
     ready: function() {
-      this.toolbar =
-          /** @type {extensions.Toolbar} */ (this.$$('extensions-toolbar'));
-      this.readyPromiseResolver.resolve();
+      if (loadTimeData.getBoolean('isGuest')) {
+        this.initPage_();
+        return;
+      }
+
+      let service = extensions.Service.getInstance();
+
+      let onProfileStateChanged = profileInfo => {
+        this.isSupervised_ = profileInfo.isSupervised;
+        this.incognitoAvailable_ = profileInfo.isIncognitoAvailable;
+        this.devModeControlledByPolicy =
+            profileInfo.isDeveloperModeControlledByPolicy;
+        this.inDevMode = profileInfo.inDeveloperMode;
+        this.canLoadUnpacked = profileInfo.canLoadUnpacked;
+      };
+      service.getProfileStateChangedTarget().addListener(onProfileStateChanged);
+      service.getProfileConfiguration().then(onProfileStateChanged);
+
+      service.getExtensionsInfo().then(extensionsAndApps => {
+        this.initExtensionsAndApps_(extensionsAndApps);
+        this.initPage_();
+
+        service.getItemStateChangedTarget().addListener(
+            this.onItemStateChanged_.bind(this));
+      });
 
       // <if expr="chromeos">
       extensions.KioskBrowserProxyImpl.getInstance()
@@ -165,6 +204,7 @@ cr.define('extensions', function() {
     /** @override */
     attached: function() {
       document.documentElement.classList.remove('loading');
+      document.fonts.load('bold 12px Roboto');
 
       this.navigationListener_ = extensions.navigation.addListener(newPage => {
         this.changePage_(newPage);
@@ -177,21 +217,54 @@ cr.define('extensions', function() {
       this.navigationListener_ = null;
     },
 
-    get keyboardShortcuts() {
-      return this.$['keyboard-shortcuts'];
-    },
-
-    get errorPage() {
-      return this.$['error-page'];
-    },
-
     /**
      * Initializes the page to reflect what's specified in the url so that if
      * the user visits chrome://extensions/?id=..., we land on the proper page.
+     * @private
      */
-    initPage: function() {
+    initPage_: function() {
       this.didInitPage_ = true;
       this.changePage_(extensions.navigation.getCurrentPage());
+    },
+
+    /**
+     * @param {!chrome.developerPrivate.EventData} eventData
+     * @private
+     */
+    onItemStateChanged_: function(eventData) {
+      const EventType = chrome.developerPrivate.EventType;
+      switch (eventData.event_type) {
+        case EventType.VIEW_REGISTERED:
+        case EventType.VIEW_UNREGISTERED:
+        case EventType.INSTALLED:
+        case EventType.LOADED:
+        case EventType.UNLOADED:
+        case EventType.ERROR_ADDED:
+        case EventType.ERRORS_REMOVED:
+        case EventType.PREFS_CHANGED:
+        case EventType.WARNINGS_CHANGED:
+          // |extensionInfo| can be undefined in the case of an extension
+          // being unloaded right before uninstallation. There's nothing to do
+          // here.
+          if (!eventData.extensionInfo)
+            break;
+
+          const listId = this.getListId_(eventData.extensionInfo);
+          const currentIndex = this[listId].findIndex(
+              item => item.id == eventData.extensionInfo.id);
+
+          if (currentIndex >= 0) {
+            this.updateItem_(listId, currentIndex, eventData.extensionInfo);
+          } else {
+            this.addItem_(listId, eventData.extensionInfo);
+          }
+          break;
+        case EventType.UNINSTALLED:
+          this.removeItem_(eventData.item_id);
+          break;
+        default:
+          assertNotReached();
+      }
     },
 
     /**
@@ -213,7 +286,7 @@ cr.define('extensions', function() {
     },
 
     /**
-     * @param {chrome.developerPrivate.ExtensionInfo} item
+     * @param {!chrome.developerPrivate.ExtensionInfo} item
      * @return {string} The ID of the list that the item belongs in.
      * @private
      */
@@ -223,10 +296,10 @@ cr.define('extensions', function() {
         case ExtensionType.HOSTED_APP:
         case ExtensionType.LEGACY_PACKAGED_APP:
         case ExtensionType.PLATFORM_APP:
-          return 'apps';
+          return 'apps_';
         case ExtensionType.EXTENSION:
         case ExtensionType.SHARED_MODULE:
-          return 'extensions';
+          return 'extensions_';
         case ExtensionType.THEME:
           assertNotReached(
               'Don\'t send themes to the chrome://extensions page');
@@ -252,8 +325,27 @@ cr.define('extensions', function() {
      * @private
      */
     getData_: function(id) {
-      return this.extensions[this.getIndexInList_('extensions', id)] ||
-          this.apps[this.getIndexInList_('apps', id)];
+      return this.extensions_[this.getIndexInList_('extensions_', id)] ||
+          this.apps_[this.getIndexInList_('apps_', id)];
+    },
+
+    /**
+     * Categorizes |extensionsAndApps| to apps and extensions and initializes
+     * those lists.
+     * @param {!Array<!chrome.developerPrivate.ExtensionInfo>} extensionsAndApps
+     * @private
+     */
+    initExtensionsAndApps_: function(extensionsAndApps) {
+      extensionsAndApps.sort(compareExtensions);
+      let apps = [];
+      let extensions = [];
+      for (let i of extensionsAndApps) {
+        let list = this.getListId_(i) === 'apps_' ? apps : extensions;
+        list.push(i);
+      }
+
+      this.apps_ = apps;
+      this.extensions_ = extensions;
     },
 
     /**
@@ -261,9 +353,9 @@ cr.define('extensions', function() {
      * into its sorted position in the relevant section.
      * @param {!chrome.developerPrivate.ExtensionInfo} item The extension
      *     the new element is representing.
+     * @private
      */
-    addItem: function(item) {
-      const listId = this.getListId_(item);
+    addItem_: function(listId, item) {
       // We should never try and add an existing item.
       assert(this.getIndexInList_(listId, item.id) == -1);
       let insertBeforeChild = this[listId].findIndex(function(listEl) {
@@ -277,10 +369,9 @@ cr.define('extensions', function() {
     /**
      * @param {!chrome.developerPrivate.ExtensionInfo} item The data for the
      *     item to update.
+     * @private
      */
-    updateItem: function(item) {
-      const listId = this.getListId_(item);
-      const index = this.getIndexInList_(listId, item.id);
+    updateItem_: function(listId, index, item) {
       // We should never try and update a non-existent item.
       assert(index >= 0);
       this.set([listId, index], item);
@@ -301,21 +392,37 @@ cr.define('extensions', function() {
     },
 
     /**
-     * @param {!chrome.developerPrivate.ExtensionInfo} item The data for the
-     *     item to remove.
+     * @param {string} itemId The id of item to remove.
+     * @private
      */
-    removeItem: function(item) {
-      const listId = this.getListId_(item);
-      const index = this.getIndexInList_(listId, item.id);
+    removeItem_: function(itemId) {
+      // Search for the item to be deleted in |extensions_|.
+      let listId = 'extensions_';
+      let index = this.getIndexInList_(listId, itemId);
+      if (index == -1) {
+        // If not in |extensions_| it must be in |apps_|.
+        listId = 'apps_';
+        index = this.getIndexInList_(listId, itemId);
+      }
+
       // We should never try and remove a non-existent item.
       assert(index >= 0);
       this.splice(listId, index, 1);
+      if ((this.currentPage_.page == Page.DETAILS ||
+           this.currentPage_.page == Page.ERRORS) &&
+          this.currentPage_.extensionId == itemId) {
+        // Leave the details page (the 'list' page is a fine choice).
+        extensions.navigation.replaceWith({page: Page.LIST});
+      }
     },
 
     /**
-     * @param {!chrome.developerPrivate.LoadError} loadError
+     * @param {!CustomEvent} e
+     * @private
      */
-    showLoadError: function(loadError) {
+    onLoadError_: function(e) {
+      const loadError =
+          /** @type {!chrome.developerPrivate.LoadError} */ (e.detail);
       this.showLoadErrorDialog_ = true;
       this.async(() => {
         const dialog = this.$$('#load-error');
@@ -325,37 +432,12 @@ cr.define('extensions', function() {
     },
 
     /**
-     * @param {Page} page
-     * @return {!(extensions.KeyboardShortcuts |
-     *            extensions.DetailView |
-     *            extensions.ItemList)}
-     * @private
-     */
-    getPage_: function(page) {
-      switch (page) {
-        case Page.LIST:
-          return this.$['items-list'];
-        case Page.DETAILS:
-          return this.$['details-view'];
-        case Page.SHORTCUTS:
-          return this.$['keyboard-shortcuts'];
-        case Page.ERRORS:
-          return this.$['error-page'];
-      }
-      assertNotReached();
-    },
-
-    /**
      * Changes the active page selection.
      * @param {PageState} newPage
      * @private
      */
     changePage_: function(newPage) {
-      const drawer = this.$$('#drawer');
-      if (drawer && drawer.open) {
-        drawer.closeDrawer();
-        this.showDrawer_ = false;
-      }
+      this.onCloseDrawer_();
 
       const optionsDialog = this.$$('#options-dialog');
       if (optionsDialog && optionsDialog.open) {
@@ -366,8 +448,14 @@ cr.define('extensions', function() {
       const fromPage = this.currentPage_ ? this.currentPage_.page : null;
       const toPage = newPage.page;
       let data;
-      if (newPage.extensionId)
-        data = assert(this.getData_(newPage.extensionId));
+      if (newPage.extensionId) {
+        data = this.getData_(newPage.extensionId);
+        if (!data) {
+          // Attempting to view an invalid (removed?) app or extension ID.
+          extensions.navigation.replaceWith({page: Page.LIST});
+          return;
+        }
+      }
 
       if (toPage == Page.DETAILS)
         this.detailViewItem_ = assert(data);
@@ -377,9 +465,6 @@ cr.define('extensions', function() {
       if (fromPage != toPage) {
         /** @type {extensions.ViewManager} */ (this.$.viewManager)
             .switchView(toPage);
-      } else {
-        /** @type {extensions.ViewManager} */ (this.$.viewManager)
-            .animateCurrentView('fade-in');
       }
 
       if (newPage.subpage) {
@@ -394,9 +479,24 @@ cr.define('extensions', function() {
       this.currentPage_ = newPage;
     },
 
-    /** @private */
+    /**
+     * This method detaches the drawer dialog completely. Should only be
+     * triggered by the dialog's 'close' event.
+     * @private
+     */
     onDrawerClose_: function() {
       this.showDrawer_ = false;
+    },
+
+    /**
+     * This method animates the closing of the drawer.
+     * @private
+     */
+    onCloseDrawer_: function() {
+      const drawer = this.$$('#drawer');
+      if (drawer && drawer.open) {
+        drawer.closeDrawer();
+      }
     },
 
     /** @private */
@@ -420,6 +520,44 @@ cr.define('extensions', function() {
     /** @private */
     onPackDialogClose_: function() {
       this.showPackDialog_ = false;
+    },
+
+    /** @private */
+    onViewExitFinish_: function(e) {
+      const viewType = e.path[0].tagName;
+      if (viewType == 'EXTENSIONS-ITEM-LIST' ||
+          viewType == 'EXTENSIONS-KEYBOARD-SHORTCUTS') {
+        return;
+      }
+
+      const extensionId = e.path[0].data.id;
+      const list = this.$$('extensions-item-list');
+      const button = viewType == 'EXTENSIONS-DETAIL-VIEW' ?
+          list.getDetailsButton(extensionId) :
+          list.getErrorsButton(extensionId);
+
+      // The button will not exist, when returning from a details page
+      // because the corresponding extension/app was deleted.
+      if (button)
+        button.focus();
+    },
+
+    /**
+     * @param {!CustomEvent} e
+     * @private
+     */
+    onShowInstallWarnings_: function(e) {
+      // Leverage Polymer data bindings instead of just assigning the
+      // installWarnings on the dialog since the dialog hasn't been stamped
+      // in the DOM yet.
+      this.installWarnings_ = /** @type{!Array<string>} */ (e.detail);
+      this.showInstallWarningsDialog_ = true;
+    },
+
+    /** @private */
+    onInstallWarningsDialogClose_: function() {
+      this.installWarnings_ = null;
+      this.showInstallWarningsDialog_ = false;
     },
 
     // <if expr="chromeos">

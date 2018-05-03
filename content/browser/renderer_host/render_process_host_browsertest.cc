@@ -9,8 +9,8 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
+#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/common/child_process_messages.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_observer.h"
@@ -22,6 +22,7 @@
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_service.mojom.h"
+#include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
@@ -43,8 +44,7 @@ namespace content {
 namespace {
 
 int RenderProcessHostCount() {
-  content::RenderProcessHost::iterator hosts =
-      content::RenderProcessHost::AllHostsIterator();
+  RenderProcessHost::iterator hosts = RenderProcessHost::AllHostsIterator();
   int count = 0;
   while (!hosts.IsAtEnd()) {
     if (hosts.GetCurrentValue()->HasConnection())
@@ -58,14 +58,14 @@ std::unique_ptr<net::test_server::HttpResponse> HandleBeacon(
     const net::test_server::HttpRequest& request) {
   if (request.relative_url != "/beacon")
     return nullptr;
-  return base::MakeUnique<net::test_server::BasicHttpResponse>();
+  return std::make_unique<net::test_server::BasicHttpResponse>();
 }
 
 std::unique_ptr<net::test_server::HttpResponse> HandleHungBeacon(
     const net::test_server::HttpRequest& request) {
   if (request.relative_url != "/beacon")
     return nullptr;
-  return base::MakeUnique<net::test_server::HungResponse>();
+  return std::make_unique<net::test_server::HungResponse>();
 }
 
 class RenderProcessHostTest : public ContentBrowserTest,
@@ -74,7 +74,9 @@ class RenderProcessHostTest : public ContentBrowserTest,
   RenderProcessHostTest() : process_exits_(0), host_destructions_(0) {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kIgnoreAutoplayRestrictionsForTests);
+    command_line->AppendSwitchASCII(
+        switches::kAutoplayPolicy,
+        switches::autoplay::kNoUserGestureRequiredPolicy);
     // These flags are necessary to emulate camera input for getUserMedia()
     // tests.
     command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
@@ -137,6 +139,24 @@ class NonSpareRendererContentBrowserClient : public TestContentBrowserClient {
   }
 };
 
+class RenderProcessHostWithKeepAliveOptionEnabledTest
+    : public RenderProcessHostTest {
+ public:
+  void SetUp() override {
+    feature_list_.InitAndEnableFeature(
+        features::kKeepAliveRendererForKeepaliveRequests);
+    RenderProcessHostTest::SetUp();
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(
+        switches::kEnableExperimentalWebPlatformFeatures);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
 // Sometimes the renderer process's ShutdownRequest (corresponding to the
 // ViewMsg_WasSwappedOut from a previous navigation) doesn't arrive until after
 // the browser process decides to re-use the renderer for a new purpose.  This
@@ -153,11 +173,13 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
 
   host_destructions_ = 0;
   process_exits_ = 0;
-  rph->AddObserver(this);
-  ChildProcessHostMsg_ShutdownRequest msg;
-  rph->OnMessageReceived(msg);
 
-  // If the RPH sends a mistaken ChildProcessMsg_Shutdown, the renderer process
+  rph->AddObserver(this);
+
+  static_cast<mojom::RendererHost*>(static_cast<RenderProcessHostImpl*>(rph))
+      ->ShutdownRequest();
+
+  // If the RPH sends a mistaken ProcessShutdown, the renderer process
   // will take some time to die. Wait for a second tab to load in order to give
   // that time to happen.
   NavigateToURL(CreateBrowser(), test_url);
@@ -170,7 +192,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
 IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
                        GuestsAreNotSuitableHosts) {
   // Set max renderers to 1 to force running out of processes.
-  content::RenderProcessHost::SetMaxRendererProcessCount(1);
+  RenderProcessHost::SetMaxRendererProcessCount(1);
 
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -335,7 +357,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, SpareRendererOnProcessReuse) {
       base::WaitableEvent::ResetPolicy::MANUAL,
       base::WaitableEvent::InitialState::NOT_SIGNALED);
   BrowserThread::PostTask(
-      content::BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
+      BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
       base::BindOnce([](base::WaitableEvent* done) { done->Signal(); },
                      base::Unretained(&launcher_thread_done)));
   ASSERT_TRUE(launcher_thread_done.TimedWait(TestTimeouts::action_timeout()));
@@ -474,7 +496,8 @@ class MediaStopObserver : public WebContentsObserver {
 
   void MediaStoppedPlaying(
       const WebContentsObserver::MediaPlayerInfo& media_info,
-      const WebContentsObserver::MediaPlayerId& id) override {
+      const WebContentsObserver::MediaPlayerId& id,
+      WebContentsObserver::MediaStoppedReason reason) override {
     quit_closure_.Run();
   }
 
@@ -706,23 +729,24 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
     rph->RemoveObserver(this);
 }
 
-IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KeepAliveRendererProcess) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeatureWithParameters(
-      features::kKeepAliveRendererForKeepaliveRequests,
-      {std::make_pair("timeout_in_sec", "30")});
-
+IN_PROC_BROWSER_TEST_F(RenderProcessHostWithKeepAliveOptionEnabledTest,
+                       KeepAliveRendererProcess) {
   embedded_test_server()->RegisterRequestHandler(
       base::BindRepeating(HandleBeacon));
   ASSERT_TRUE(embedded_test_server()->Start());
-  RenderProcessHostImpl* rph = static_cast<RenderProcessHostImpl*>(
-      shell()->web_contents()->GetMainFrame()->GetProcess());
+
+  NavigateToURL(shell(), embedded_test_server()->GetURL("/send-beacon.html"));
+
+  RenderFrameHostImpl* rfh = static_cast<RenderFrameHostImpl*>(
+      shell()->web_contents()->GetMainFrame());
+  RenderProcessHostImpl* rph =
+      static_cast<RenderProcessHostImpl*>(rfh->GetProcess());
 
   host_destructions_ = 0;
   process_exits_ = 0;
   rph->AddObserver(this);
+  rfh->SetKeepAliveTimeoutForTesting(base::TimeDelta::FromSeconds(30));
 
-  NavigateToURL(shell(), embedded_test_server()->GetURL("/send-beacon.html"));
   base::TimeTicks start = base::TimeTicks::Now();
   NavigateToURL(shell(), GURL("data:text/html,<p>hello</p>"));
 
@@ -733,23 +757,53 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KeepAliveRendererProcess) {
     rph->RemoveObserver(this);
 }
 
-IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KeepAliveRendererProcess_Hung) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeatureWithParameters(
-      features::kKeepAliveRendererForKeepaliveRequests,
-      {std::make_pair("timeout_in_sec", "1")});
-
+IN_PROC_BROWSER_TEST_F(RenderProcessHostWithKeepAliveOptionEnabledTest,
+                       KeepAliveRendererProcess_Hung) {
   embedded_test_server()->RegisterRequestHandler(
       base::BindRepeating(HandleHungBeacon));
   ASSERT_TRUE(embedded_test_server()->Start());
-  RenderProcessHostImpl* rph = static_cast<RenderProcessHostImpl*>(
-      shell()->web_contents()->GetMainFrame()->GetProcess());
+
+  NavigateToURL(shell(), embedded_test_server()->GetURL("/send-beacon.html"));
+
+  RenderFrameHostImpl* rfh = static_cast<RenderFrameHostImpl*>(
+      shell()->web_contents()->GetMainFrame());
+  RenderProcessHostImpl* rph =
+      static_cast<RenderProcessHostImpl*>(rfh->GetProcess());
 
   host_destructions_ = 0;
   process_exits_ = 0;
   rph->AddObserver(this);
+  rfh->SetKeepAliveTimeoutForTesting(base::TimeDelta::FromSeconds(1));
 
-  NavigateToURL(shell(), embedded_test_server()->GetURL("/send-beacon.html"));
+  base::TimeTicks start = base::TimeTicks::Now();
+  NavigateToURL(shell(), GURL("data:text/html,<p>hello</p>"));
+
+  WaitUntilProcessExits(1);
+
+  EXPECT_GE(base::TimeTicks::Now() - start, base::TimeDelta::FromSeconds(1));
+  if (!host_destructions_)
+    rph->RemoveObserver(this);
+}
+
+IN_PROC_BROWSER_TEST_F(RenderProcessHostWithKeepAliveOptionEnabledTest,
+                       FetchKeepAliveRendererProcess_Hung) {
+  embedded_test_server()->RegisterRequestHandler(
+      base::BindRepeating(HandleHungBeacon));
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  NavigateToURL(shell(),
+                embedded_test_server()->GetURL("/fetch-keepalive.html"));
+
+  RenderFrameHostImpl* rfh = static_cast<RenderFrameHostImpl*>(
+      shell()->web_contents()->GetMainFrame());
+  RenderProcessHostImpl* rph =
+      static_cast<RenderProcessHostImpl*>(rfh->GetProcess());
+
+  host_destructions_ = 0;
+  process_exits_ = 0;
+  rph->AddObserver(this);
+  rfh->SetKeepAliveTimeoutForTesting(base::TimeDelta::FromSeconds(1));
+
   base::TimeTicks start = base::TimeTicks::Now();
   NavigateToURL(shell(), GURL("data:text/html,<p>hello</p>"));
 

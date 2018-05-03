@@ -17,9 +17,9 @@
 #include "content/browser/frame_host/render_frame_host_manager.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/streams/stream.h"
+#include "content/common/frame.mojom.h"
 #include "content/common/frame_messages.h"
 #include "content/common/navigation_params.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/public/browser/navigation_data.h"
 #include "content/public/browser/stream_handle.h"
 #include "content/public/common/content_features.h"
@@ -38,12 +38,9 @@
 #include "ui/base/page_transition_types.h"
 #include "url/url_constants.h"
 
-#if !defined(OS_ANDROID)
-#include "content/browser/compositor/test/no_transport_image_transport_factory.h"
-#endif
-
 namespace content {
 
+// TODO(clamy): Rename the tests NavigatorTests.
 class NavigatorTestWithBrowserSideNavigation
     : public RenderViewHostImplTestHarness {
  public:
@@ -51,7 +48,6 @@ class NavigatorTestWithBrowserSideNavigation
   using SiteInstanceRelation = RenderFrameHostManager::SiteInstanceRelation;
 
   void SetUp() override {
-    EnableBrowserSideNavigation();
     RenderViewHostImplTestHarness::SetUp();
   }
 
@@ -93,18 +89,6 @@ class NavigatorTestWithBrowserSideNavigation
         node->render_manager()->speculative_render_frame_host_.get());
   }
 
-  // Checks if this RenderFrameHost sent a single FrameMsg_CommitNavigation
-  // since the last clearing of the sink.
-  // Note: caller must invoke ClearMessages on the sink at some point before
-  // the tracked commit happens to clear up commit messages from previous
-  // navigations.
-  bool DidRenderFrameHostRequestCommit(TestRenderFrameHost* rfh) {
-    const IPC::Message* message =
-        rfh->GetProcess()->sink().GetUniqueMessageMatching(
-            FrameMsg_CommitNavigation::ID);
-    return message && rfh->GetRoutingID() == message->routing_id();
-  }
-
   scoped_refptr<SiteInstance> ConvertToSiteInstance(
       RenderFrameHostManager* rfhm,
       const SiteInstanceDescriptor& descriptor,
@@ -135,13 +119,13 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_EQ(NavigationRequest::STARTED, request->state());
   ASSERT_TRUE(GetLoaderForNavigationRequest(request));
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
 
   // Have the current RenderFrameHost commit the navigation.
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  scoped_refptr<network::ResourceResponse> response(
+      new network::ResourceResponse);
   GetLoaderForNavigationRequest(request)->CallOnResponseStarted(
       response, MakeEmptyStream(), nullptr);
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_TRUE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
   EXPECT_TRUE(main_test_rfh()->is_loading());
   EXPECT_FALSE(node->navigation_request());
 
@@ -151,7 +135,6 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_EQ(SiteInstanceImpl::GetSiteForURL(browser_context(), kUrl),
             main_test_rfh()->GetSiteInstance()->GetSiteURL());
   EXPECT_EQ(kUrl, contents()->GetLastCommittedURL());
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
 
   // The main RenderFrameHost should not have been changed, and the renderer
   // should have been initialized.
@@ -161,9 +144,6 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // After a navigation is finished no speculative RenderFrameHost should
   // exist.
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
-
-  // With PlzNavigate enabled a pending RenderFrameHost should never exist.
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
 }
 
 // PlzNavigate: Test a complete renderer-initiated same-site navigation.
@@ -178,7 +158,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
       FrameHostMsg_DidStopLoading(main_test_rfh()->GetRoutingID()));
 
   // Start a renderer-initiated non-user-initiated navigation.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   auto navigation =
       NavigationSimulator::CreateRendererInitiated(kUrl2, main_test_rfh());
   navigation->SetTransition(ui::PageTransitionFromInt(
@@ -192,7 +172,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // The navigation is immediately started as there's no need to wait for
   // beforeUnload to be executed.
   EXPECT_EQ(NavigationRequest::STARTED, request->state());
-  EXPECT_FALSE(request->begin_params().has_user_gesture);
+  EXPECT_FALSE(request->common_params().has_user_gesture);
   EXPECT_EQ(kUrl2, request->common_params().url);
   EXPECT_FALSE(request->browser_initiated());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
@@ -200,7 +180,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Have the current RenderFrameHost commit the navigation
   navigation->ReadyToCommit();
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_TRUE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
   EXPECT_TRUE(main_test_rfh()->is_loading());
   EXPECT_FALSE(node->navigation_request());
 
@@ -211,7 +191,6 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
             main_test_rfh()->GetSiteInstance()->GetSiteURL());
   EXPECT_EQ(kUrl2, contents()->GetLastCommittedURL());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
 }
 
 // PlzNavigate: Test a complete renderer-initiated navigation that should be
@@ -229,7 +208,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   int32_t site_instance_id_1 = main_test_rfh()->GetSiteInstance()->GetId();
 
   // Start a renderer-initiated navigation.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   auto navigation =
       NavigationSimulator::CreateRendererInitiated(kUrl2, main_test_rfh());
   navigation->Start();
@@ -254,13 +233,11 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   if (AreAllSitesIsolatedForTesting()) {
     EXPECT_EQ(navigation->GetFinalRenderFrameHost(),
               GetSpeculativeRenderFrameHost(node));
-    EXPECT_TRUE(
-        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
   } else {
-    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
-    EXPECT_EQ(navigation->GetFinalRenderFrameHost(), main_test_rfh());
+    EXPECT_TRUE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
   }
   EXPECT_FALSE(node->navigation_request());
+  EXPECT_TRUE(process()->did_frame_commit_navigation());
 
   // Commit the navigation.
   navigation->Commit();
@@ -268,7 +245,6 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_TRUE(main_test_rfh()->is_active());
   EXPECT_EQ(kUrl2, contents()->GetLastCommittedURL());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
 
   // The SiteInstance did not change unless site-per-process is enabled.
   if (AreAllSitesIsolatedForTesting()) {
@@ -399,7 +375,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, NoContent) {
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
 
   // Navigate to a different site.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   RequestNavigation(node, kUrl2);
   main_test_rfh()->SendBeforeUnloadACK(true);
 
@@ -410,7 +386,8 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, NoContent) {
   EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
 
   // Commit an HTTP 204 response.
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  scoped_refptr<network::ResourceResponse> response(
+      new network::ResourceResponse);
   const char kNoContentHeaders[] = "HTTP/1.1 204 No Content\0\0";
   response->head.headers = new net::HttpResponseHeaders(
       std::string(kNoContentHeaders, arraysize(kNoContentHeaders)));
@@ -419,15 +396,14 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, NoContent) {
 
   // There should be no pending nor speculative RenderFrameHost; the navigation
   // was aborted.
-  EXPECT_FALSE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_FALSE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
   EXPECT_FALSE(node->navigation_request());
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Now, repeat the test with 205 Reset Content.
 
   // Navigate to a different site again.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   RequestNavigation(node, kUrl2);
   main_test_rfh()->SendBeforeUnloadACK(true);
 
@@ -436,7 +412,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, NoContent) {
   EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
 
   // Commit an HTTP 205 response.
-  response = new ResourceResponse;
+  response = new network::ResourceResponse;
   const char kResetContentHeaders[] = "HTTP/1.1 205 Reset Content\0\0";
   response->head.headers = new net::HttpResponseHeaders(
       std::string(kResetContentHeaders, arraysize(kResetContentHeaders)));
@@ -445,9 +421,8 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, NoContent) {
 
   // There should be no pending nor speculative RenderFrameHost; the navigation
   // was aborted.
-  EXPECT_FALSE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_FALSE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
   EXPECT_FALSE(node->navigation_request());
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 }
 
@@ -462,7 +437,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, CrossSiteNavigation) {
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
 
   // Navigate to a different site.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   int entry_id = RequestNavigation(node, kUrl2);
   NavigationRequest* main_request = node->navigation_request();
   ASSERT_TRUE(main_request);
@@ -473,12 +448,13 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, CrossSiteNavigation) {
   main_test_rfh()->SendBeforeUnloadACK(true);
   EXPECT_EQ(speculative_rfh, GetSpeculativeRenderFrameHost(node));
 
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  scoped_refptr<network::ResourceResponse> response(
+      new network::ResourceResponse);
   GetLoaderForNavigationRequest(main_request)
       ->CallOnResponseStarted(response, MakeEmptyStream(), nullptr);
   EXPECT_EQ(speculative_rfh, GetSpeculativeRenderFrameHost(node));
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(speculative_rfh));
-  EXPECT_FALSE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_TRUE(speculative_rfh->GetProcess()->did_frame_commit_navigation());
+  EXPECT_FALSE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
 
   speculative_rfh->SendNavigate(entry_id, true, kUrl2);
 
@@ -501,7 +477,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, RedirectCrossSite) {
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
 
   // Navigate to a URL on the same site.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   int entry_id = RequestNavigation(node, kUrl1);
   main_test_rfh()->SendBeforeUnloadACK(true);
   NavigationRequest* main_request = node->navigation_request();
@@ -516,13 +492,15 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, RedirectCrossSite) {
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Have the RenderFrameHost commit the navigation.
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  scoped_refptr<network::ResourceResponse> response(
+      new network::ResourceResponse);
   GetLoaderForNavigationRequest(main_request)
       ->CallOnResponseStarted(response, MakeEmptyStream(), nullptr);
   TestRenderFrameHost* final_speculative_rfh =
       GetSpeculativeRenderFrameHost(node);
   EXPECT_TRUE(final_speculative_rfh);
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(final_speculative_rfh));
+  EXPECT_TRUE(
+      final_speculative_rfh->GetProcess()->did_frame_commit_navigation());
 
   // Commit the navigation.
   final_speculative_rfh->SendNavigate(entry_id, true, kUrl2);
@@ -551,7 +529,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
 
   // Request navigation to the 1st URL.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   RequestNavigation(node, kUrl1);
   main_test_rfh()->SendBeforeUnloadACK(true);
   NavigationRequest* request1 = node->navigation_request();
@@ -587,11 +565,12 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_NE(site_instance_id_1, site_instance_id_2);
 
   // Have the RenderFrameHost commit the navigation.
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  scoped_refptr<network::ResourceResponse> response(
+      new network::ResourceResponse);
   GetLoaderForNavigationRequest(request2)->CallOnResponseStarted(
       response, MakeEmptyStream(), nullptr);
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(speculative_rfh));
-  EXPECT_FALSE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_TRUE(speculative_rfh->GetProcess()->did_frame_commit_navigation());
+  EXPECT_FALSE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
 
   // Commit the navigation.
   speculative_rfh->SendNavigate(entry_id, true, kUrl2);
@@ -619,7 +598,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Start a browser-initiated navigation to the 1st URL and receive its
   // beforeUnload ACK.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   RequestNavigation(node, kUrl1);
   main_test_rfh()->SendBeforeUnloadACK(true);
   NavigationRequest* request1 = node->navigation_request();
@@ -644,7 +623,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   ASSERT_TRUE(request2);
   EXPECT_EQ(kUrl2, request2->common_params().url);
   EXPECT_FALSE(request2->browser_initiated());
-  EXPECT_TRUE(request2->begin_params().has_user_gesture);
+  EXPECT_TRUE(request2->common_params().has_user_gesture);
 
   // Confirm that the first loader got destroyed.
   EXPECT_FALSE(loader1);
@@ -660,10 +639,11 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // Have the RenderFrameHost commit the navigation.
   navigation->ReadyToCommit();
   if (AreAllSitesIsolatedForTesting()) {
-    EXPECT_TRUE(
-        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node)
+                    ->GetProcess()
+                    ->did_frame_commit_navigation());
   } else {
-    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+    EXPECT_TRUE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
   }
 
   // Commit the navigation.
@@ -688,7 +668,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
 
   // Start a renderer-initiated user-initiated navigation to the 1st URL.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   auto user_initiated_navigation =
       NavigationSimulator::CreateRendererInitiated(kUrl1, main_test_rfh());
   user_initiated_navigation->SetTransition(ui::PAGE_TRANSITION_LINK);
@@ -698,7 +678,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   ASSERT_TRUE(request1);
   EXPECT_EQ(kUrl1, request1->common_params().url);
   EXPECT_FALSE(request1->browser_initiated());
-  EXPECT_TRUE(request1->begin_params().has_user_gesture);
+  EXPECT_TRUE(request1->common_params().has_user_gesture);
   if (AreAllSitesIsolatedForTesting()) {
     EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
   } else {
@@ -718,7 +698,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_NE(request1, request2);
   EXPECT_EQ(kUrl2, request2->common_params().url);
   EXPECT_FALSE(request2->browser_initiated());
-  EXPECT_FALSE(request2->begin_params().has_user_gesture);
+  EXPECT_FALSE(request2->common_params().has_user_gesture);
   if (AreAllSitesIsolatedForTesting()) {
     EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
   } else {
@@ -728,10 +708,11 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // Have the RenderFrameHost commit the navigation.
   non_user_initiated_navigation->ReadyToCommit();
   if (AreAllSitesIsolatedForTesting()) {
-    EXPECT_TRUE(
-        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node)
+                    ->GetProcess()
+                    ->did_frame_commit_navigation());
   } else {
-    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+    EXPECT_TRUE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
   }
 
   // Commit the navigation.
@@ -752,7 +733,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
 
   // Start a browser-initiated navigation to the 1st URL.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   int entry_id = RequestNavigation(node, kUrl1);
   NavigationRequest* request1 = node->navigation_request();
   ASSERT_TRUE(request1);
@@ -762,24 +743,8 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Now receive a renderer-initiated non-user-initiated request. Nothing should
   // change.
-  {
-    CommonNavigationParams common_params;
-    common_params.url = kUrl2;
-    common_params.referrer = Referrer(kUrl0, blink::kWebReferrerPolicyDefault);
-    common_params.transition = ui::PageTransitionFromInt(
-        ui::PAGE_TRANSITION_LINK | ui::PAGE_TRANSITION_CLIENT_REDIRECT);
-    BeginNavigationParams begin_params(
-        std::string(),     // headers
-        net::LOAD_NORMAL,  // load_flags
-        false,             // has_user_gesture
-        false,             // skip_service_worker
-        REQUEST_CONTEXT_TYPE_SCRIPT,
-        blink::WebMixedContentContextType::kBlockable,
-        false,  // is_form_submission
-        url::Origin::Create(kUrl0));
-    main_test_rfh()->OnMessageReceived(FrameHostMsg_BeginNavigation(
-        main_test_rfh()->GetRoutingID(), common_params, begin_params));
-  }
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(
+      kUrl2, false /* has_user_gesture */);
   NavigationRequest* request2 = node->navigation_request();
   ASSERT_TRUE(request2);
   EXPECT_EQ(request1, request2);
@@ -793,11 +758,12 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   ASSERT_TRUE(speculative_rfh);
 
   // Have the RenderFrameHost commit the navigation.
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  scoped_refptr<network::ResourceResponse> response(
+      new network::ResourceResponse);
   GetLoaderForNavigationRequest(request2)->CallOnResponseStarted(
       response, MakeEmptyStream(), nullptr);
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(speculative_rfh));
-  EXPECT_FALSE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_TRUE(speculative_rfh->GetProcess()->did_frame_commit_navigation());
+  EXPECT_FALSE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
 
   // Commit the navigation.
   speculative_rfh->SendNavigate(entry_id, true, kUrl1);
@@ -818,7 +784,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   int32_t site_instance_id_0 = main_test_rfh()->GetSiteInstance()->GetId();
 
   // Start a renderer-initiated non-user-initiated navigation to the 1st URL.
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   auto navigation1 =
       NavigationSimulator::CreateRendererInitiated(kUrl1, main_test_rfh());
   navigation1->SetTransition(ui::PageTransitionFromInt(
@@ -829,7 +795,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   ASSERT_TRUE(request1);
   EXPECT_EQ(kUrl1, request1->common_params().url);
   EXPECT_FALSE(request1->browser_initiated());
-  EXPECT_FALSE(request1->begin_params().has_user_gesture);
+  EXPECT_FALSE(request1->common_params().has_user_gesture);
   if (AreAllSitesIsolatedForTesting()) {
     EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
   } else {
@@ -849,7 +815,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   NavigationRequest* request2 = node->navigation_request();
   EXPECT_EQ(kUrl2, request2->common_params().url);
   EXPECT_FALSE(request2->browser_initiated());
-  EXPECT_FALSE(request2->begin_params().has_user_gesture);
+  EXPECT_FALSE(request2->common_params().has_user_gesture);
   if (AreAllSitesIsolatedForTesting()) {
     EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
   } else {
@@ -862,10 +828,11 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // Have the RenderFrameHost commit the navigation.
   navigation2->ReadyToCommit();
   if (AreAllSitesIsolatedForTesting()) {
-    EXPECT_TRUE(
-        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node)
+                    ->GetProcess()
+                    ->did_frame_commit_navigation());
   } else {
-    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+    EXPECT_TRUE(main_test_rfh()->GetProcess()->did_frame_commit_navigation());
   }
 
   // Commit the navigation.
@@ -892,7 +859,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, Reload) {
   int entry_id = controller().GetPendingEntry()->GetUniqueID();
   // A NavigationRequest should have been generated.
   NavigationRequest* main_request = node->navigation_request();
-  ASSERT_TRUE(main_request != NULL);
+  ASSERT_TRUE(main_request != nullptr);
   EXPECT_EQ(FrameMsg_Navigate_Type::RELOAD,
             main_request->common_params().navigation_type);
   main_test_rfh()->PrepareForCommit();
@@ -905,7 +872,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, Reload) {
   controller().Reload(ReloadType::BYPASSING_CACHE, false);
   // A NavigationRequest should have been generated.
   main_request = node->navigation_request();
-  ASSERT_TRUE(main_request != NULL);
+  ASSERT_TRUE(main_request != nullptr);
   EXPECT_EQ(FrameMsg_Navigate_Type::RELOAD_BYPASSING_CACHE,
             main_request->common_params().navigation_type);
   main_test_rfh()->PrepareForCommit();
@@ -923,7 +890,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Begin navigating to another site.
   const GURL kUrl("http://google.com/");
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   int entry_id = RequestNavigation(node, kUrl);
   TestRenderFrameHost* speculative_rfh = GetSpeculativeRenderFrameHost(node);
   ASSERT_TRUE(speculative_rfh);
@@ -934,24 +901,22 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_EQ(speculative_rfh, GetSpeculativeRenderFrameHost(node));
   EXPECT_EQ(SiteInstanceImpl::GetSiteForURL(browser_context(), kUrl),
             speculative_rfh->GetSiteInstance()->GetSiteURL());
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
   int32_t site_instance_id = speculative_rfh->GetSiteInstance()->GetId();
 
   // Ask Navigator to commit the navigation by simulating a call to
   // OnResponseStarted.
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  scoped_refptr<network::ResourceResponse> response(
+      new network::ResourceResponse);
   GetLoaderForNavigationRequest(node->navigation_request())
       ->CallOnResponseStarted(response, MakeEmptyStream(), nullptr);
   EXPECT_EQ(speculative_rfh, GetSpeculativeRenderFrameHost(node));
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(speculative_rfh));
+  EXPECT_TRUE(speculative_rfh->GetProcess()->did_frame_commit_navigation());
   EXPECT_EQ(site_instance_id, speculative_rfh->GetSiteInstance()->GetId());
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
 
   // Invoke DidCommitProvisionalLoad.
   speculative_rfh->SendNavigate(entry_id, true, kUrl);
   EXPECT_EQ(site_instance_id, main_test_rfh()->GetSiteInstance()->GetId());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
-  EXPECT_FALSE(node->render_manager()->pending_frame_host());
 }
 
 // PlzNavigate: Confirm that a speculative RenderFrameHost is thrown away when
@@ -966,7 +931,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Begin navigating to another site.
   const GURL kUrl("http://google.com/");
-  process()->sink().ClearMessages();
+  process()->set_did_frame_commit_navigation(false);
   int entry_id = RequestNavigation(node, kUrl);
   TestRenderFrameHost* speculative_rfh = GetSpeculativeRenderFrameHost(node);
   ASSERT_TRUE(speculative_rfh);
@@ -1000,12 +965,13 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Commit the navigation with Navigator by simulating the call to
   // OnResponseStarted.
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  scoped_refptr<network::ResourceResponse> response(
+      new network::ResourceResponse);
   GetLoaderForNavigationRequest(main_request)
       ->CallOnResponseStarted(response, MakeEmptyStream(), nullptr);
   speculative_rfh = GetSpeculativeRenderFrameHost(node);
   ASSERT_TRUE(speculative_rfh);
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(speculative_rfh));
+  EXPECT_TRUE(speculative_rfh->GetProcess()->did_frame_commit_navigation());
   EXPECT_EQ(init_site_instance_id, main_test_rfh()->GetSiteInstance()->GetId());
   EXPECT_TRUE(rfh_deleted_observer.deleted());
 
@@ -1306,14 +1272,16 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   contents()->NavigateAndCommit(kUrl1);
 
   // Check the feature policy before navigation.
-  FeaturePolicy* original_feature_policy = main_test_rfh()->feature_policy();
+  blink::FeaturePolicy* original_feature_policy =
+      main_test_rfh()->feature_policy();
   ASSERT_TRUE(original_feature_policy);
 
   // Navigate to the new URL.
   contents()->NavigateAndCommit(kUrl2);
 
   // Check the feature policy after navigation.
-  FeaturePolicy* final_feature_policy = main_test_rfh()->feature_policy();
+  blink::FeaturePolicy* final_feature_policy =
+      main_test_rfh()->feature_policy();
   ASSERT_TRUE(final_feature_policy);
   ASSERT_NE(original_feature_policy, final_feature_policy);
 }
@@ -1328,14 +1296,16 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   contents()->NavigateAndCommit(kUrl1);
 
   // Check the feature policy before navigation.
-  FeaturePolicy* original_feature_policy = main_test_rfh()->feature_policy();
+  blink::FeaturePolicy* original_feature_policy =
+      main_test_rfh()->feature_policy();
   ASSERT_TRUE(original_feature_policy);
 
   // Navigate to the new URL.
   contents()->NavigateAndCommit(kUrl2);
 
   // Check the feature policy after navigation.
-  FeaturePolicy* final_feature_policy = main_test_rfh()->feature_policy();
+  blink::FeaturePolicy* final_feature_policy =
+      main_test_rfh()->feature_policy();
   ASSERT_EQ(original_feature_policy, final_feature_policy);
 }
 
@@ -1355,9 +1325,10 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, FeaturePolicyNewChild) {
                      ui::PAGE_TRANSITION_AUTO_SUBFRAME);
   subframe_rfh->SendNavigateWithParams(&params);
 
-  FeaturePolicy* subframe_feature_policy = subframe_rfh->feature_policy();
+  blink::FeaturePolicy* subframe_feature_policy =
+      subframe_rfh->feature_policy();
   ASSERT_TRUE(subframe_feature_policy);
-  ASSERT_FALSE(subframe_feature_policy->origin_.unique());
+  ASSERT_FALSE(subframe_feature_policy->GetOriginForTest().unique());
 }
 
 }  // namespace content

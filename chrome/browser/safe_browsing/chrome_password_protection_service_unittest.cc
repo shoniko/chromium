@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 #include "chrome/browser/safe_browsing/chrome_password_protection_service.h"
 
+#include <memory>
+
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
@@ -23,6 +25,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/safe_browsing/db/v4_protocol_manager_util.h"
 #include "components/safe_browsing/features.h"
 #include "components/safe_browsing/password_protection/password_protection_navigation_throttle.h"
@@ -59,7 +62,7 @@ const char kRedirectURL[] = "http://redirect.com";
 
 std::unique_ptr<KeyedService> BuildFakeUserEventService(
     content::BrowserContext* context) {
-  return base::MakeUnique<syncer::FakeUserEventService>();
+  return std::make_unique<syncer::FakeUserEventService>();
 }
 
 constexpr struct {
@@ -137,7 +140,7 @@ class ChromePasswordProtectionServiceTest
     content_setting_map_ = new HostContentSettingsMap(
         &test_pref_service_, false /* incognito */, false /* guest_profile */,
         false /* store_last_modified */);
-    service_ = base::MakeUnique<MockChromePasswordProtectionService>(
+    service_ = std::make_unique<MockChromePasswordProtectionService>(
         profile(), content_setting_map_,
         new SafeBrowsingUIManager(
             SafeBrowsingService::CreateSafeBrowsingService()));
@@ -191,14 +194,14 @@ class ChromePasswordProtectionServiceTest
   }
 
   void InitializeVerdict(LoginReputationClientResponse::VerdictType type) {
-    verdict_ = base::MakeUnique<LoginReputationClientResponse>();
+    verdict_ = std::make_unique<LoginReputationClientResponse>();
     verdict_->set_verdict_type(type);
   }
 
   void SimulateRequestFinished(
       LoginReputationClientResponse::VerdictType verdict_type) {
     std::unique_ptr<LoginReputationClientResponse> verdict =
-        base::MakeUnique<LoginReputationClientResponse>();
+        std::make_unique<LoginReputationClientResponse>();
     verdict->set_verdict_type(verdict_type);
     service_->RequestFinished(request_.get(), false, std::move(verdict));
   }
@@ -231,9 +234,17 @@ class ChromePasswordProtectionServiceTest
     if (throttle)
       test_handle->RegisterThrottleForTesting(std::move(throttle));
 
-    return test_handle->CallWillStartRequestForTesting(
-        /*is_post=*/false, content::Referrer(), /*has_user_gesture=*/false,
-        ui::PAGE_TRANSITION_LINK, /*is_external_protocol=*/false);
+    return test_handle->CallWillStartRequestForTesting();
+  }
+
+  int GetSizeofUnhandledSyncPasswordReuses() {
+    DictionaryPrefUpdate unhandled_sync_password_reuses(
+        profile()->GetPrefs(), prefs::kSafeBrowsingUnhandledSyncPasswordReuses);
+    return unhandled_sync_password_reuses->size();
+  }
+
+  size_t GetNumberOfNavigationThrottles() {
+    return request_ ? request_->throttles_.size() : 0u;
   }
 
  protected:
@@ -252,22 +263,22 @@ TEST_F(ChromePasswordProtectionServiceTest,
   // Password field on focus pinging is enabled on !incognito && SBER.
   PasswordProtectionService::RequestOutcome reason;
   service_->ConfigService(false /*incognito*/, false /*SBER*/);
-  EXPECT_FALSE(
-      service_->IsPingingEnabled(kPasswordFieldOnFocusPinging, &reason));
+  EXPECT_FALSE(service_->IsPingingEnabled(
+      LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE, &reason));
   EXPECT_EQ(PasswordProtectionService::DISABLED_DUE_TO_USER_POPULATION, reason);
 
   service_->ConfigService(false /*incognito*/, true /*SBER*/);
-  EXPECT_TRUE(
-      service_->IsPingingEnabled(kPasswordFieldOnFocusPinging, &reason));
+  EXPECT_TRUE(service_->IsPingingEnabled(
+      LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE, &reason));
 
   service_->ConfigService(true /*incognito*/, false /*SBER*/);
-  EXPECT_FALSE(
-      service_->IsPingingEnabled(kPasswordFieldOnFocusPinging, &reason));
+  EXPECT_FALSE(service_->IsPingingEnabled(
+      LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE, &reason));
   EXPECT_EQ(PasswordProtectionService::DISABLED_DUE_TO_INCOGNITO, reason);
 
   service_->ConfigService(true /*incognito*/, true /*SBER*/);
-  EXPECT_FALSE(
-      service_->IsPingingEnabled(kPasswordFieldOnFocusPinging, &reason));
+  EXPECT_FALSE(service_->IsPingingEnabled(
+      LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE, &reason));
   EXPECT_EQ(PasswordProtectionService::DISABLED_DUE_TO_INCOGNITO, reason);
 }
 
@@ -276,20 +287,20 @@ TEST_F(ChromePasswordProtectionServiceTest,
   // Protected password entry pinging is enabled for all safe browsing users.
   PasswordProtectionService::RequestOutcome reason;
   service_->ConfigService(false /*incognito*/, false /*SBER*/);
-  EXPECT_TRUE(
-      service_->IsPingingEnabled(kProtectedPasswordEntryPinging, &reason));
+  EXPECT_TRUE(service_->IsPingingEnabled(
+      LoginReputationClientRequest::PASSWORD_REUSE_EVENT, &reason));
 
   service_->ConfigService(false /*incognito*/, true /*SBER*/);
-  EXPECT_TRUE(
-      service_->IsPingingEnabled(kProtectedPasswordEntryPinging, &reason));
+  EXPECT_TRUE(service_->IsPingingEnabled(
+      LoginReputationClientRequest::PASSWORD_REUSE_EVENT, &reason));
 
   service_->ConfigService(true /*incognito*/, false /*SBER*/);
-  EXPECT_TRUE(
-      service_->IsPingingEnabled(kProtectedPasswordEntryPinging, &reason));
+  EXPECT_TRUE(service_->IsPingingEnabled(
+      LoginReputationClientRequest::PASSWORD_REUSE_EVENT, &reason));
 
   service_->ConfigService(true /*incognito*/, true /*SBER*/);
-  EXPECT_TRUE(
-      service_->IsPingingEnabled(kProtectedPasswordEntryPinging, &reason));
+  EXPECT_TRUE(service_->IsPingingEnabled(
+      LoginReputationClientRequest::PASSWORD_REUSE_EVENT, &reason));
 }
 
 TEST_F(ChromePasswordProtectionServiceTest, VerifyGetSyncAccountType) {
@@ -420,7 +431,7 @@ TEST_F(ChromePasswordProtectionServiceTest,
   }
 
   {
-    auto response = base::MakeUnique<LoginReputationClientResponse>();
+    auto response = std::make_unique<LoginReputationClientResponse>();
     response->set_verdict_token("token1");
     response->set_verdict_type(LoginReputationClientResponse::LOW_REPUTATION);
     service_->MaybeLogPasswordReuseLookupEvent(
@@ -440,7 +451,7 @@ TEST_F(ChromePasswordProtectionServiceTest,
   }
 
   {
-    auto response = base::MakeUnique<LoginReputationClientResponse>();
+    auto response = std::make_unique<LoginReputationClientResponse>();
     response->set_verdict_token("token2");
     response->set_verdict_type(LoginReputationClientResponse::SAFE);
     service_->MaybeLogPasswordReuseLookupEvent(
@@ -543,6 +554,68 @@ TEST_F(ChromePasswordProtectionServiceTest,
   EXPECT_EQ(content::NavigationThrottle::CANCEL,
             SimulateWillStart(test_handle.get()));
   EXPECT_FALSE(test_handle->HasCommitted());
+}
+
+TEST_F(ChromePasswordProtectionServiceTest,
+       VerifyNavigationThrottleRemovedWhenNavigationHandleIsGone) {
+  GURL trigger_url(kPhishingURL);
+  NavigateAndCommit(trigger_url);
+  // Simulate a on-going password reuse request that hasn't received
+  // verdict yet.
+  PrepareRequest(LoginReputationClientRequest::PASSWORD_REUSE_EVENT,
+                 /*is_warning_showing=*/false);
+
+  GURL redirect_url(kRedirectURL);
+  std::unique_ptr<content::NavigationHandle> test_handle =
+      content::NavigationHandle::CreateNavigationHandleForTesting(redirect_url,
+                                                                  main_rfh());
+  // Verify navigation get deferred.
+  EXPECT_EQ(content::NavigationThrottle::DEFER,
+            SimulateWillStart(test_handle.get()));
+
+  EXPECT_EQ(1u, GetNumberOfNavigationThrottles());
+
+  // Simulate the deletion of NavigationHandle.
+  test_handle.reset();
+  base::RunLoop().RunUntilIdle();
+
+  // Expect no navigation throttle kept by |request_|.
+  EXPECT_EQ(0u, GetNumberOfNavigationThrottles());
+
+  // Simulate receiving a SAFE verdict.
+  SimulateRequestFinished(LoginReputationClientResponse::SAFE);
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(ChromePasswordProtectionServiceTest,
+       VerifyUnhandledSyncPasswordReuseUponClearHistoryDeletion) {
+  ASSERT_EQ(0, GetSizeofUnhandledSyncPasswordReuses());
+  GURL url_a("https://www.phishinga.com");
+  GURL url_b("https://www.phishingb.com");
+  GURL url_c("https://www.phishingc.com");
+
+  DictionaryPrefUpdate update(profile()->GetPrefs(),
+                              prefs::kSafeBrowsingUnhandledSyncPasswordReuses);
+  update->SetKey(Origin::Create(url_a).Serialize(),
+                 base::Value("navigation_id_a"));
+  update->SetKey(Origin::Create(url_b).Serialize(),
+                 base::Value("navigation_id_b"));
+  update->SetKey(Origin::Create(url_c).Serialize(),
+                 base::Value("navigation_id_c"));
+
+  // Delete a https://www.phishinga.com URL.
+  history::URLRows deleted_urls;
+  deleted_urls.push_back(history::URLRow(url_a));
+  deleted_urls.push_back(history::URLRow(GURL("https://www.notinlist.com")));
+
+  service_->RemoveUnhandledSyncPasswordReuseOnURLsDeleted(
+      /*all_history=*/false, deleted_urls);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(2, GetSizeofUnhandledSyncPasswordReuses());
+
+  service_->RemoveUnhandledSyncPasswordReuseOnURLsDeleted(
+      /*all_history=*/true, deleted_urls);
+  EXPECT_EQ(0, GetSizeofUnhandledSyncPasswordReuses());
 }
 
 }  // namespace safe_browsing

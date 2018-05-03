@@ -34,37 +34,34 @@
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/wtf/AddressSanitizer.h"
 #include "platform/wtf/Atomics.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/HashSet.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
 
-TimerBase::TimerBase(RefPtr<WebTaskRunner> web_task_runner)
-    : next_fire_time_(0),
-      repeat_interval_(0),
-      web_task_runner_(std::move(web_task_runner)),
+TimerBase::TimerBase(scoped_refptr<WebTaskRunner> web_task_runner)
+    : web_task_runner_(std::move(web_task_runner)),
 #if DCHECK_IS_ON()
       thread_(CurrentThread()),
 #endif
       weak_ptr_factory_(this) {
-  DCHECK(web_task_runner_);
 }
 
 TimerBase::~TimerBase() {
   Stop();
 }
 
-void TimerBase::Start(double next_fire_interval,
-                      double repeat_interval,
-                      const WebTraceLocation& caller) {
+void TimerBase::Start(TimeDelta next_fire_interval,
+                      TimeDelta repeat_interval,
+                      const base::Location& caller) {
 #if DCHECK_IS_ON()
   DCHECK_EQ(thread_, CurrentThread());
 #endif
 
   location_ = caller;
   repeat_interval_ = repeat_interval;
-  SetNextFireTime(TimerMonotonicallyIncreasingTime(), next_fire_interval);
+  SetNextFireTime(TimerCurrentTimeTicksInSeconds(), next_fire_interval);
 }
 
 void TimerBase::Stop() {
@@ -72,70 +69,69 @@ void TimerBase::Stop() {
   DCHECK_EQ(thread_, CurrentThread());
 #endif
 
-  repeat_interval_ = 0;
-  next_fire_time_ = 0;
-  weak_ptr_factory_.RevokeAll();
+  repeat_interval_ = TimeDelta();
+  next_fire_time_ = TimeTicks();
+  weak_ptr_factory_.InvalidateWeakPtrs();
 }
 
-double TimerBase::NextFireInterval() const {
+TimeDelta TimerBase::NextFireIntervalDelta() const {
   DCHECK(IsActive());
-  double current = TimerMonotonicallyIncreasingTime();
+  TimeTicks current = TimerCurrentTimeTicksInSeconds();
   if (next_fire_time_ < current)
-    return 0;
+    return TimeDelta();
   return next_fire_time_ - current;
 }
 
-void TimerBase::MoveToNewTaskRunner(RefPtr<WebTaskRunner> task_runner) {
+void TimerBase::MoveToNewTaskRunner(scoped_refptr<WebTaskRunner> task_runner) {
 #if DCHECK_IS_ON()
   DCHECK_EQ(thread_, CurrentThread());
   DCHECK(task_runner->RunsTasksInCurrentSequence());
 #endif
   // If the underlying task runner stays the same, ignore it.
-  if (web_task_runner_->ToSingleThreadTaskRunner() ==
-      task_runner->ToSingleThreadTaskRunner()) {
+  if (web_task_runner_ == task_runner) {
     return;
   }
 
   bool active = IsActive();
-  weak_ptr_factory_.RevokeAll();
+  weak_ptr_factory_.InvalidateWeakPtrs();
   web_task_runner_ = std::move(task_runner);
 
   if (!active)
     return;
 
-  double now = TimerMonotonicallyIncreasingTime();
-  double next_fire_time = std::max(next_fire_time_, now);
-  next_fire_time_ = 0;
+  TimeTicks now = TimerCurrentTimeTicksInSeconds();
+  TimeTicks next_fire_time = std::max(next_fire_time_, now);
+  next_fire_time_ = TimeTicks();
 
   SetNextFireTime(now, next_fire_time - now);
 }
 
 // static
-RefPtr<WebTaskRunner> TimerBase::GetTimerTaskRunner() {
+scoped_refptr<WebTaskRunner> TimerBase::GetTimerTaskRunner() {
   return Platform::Current()->CurrentThread()->Scheduler()->TimerTaskRunner();
 }
 
-RefPtr<WebTaskRunner> TimerBase::TimerTaskRunner() const {
+scoped_refptr<WebTaskRunner> TimerBase::TimerTaskRunner() const {
   return web_task_runner_;
 }
 
-void TimerBase::SetNextFireTime(double now, double delay) {
+void TimerBase::SetNextFireTime(TimeTicks now, TimeDelta delay) {
 #if DCHECK_IS_ON()
   DCHECK_EQ(thread_, CurrentThread());
 #endif
 
-  double new_time = now + delay;
+  TimeTicks new_time = now + delay;
 
   if (next_fire_time_ != new_time) {
     next_fire_time_ = new_time;
 
     // Cancel any previously posted task.
-    weak_ptr_factory_.RevokeAll();
+    weak_ptr_factory_.InvalidateWeakPtrs();
 
-    TimerTaskRunner()->ToSingleThreadTaskRunner()->PostDelayedTask(
+    TimerTaskRunner()->PostDelayedTask(
         location_,
-        base::Bind(&TimerBase::RunInternal, weak_ptr_factory_.CreateWeakPtr()),
-        TimeDelta::FromSecondsD(delay));
+        WTF::Bind(&TimerBase::RunInternal, weak_ptr_factory_.GetWeakPtr()),
+        delay);
   }
 }
 
@@ -144,7 +140,7 @@ void TimerBase::RunInternal() {
   if (!CanFire())
     return;
 
-  weak_ptr_factory_.RevokeAll();
+  weak_ptr_factory_.InvalidateWeakPtrs();
 
   TRACE_EVENT0("blink", "TimerBase::run");
 #if DCHECK_IS_ON()
@@ -153,17 +149,17 @@ void TimerBase::RunInternal() {
       << location_.file_name() << " was run on a different thread";
 #endif
 
-  if (repeat_interval_) {
-    double now = TimerMonotonicallyIncreasingTime();
+  if (!repeat_interval_.is_zero()) {
+    TimeTicks now = TimerCurrentTimeTicksInSeconds();
     // This computation should be drift free, and it will cope if we miss a
     // beat, which can easily happen if the thread is busy.  It will also cope
     // if we get called slightly before m_unalignedNextFireTime, which can
     // happen due to lack of timer precision.
-    double interval_to_next_fire_time =
-        repeat_interval_ - fmod(now - next_fire_time_, repeat_interval_);
+    TimeDelta interval_to_next_fire_time =
+        repeat_interval_ - (now - next_fire_time_) % repeat_interval_;
     SetNextFireTime(now, interval_to_next_fire_time);
   } else {
-    next_fire_time_ = 0;
+    next_fire_time_ = TimeTicks();
   }
   Fired();
 }
@@ -174,8 +170,9 @@ bool TimerBase::Comparator::operator()(const TimerBase* a,
 }
 
 // static
-double TimerBase::TimerMonotonicallyIncreasingTime() const {
-  return TimerTaskRunner()->MonotonicallyIncreasingVirtualTimeSeconds();
+TimeTicks TimerBase::TimerCurrentTimeTicksInSeconds() const {
+  return TimeTicks::FromSeconds(
+      TimerTaskRunner()->MonotonicallyIncreasingVirtualTimeSeconds());
 }
 
 }  // namespace blink

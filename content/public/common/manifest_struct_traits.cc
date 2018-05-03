@@ -4,7 +4,7 @@
 
 #include "content/public/common/manifest_struct_traits.h"
 
-#include "mojo/common/common_custom_types_struct_traits.h"
+#include "mojo/common/string16_struct_traits.h"
 #include "third_party/WebKit/public/platform/WebDisplayModeStructTraits.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationEnumTraits.h"
 #include "ui/gfx/geometry/mojo/geometry_struct_traits.h"
@@ -83,6 +83,9 @@ bool StructTraits<blink::mojom::ManifestDataView, content::Manifest>::Read(
 
   out->background_color = data.background_color();
   if (!ValidateColor(out->background_color))
+    return false;
+
+  if (!data.ReadSplashScreenUrl(&out->splash_screen_url))
     return false;
 
   if (!data.ReadDisplay(&out->display))

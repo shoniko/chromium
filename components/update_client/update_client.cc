@@ -16,7 +16,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/observer_list.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_checker.h"
@@ -69,7 +68,7 @@ UpdateClientImpl::UpdateClientImpl(
     : is_stopped_(false),
       config_(config),
       ping_manager_(std::move(ping_manager)),
-      update_engine_(base::MakeUnique<UpdateEngine>(
+      update_engine_(std::make_unique<UpdateEngine>(
           config,
           update_checker_factory,
           crx_downloader_factory,
@@ -87,7 +86,7 @@ UpdateClientImpl::~UpdateClientImpl() {
 }
 
 void UpdateClientImpl::Install(const std::string& id,
-                               const CrxDataCallback& crx_data_callback,
+                               CrxDataCallback crx_data_callback,
                                Callback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -102,18 +101,18 @@ void UpdateClientImpl::Install(const std::string& id,
   // available when the task completes, along with the task itself.
   // Install tasks are run concurrently and never queued up.
   RunTask(std::make_unique<TaskUpdate>(
-      update_engine_.get(), true, ids, crx_data_callback,
+      update_engine_.get(), true, ids, std::move(crx_data_callback),
       base::BindOnce(&UpdateClientImpl::OnTaskComplete, this,
                      std::move(callback))));
 }
 
 void UpdateClientImpl::Update(const std::vector<std::string>& ids,
-                              const CrxDataCallback& crx_data_callback,
+                              CrxDataCallback crx_data_callback,
                               Callback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   auto task = std::make_unique<TaskUpdate>(
-      update_engine_.get(), false, ids, crx_data_callback,
+      update_engine_.get(), false, ids, std::move(crx_data_callback),
       base::BindOnce(&UpdateClientImpl::OnTaskComplete, this,
                      std::move(callback)));
 
@@ -243,7 +242,7 @@ void UpdateClientImpl::SendUninstallPing(const std::string& id,
 scoped_refptr<UpdateClient> UpdateClientFactory(
     const scoped_refptr<Configurator>& config) {
   return base::MakeRefCounted<UpdateClientImpl>(
-      config, base::MakeUnique<PingManager>(config), &UpdateChecker::Create,
+      config, std::make_unique<PingManager>(config), &UpdateChecker::Create,
       &CrxDownloader::Create);
 }
 

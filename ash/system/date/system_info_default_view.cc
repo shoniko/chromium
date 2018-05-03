@@ -32,7 +32,7 @@ SystemInfoDefaultView::SystemInfoDefaultView(SystemTrayItem* owner)
       tri_view_(TrayPopupUtils::CreateMultiTargetRowView()) {
   tri_view_->SetMinHeight(kTrayPopupSystemInfoRowHeight);
   AddChildView(tri_view_);
-  SetLayoutManager(new views::FillLayout);
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
   date_view_ = new tray::DateView(owner);
   tri_view_->AddView(TriView::Container::START, date_view_);
@@ -58,7 +58,7 @@ SystemInfoDefaultView::SystemInfoDefaultView(SystemTrayItem* owner)
     date_view_->SetAction(tray::DateView::DateAction::SHOW_DATE_SETTINGS);
 }
 
-SystemInfoDefaultView::~SystemInfoDefaultView() {}
+SystemInfoDefaultView::~SystemInfoDefaultView() = default;
 
 tray::DateView* SystemInfoDefaultView::GetDateView() {
   return date_view_;

@@ -33,6 +33,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -41,13 +42,16 @@ import org.robolectric.annotation.Config;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.favicon.IconType;
 import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.cards.CardsVariationParameters;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.suggestions.TileView.Style;
 import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
+import org.chromium.chrome.test.util.browser.ChromeHome;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
 import org.chromium.chrome.test.util.browser.suggestions.FakeMostVisitedSites;
 import org.chromium.testing.local.LocalRobolectricTestRunner;
 
@@ -60,16 +64,17 @@ import java.util.List;
  */
 @RunWith(LocalRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-@Features({@Features.Register(ChromeFeatureList.NTP_OFFLINE_PAGES_FEATURE_NAME),
-        @Features.Register(ChromeFeatureList.CHROME_HOME),
-        @Features.Register(ChromeFeatureList.NTP_TILES_LOWER_RESOLUTION_FAVICONS)})
+@DisableFeatures({ChromeFeatureList.NTP_MODERN_LAYOUT})
+@ChromeHome.Enable
 public class TileGroupUnitTest {
     private static final int MAX_TILES_TO_FETCH = 4;
     private static final int TILE_TITLE_LINES = 1;
     private static final String[] URLS = {"https://www.google.com", "https://tellmedadjokes.com"};
 
     @Rule
-    public Features.Processor mFeaturesProcessor = new Features.Processor();
+    public TestRule mFeaturesProcessor = new Features.JUnitProcessor();
+    @Rule
+    public TestRule mChromeHomeProcessor = new ChromeHome.Processor();
 
     @Mock
     private TileGroup.Observer mTileGroupObserver;
@@ -80,11 +85,15 @@ public class TileGroupUnitTest {
     private FakeImageFetcher mImageFetcher;
     private TileRenderer mTileRenderer;
 
+    public TileGroupUnitTest() {
+        // The ChromeHome.Processor rule needs an available context when it is applied.
+        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
+    }
+
     @Before
     public void setUp() {
         CardsVariationParameters.setTestVariationParams(new HashMap<>());
         MockitoAnnotations.initMocks(this);
-        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
 
         mImageFetcher = new FakeImageFetcher();
         mTileRenderer = new TileRenderer(
@@ -493,7 +502,7 @@ public class TileGroupUnitTest {
 
         public void fulfillLargeIconRequests(Bitmap bitmap, int color, boolean isColorDefault) {
             for (LargeIconCallback callback : mCallbackList) {
-                callback.onLargeIconAvailable(bitmap, color, isColorDefault);
+                callback.onLargeIconAvailable(bitmap, color, isColorDefault, IconType.INVALID);
             }
             mCallbackList.clear();
         }

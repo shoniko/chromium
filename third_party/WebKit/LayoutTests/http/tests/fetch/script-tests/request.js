@@ -486,8 +486,9 @@ test(function() {
 
 test(function() {
     var referrer = OTHER_ORIGIN + '/path?query';
-    assert_throws({name: 'TypeError'},
-        () => new Request(URL, {referrer: referrer}));
+
+    assert_equals(new Request(URL, {referrer: referrer}).referrer, 'about:client',
+                      'constructed with cross-origin referrer');
   }, 'Request with a url with another origin');
 
 test(function() {
@@ -616,10 +617,10 @@ test(() => {
     new Request('/', {get redirect() { throw e; }})}, 'redirect');
   assert_throws(e, () => {
     new Request('/', {get integrity() { throw e; }})}, 'integrity');
+  assert_throws(e, () => {
+    new Request('/', {get keepalive() { throw e; }})}, 'keepalive');
 
   // Not implemented
-  // assert_throws(e, () => {
-  //  new Request('/', {get keepalive() { throw e; }})}, 'keepalive');
   // assert_throws(e, () => {
   //  new Request('/', {get signal() { throw e; }})}, 'signal');
   // assert_throws(e, () => {

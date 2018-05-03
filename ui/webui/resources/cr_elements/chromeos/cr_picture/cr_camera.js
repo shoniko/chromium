@@ -35,7 +35,15 @@ Polymer({
   properties: {
     /** Strings provided by host */
     takePhotoLabel: String,
-    switchModeLabel: String,
+    captureVideoLabel: String,
+    switchModeToCameraLabel: String,
+    switchModeToVideoLabel: String,
+
+    /** True if video mode is enabled. */
+    videoModeEnabled: {
+      type: Boolean,
+      value: false,
+    },
 
     /**
      * True if currently in video mode.
@@ -58,9 +66,16 @@ Polymer({
     },
   },
 
+  /** @private {boolean} */
+  cameraStartInProgress_: false,
+
+  /** @private {boolean} */
+  cameraCaptureInProgress_: false,
+
   /** @override */
   attached: function() {
     this.$.cameraVideo.addEventListener('canplay', function() {
+      this.$.userImageStreamCrop.classList.add('preview');
       this.cameraOnline_ = true;
     }.bind(this));
     this.startCamera();
@@ -71,14 +86,21 @@ Polymer({
     this.stopCamera();
   },
 
+  /** Only focuses the button if it's not disabled. */
+  focusTakePhotoButton: function() {
+    if (this.cameraOnline_)
+      this.$.takePhoto.focus();
+  },
+
   /**
    * Performs photo capture from the live camera stream. A 'photo-taken' event
    * will be fired as soon as captured photo is available, with the
    * 'photoDataURL' property containing the photo encoded as a data URL.
    */
   takePhoto: function() {
-    if (!this.cameraOnline_)
+    if (!this.cameraOnline_ || this.cameraCaptureInProgress_)
       return;
+    this.cameraCaptureInProgress_ = true;
 
     /** Pre-allocate all frames needed for capture. */
     var frames = [];
@@ -97,17 +119,20 @@ Polymer({
 
     /** Start capturing frames at an interval. */
     var capturedFrames = [];
+    this.$.userImageStreamCrop.classList.remove('preview');
     this.$.userImageStreamCrop.classList.add('capture');
     var interval = setInterval(() => {
-      capturedFrames.push(this.captureFrame_(this.$.cameraVideo, frames.pop()));
-
       /** Stop capturing frames when all allocated frames have been consumed. */
-      if (!frames.length) {
-        this.$.userImageStreamCrop.classList.remove('capture');
+      if (frames.length) {
+        capturedFrames.push(
+            this.captureFrame_(this.$.cameraVideo, frames.pop()));
+      } else {
         clearInterval(interval);
         this.fire(
             'photo-taken',
             {photoDataUrl: this.convertFramesToPng_(capturedFrames)});
+        this.$.userImageStreamCrop.classList.remove('capture');
+        this.cameraCaptureInProgress_ = false;
       }
     }, CAPTURE_INTERVAL_MS);
   },
@@ -142,6 +167,7 @@ Polymer({
 
   /** Stops the camera stream capture if it's currently active. */
   stopCamera: function() {
+    this.$.userImageStreamCrop.classList.remove('preview');
     this.cameraOnline_ = false;
     this.$.cameraVideo.src = '';
     if (this.cameraStream_)
@@ -248,6 +274,24 @@ Polymer({
     /** Convert image sequence to animated PNG. */
     return CrPngBehavior.convertImageSequenceToPng(
         forwardBackwardImageSequence);
+  },
+
+  /**
+   * Returns the label to use for take photo button.
+   * @return {string}
+   * @private
+   */
+  getTakePhotoLabel_: function(videomode, photoLabel, videoLabel) {
+    return videomode ? videoLabel : photoLabel;
+  },
+
+  /**
+   * Returns the label to use for switch mode button.
+   * @return {string}
+   * @private
+   */
+  getSwitchModeLabel_: function(videomode, cameraLabel, videoLabel) {
+    return videomode ? cameraLabel : videoLabel;
   },
 });
 

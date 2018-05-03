@@ -10,7 +10,6 @@
 #include "core/layout/ng/inline/ng_inline_item.h"
 #include "core/layout/ng/inline/ng_inline_node_data.h"
 #include "core/layout/ng/ng_layout_input_node.h"
-#include "platform/wtf/Optional.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -28,7 +27,7 @@ using NGInlineItemsBuilder =
     NGInlineItemsBuilderTemplate<EmptyOffsetMappingBuilder>;
 struct NGInlineNodeData;
 class NGLayoutResult;
-class NGOffsetMappingResult;
+class NGOffsetMapping;
 
 // Represents an anonymous block box to be laid out, that contains consecutive
 // inline nodes and their descendants.
@@ -39,7 +38,12 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   LayoutBlockFlow* GetLayoutBlockFlow() const {
     return ToLayoutBlockFlow(box_);
   }
-  NGLayoutInputNode NextSibling();
+  NGLayoutInputNode NextSibling() { return nullptr; }
+
+  // True in quirks mode or limited-quirks mode, which require line-height
+  // quirks.
+  // https://quirks.spec.whatwg.org/#the-line-height-calculation-quirk
+  bool InLineHeightQuirksMode() const;
 
   scoped_refptr<NGLayoutResult> Layout(const NGConstraintSpace&,
                                        NGBreakToken* = nullptr);
@@ -56,10 +60,6 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   // Instruct to re-compute |PrepareLayout| on the next layout.
   void InvalidatePrepareLayout();
 
-  // Prepare inline and text content for layout. Must be called before
-  // calling the Layout method.
-  void PrepareLayout();
-
   const String& Text() const { return Data().text_content_; }
   StringView Text(unsigned start_offset, unsigned end_offset) const {
     return StringView(Data().text_content_, start_offset,
@@ -74,12 +74,12 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   // Returns the DOM to text content offset mapping of this block. If it is not
   // computed before, compute and store it in NGInlineNodeData.
   // This funciton must be called with clean layout.
-  const NGOffsetMappingResult& ComputeOffsetMappingIfNeeded();
+  const NGOffsetMapping* ComputeOffsetMappingIfNeeded();
 
   bool IsBidiEnabled() const { return Data().is_bidi_enabled_; }
   TextDirection BaseDirection() const { return Data().BaseDirection(); }
 
-  bool IsEmptyInline() const { return Data().is_empty_inline_; }
+  bool IsEmptyInline() { return EnsureData().is_empty_inline_; }
 
   void AssertOffset(unsigned index, unsigned offset) const;
   void AssertEndOffset(unsigned index, unsigned offset) const;
@@ -88,20 +88,21 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   String ToString() const;
 
  protected:
-  bool IsPrepareLayoutFinished() const { return !Text().IsNull(); }
+  bool IsPrepareLayoutFinished() const;
 
-  void CollectInlines();
-  void SegmentText();
-  void ShapeText();
+  // Prepare inline and text content for layout. Must be called before
+  // calling the Layout method.
+  void PrepareLayoutIfNeeded();
+
+  void CollectInlines(NGInlineNodeData*);
+  void SegmentText(NGInlineNodeData*);
+  void ShapeText(NGInlineNodeData*);
   void ShapeText(const String&, Vector<NGInlineItem>*);
-  void ShapeTextForFirstLineIfNeeded();
+  void ShapeTextForFirstLineIfNeeded(NGInlineNodeData*);
 
-  NGInlineNodeData* MutableData() {
-    return ToLayoutBlockFlow(box_)->GetNGInlineNodeData();
-  }
-  const NGInlineNodeData& Data() const {
-    return *ToLayoutBlockFlow(box_)->GetNGInlineNodeData();
-  }
+  NGInlineNodeData* MutableData();
+  const NGInlineNodeData& Data() const;
+  const NGInlineNodeData& EnsureData();
 
   friend class NGLineBreakerTest;
 };
@@ -114,13 +115,6 @@ inline void NGInlineNode::AssertEndOffset(unsigned index,
                                           unsigned offset) const {
   Data().items_[index].AssertEndOffset(offset);
 }
-
-// If the given position is laid out as an inline, returns the NGInlineNode that
-// encloses it. Otherwise, returns null.
-CORE_EXPORT Optional<NGInlineNode> GetNGInlineNodeFor(const Node&, unsigned);
-
-// Short hand of the above function with offset 0.
-CORE_EXPORT Optional<NGInlineNode> GetNGInlineNodeFor(const Node&);
 
 DEFINE_TYPE_CASTS(NGInlineNode,
                   NGLayoutInputNode,

@@ -36,10 +36,10 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8BindingForCore.h"
+#include "bindings/core/v8/V8Event.h"
 #include "bindings/core/v8/V8EventListener.h"
 #include "bindings/core/v8/V8HTMLCollection.h"
 #include "bindings/core/v8/V8Node.h"
-#include "core/dom/MessagePort.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/FrameOwner.h"
 #include "core/frame/LocalDOMWindow.h"
@@ -56,6 +56,7 @@
 #include "core/inspector/MainThreadDebugger.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
+#include "core/messaging/MessagePort.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/bindings/V8PrivateProperty.h"
@@ -113,6 +114,22 @@ void V8Window::eventAttributeGetterCustom(
 
   v8::Local<v8::Value> js_event =
       V8PrivateProperty::GetGlobalEvent(isolate).GetOrUndefined(info.Holder());
+
+  // Track usage of window.event when the event's target is inside V0 shadow
+  // tree.
+  // TODO(yukishiino): Make window.event [Replaceable] and simplify the
+  // following IsWrapper/ToImplWithTypeCheck hack.
+  if (V8DOMWrapper::IsWrapper(isolate, js_event)) {
+    if (Event* event = V8Event::ToImplWithTypeCheck(isolate, js_event)) {
+      if (event->target()) {
+        Node* target_node = event->target()->ToNode();
+        if (target_node && target_node->IsInV0ShadowTree()) {
+          UseCounter::Count(CurrentExecutionContext(isolate),
+                            WebFeature::kWindowEventInV0ShadowTree);
+        }
+      }
+    }
+  }
   V8SetReturnValue(info, js_event);
 }
 
@@ -244,53 +261,15 @@ void V8Window::postMessageMethodCustom(
 
   SerializedScriptValue::SerializeOptions options;
   options.transferables = &transferables;
-  RefPtr<SerializedScriptValue> message = SerializedScriptValue::Serialize(
-      info.GetIsolate(), info[0], options, exception_state);
+  scoped_refptr<SerializedScriptValue> message =
+      SerializedScriptValue::Serialize(info.GetIsolate(), info[0], options,
+                                       exception_state);
   if (exception_state.HadException())
     return;
 
   message->UnregisterMemoryAllocatedWithCurrentScriptContext();
-  window->postMessage(message.get(), transferables.message_ports, target_origin,
-                      source, exception_state);
-}
-
-void V8Window::openMethodCustom(
-    const v8::FunctionCallbackInfo<v8::Value>& info) {
-  DOMWindow* impl = V8Window::ToImpl(info.Holder());
-  ExceptionState exception_state(
-      info.GetIsolate(), ExceptionState::kExecutionContext, "Window", "open");
-  if (!BindingSecurity::ShouldAllowAccessTo(CurrentDOMWindow(info.GetIsolate()),
-                                            impl, exception_state)) {
-    return;
-  }
-
-  TOSTRING_VOID(V8StringResource<kTreatNullAndUndefinedAsNullString>,
-                url_string, info[0]);
-  AtomicString frame_name;
-  if (info[1]->IsUndefined() || info[1]->IsNull()) {
-    frame_name = "_blank";
-  } else {
-    TOSTRING_VOID(V8StringResource<>, frame_name_resource, info[1]);
-    frame_name = frame_name_resource;
-  }
-  TOSTRING_VOID(V8StringResource<kTreatNullAndUndefinedAsNullString>,
-                window_features_string, info[2]);
-
-  // |impl| has to be a LocalDOMWindow, since RemoteDOMWindows wouldn't have
-  // passed the BindingSecurity check above.
-  DOMWindow* opened_window = ToLocalDOMWindow(impl)->open(
-      url_string, frame_name, window_features_string,
-      CurrentDOMWindow(info.GetIsolate()), EnteredDOMWindow(info.GetIsolate()),
-      exception_state);
-  if (exception_state.HadException()) {
-    return;
-  }
-  if (!opened_window) {
-    V8SetReturnValueNull(info);
-    return;
-  }
-
-  V8SetReturnValueFast(info, opened_window, impl);
+  window->postMessage(std::move(message), transferables.message_ports,
+                      target_origin, source, exception_state);
 }
 
 void V8Window::namedPropertyGetterCustom(
@@ -345,6 +324,17 @@ void V8Window::namedPropertyGetterCustom(
   if (!BindingSecurity::ShouldAllowAccessTo(
           CurrentDOMWindow(info.GetIsolate()), window,
           BindingSecurity::ErrorReportOption::kDoNotReport)) {
+    // HTML 7.2.3.3 CrossOriginGetOwnPropertyHelper ( O, P )
+    // https://html.spec.whatwg.org/multipage/browsers.html#crossorigingetownpropertyhelper-(-o,-p-)
+    // step 3. If P is "then", @@toStringTag, @@hasInstance, or
+    //   @@isConcatSpreadable, then return PropertyDescriptor{ [[Value]]:
+    //   undefined, [[Writable]]: false, [[Enumerable]]: false,
+    //   [[Configurable]]: true }.
+    if (name == "then") {
+      V8SetReturnValueFast(info, v8::Undefined(info.GetIsolate()), window);
+      return;
+    }
+
     BindingSecurity::FailedAccessCheckFor(
         info.GetIsolate(), window->GetWrapperTypeInfo(), info.Holder());
     return;

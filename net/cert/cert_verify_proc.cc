@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sha1.h"
 #include "base/strings/string_util.h"
@@ -27,8 +28,11 @@
 #include "net/cert/crl_set.h"
 #include "net/cert/internal/ocsp.h"
 #include "net/cert/internal/signature_algorithm.h"
+#include "net/cert/known_roots.h"
 #include "net/cert/ocsp_revocation_status.h"
+#include "net/cert/symantec_certs.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "net/der/encode_values.h"
 #include "url/url_canon.h"
 
@@ -151,7 +155,7 @@ bool ExaminePublicKeys(const scoped_refptr<X509Certificate>& cert,
       cert->valid_start() >= kBaselineEffectiveDate &&
       cert->valid_expiry() >= kBaselineKeysizeEffectiveDate;
 
-  X509Certificate::GetPublicKeyInfo(cert->os_cert_handle(), &size_bits, &type);
+  X509Certificate::GetPublicKeyInfo(cert->cert_buffer(), &size_bits, &type);
   if (should_histogram) {
     RecordPublicKeyHistogram(kLeafCert, baseline_keysize_applies, size_bits,
                              type);
@@ -159,10 +163,11 @@ bool ExaminePublicKeys(const scoped_refptr<X509Certificate>& cert,
   if (IsWeakKey(type, size_bits))
     weak_key = true;
 
-  const X509Certificate::OSCertHandles& intermediates =
-      cert->GetIntermediateCertificates();
+  const std::vector<bssl::UniquePtr<CRYPTO_BUFFER>>& intermediates =
+      cert->intermediate_buffers();
   for (size_t i = 0; i < intermediates.size(); ++i) {
-    X509Certificate::GetPublicKeyInfo(intermediates[i], &size_bits, &type);
+    X509Certificate::GetPublicKeyInfo(intermediates[i].get(), &size_bits,
+                                      &type);
     if (should_histogram) {
       RecordPublicKeyHistogram(
           (i < intermediates.size() - 1) ? kIntermediateCert : kRootCert,
@@ -189,6 +194,23 @@ bool IsPastSHA1DeprecationDate(const X509Certificate& cert) {
   return start >= kSHA1DeprecationDate;
 }
 
+// See
+// https://security.googleblog.com/2017/09/chromes-plan-to-distrust-symantec.html
+// for more details.
+bool IsUntrustedSymantecCert(const X509Certificate& cert) {
+  const base::Time& start = cert.valid_start();
+  if (start.is_max() || start.is_null())
+    return true;
+  // Certificates issued on/after 2017-12-01 00:00:00 UTC are no longer
+  // trusted.
+  const base::Time kSymantecDeprecationDate =
+      base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(1512086400);
+  if (start >= kSymantecDeprecationDate)
+    return true;
+
+  return false;
+}
+
 void BestEffortCheckOCSP(const std::string& raw_response,
                          const X509Certificate& certificate,
                          OCSPVerifyResult* verify_result) {
@@ -198,31 +220,24 @@ void BestEffortCheckOCSP(const std::string& raw_response,
     return;
   }
 
-  std::string cert_der;
-  if (!X509Certificate::GetDEREncoded(certificate.os_cert_handle(),
-                                      &cert_der)) {
-    *verify_result = OCSPVerifyResult();
-    return;
-  }
+  base::StringPiece cert_der =
+      x509_util::CryptoBufferAsStringPiece(certificate.cert_buffer());
 
   // Try to get the certificate that signed |certificate|. This will run into
   // problems if the CertVerifyProc implementation doesn't return the ordered
   // certificates. If that happens the OCSP verification may be incorrect.
-  std::string issuer_der;
-  const X509Certificate::OSCertHandles& intermediates =
-      certificate.GetIntermediateCertificates();
-  if (intermediates.empty()) {
-    if (X509Certificate::IsSelfSigned(certificate.os_cert_handle())) {
+  base::StringPiece issuer_der;
+  if (certificate.intermediate_buffers().empty()) {
+    if (X509Certificate::IsSelfSigned(certificate.cert_buffer())) {
       issuer_der = cert_der;
     } else {
       // A valid cert chain wasn't provided.
       *verify_result = OCSPVerifyResult();
       return;
     }
-  } else if (!X509Certificate::GetDEREncoded(intermediates.front(),
-                                             &issuer_der)) {
-    *verify_result = OCSPVerifyResult();
-    return;
+  } else {
+    issuer_der = x509_util::CryptoBufferAsStringPiece(
+        certificate.intermediate_buffers().front().get());
   }
 
   verify_result->revocation_status =
@@ -237,16 +252,13 @@ void BestEffortCheckOCSP(const std::string& raw_response,
 void RecordTLSFeatureExtensionWithPrivateRoot(
     X509Certificate* cert,
     const OCSPVerifyResult& ocsp_result) {
-  std::string cert_der;
-  if (!X509Certificate::GetDEREncoded(cert->os_cert_handle(), &cert_der))
-    return;
-
   // This checks only for the presence of the TLS Feature Extension, but
   // does not check the feature list, and in particular does not verify that
   // its value is 'status_request' or 'status_request2'. In practice the
   // only use of the TLS feature extension is for OCSP stapling, so
   // don't bother to check the value.
-  bool has_extension = asn1::HasTLSFeatureExtension(cert_der);
+  bool has_extension = asn1::HasTLSFeatureExtension(
+      x509_util::CryptoBufferAsStringPiece(cert->cert_buffer()));
 
   UMA_HISTOGRAM_BOOLEAN("Net.Certificate.TLSFeatureExtensionWithPrivateRoot",
                         has_extension);
@@ -256,6 +268,29 @@ void RecordTLSFeatureExtensionWithPrivateRoot(
   UMA_HISTOGRAM_BOOLEAN(
       "Net.Certificate.TLSFeatureExtensionWithPrivateRootHasOCSP",
       (ocsp_result.response_status != OCSPVerifyResult::MISSING));
+}
+
+// Records details about the most-specific trust anchor in |hashes|, which is
+// expected to be ordered with the leaf cert first and the root cert last.
+// "Most-specific" refers to the case that it is not uncommon to have multiple
+// potential trust anchors present in a chain, depending on the client trust
+// store. For example, '1999-Root' cross-signing '2005-Root' cross-signing
+// '2012-Root' cross-signing '2017-Root', then followed by intermediate and
+// leaf. For purposes of assessing impact of, say, removing 1999-Root, while
+// including 2017-Root as a trust anchor, then the validation should be
+// counted as 2017-Root, rather than 1999-Root.
+//
+// This also accounts for situations in which a new CA is introduced, and
+// has been cross-signed by an existing CA. Assessing impact should use the
+// most-specific trust anchor, when possible.
+void RecordTrustAnchorHistogram(const HashValueVector& spki_hashes) {
+  int32_t id = 0;
+  for (const auto& hash : spki_hashes) {
+    id = GetNetTrustAnchorHistogramIdForSPKI(hash);
+    if (id != 0)
+      break;
+  }
+  base::UmaHistogramSparse("Net.Certificate.TrustAnchor.Verify", id);
 }
 
 // Comparison functor used for binary searching whether a given HashValue,
@@ -321,16 +356,15 @@ void MapAlgorithmToBool(DigestAlgorithm hash, CertVerifyResult* verify_result) {
 //
 // Returns false if the signature algorithm was unknown or mismatched.
 WARN_UNUSED_RESULT bool InspectSignatureAlgorithmForCert(
-    X509Certificate::OSCertHandle cert,
+    const CRYPTO_BUFFER* cert,
     CertVerifyResult* verify_result) {
-  std::string cert_der;
   base::StringPiece cert_algorithm_sequence;
   base::StringPiece tbs_algorithm_sequence;
 
   // Extract the AlgorithmIdentifier SEQUENCEs
-  if (!X509Certificate::GetDEREncoded(cert, &cert_der) ||
-      !asn1::ExtractSignatureAlgorithmsFromDERCert(
-          cert_der, &cert_algorithm_sequence, &tbs_algorithm_sequence)) {
+  if (!asn1::ExtractSignatureAlgorithmsFromDERCert(
+          x509_util::CryptoBufferAsStringPiece(cert), &cert_algorithm_sequence,
+          &tbs_algorithm_sequence)) {
     return false;
   }
 
@@ -388,8 +422,8 @@ WARN_UNUSED_RESULT bool InspectSignatureAlgorithmForCert(
 // in order to prevent such confusion.
 WARN_UNUSED_RESULT bool InspectSignatureAlgorithmsInChain(
     CertVerifyResult* verify_result) {
-  const X509Certificate::OSCertHandles& intermediates =
-      verify_result->verified_cert->GetIntermediateCertificates();
+  const std::vector<bssl::UniquePtr<CRYPTO_BUFFER>>& intermediates =
+      verify_result->verified_cert->intermediate_buffers();
 
   // If there are no intermediates, then the leaf is trusted or verification
   // failed.
@@ -400,7 +434,7 @@ WARN_UNUSED_RESULT bool InspectSignatureAlgorithmsInChain(
 
   // Fill in hash algorithms for the leaf certificate.
   if (!InspectSignatureAlgorithmForCert(
-          verify_result->verified_cert->os_cert_handle(), verify_result)) {
+          verify_result->verified_cert->cert_buffer(), verify_result)) {
     return false;
   }
 
@@ -410,7 +444,8 @@ WARN_UNUSED_RESULT bool InspectSignatureAlgorithmsInChain(
   // final one (which is presumably the trust anchor; may be incorrect for
   // partial chains).
   for (size_t i = 0; i + 1 < intermediates.size(); ++i) {
-    if (!InspectSignatureAlgorithmForCert(intermediates[i], verify_result))
+    if (!InspectSignatureAlgorithmForCert(intermediates[i].get(),
+                                          verify_result))
       return false;
   }
 
@@ -441,7 +476,7 @@ scoped_refptr<CertVerifyProc> CertVerifyProc::CreateDefault() {
 CertVerifyProc::CertVerifyProc()
     : sha1_legacy_mode_enabled(base::FeatureList::IsEnabled(kSHA1LegacyMode)) {}
 
-CertVerifyProc::~CertVerifyProc() {}
+CertVerifyProc::~CertVerifyProc() = default;
 
 int CertVerifyProc::Verify(X509Certificate* cert,
                            const std::string& hostname,
@@ -565,6 +600,17 @@ int CertVerifyProc::Verify(X509Certificate* cert,
       rv = MapCertStatusToNetError(verify_result->cert_status);
   }
 
+  // Distrust Symantec-issued certificates, as described at
+  // https://security.googleblog.com/2017/09/chromes-plan-to-distrust-symantec.html
+  if (!(flags & CertVerifier::VERIFY_DISABLE_SYMANTEC_ENFORCEMENT) &&
+      IsLegacySymantecCert(verify_result->public_key_hashes)) {
+    if (IsUntrustedSymantecCert(*verify_result->verified_cert)) {
+      verify_result->cert_status |= CERT_STATUS_AUTHORITY_INVALID;
+      if (rv == OK || IsCertificateError(rv))
+        rv = MapCertStatusToNetError(verify_result->cert_status);
+    }
+  }
+
   // Flag certificates from publicly-trusted CAs that are issued to intranet
   // hosts. While the CA/Browser Forum Baseline Requirements (v1.1) permit
   // these to be issued until 1 November 2015, they represent a real risk for
@@ -587,6 +633,10 @@ int CertVerifyProc::Verify(X509Certificate* cert,
   // a certificate chaining to a private root.
   if (rv == OK && !verify_result->is_issued_by_known_root)
     RecordTLSFeatureExtensionWithPrivateRoot(cert, verify_result->ocsp_result);
+
+  // Record a histogram for per-verification usage of root certs.
+  if (rv == OK)
+    RecordTrustAnchorHistogram(verify_result->public_key_hashes);
 
   return rv;
 }
@@ -621,7 +671,7 @@ bool CertVerifyProc::IsPublicKeyBlacklisted(
 // Defines kBlacklistedSPKIs.
 #include "net/cert/cert_verify_proc_blacklist.inc"
   for (const auto& hash : public_key_hashes) {
-    if (hash.tag != HASH_VALUE_SHA256)
+    if (hash.tag() != HASH_VALUE_SHA256)
       continue;
     if (std::binary_search(std::begin(kBlacklistedSPKIs),
                            std::end(kBlacklistedSPKIs), hash,
@@ -778,7 +828,7 @@ bool CertVerifyProc::HasNameConstraintsViolation(
   for (unsigned i = 0; i < arraysize(kLimits); ++i) {
     for (HashValueVector::const_iterator j = public_key_hashes.begin();
          j != public_key_hashes.end(); ++j) {
-      if (j->tag == HASH_VALUE_SHA256 &&
+      if (j->tag() == HASH_VALUE_SHA256 &&
           memcmp(j->data(), kLimits[i].public_key, crypto::kSHA256Length) ==
               0) {
         if (dns_names.empty() && ip_addrs.empty()) {

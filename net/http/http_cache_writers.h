@@ -78,15 +78,16 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
 
   // Adds an HttpCache::Transaction to Writers.
   // Should only be invoked if CanAddWriters() returns true.
-  // If |is_exclusive| is true, it makes writing an exclusive operation
-  // implying that Writers can contain at most one transaction till the
-  // completion of the response body. It is illegal to invoke with is_exclusive
-  // as true if there is already a transaction present.
+  // |parallel_writing_pattern| governs whether writing is an exclusive
+  // operation implying that Writers can contain at most one transaction till
+  // the completion of the response body. It is illegal to invoke with
+  // |parallel_writing_pattern| as PARALLEL_WRITING_NOT_JOIN*  if there is
+  // already a transaction present.
   // |transaction| can be destroyed at any point and it should invoke
   // HttpCache::DoneWithEntry() during its destruction. This will also ensure
   // any pointers in |info| are not accessed after the transaction is destroyed.
   void AddTransaction(Transaction* transaction,
-                      bool is_exclusive,
+                      ParallelWritingPattern initial_writing_pattern,
                       RequestPriority priority,
                       const TransactionInfo& info);
 
@@ -108,8 +109,9 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
     return all_writers_.count(const_cast<Transaction*>(transaction)) > 0;
   }
 
-  // Returns true if more writers can be added for shared writing.
-  bool CanAddWriters();
+  // Returns true if more writers can be added for shared writing. Also fills in
+  // the |reason| for why a transaction cannot be added.
+  bool CanAddWriters(ParallelWritingPattern* reason);
 
   // Returns if only one transaction can be a member of writers.
   bool IsExclusive() const { return is_exclusive_; }
@@ -136,11 +138,6 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
 
   // Returns if response is only being read from the network.
   bool network_read_only() const { return network_read_only_; }
-
-  // Returns true if entry is worth keeping in its current state. It may be
-  // truncated or complete. Returns false if entry is incomplete and cannot be
-  // resumed, it will not be marked as truncated and will not be preserved.
-  bool ShouldKeepEntry() const { return should_keep_entry_; }
 
   int GetTransactionsCount() const { return all_writers_.size(); }
 
@@ -217,7 +214,8 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   bool ContainsOnlyIdleWriters() const;
 
   // Returns true if its worth marking the entry as truncated.
-  bool CanResume() const;
+  // TODO(shivanisha): Refactor this so that it could be const.
+  bool ShouldTruncate();
 
   // Invoked for truncating the entry either internally within DoLoop or through
   // the API RemoveTransaction.
@@ -239,7 +237,6 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   void EraseTransaction(Transaction* transaction, int result);
   TransactionMap::iterator EraseTransaction(TransactionMap::iterator it,
                                             int result);
-
   void SetCacheCallback(bool success, const TransactionSet& make_readers);
 
   // IO Completion callback function.
@@ -279,6 +276,7 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
 
   // True if multiple transactions are not allowed e.g. for partial requests.
   bool is_exclusive_ = false;
+  ParallelWritingPattern parallel_writing_pattern_ = PARALLEL_WRITING_NONE;
 
   // Current priority of the request. It is always the maximum of all the writer
   // transactions.

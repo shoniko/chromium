@@ -10,7 +10,6 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "components/web_contents_delegate_android/color_chooser_android.h"
-#include "components/web_contents_delegate_android/validation_message_bubble_android.h"
 #include "content/public/browser/color_chooser.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/invalidate_type.h"
@@ -20,6 +19,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
+#include "content/public/common/resource_request_body_android.h"
 #include "jni/WebContentsDelegateAndroid_jni.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect.h"
@@ -34,7 +34,6 @@ using content::ColorChooser;
 using content::RenderWidgetHostView;
 using content::WebContents;
 using content::WebContentsDelegate;
-using content::WebContentsUnresponsiveState;
 
 namespace web_contents_delegate_android {
 
@@ -55,9 +54,9 @@ WebContentsDelegateAndroid::GetJavaDelegate(JNIEnv* env) const {
 // ----------------------------------------------------------------------------
 
 ColorChooser* WebContentsDelegateAndroid::OpenColorChooser(
-      WebContents* source,
-      SkColor color,
-      const std::vector<content::ColorSuggestion>& suggestions)  {
+    WebContents* source,
+    SkColor color,
+    const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
   return new ColorChooserAndroid(source, color, suggestions);
 }
 
@@ -92,8 +91,10 @@ WebContents* WebContentsDelegateAndroid::OpenURLFromTab(
     ScopedJavaLocalRef<jstring> extra_headers =
             ConvertUTF8ToJavaString(env, params.extra_headers);
     ScopedJavaLocalRef<jobject> post_data;
-    if (params.uses_post && params.post_data)
-      post_data = params.post_data->ToJavaObject(env);
+    if (params.uses_post && params.post_data) {
+      post_data = content::ConvertResourceRequestBodyToJavaObject(
+          env, params.post_data);
+    }
     Java_WebContentsDelegateAndroid_openNewTab(
         env, obj, java_url, extra_headers, post_data,
         static_cast<int>(disposition), params.is_renderer_initiated);
@@ -166,9 +167,7 @@ void WebContentsDelegateAndroid::LoadProgressChanged(WebContents* source,
   Java_WebContentsDelegateAndroid_notifyLoadProgressChanged(env, obj, progress);
 }
 
-void WebContentsDelegateAndroid::RendererUnresponsive(
-    WebContents* source,
-    const WebContentsUnresponsiveState& unresponsive_state) {
+void WebContentsDelegateAndroid::RendererUnresponsive(WebContents* source) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
   if (obj.is_null())
@@ -377,30 +376,6 @@ bool WebContentsDelegateAndroid::IsFullscreenForTabOrPending(
   return Java_WebContentsDelegateAndroid_isFullscreenForTabOrPending(env, obj);
 }
 
-void WebContentsDelegateAndroid::ShowValidationMessage(
-    WebContents* web_contents,
-    const gfx::Rect& anchor_in_root_view,
-    const base::string16& main_text,
-    const base::string16& sub_text) {
-  validation_message_bubble_.reset(new ValidationMessageBubbleAndroid(
-      web_contents->GetNativeView(), main_text, sub_text));
-  MoveValidationMessage(web_contents, anchor_in_root_view);
-}
-
-void WebContentsDelegateAndroid::HideValidationMessage(
-    WebContents* web_contents) {
-  validation_message_bubble_.reset();
-}
-
-void WebContentsDelegateAndroid::MoveValidationMessage(
-    WebContents* web_contents,
-    const gfx::Rect& anchor_in_root_view) {
-  if (!validation_message_bubble_)
-    return;
-  validation_message_bubble_->ShowAtPositionRelativeToAnchor(
-      web_contents->GetNativeView(), anchor_in_root_view);
-}
-
 void WebContentsDelegateAndroid::RequestAppBannerFromDevTools(
     content::WebContents* web_contents) {
 }
@@ -408,5 +383,29 @@ void WebContentsDelegateAndroid::RequestAppBannerFromDevTools(
 void WebContentsDelegateAndroid::OnDidBlockFramebust(
     content::WebContents* web_contents,
     const GURL& url) {}
+
+int WebContentsDelegateAndroid::GetTopControlsHeight() const {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
+  if (obj.is_null())
+    return 0;
+  return Java_WebContentsDelegateAndroid_getTopControlsHeight(env, obj);
+}
+
+int WebContentsDelegateAndroid::GetBottomControlsHeight() const {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
+  if (obj.is_null())
+    return 0;
+  return Java_WebContentsDelegateAndroid_getBottomControlsHeight(env, obj);
+}
+
+bool WebContentsDelegateAndroid::DoBrowserControlsShrinkBlinkSize() const {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
+  if (obj.is_null())
+    return false;
+  return Java_WebContentsDelegateAndroid_controlsResizeView(env, obj);
+}
 
 }  // namespace web_contents_delegate_android

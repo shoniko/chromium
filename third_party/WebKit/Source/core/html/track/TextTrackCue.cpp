@@ -54,9 +54,9 @@ void TextTrackCue::CueWillChange() {
     track_->CueWillChange(this);
 }
 
-void TextTrackCue::CueDidChange() {
+void TextTrackCue::CueDidChange(CueMutationAffectsOrder affects_order) {
   if (track_)
-    track_->CueDidChange(this);
+    track_->CueDidChange(this, affects_order == kCueMutationAffectsOrder);
 }
 
 TextTrack* TextTrackCue::track() const {
@@ -81,23 +81,21 @@ void TextTrackCue::setId(const AtomicString& id) {
 }
 
 void TextTrackCue::setStartTime(double value) {
-  // TODO(93143): Add spec-compliant behavior for negative time values.
-  if (start_time_ == value || value < 0)
+  if (start_time_ == value)
     return;
 
   CueWillChange();
   start_time_ = value;
-  CueDidChange();
+  CueDidChange(kCueMutationAffectsOrder);
 }
 
 void TextTrackCue::setEndTime(double value) {
-  // TODO(93143): Add spec-compliant behavior for negative time values.
-  if (end_time_ == value || value < 0)
+  if (end_time_ == value)
     return;
 
   CueWillChange();
   end_time_ = value;
-  CueDidChange();
+  CueDidChange(kCueMutationAffectsOrder);
 }
 
 void TextTrackCue::setPauseOnExit(bool value) {

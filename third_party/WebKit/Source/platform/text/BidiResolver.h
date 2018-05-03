@@ -59,10 +59,11 @@ class MidpointState final {
   // Adding a pair of midpoints before a character will split it out into a new
   // line box.
   void EnsureCharacterGetsLineBox(Iterator& text_paragraph_separator) {
-    StartIgnoringSpaces(Iterator(0,
+    StartIgnoringSpaces(Iterator(nullptr,
                                  text_paragraph_separator.GetLineLayoutItem(),
                                  text_paragraph_separator.Offset() - 1));
-    StopIgnoringSpaces(Iterator(0, text_paragraph_separator.GetLineLayoutItem(),
+    StopIgnoringSpaces(Iterator(nullptr,
+                                text_paragraph_separator.GetLineLayoutItem(),
                                 text_paragraph_separator.Offset()));
   }
 
@@ -142,7 +143,7 @@ struct BidiStatus final {
   BidiStatus(WTF::Unicode::CharDirection eor_dir,
              WTF::Unicode::CharDirection last_strong_dir,
              WTF::Unicode::CharDirection last_dir,
-             RefPtr<BidiContext> bidi_context)
+             scoped_refptr<BidiContext> bidi_context)
       : eor(eor_dir),
         last_strong(last_strong_dir),
         last(last_dir),
@@ -161,7 +162,7 @@ struct BidiStatus final {
       level = NextGreaterEvenLevel(level);
       direction = WTF::Unicode::kLeftToRight;
     }
-    RefPtr<BidiContext> context =
+    scoped_refptr<BidiContext> context =
         BidiContext::Create(level, direction, is_override, kFromStyleOrDOM);
 
     // This copies BidiStatus and may churn the ref on BidiContext.
@@ -172,7 +173,7 @@ struct BidiStatus final {
   WTF::Unicode::CharDirection eor;
   WTF::Unicode::CharDirection last_strong;
   WTF::Unicode::CharDirection last;
-  RefPtr<BidiContext> context;
+  scoped_refptr<BidiContext> context;
 };
 
 class BidiEmbedding final {
@@ -222,7 +223,7 @@ class BidiResolver final {
         reached_end_of_line_(false),
         empty_run_(true),
         nested_isolate_count_(0),
-        trailing_space_run_(0),
+        trailing_space_run_(nullptr),
         needs_trailing_space_(false) {}
 
 #if DCHECK_IS_ON()
@@ -240,7 +241,9 @@ class BidiResolver final {
   }
 
   BidiContext* Context() const { return status_.context.get(); }
-  void SetContext(RefPtr<BidiContext> c) { status_.context = std::move(c); }
+  void SetContext(scoped_refptr<BidiContext> c) {
+    status_.context = std::move(c);
+  }
 
   void SetLastDir(WTF::Unicode::CharDirection last_dir) {
     status_.last = last_dir;
@@ -295,12 +298,13 @@ class BidiResolver final {
   }
 
   TextDirection DetermineParagraphDirectionality(
-      bool* has_strong_directionality = 0) {
+      bool* has_strong_directionality = nullptr) {
     bool break_on_paragraph = true;
     return DetermineDirectionalityInternal(break_on_paragraph,
                                            has_strong_directionality);
   }
-  TextDirection DetermineDirectionality(bool* has_strong_directionality = 0) {
+  TextDirection DetermineDirectionality(
+      bool* has_strong_directionality = nullptr) {
     bool break_on_paragraph = false;
     return DetermineDirectionalityInternal(break_on_paragraph,
                                            has_strong_directionality);
@@ -327,7 +331,7 @@ class BidiResolver final {
                       Run*,
                       BidiContext*,
                       TextDirection) const {
-    return 0;
+    return nullptr;
   }
   Iterator current_;
   // sor and eor are "start of run" and "end of run" respectively and correpond
@@ -599,7 +603,7 @@ bool BidiResolver<Iterator, Run, IsolatedRun>::CommitExplicitEmbedding(
   DCHECK(!InIsolate() || current_explicit_embedding_sequence_.IsEmpty());
 
   unsigned char from_level = Context()->Level();
-  RefPtr<BidiContext> to_context = Context();
+  scoped_refptr<BidiContext> to_context = Context();
 
   for (size_t i = 0; i < current_explicit_embedding_sequence_.size(); ++i) {
     BidiEmbedding embedding = current_explicit_embedding_sequence_[i];
@@ -793,7 +797,7 @@ void BidiResolver<Iterator, Run, IsolatedRun>::CreateBidiRunsForLine(
     bool hard_line_break,
     bool reorder_runs) {
   DCHECK_EQ(direction_, WTF::Unicode::kOtherNeutral);
-  trailing_space_run_ = 0;
+  trailing_space_run_ = nullptr;
 
   end_of_line_ = end;
 

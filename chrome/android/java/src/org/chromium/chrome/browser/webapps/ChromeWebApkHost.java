@@ -11,10 +11,7 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
-import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.chrome.browser.ChromeVersionInfo;
-import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
 import org.chromium.webapk.lib.client.WebApkIdentityServiceClient;
 import org.chromium.webapk.lib.client.WebApkValidator;
 
@@ -24,15 +21,9 @@ import org.chromium.webapk.lib.client.WebApkValidator;
 public class ChromeWebApkHost {
     private static ApplicationStatus.ApplicationStateListener sListener;
 
-    private static class SignatureChecker implements WebApkValidator.ISignatureChecker {
-        public boolean isGoogleSigned(String packageName) {
-            return ExternalAuthUtils.getInstance().isGoogleSigned(packageName);
-        }
-    }
-
     public static void init() {
         WebApkValidator.init(ChromeWebApkHostSignature.EXPECTED_SIGNATURE,
-                ChromeWebApkHostSignature.PUBLIC_KEY, new SignatureChecker());
+                ChromeWebApkHostSignature.PUBLIC_KEY);
         if (ChromeVersionInfo.isLocalBuild()
                 && CommandLine.getInstance().hasSwitch(SKIP_WEBAPK_VERIFICATION)) {
             // Tell the WebApkValidator to work for all WebAPKs.
@@ -40,16 +31,10 @@ public class ChromeWebApkHost {
         }
     }
 
-    /* Returns whether launching renderer in WebAPK process is enabled by Chrome. */
-    public static boolean canLaunchRendererInWebApkProcess() {
-        return LibraryLoader.isInitialized() && nativeCanLaunchRendererInWebApkProcess();
-    }
-
     /**
      * Checks whether Chrome is the runtime host of the WebAPK asynchronously. Accesses the
      * ApplicationStateListener needs to be called on UI thread.
      */
-    @SuppressFBWarnings("LI_LAZY_INIT_UPDATE_STATIC")
     public static void checkChromeBacksWebApkAsync(String webApkPackageName,
             WebApkIdentityServiceClient.CheckBrowserBacksWebApkCallback callback) {
         ThreadUtils.assertOnUiThread();
@@ -77,6 +62,4 @@ public class ChromeWebApkHost {
         WebApkIdentityServiceClient.getInstance().checkBrowserBacksWebApkAsync(
                 ContextUtils.getApplicationContext(), webApkPackageName, callback);
     }
-
-    private static native boolean nativeCanLaunchRendererInWebApkProcess();
 }

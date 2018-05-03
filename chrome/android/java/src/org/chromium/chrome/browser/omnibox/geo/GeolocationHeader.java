@@ -24,8 +24,8 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.omnibox.geo.VisibleNetworks.VisibleCell;
 import org.chromium.chrome.browser.omnibox.geo.VisibleNetworks.VisibleWifi;
@@ -390,8 +390,13 @@ public class GeolocationHeader {
      */
     static boolean isLocationDisabledForUrl(Uri uri, boolean isIncognito) {
         boolean enabled =
-                WebsitePreferenceBridge.shouldUseDSEGeolocationSetting(uri.toString(), isIncognito)
-                && WebsitePreferenceBridge.getDSEGeolocationSetting();
+                // TODO(raymes): The call to isPermissionControlledByDSE is only needed if this
+                // could be called for an origin that isn't the default search engine. Otherwise
+                // remove this line.
+                WebsitePreferenceBridge.isPermissionControlledByDSE(
+                        ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION, uri.toString(),
+                        isIncognito)
+                && locationContentSettingForUrl(uri, isIncognito) == ContentSetting.ALLOW;
         return !enabled;
     }
 
@@ -660,7 +665,6 @@ public class GeolocationHeader {
     }
 
     /** Records a data point for one of the GeolocationHeader.TimeListening* histograms. */
-    @SuppressFBWarnings("RCN_REDUNDANT_NULLCHECK_OF_NONNULL_VALUE")
     private static void recordTimeListeningHistogram(
             int locationSource, boolean locationAttached, long duration) {
         String name = getTimeListeningHistogramEnum(locationSource, locationAttached);

@@ -8,6 +8,8 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
@@ -46,6 +48,7 @@ class NavigationController;
 class RenderProcessHostFactory;
 class TestRenderFrameHostFactory;
 class TestRenderViewHostFactory;
+class TestRenderWidgetHostFactory;
 class WebContents;
 struct WebPreferences;
 
@@ -119,8 +122,12 @@ class RenderFrameHostTester {
   // can be generalized as needed. Setting a header policy should only be done
   // once per navigation of the RFH.
   virtual void SimulateFeaturePolicyHeader(
-      blink::WebFeaturePolicyFeature feature,
+      blink::FeaturePolicyFeature feature,
       const std::vector<url::Origin>& whitelist) = 0;
+
+  // Gets all the console messages requested via
+  // RenderFrameHost::AddMessageToConsole in this frame.
+  virtual const std::vector<std::string>& GetConsoleMessages() = 0;
 };
 
 // An interface and utility for driving tests of RenderViewHost.
@@ -176,6 +183,7 @@ class RenderViewHostTestEnabler {
   std::unique_ptr<MockRenderProcessHostFactory> rph_factory_;
   std::unique_ptr<TestRenderViewHostFactory> rvh_factory_;
   std::unique_ptr<TestRenderFrameHostFactory> rfh_factory_;
+  std::unique_ptr<TestRenderWidgetHostFactory> rwhi_factory_;
 };
 
 // RenderViewHostTestHarness ---------------------------------------------------
@@ -240,6 +248,12 @@ class RenderViewHostTestHarness : public testing::Test {
   // RenderViewHostTestHarness will take ownership of the returned
   // BrowserContext.
   virtual BrowserContext* CreateBrowserContext();
+
+  // Derived classes can override this method to have the test harness use a
+  // different BrowserContext than the one owned by this class. This is most
+  // useful for off-the-record contexts, which are usually owned by the original
+  // context.
+  virtual BrowserContext* GetBrowserContext();
 
 #if defined(USE_AURA)
   aura::Window* root_window() { return aura_test_helper_->root_window(); }

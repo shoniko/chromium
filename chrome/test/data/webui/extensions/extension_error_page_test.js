@@ -36,7 +36,9 @@ cr.define('extension_error_page_tests', function() {
     },
   };
 
-  suite('ExtensionErrorPageTest', function() {
+  var suiteName = 'ExtensionErrorPageTest';
+
+  suite(suiteName, function() {
     /** @type {chrome.developerPrivate.ExtensionInfo} */
     var extensionData;
 
@@ -92,7 +94,7 @@ cr.define('extension_error_page_tests', function() {
       var testIsVisible = extension_test_util.isVisible.bind(null, errorPage);
       expectTrue(testIsVisible('#close-button'));
       expectTrue(testIsVisible('#heading'));
-      expectTrue(testIsVisible('#errors-list'));
+      expectTrue(testIsVisible('#errorsList'));
 
       var errorElements = errorPage.querySelectorAll('* /deep/ .error-item');
       expectEquals(1, errorElements.length);
@@ -158,11 +160,8 @@ cr.define('extension_error_page_tests', function() {
             renderProcessId: 111,
             renderViewId: 222,
             canInspect: true,
-            stackTrace: [{
-              url: 'url',
-              lineNumber: 123,
-              columnNumber: 321
-            }],
+            contextUrl: 'http://test.com',
+            stackTrace: [{url: 'url', lineNumber: 123, columnNumber: 321}],
           },
           runtimeErrorBase);
       // Add a new runtime error to the end.
@@ -176,7 +175,8 @@ cr.define('extension_error_page_tests', function() {
 
       // The first error should be focused by default, and we should have
       // requested the source for it.
-      expectEquals(extensionData.runtimeErrors[0], errorPage.selectedError_);
+      expectEquals(
+          extensionData.runtimeErrors[0], errorPage.getSelectedError());
       expectTrue(!!mockDelegate.requestFileSourceArgs);
       var args = mockDelegate.requestFileSourceArgs;
       expectEquals('source.html', args.pathSuffix);
@@ -190,9 +190,9 @@ cr.define('extension_error_page_tests', function() {
       // Tap the second error. It should now be selected and we should request
       // the source for it.
       MockInteractions.tap(errorElements[1]);
-      expectEquals(nextRuntimeError, errorPage.selectedError_);
+      expectEquals(nextRuntimeError, errorPage.getSelectedError());
       expectTrue(!!mockDelegate.requestFileSourceArgs);
-      args = mockDelegate.requestFileSourceArgs
+      args = mockDelegate.requestFileSourceArgs;
       expectEquals('other_source.html', args.pathSuffix);
       expectTrue(ironCollapses[1].opened);
       expectFalse(ironCollapses[0].opened);
@@ -207,10 +207,18 @@ cr.define('extension_error_page_tests', function() {
         lineNumber: 123,
         columnNumber: 321,
       });
+
+      expectEquals(
+          'Unknown',
+          ironCollapses[0].querySelector('.context-url').textContent.trim());
+      expectEquals(
+          nextRuntimeError.contextUrl,
+          ironCollapses[1].querySelector('.context-url').textContent.trim());
     });
   });
 
   return {
+    suiteName: suiteName,
     TestNames: TestNames,
   };
 });

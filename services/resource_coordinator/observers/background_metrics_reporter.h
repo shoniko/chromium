@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SERVICES_RESOURCE_COORDINATOR_COORDINATION_UNIT_BACKGROUND_METRICS_REPORTER_H_
-#define SERVICES_RESOURCE_COORDINATOR_COORDINATION_UNIT_BACKGROUND_METRICS_REPORTER_H_
+#ifndef SERVICES_RESOURCE_COORDINATOR_OBSERVER_BACKGROUND_METRICS_REPORTER_H_
+#define SERVICES_RESOURCE_COORDINATOR_OBSERVER_BACKGROUND_METRICS_REPORTER_H_
 
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
@@ -18,10 +18,6 @@
 #define HEURISTICS_HISTOGRAM(name, sample)                                  \
   UMA_HISTOGRAM_CUSTOM_TIMES(name, sample, base::TimeDelta::FromSeconds(1), \
                              base::TimeDelta::FromHours(48), 100)
-
-namespace ukm {
-class MojoUkmRecorder;
-}  // namespace ukm
 
 namespace resource_coordinator {
 
@@ -42,7 +38,7 @@ class UKMReportDelegate<UKMBuilderClass, internal::kMainFrameOnly> {
   void ReportUKM(int64_t ukm_source_id,
                  bool is_main_frame,
                  int64_t duration_in_ms,
-                 ukm::MojoUkmRecorder* ukm_recorder) {
+                 ukm::UkmRecorder* ukm_recorder) {
     UKMBuilderClass ukm_builder(ukm_source_id);
     ukm_builder.SetTimeFromBackgrounded(duration_in_ms).Record(ukm_recorder);
   }
@@ -54,7 +50,7 @@ class UKMReportDelegate<UKMBuilderClass, internal::kMainFrameAndChildFrame> {
   void ReportUKM(int64_t ukm_source_id,
                  bool is_main_frame,
                  int64_t duration_in_ms,
-                 ukm::MojoUkmRecorder* ukm_recorder) {
+                 ukm::UkmRecorder* ukm_recorder) {
     UKMBuilderClass ukm_builder(ukm_source_id);
     ukm_builder.SetIsMainFrame(is_main_frame)
         .SetTimeFromBackgrounded(duration_in_ms)
@@ -85,7 +81,7 @@ class BackgroundMetricsReporter {
 
   void OnSignalReceived(bool is_main_frame,
                         base::TimeDelta duration,
-                        ukm::MojoUkmRecorder* ukm_recorder) {
+                        ukm::UkmRecorder* ukm_recorder) {
     if (!uma_reported_) {
       uma_reported_ = true;
       HEURISTICS_HISTOGRAM(kMetricName, duration);
@@ -97,7 +93,7 @@ class BackgroundMetricsReporter {
  private:
   void ReportUKMIfNeeded(bool is_main_frame,
                          base::TimeDelta duration,
-                         ukm::MojoUkmRecorder* ukm_recorder) {
+                         ukm::UkmRecorder* ukm_recorder) {
     if (ukm_source_id_ == ukm::kInvalidSourceId ||
         (!kShouldReportChildFrameUkm && ukm_reported_) ||
         (kShouldReportChildFrameUkm &&
@@ -134,4 +130,4 @@ class BackgroundMetricsReporter {
 
 }  // namespace resource_coordinator
 
-#endif  // SERVICES_RESOURCE_COORDINATOR_COORDINATION_UNIT_BACKGROUND_METRICS_REPORTER_H_
+#endif  // SERVICES_RESOURCE_COORDINATOR_OBSERVER_BACKGROUND_METRICS_REPORTER_H_

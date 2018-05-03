@@ -32,7 +32,6 @@
 
 #include <memory>
 #include "platform/geometry/IntSize.h"
-#include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/LoggingCanvas.h"
 #include "platform/graphics/ProfilingCanvas.h"
 #include "platform/graphics/ReplayingCanvas.h"
@@ -41,55 +40,27 @@
 #include "platform/image-decoders/ImageFrame.h"
 #include "platform/image-decoders/SegmentReader.h"
 #include "platform/image-encoders/ImageEncoder.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/HexNumber.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/Base64.h"
 #include "platform/wtf/text/TextEncoding.h"
-#include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkImage.h"
-#include "third_party/skia/include/core/SkImageDeserializer.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
-#include "third_party/skia/include/core/SkStream.h"
 
 namespace blink {
 
 PictureSnapshot::PictureSnapshot(sk_sp<const SkPicture> picture)
     : picture_(std::move(picture)) {}
 
-class SkiaImageDecoder final : public SkImageDeserializer {
- public:
-  sk_sp<SkImage> makeFromMemory(const void* data,
-                                size_t length,
-                                const SkIRect* subset) override {
-    // No need to copy the data; this decodes immediately.
-    RefPtr<SegmentReader> segment_reader =
-        SegmentReader::CreateFromSkData(SkData::MakeWithoutCopy(data, length));
-    std::unique_ptr<ImageDecoder> image_decoder = ImageDecoder::Create(
-        std::move(segment_reader), true, ImageDecoder::kAlphaPremultiplied,
-        ColorBehavior::Ignore());
-    if (!image_decoder)
-      return nullptr;
-
-    ImageFrame* frame = image_decoder->DecodeFrameBufferAtIndex(0);
-    return (frame && !image_decoder->Failed())
-               ? frame->FinalizePixelsAndGetImage()
-               : nullptr;
-  }
-  sk_sp<SkImage> makeFromData(SkData* data, const SkIRect* subset) override {
-    return this->makeFromMemory(data->data(), data->size(), subset);
-  }
-};
-
-RefPtr<PictureSnapshot> PictureSnapshot::Load(
-    const Vector<RefPtr<TilePictureStream>>& tiles) {
+scoped_refptr<PictureSnapshot> PictureSnapshot::Load(
+    const Vector<scoped_refptr<TilePictureStream>>& tiles) {
   DCHECK(!tiles.IsEmpty());
   Vector<sk_sp<SkPicture>> pictures;
   pictures.ReserveCapacity(tiles.size());
   FloatRect union_rect;
   for (const auto& tile_stream : tiles) {
-    SkMemoryStream stream(tile_stream->data.begin(), tile_stream->data.size());
-    SkiaImageDecoder factory;
-    sk_sp<SkPicture> picture = SkPicture::MakeFromStream(&stream, &factory);
+    sk_sp<SkPicture> picture = SkPicture::MakeFromData(
+        tile_stream->data.begin(), tile_stream->data.size());
     if (!picture)
       return nullptr;
     FloatRect cull_rect(picture->cullRect());
@@ -98,7 +69,7 @@ RefPtr<PictureSnapshot> PictureSnapshot::Load(
     pictures.push_back(std::move(picture));
   }
   if (tiles.size() == 1)
-    return WTF::AdoptRef(new PictureSnapshot(std::move(pictures[0])));
+    return base::AdoptRef(new PictureSnapshot(std::move(pictures[0])));
   SkPictureRecorder recorder;
   SkCanvas* canvas = recorder.beginRecording(union_rect.Width(),
                                              union_rect.Height(), nullptr, 0);
@@ -109,7 +80,7 @@ RefPtr<PictureSnapshot> PictureSnapshot::Load(
     pictures[i]->playback(canvas, nullptr);
     canvas->restore();
   }
-  return WTF::AdoptRef(
+  return base::AdoptRef(
       new PictureSnapshot(recorder.finishRecordingAsPicture()));
 }
 
@@ -176,7 +147,7 @@ std::unique_ptr<PictureSnapshot::Timings> PictureSnapshot::Profile(
       SkImageInfo::MakeN32Premul(bounds.width(), bounds.height()));
   bitmap.eraseARGB(0, 0, 0, 0);
 
-  double now = WTF::MonotonicallyIncreasingTime();
+  double now = WTF::CurrentTimeTicksInSeconds();
   double stop_time = now + min_duration;
   for (unsigned step = 0; step < min_repeat_count || now < stop_time; ++step) {
     timings->push_back(Vector<double>());
@@ -192,7 +163,7 @@ std::unique_ptr<PictureSnapshot::Timings> PictureSnapshot::Profile(
     }
     canvas.SetTimings(current_timings);
     picture_->playback(&canvas);
-    now = WTF::MonotonicallyIncreasingTime();
+    now = WTF::CurrentTimeTicksInSeconds();
   }
   return timings;
 }

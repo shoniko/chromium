@@ -45,7 +45,20 @@ class VisibleSelectionTest : public EditingTestBase {
             .Extend(PositionTemplate<Strategy>(node, extend))
             .Build());
   }
+
+  std::string GetWordSelectionText(const std::string&);
 };
+
+std::string VisibleSelectionTest::GetWordSelectionText(
+    const std::string& selection_text) {
+  const PositionInFlatTree position =
+      ToPositionInFlatTree(SetSelectionTextToBody(selection_text).Base());
+  return GetSelectionTextInFlatTreeFromBody(
+      CreateVisibleSelectionWithGranularity(
+          SelectionInFlatTree::Builder().Collapse(position).Build(),
+          TextGranularity::kWord)
+          .AsSelection());
+}
 
 static void TestFlatTreePositionsToEqualToDOMTreePositions(
     const VisibleSelection& selection,
@@ -71,33 +84,6 @@ VisibleSelectionTemplate<Strategy> ExpandUsingGranularity(
           .SetBaseAndExtent(selection.Base(), selection.Extent())
           .Build(),
       granularity);
-}
-
-// TODO(editing-dev): We should move this test to "SelectionControllerTest.cpp"
-// For http://crbug.com/700368
-TEST_F(VisibleSelectionTest, AdjustSelectionWithTrailingWhitespace) {
-  SetBodyContent(
-      "<input type=checkbox>"
-      "<div style='user-select:none'>abc</div>");
-  Element* const input = GetDocument().QuerySelector("input");
-
-  // Simulate double-clicking "abc".
-  // TODO(editing-dev): We should remove above comment once we fix [1].
-  // [1] http://crbug.com/701657 double-click on user-select:none should not
-  // compute selection.
-  const VisibleSelectionInFlatTree& selection =
-      CreateVisibleSelectionWithGranularity(
-          SelectionInFlatTree::Builder()
-              .Collapse(PositionInFlatTree::BeforeNode(*input))
-              .Extend(PositionInFlatTree::AfterNode(*input))
-              .Build(),
-          TextGranularity::kWord);
-  const SelectionInFlatTree& result =
-      AdjustSelectionWithTrailingWhitespace(selection.AsSelection());
-
-  EXPECT_EQ(PositionInFlatTree::BeforeNode(*input),
-            result.ComputeStartPosition());
-  EXPECT_EQ(PositionInFlatTree::AfterNode(*input), result.ComputeEndPosition());
 }
 
 TEST_F(VisibleSelectionTest, expandUsingGranularity) {
@@ -384,6 +370,42 @@ TEST_F(VisibleSelectionTest, SelectAllWithInputElement) {
                 .Extend(PositionInFlatTree(last_child, 3))
                 .Build(),
             visible_selection_in_flat_tree.AsSelection());
+}
+
+TEST_F(VisibleSelectionTest, GetWordSelectionTextWithTextSecurity) {
+  InsertStyleElement("s {-webkit-text-security:disc;}");
+  // Note: |CreateVisibleSelectionWithGranularity()| considers security
+  // characters as a sequence "x".
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("|abc<s>foo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("a|bc<s>foo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc|<s>foo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>|foo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>f|oo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>fo|o bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo| bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo |bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo b|ar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo ba|r</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar|</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar</s>|baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar</s>b|az"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar</s>ba|z"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar</s>baz|"));
 }
 
 TEST_F(VisibleSelectionTest, ShadowCrossing) {

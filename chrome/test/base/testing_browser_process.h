@@ -44,7 +44,6 @@ class GCMDriver;
 }
 
 namespace policy {
-class BrowserPolicyConnector;
 class PolicyService;
 }
 
@@ -69,14 +68,17 @@ class TestingBrowserProcess : public BrowserProcess {
   rappor::RapporServiceImpl* rappor_service() override;
   IOThread* io_thread() override;
   SystemNetworkContextManager* system_network_context_manager() override;
+  content::NetworkConnectionTracker* network_connection_tracker() override;
   WatchDogThread* watchdog_thread() override;
   ProfileManager* profile_manager() override;
   PrefService* local_state() override;
   variations::VariationsService* variations_service() override;
-  policy::BrowserPolicyConnector* browser_policy_connector() override;
+  policy::ChromeBrowserPolicyConnector* browser_policy_connector() override;
   policy::PolicyService* policy_service() override;
   IconManager* icon_manager() override;
-  GpuProfileCache* gpu_profile_cache() override;
+#if defined(OS_ANDROID)
+  GpuDriverInfoManager* gpu_driver_info_manager() override;
+#endif
   GpuModeManager* gpu_mode_manager() override;
   BackgroundModeManager* background_mode_manager() override;
   void set_background_mode_manager_for_test(
@@ -87,6 +89,8 @@ class TestingBrowserProcess : public BrowserProcess {
       override;
   subresource_filter::ContentRulesetService*
   subresource_filter_ruleset_service() override;
+  optimization_guide::OptimizationGuideService* optimization_guide_service()
+      override;
   net::URLRequestContextGetter* system_request_context() override;
   BrowserProcessPlatformPart* platform_part() override;
 
@@ -140,7 +144,12 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetRulesetService(
       std::unique_ptr<subresource_filter::ContentRulesetService>
           ruleset_service);
+  void SetOptimizationGuideService(
+      std::unique_ptr<optimization_guide::OptimizationGuideService>
+          optimization_guide_service);
   void SetSystemRequestContext(net::URLRequestContextGetter* context_getter);
+  void SetNetworkConnectionTracker(
+      std::unique_ptr<content::NetworkConnectionTracker> tracker);
   void SetNotificationUIManager(
       std::unique_ptr<NotificationUIManager> notification_ui_manager);
   void SetNotificationPlatformBridge(
@@ -158,8 +167,11 @@ class TestingBrowserProcess : public BrowserProcess {
   std::string app_locale_;
   bool is_shutting_down_;
 
-  std::unique_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
+  std::unique_ptr<policy::ChromeBrowserPolicyConnector>
+      browser_policy_connector_;
   bool created_browser_policy_connector_ = false;
+  std::unique_ptr<content::NetworkConnectionTracker>
+      network_connection_tracker_;
   std::unique_ptr<ProfileManager> profile_manager_;
   std::unique_ptr<NotificationUIManager> notification_ui_manager_;
   std::unique_ptr<NotificationPlatformBridge> notification_platform_bridge_;
@@ -178,6 +190,8 @@ class TestingBrowserProcess : public BrowserProcess {
   scoped_refptr<safe_browsing::SafeBrowsingService> sb_service_;
   std::unique_ptr<subresource_filter::ContentRulesetService>
       subresource_filter_ruleset_service_;
+  std::unique_ptr<optimization_guide::OptimizationGuideService>
+      optimization_guide_service_;
 
   std::unique_ptr<network_time::NetworkTimeTracker> network_time_tracker_;
 

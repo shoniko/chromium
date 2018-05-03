@@ -10,6 +10,7 @@
 #include "platform/bindings/SharedPersistent.h"
 #include "platform/loader/fetch/AccessControlStatus.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/TextPosition.h"
@@ -20,20 +21,6 @@
 namespace blink {
 
 class ExceptionState;
-
-// Correspond to TC39 ModuleRecord.[[Status]]
-// TODO(kouhei): Add URL after https://github.com/tc39/ecma262/pull/916 is
-// merged.
-using ScriptModuleState = v8::Module::Status;
-const char* ScriptModuleStateToString(ScriptModuleState);
-
-// CaptureEvalErrorFlag is used to implement "rethrow errors" parameter in
-// run-a-module-script. When "rethrow errors" is to be set, use kCapture for
-// ScriptModule::Evaluate()/Modulator::EvaluateModule(), and rethrow the
-// returned exception (if any) in the caller of these methods. When "rethrow
-// errors" is not to be set, use kReport, and Evaluate()/EvaluateModule()
-// "report the error".
-enum class CaptureEvalErrorFlag : bool { kReport, kCapture };
 
 // ScriptModule wraps a handle to a v8::Module for use in core.
 //
@@ -48,11 +35,10 @@ class CORE_EXPORT ScriptModule final {
  public:
   static ScriptModule Compile(v8::Isolate*,
                               const String& source,
-                              const String& file_name,
+                              const KURL& source_url,
+                              const KURL& base_url,
+                              const ScriptFetchOptions&,
                               AccessControlStatus,
-                              WebURLRequest::FetchCredentialsMode,
-                              const String& nonce,
-                              ParserDisposition,
                               const TextPosition&,
                               ExceptionState&);
 
@@ -65,18 +51,12 @@ class CORE_EXPORT ScriptModule final {
   // Returns exception, if any.
   ScriptValue Instantiate(ScriptState*);
 
-  // Returns exception if CaptureEvalErrorFlag::kCapture is specified.
-  // Otherwise, "report the error" to console.
-  ScriptValue Evaluate(ScriptState*, CaptureEvalErrorFlag) const;
+  // Returns exception, if any.
+  ScriptValue Evaluate(ScriptState*) const;
   static void ReportException(ScriptState*, v8::Local<v8::Value> exception);
 
   Vector<String> ModuleRequests(ScriptState*);
   Vector<TextPosition> ModuleRequestPositions(ScriptState*);
-  ScriptModuleState Status(ScriptState*);
-
-  // Returns record's [[ErrorCompletion]] field's [[Value]].
-  // Should only be used via ModulatorImpl::GetError()
-  v8::Local<v8::Value> ErrorCompletion(ScriptState*);
 
   inline bool operator==(const blink::ScriptModule& other) const;
   bool operator!=(const blink::ScriptModule& other) const {
@@ -101,7 +81,7 @@ class CORE_EXPORT ScriptModule final {
       v8::Local<v8::String> specifier,
       v8::Local<v8::Module> referrer);
 
-  RefPtr<SharedPersistent<v8::Module>> module_;
+  scoped_refptr<SharedPersistent<v8::Module>> module_;
   unsigned identity_hash_ = 0;
 
   friend struct ScriptModuleHash;
@@ -137,13 +117,13 @@ template <>
 struct HashTraits<blink::ScriptModule>
     : public SimpleClassHashTraits<blink::ScriptModule> {
   static bool IsDeletedValue(const blink::ScriptModule& value) {
-    return HashTraits<RefPtr<blink::SharedPersistent<v8::Module>>>::
+    return HashTraits<scoped_refptr<blink::SharedPersistent<v8::Module>>>::
         IsDeletedValue(value.module_);
   }
 
   static void ConstructDeletedValue(blink::ScriptModule& slot,
                                     bool zero_value) {
-    HashTraits<RefPtr<blink::SharedPersistent<v8::Module>>>::
+    HashTraits<scoped_refptr<blink::SharedPersistent<v8::Module>>>::
         ConstructDeletedValue(slot.module_, zero_value);
   }
 };

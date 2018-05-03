@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">Razdoblje</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 mjesec}one{# mjesec}few{# mjeseca}other{# mjeseci}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>
+<translation id="1812519734428420144">Broj zvjezdica: <ph name="RATING_SCORE" /></translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{1 sat i }one{# sat i }few{# sata i }other{# sati i }}</translation>
 <translation id="1842960171412779397">odaberi</translation>
 <translation id="1860796786778352021">Zatvaranje obavijesti</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">Otvori mapu</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{Prije godinu dana}one{Prije # godine}few{Prije # godine}other{Prije # godina}}</translation>
 <translation id="2931838996092594335">klikanje</translation>
-<translation id="2983818520079887040">Postavke...</translation>
 <translation id="3036649622769666520">Otvori datoteke</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3087734570205094154">Donji</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">SVE APLIKACIJE</translation>
 <translation id="4320177379694898372">Nema internetske veze</translation>
 <translation id="4588090240171750605">Pomakni se desno</translation>
+<translation id="4724120544754982507">Centar za obavijesti, nepročitanih obavijesti: <ph name="UNREAD_NOTIFICATION_COUNT" /></translation>
 <translation id="4730374152663651037">ČESTO KORIŠTENO</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{Još mjesec dana}one{Još # mjesec}few{Još # mjeseca}other{Još # mjeseci}}</translation>
 <translation id="4820616160060340806">Naredba + <ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">Minimiziraj</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 sat}one{# sat}few{# sata}other{# sati}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">Sve aplikacije</translation>
 <translation id="6012623610530968780"><ph name="SELECTED_PAGE" />. stranica od <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">Brisanje teksta u okviru za pretraživanje</translation>
 <translation id="6040143037577758943">Zatvori</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">Zarez</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{Prije 1 s}one{Prije # s}few{Prije # s}other{Prije # s}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{Prije 1 sekunde}one{Prije # sekunde}few{Prije # sekunde}other{Prije # sekundi}}</translation>
+<translation id="654149438358937226">Blokiraj sve obavijesti</translation>
 <translation id="6567071839949112727">klikni nadređeni element</translation>
 <translation id="6612467943526193239">Za izlaz iz kalibracije pritisnite Esc.</translation>
 <translation id="6620110761915583480">Spremi datoteku</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">Odustani</translation>
 <translation id="7781829728241885113">Danas</translation>
 <translation id="7814458197256864873">&amp;Kopiraj</translation>
+<translation id="7879499977785298635">Ne blokiraj</translation>
 <translation id="7907591526440419938">Otvori datoteku</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{Prije 1 sat}one{Prije # sat}few{Prije # sata}other{Prije # sati}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{Još 1 s}one{Još # s}few{Još # s}other{Još # s}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{1 godina}one{# godina}few{# godine}other{# godina}}</translation>
 <translation id="8371695176452482769">Govorite sad</translation>
 <translation id="838869780401515933">označi</translation>
+<translation id="8393700583063109961">Pošaljite poruku</translation>
 <translation id="8394908167088220973">Reproduciraj/pauziraj Medije</translation>
 <translation id="8400147561352026160">Shift+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 g}one{# g}few{# g}other{# g}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> Datoteka (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s</translation>
 <translation id="8725488761726303204">Još <ph name="NUMBER" /></translation>
+<translation id="8730621377337864115">Gotovo</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{1 h}one{# h}few{# h}other{# h}}</translation>
 <translation id="8806053966018712535">Mapa <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">Dodaj napomenu slici</translation>

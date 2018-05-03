@@ -8,6 +8,7 @@
 #include "content/common/url_schemes.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/url_constants.h"
+#include "url/gurl.h"
 #include "url/url_util.h"
 
 namespace content {
@@ -41,6 +42,11 @@ bool IsURLHandledByNetworkStack(const GURL& url) {
       return false;
   }
 
+  // Renderer debug URLs (e.g. chrome://kill) are handled in the renderer
+  // process directly and should not be sent to the network stack.
+  if (IsRendererDebugURL(url))
+    return false;
+
   // For you information, even though a "data:" url doesn't generate actual
   // network requests, it is handled by the network stack and so must return
   // true. The reason is that a few "data:" urls can't be handled locally. For
@@ -51,6 +57,46 @@ bool IsURLHandledByNetworkStack(const GURL& url) {
   // - the ones that target the top-level frame on Android.
 
   return true;
+}
+
+bool IsURLHandledByNetworkService(const GURL& url) {
+  return url.SchemeIsHTTPOrHTTPS() || url.SchemeIsWSOrWSS() ||
+         url.SchemeIs(url::kFtpScheme) || url.SchemeIs(url::kGopherScheme);
+}
+
+bool IsRendererDebugURL(const GURL& url) {
+  if (!url.is_valid())
+    return false;
+
+  if (url.SchemeIs(url::kJavaScriptScheme))
+    return true;
+
+  if (!url.SchemeIs(kChromeUIScheme))
+    return false;
+
+  if (url == kChromeUICheckCrashURL || url == kChromeUIBadCastCrashURL ||
+      url == kChromeUICrashURL || url == kChromeUIDumpURL ||
+      url == kChromeUIKillURL || url == kChromeUIHangURL ||
+      url == kChromeUIShorthangURL || url == kChromeUIMemoryExhaustURL) {
+    return true;
+  }
+
+#if defined(ADDRESS_SANITIZER) || defined(SYZYASAN)
+  if (url == kChromeUICrashHeapOverflowURL ||
+      url == kChromeUICrashHeapUnderflowURL ||
+      url == kChromeUICrashUseAfterFreeURL) {
+    return true;
+  }
+#endif
+
+#if defined(SYZYASAN)
+  if (url == kChromeUICrashCorruptHeapBlockURL ||
+      url == kChromeUICrashCorruptHeapURL || url == kChromeUICrashDcheckURL) {
+    return true;
+  }
+#endif
+
+  return false;
 }
 
 }  // namespace content

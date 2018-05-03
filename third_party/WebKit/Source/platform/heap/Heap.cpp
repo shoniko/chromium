@@ -45,10 +45,10 @@
 #include "platform/instrumentation/tracing/web_memory_allocator_dump.h"
 #include "platform/instrumentation/tracing/web_process_memory_dump.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/DataLog.h"
 #include "platform/wtf/LeakAnnotations.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/allocator/Partitions.h"
 #include "public/platform/Platform.h"
 
@@ -146,9 +146,15 @@ void ThreadHeapStats::DecreaseAllocatedSpace(size_t delta) {
   ProcessHeap::DecreaseTotalAllocatedSpace(delta);
 }
 
+double ThreadHeapStats::LiveObjectRateSinceLastGC() const {
+  if (ObjectSizeAtLastGC() > 0)
+    return static_cast<double>(MarkedObjectSize()) / ObjectSizeAtLastGC();
+  return 0.0;
+}
+
 ThreadHeap::ThreadHeap(ThreadState* thread_state)
     : thread_state_(thread_state),
-      region_tree_(WTF::MakeUnique<RegionTree>()),
+      region_tree_(std::make_unique<RegionTree>()),
       heap_does_not_contain_cache_(
           WTF::WrapUnique(new HeapDoesNotContainCache)),
       free_page_pool_(WTF::WrapUnique(new PagePool)),
@@ -169,7 +175,7 @@ ThreadHeap::ThreadHeap(ThreadState* thread_state)
       new LargeObjectArena(thread_state_, BlinkGC::kLargeObjectArenaIndex);
 
   likely_to_be_promptly_freed_ =
-      WrapArrayUnique(new int[kLikelyToBePromptlyFreedArraySize]);
+      std::make_unique<int[]>(kLikelyToBePromptlyFreedArraySize);
   ClearArenaAges();
 }
 
@@ -229,7 +235,7 @@ Address ThreadHeap::CheckAndMarkPointer(
 #endif
 
 void ThreadHeap::PushTraceCallback(void* object, TraceCallback callback) {
-  DCHECK(thread_state_->IsInGC());
+  DCHECK(thread_state_->IsInGC() || thread_state_->IsIncrementalMarking());
 
   CallbackStack::Item* slot = marking_stack_->AllocateEntry();
   *slot = CallbackStack::Item(object, callback);
@@ -346,7 +352,7 @@ bool ThreadHeap::AdvanceMarkingStackProcessing(Visitor* visitor,
       while (PopAndInvokeTraceCallback(visitor)) {
         processed_callback_count++;
         if (processed_callback_count % kDeadlineCheckInterval == 0) {
-          if (deadline_seconds <= MonotonicallyIncreasingTime()) {
+          if (deadline_seconds <= CurrentTimeTicksInSeconds()) {
             return false;
           }
         }
@@ -383,7 +389,7 @@ void ThreadHeap::PostMarkingProcessing(Visitor* visitor) {
 
 void ThreadHeap::WeakProcessing(Visitor* visitor) {
   TRACE_EVENT0("blink_gc", "ThreadHeap::weakProcessing");
-  double start_time = WTF::MonotonicallyIncreasingTimeMS();
+  double start_time = WTF::CurrentTimeTicksInMilliseconds();
 
   // Weak processing may access unmarked objects but are forbidden from
   // ressurecting them.
@@ -399,7 +405,7 @@ void ThreadHeap::WeakProcessing(Visitor* visitor) {
   DCHECK(marking_stack_->IsEmpty());
 
   double time_for_weak_processing =
-      WTF::MonotonicallyIncreasingTimeMS() - start_time;
+      WTF::CurrentTimeTicksInMilliseconds() - start_time;
   DEFINE_THREAD_SAFE_STATIC_LOCAL(
       CustomCountHistogram, weak_processing_time_histogram,
       ("BlinkGC.TimeForGlobalWeakProcessing", 1, 10 * 1000, 50));
@@ -788,7 +794,7 @@ bool ThreadHeap::AdvanceLazySweep(double deadline_seconds) {
     // 10 pages. So we give a small slack for safety.
     double slack = 0.001;
     double remaining_budget =
-        deadline_seconds - slack - MonotonicallyIncreasingTime();
+        deadline_seconds - slack - CurrentTimeTicksInSeconds();
     if (remaining_budget <= 0 ||
         !arenas_[i]->LazySweepWithDeadline(deadline_seconds)) {
       return false;
@@ -807,6 +813,31 @@ void ThreadHeap::DisableIncrementalMarkingBarrier() {
   thread_state_->SetIncrementalMarking(false);
   for (int i = 0; i < BlinkGC::kNumberOfArenas; ++i)
     arenas_[i]->DisableIncrementalMarkingBarrier();
+}
+
+void ThreadHeap::WriteBarrier(const void* value) {
+  if (!value || !ThreadState::Current()->IsIncrementalMarking())
+    return;
+
+  WriteBarrierInternal(PageFromObject(value), value);
+}
+
+void ThreadHeap::WriteBarrierInternal(BasePage* page, const void* value) {
+  DCHECK(ThreadState::Current()->IsIncrementalMarking());
+  DCHECK(page->IsIncrementalMarking());
+  DCHECK(value);
+  HeapObjectHeader* const header =
+      page->IsLargeObjectPage()
+          ? static_cast<LargeObjectPage*>(page)->GetHeapObjectHeader()
+          : static_cast<NormalPage*>(page)->FindHeaderFromAddress(
+                reinterpret_cast<Address>(const_cast<void*>(value)));
+  if (header->IsMarked())
+    return;
+
+  // Mark and push trace callback.
+  header->Mark();
+  PushTraceCallback(header->Payload(),
+                    ThreadHeap::GcInfo(header->GcInfoIndex())->trace_);
 }
 
 ThreadHeap* ThreadHeap::main_thread_heap_ = nullptr;

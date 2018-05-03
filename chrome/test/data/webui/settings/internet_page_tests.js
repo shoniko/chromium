@@ -2,15 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-suite('Internet', function() {
+suite('InternetPage', function() {
   /** @type {InternetPageElement} */
-  var internetPage = null;
+  let internetPage = null;
 
   /** @type {NetworkSummaryElement} */
-  var networkSummary_ = null;
+  let networkSummary_ = null;
 
   /** @type {NetworkingPrivate} */
-  var api_;
+  let api_;
 
   suiteSetup(function() {
     loadTimeData.overrideValues({
@@ -20,6 +20,8 @@ suite('Internet', function() {
       internetAddConnectionNotAllowed: 'internetAddConnectionNotAllowed',
       internetAddThirdPartyVPN: 'internetAddThirdPartyVPN',
       internetAddVPN: 'internetAddVPN',
+      internetAddArcVPN: 'internetAddArcVPN',
+      internetAddArcVPNProvider: 'internetAddArcVPNProvider',
       internetAddWiFi: 'internetAddWiFi',
       internetDetailPageTitle: 'internetDetailPageTitle',
       internetKnownNetworksPageTitle: 'internetKnownNetworksPageTitle',
@@ -51,12 +53,16 @@ suite('Internet', function() {
     return new Promise(resolve => {
       internetPage.async(resolve);
     });
-  };
+  }
 
   function setNetworksForTest(networks) {
     api_.resetForTest();
     api_.addNetworksForTest(networks);
-  };
+  }
+
+  function setArcVpnProvidersForTest(arcVpnProviders) {
+    cr.webUIListenerCallback('sendArcVpnProviders',arcVpnProviders);
+  }
 
   setup(function() {
     PolymerTest.clearBody();
@@ -85,7 +91,7 @@ suite('Internet', function() {
   suite('MainPage', function() {
     test('Ethernet', function() {
       // Default fake device state is Ethernet enabled only.
-      var ethernet = networkSummary_.$$('#Ethernet');
+      const ethernet = networkSummary_.$$('#Ethernet');
       assertTrue(!!ethernet);
       assertEquals(1, ethernet.networkStateList.length);
       assertEquals(null, networkSummary_.$$('#Cellular'));
@@ -101,7 +107,7 @@ suite('Internet', function() {
       ]);
       api_.enableNetworkType('WiFi');
       Polymer.dom.flush();
-      var wifi = networkSummary_.$$('#WiFi');
+      const wifi = networkSummary_.$$('#WiFi');
       assertTrue(!!wifi);
       assertEquals(2, wifi.networkStateList.length);
     });
@@ -110,13 +116,13 @@ suite('Internet', function() {
       // Make WiFi an available but disabled technology.
       api_.disableNetworkType('WiFi');
       Polymer.dom.flush();
-      var wifi = networkSummary_.$$('#WiFi');
+      const wifi = networkSummary_.$$('#WiFi');
       assertTrue(!!wifi);
 
       // Ensure that the initial state is disabled and the toggle is
       // enabled but unchecked.
       assertEquals('Disabled', api_.getDeviceStateForTest('WiFi').State);
-      var toggle = wifi.$$('#deviceEnabledButton');
+      const toggle = wifi.$$('#deviceEnabledButton');
       assertTrue(!!toggle);
       assertFalse(toggle.disabled);
       assertFalse(toggle.checked);
@@ -137,17 +143,17 @@ suite('Internet', function() {
       ]);
       api_.enableNetworkType('WiFi');
       Polymer.dom.flush();
-      var wifi = networkSummary_.$$('#WiFi');
+      const wifi = networkSummary_.$$('#WiFi');
       assertTrue(!!wifi);
       MockInteractions.tap(wifi.$$('button.subpage-arrow'));
       return flushAsync().then(() => {
-        var subpage = internetPage.$$('settings-internet-subpage');
+        const subpage = internetPage.$$('settings-internet-subpage');
         assertTrue(!!subpage);
         assertEquals(2, subpage.networkStateList_.length);
-        var toggle = wifi.$$('#deviceEnabledButton');
+        const toggle = wifi.$$('#deviceEnabledButton');
         assertTrue(!!toggle);
         assertFalse(toggle.disabled);
-        var networkList = subpage.$$('#networkList');
+        const networkList = subpage.$$('#networkList');
         assertTrue(!!networkList);
         assertEquals(2, networkList.networks.length);
       });
@@ -164,14 +170,14 @@ suite('Internet', function() {
           api_.whenCalled('getDeviceStates'),
         ]);
       }).then(() => {
-        var mobile = networkSummary_.$$('#Cellular');
+        const mobile = networkSummary_.$$('#Cellular');
         assertTrue(!!mobile);
         MockInteractions.tap(mobile.$$('button.subpage-arrow'));
         return Promise.all([
           api_.whenCalled('getManagedProperties'),
         ]);
       }).then(() => {
-        var detailPage = internetPage.$$('settings-internet-detail-page');
+        const detailPage = internetPage.$$('settings-internet-detail-page');
         assertTrue(!!detailPage);
       });
     });
@@ -183,20 +189,20 @@ suite('Internet', function() {
       ]);
       api_.enableNetworkType('Tether');
       return flushAsync().then(() => {
-        var mobile = networkSummary_.$$('#Tether');
+        const mobile = networkSummary_.$$('#Tether');
         assertTrue(!!mobile);
         MockInteractions.tap(mobile.$$('button.subpage-arrow'));
         Polymer.dom.flush();
-        var subpage = internetPage.$$('settings-internet-subpage');
+        const subpage = internetPage.$$('settings-internet-subpage');
         assertTrue(!!subpage);
         assertEquals(2, subpage.networkStateList_.length);
-        var toggle = mobile.$$('#deviceEnabledButton');
+        const toggle = mobile.$$('#deviceEnabledButton');
         assertTrue(!!toggle);
         assertFalse(toggle.disabled);
-        var networkList = subpage.$$('#networkList');
+        const networkList = subpage.$$('#networkList');
         assertTrue(!!networkList);
         assertEquals(2, networkList.networks.length);
-        var tetherToggle = mobile.$$('#tetherEnabledButton');
+        const tetherToggle = mobile.$$('#tetherEnabledButton');
         // No separate tether toggle when Celular is not available; the
         // primary toggle enables or disables Tether in that case.
         assertFalse(!!tetherToggle);
@@ -212,20 +218,20 @@ suite('Internet', function() {
       api_.enableNetworkType('Cellular');
       api_.enableNetworkType('Tether');
       return flushAsync().then(() => {
-        var mobile = networkSummary_.$$('#Cellular');
+        const mobile = networkSummary_.$$('#Cellular');
         assertTrue(!!mobile);
         MockInteractions.tap(mobile.$$('button.subpage-arrow'));
         Polymer.dom.flush();
-        var subpage = internetPage.$$('settings-internet-subpage');
+        const subpage = internetPage.$$('settings-internet-subpage');
         assertTrue(!!subpage);
         assertEquals(3, subpage.networkStateList_.length);
-        var toggle = mobile.$$('#deviceEnabledButton');
+        const toggle = mobile.$$('#deviceEnabledButton');
         assertTrue(!!toggle);
         assertFalse(toggle.disabled);
-        var networkList = subpage.$$('#networkList');
+        const networkList = subpage.$$('#networkList');
         assertTrue(!!networkList);
         assertEquals(3, networkList.networks.length);
-        var tetherToggle = subpage.$$('#tetherEnabledButton');
+        const tetherToggle = subpage.$$('#tetherEnabledButton');
         assertTrue(!!tetherToggle);
         assertFalse(tetherToggle.disabled);
       });
@@ -265,18 +271,87 @@ suite('Internet', function() {
       ]);
       api_.onNetworkListChanged.callListeners();
       return flushAsync().then(() => {
-        var vpn = networkSummary_.$$('#VPN');
+        const vpn = networkSummary_.$$('#VPN');
         assertTrue(!!vpn);
         MockInteractions.tap(vpn.$$('button.subpage-arrow'));
         Polymer.dom.flush();
-        var subpage = internetPage.$$('settings-internet-subpage');
+        const subpage = internetPage.$$('settings-internet-subpage');
         assertTrue(!!subpage);
         assertEquals(2, subpage.networkStateList_.length);
-        var networkList = subpage.$$('#networkList');
+        const networkList = subpage.$$('#networkList');
         assertTrue(!!networkList);
         assertEquals(2, networkList.networks.length);
         // TODO(stevenjb): Implement fake management API and test third
         // party provider sections.
+      });
+    });
+
+    test('ArcVPNProvider', function() {
+      setArcVpnProvidersForTest([
+        {
+          Packagename: 'vpn.app.pacakge1',
+          ProviderName: 'MyArcVPN1',
+          AppID: 'arcid1',
+          LastLaunchTime: 0
+        },
+        {
+          Packagename: 'vpn.app.pacakge2',
+          ProviderName: 'MyArcVPN2',
+          AppID: 'arcid2',
+          LastLaunchTime: 1
+        }]);
+      return flushAsync().then(() => {
+        const expandAddConnections = internetPage.$$('#expandAddConnections');
+        assertTrue(!!expandAddConnections);
+        assertTrue(!expandAddConnections.expanded);
+        internetPage.addConnectionExpanded_ = true;
+        Polymer.dom.flush();
+        const addArcVpn = internetPage.$$('#addArcVpn');
+        assertTrue(!!addArcVpn);
+        MockInteractions.tap(addArcVpn);
+        Polymer.dom.flush();
+        const subpage = internetPage.$$('settings-internet-subpage');
+        assertTrue(!!subpage);
+        assertEquals(2, subpage.arcVpnProviders.length);
+      });
+    });
+
+    test('WiFi Detail', function() {
+      setNetworksForTest([
+        {GUID: 'wifi1_guid', Name: 'wifi1', Type: 'WiFi'},
+      ]);
+      api_.enableNetworkType('WiFi');
+      return flushAsync().then(() => {
+        const wifi = networkSummary_.$$('#WiFi');
+        assertTrue(!!wifi);
+        MockInteractions.tap(wifi.$$('button.subpage-arrow'));
+        return flushAsync();
+      }).then(() => {
+        // Call setTimeout to populate iron-list.
+        return new Promise((resolve) => {
+          setTimeout(function() { resolve(); });
+        });
+      }).then(() => {
+        const subpage = internetPage.$$('settings-internet-subpage');
+        assertTrue(!!subpage);
+        const networkList = subpage.$$('#networkList');
+        assertTrue(!!networkList);
+        assertEquals(1, networkList.networks.length);
+        assertEquals(1, networkList.listItems_.length);
+        const ironList = networkList.$$('iron-list');
+        assertTrue(!!ironList);
+        assertEquals(1, ironList.items.length);
+        const networkListItem = networkList.$$('cr-network-list-item');
+        assertTrue(!!networkListItem);
+        MockInteractions.tap(networkListItem);
+        return flushAsync();
+      }).then(() => {
+        const detailPage = internetPage.$$('settings-internet-detail-page');
+        assertTrue(!!detailPage);
+        assertEquals('wifi1_guid', detailPage.guid);
+        return Promise.all([
+          api_.whenCalled('getManagedProperties'),
+        ]);
       });
     });
   });

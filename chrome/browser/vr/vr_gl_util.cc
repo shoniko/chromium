@@ -95,14 +95,17 @@ GLuint CreateAndLinkProgram(GLuint vertext_shader_handle,
 }
 
 gfx::SizeF CalculateScreenSize(const gfx::Transform& proj_matrix,
-                               const gfx::Transform& model_matrix,
+                               float distance,
                                const gfx::SizeF& size) {
   // View matrix is the identity, thus, not needed in the calculation.
   gfx::Transform scale_transform;
   scale_transform.Scale(size.width(), size.height());
 
+  gfx::Transform translate_transform;
+  translate_transform.Translate3d(0, 0, -distance);
+
   gfx::Transform model_view_proj_matrix =
-      proj_matrix * model_matrix * scale_transform;
+      proj_matrix * translate_transform * scale_transform;
 
   gfx::Point3F projected_upper_right_corner(0.5f, 0.5f, 0.0f);
   model_view_proj_matrix.TransformPoint(&projected_upper_right_corner);
@@ -116,6 +119,23 @@ gfx::SizeF CalculateScreenSize(const gfx::Transform& proj_matrix,
                     (std::abs(projected_upper_right_corner.y()) +
                      std::abs(projected_lower_left_corner.y())) /
                         2.0f);
+}
+
+void SetTexParameters(GLenum texture_type) {
+  glTexParameteri(texture_type, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(texture_type, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(texture_type, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(texture_type, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+}
+
+void SetColorUniform(GLuint handle, SkColor c) {
+  glUniform4f(handle, SkColorGetR(c) / 255.0, SkColorGetG(c) / 255.0,
+              SkColorGetB(c) / 255.0, SkColorGetA(c) / 255.0);
+}
+
+void SetOpaqueColorUniform(GLuint handle, SkColor c) {
+  glUniform3f(handle, SkColorGetR(c) / 255.0, SkColorGetG(c) / 255.0,
+              SkColorGetB(c) / 255.0);
 }
 
 }  // namespace vr

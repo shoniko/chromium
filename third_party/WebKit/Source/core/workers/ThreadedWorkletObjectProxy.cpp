@@ -20,12 +20,12 @@ std::unique_ptr<ThreadedWorkletObjectProxy> ThreadedWorkletObjectProxy::Create(
       messaging_proxy_weak_ptr, parent_frame_task_runners));
 }
 
-ThreadedWorkletObjectProxy::~ThreadedWorkletObjectProxy() {}
+ThreadedWorkletObjectProxy::~ThreadedWorkletObjectProxy() = default;
 
 void ThreadedWorkletObjectProxy::FetchAndInvokeScript(
     const KURL& module_url_record,
     WorkletModuleResponsesMap* module_responses_map,
-    WebURLRequest::FetchCredentialsMode credentials_mode,
+    network::mojom::FetchCredentialsMode credentials_mode,
     scoped_refptr<WebTaskRunner> outside_settings_task_runner,
     WorkletPendingTasks* pending_tasks,
     WorkerThread* worker_thread) {

@@ -101,6 +101,7 @@ class CORE_EXPORT ContentSecurityPolicy
     kMediaSrc,
     kObjectSrc,
     kPluginTypes,
+    kPrefetchSrc,
     kReportTo,
     kReportURI,
     kRequireSRIFor,
@@ -180,6 +181,10 @@ class CORE_EXPORT ContentSecurityPolicy
                  SecurityViolationReportingPolicy,
                  ExceptionStatus,
                  const String& script_content) const;
+  bool AllowWasmEval(ScriptState*,
+                     SecurityViolationReportingPolicy,
+                     ExceptionStatus,
+                     const String& script_content) const;
   bool AllowPluginType(const String& type,
                        const String& type_attribute,
                        const KURL&,
@@ -197,6 +202,12 @@ class CORE_EXPORT ContentSecurityPolicy
           SecurityViolationReportingPolicy::kReport) const;
 
   bool AllowObjectFromSource(
+      const KURL&,
+      RedirectStatus = RedirectStatus::kNoRedirect,
+      SecurityViolationReportingPolicy =
+          SecurityViolationReportingPolicy::kReport,
+      CheckHeaderType = CheckHeaderType::kCheckAll) const;
+  bool AllowPrefetchFromSource(
       const KURL&,
       RedirectStatus = RedirectStatus::kNoRedirect,
       SecurityViolationReportingPolicy =
@@ -321,6 +332,7 @@ class CORE_EXPORT ContentSecurityPolicy
   void SetOverrideURLForSelf(const KURL&);
 
   bool IsActive() const;
+  bool IsActiveForConnections() const;
 
   // If a frame is passed in, the message will be logged to its active
   // document's console.  Otherwise, the message will be logged to this object's
@@ -414,7 +426,7 @@ class CORE_EXPORT ContentSecurityPolicy
   // experimental EmbeddingCSP feature
   // Please, see https://w3c.github.io/webappsec-csp/embedded/#origin-allowed.
   static bool ShouldEnforceEmbeddersPolicy(const ResourceResponse&,
-                                           SecurityOrigin*);
+                                           const SecurityOrigin*);
 
   static const char* GetDirectiveName(const DirectiveType&);
   static DirectiveType GetDirectiveType(const String& name);
@@ -431,6 +443,9 @@ class CORE_EXPORT ContentSecurityPolicy
 
   static bool IsValidCSPAttr(const String& attr);
 
+  // Returns the 'wasm-eval' source is supported.
+  bool SupportsWasmEval() const { return supports_wasm_eval_; }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ContentSecurityPolicyTest, NonceInline);
   FRIEND_TEST_ALL_PREFIXES(ContentSecurityPolicyTest, NonceSinglePolicy);
@@ -445,8 +460,6 @@ class CORE_EXPORT ContentSecurityPolicy
   ContentSecurityPolicy();
 
   void ApplyPolicySideEffectsToExecutionContext();
-
-  KURL CompleteURL(const String&) const;
 
   void LogToConsole(const String& message, MessageLevel = kErrorMessageLevel);
 
@@ -499,6 +512,8 @@ class CORE_EXPORT ContentSecurityPolicy
 
   Member<CSPSource> self_source_;
   String self_protocol_;
+
+  bool supports_wasm_eval_ = false;
 };
 
 }  // namespace blink

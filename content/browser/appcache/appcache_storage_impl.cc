@@ -37,6 +37,7 @@
 #include "storage/browser/quota/quota_client.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
+#include "third_party/WebKit/common/quota/quota_types.mojom.h"
 
 namespace content {
 
@@ -204,7 +205,7 @@ void AppCacheStorageImpl::DatabaseTask::Schedule() {
 void AppCacheStorageImpl::DatabaseTask::CancelCompletion() {
   DCHECK(io_thread_->RunsTasksInCurrentSequence());
   delegates_.clear();
-  storage_ = NULL;
+  storage_ = nullptr;
 }
 
 void AppCacheStorageImpl::DatabaseTask::CallRun(
@@ -601,7 +602,7 @@ class AppCacheStorageImpl::StoreGroupAndCacheTask : public StoreOrLoadTask {
                          AppCache* newest_cache);
 
   void GetQuotaThenSchedule();
-  void OnQuotaCallback(storage::QuotaStatusCode status,
+  void OnQuotaCallback(blink::mojom::QuotaStatusCode status,
                        int64_t usage,
                        int64_t quota);
 
@@ -644,7 +645,7 @@ AppCacheStorageImpl::StoreGroupAndCacheTask::StoreGroupAndCacheTask(
 }
 
 void AppCacheStorageImpl::StoreGroupAndCacheTask::GetQuotaThenSchedule() {
-  storage::QuotaManager* quota_manager = NULL;
+  storage::QuotaManager* quota_manager = nullptr;
   if (storage_->service()->quota_manager_proxy()) {
     quota_manager =
         storage_->service()->quota_manager_proxy()->quota_manager();
@@ -667,17 +668,16 @@ void AppCacheStorageImpl::StoreGroupAndCacheTask::GetQuotaThenSchedule() {
   // We have to ask the quota manager for the value.
   storage_->pending_quota_queries_.insert(this);
   quota_manager->GetUsageAndQuota(
-      group_record_.origin,
-      storage::kStorageTypeTemporary,
+      group_record_.origin, blink::mojom::StorageType::kTemporary,
       base::Bind(&StoreGroupAndCacheTask::OnQuotaCallback, this));
 }
 
 void AppCacheStorageImpl::StoreGroupAndCacheTask::OnQuotaCallback(
-    storage::QuotaStatusCode status,
+    blink::mojom::QuotaStatusCode status,
     int64_t usage,
     int64_t quota) {
   if (storage_) {
-    if (status == storage::kQuotaStatusOk)
+    if (status == blink::mojom::QuotaStatusCode::kOk)
       space_available_ = std::max(static_cast<int64_t>(0), quota - usage);
     else
       space_available_ = 0;
@@ -809,8 +809,8 @@ void AppCacheStorageImpl::StoreGroupAndCacheTask::RunCompleted() {
       delegates_,
       OnGroupAndNewestCacheStored(
           group_.get(), cache_.get(), success_, would_exceed_quota_));
-  group_ = NULL;
-  cache_ = NULL;
+  group_ = nullptr;
+  cache_ = nullptr;
 
   // TODO(michaeln): if (would_exceed_quota_) what if the current usage
   // also exceeds the quota? http://crbug.com/83968
@@ -820,8 +820,8 @@ void AppCacheStorageImpl::StoreGroupAndCacheTask::CancelCompletion() {
   // Overriden to safely drop our reference to the group and cache
   // which are not thread safe refcounted.
   DatabaseTask::CancelCompletion();
-  group_ = NULL;
-  cache_ = NULL;
+  group_ = nullptr;
+  cache_ = nullptr;
 }
 
 // FindMainResponseTask -------
@@ -869,7 +869,7 @@ class NetworkNamespaceHelper {
         WhiteListMap::value_type(cache_id, AppCacheNamespaceVector()));
     if (result.second)
       GetOnlineWhiteListForCache(cache_id, &result.first->second);
-    return AppCache::FindNamespace(result.first->second, url) != NULL;
+    return AppCache::FindNamespace(result.first->second, url) != nullptr;
   }
 
  private:
@@ -1222,14 +1222,14 @@ void AppCacheStorageImpl::MakeGroupObsoleteTask::RunCompleted() {
   }
   FOR_EACH_DELEGATE(
       delegates_, OnGroupMadeObsolete(group_.get(), success_, response_code_));
-  group_ = NULL;
+  group_ = nullptr;
 }
 
 void AppCacheStorageImpl::MakeGroupObsoleteTask::CancelCompletion() {
   // Overriden to safely drop our reference to the group
   // which is not thread safe refcounted.
   DatabaseTask::CancelCompletion();
-  group_ = NULL;
+  group_ = nullptr;
 }
 
 // GetDeletableResponseIdsTask -------
@@ -1392,7 +1392,7 @@ AppCacheStorageImpl::AppCacheStorageImpl(AppCacheServiceImpl* service)
       is_response_deletion_scheduled_(false),
       did_start_deleting_responses_(false),
       last_deletable_response_rowid_(0),
-      database_(NULL),
+      database_(nullptr),
       is_disabled_(false),
       delete_and_start_over_pending_(false),
       expecting_cleanup_complete_on_disable_(false),
@@ -1412,7 +1412,7 @@ AppCacheStorageImpl::~AppCacheStorageImpl() {
                                     service()->force_keep_session_state()))) {
     delete database_;
   }
-  database_ = NULL;  // So no further database tasks can be scheduled.
+  database_ = nullptr;  // So no further database tasks can be scheduled.
 }
 
 void AppCacheStorageImpl::Initialize(
@@ -1455,7 +1455,7 @@ void AppCacheStorageImpl::GetAllInfo(Delegate* delegate) {
 void AppCacheStorageImpl::LoadCache(int64_t id, Delegate* delegate) {
   DCHECK(delegate);
   if (is_disabled_) {
-    delegate->OnCacheLoaded(NULL, id);
+    delegate->OnCacheLoaded(nullptr, id);
     return;
   }
 
@@ -1485,7 +1485,7 @@ void AppCacheStorageImpl::LoadOrCreateGroup(
     const GURL& manifest_url, Delegate* delegate) {
   DCHECK(delegate);
   if (is_disabled_) {
-    delegate->OnGroupLoaded(NULL, manifest_url);
+    delegate->OnGroupLoaded(nullptr, manifest_url);
     return;
   }
 
@@ -1507,9 +1507,9 @@ void AppCacheStorageImpl::LoadOrCreateGroup(
 
   if (usage_map_.find(manifest_url.GetOrigin()) == usage_map_.end()) {
     // No need to query the database, return a new group immediately.
-    scoped_refptr<AppCacheGroup> group(new AppCacheGroup(
-        this, manifest_url, NewGroupId()));
-    delegate->OnGroupLoaded(group.get(), manifest_url);
+    scoped_refptr<AppCacheGroup> new_group(
+        new AppCacheGroup(this, manifest_url, NewGroupId()));
+    delegate->OnGroupLoaded(new_group.get(), manifest_url);
     return;
   }
 
@@ -1842,7 +1842,7 @@ AppCacheStorageImpl::GetPendingCacheLoadTask(int64_t cache_id) {
   PendingCacheLoads::iterator found = pending_cache_loads_.find(cache_id);
   if (found != pending_cache_loads_.end())
     return found->second;
-  return NULL;
+  return nullptr;
 }
 
 AppCacheStorageImpl::GroupLoadTask*
@@ -1850,7 +1850,7 @@ AppCacheStorageImpl::GetPendingGroupLoadTask(const GURL& manifest_url) {
   PendingGroupLoads::iterator found = pending_group_loads_.find(manifest_url);
   if (found != pending_group_loads_.end())
     return found->second;
-  return NULL;
+  return nullptr;
 }
 
 void AppCacheStorageImpl::GetPendingForeignMarkingsForCache(

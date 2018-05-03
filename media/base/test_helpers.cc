@@ -41,8 +41,8 @@ class MockCallback : public base::RefCountedThreadSafe<MockCallback> {
   DISALLOW_COPY_AND_ASSIGN(MockCallback);
 };
 
-MockCallback::MockCallback() {}
-MockCallback::~MockCallback() {}
+MockCallback::MockCallback() = default;
+MockCallback::~MockCallback() = default;
 
 base::Closure NewExpectedClosure() {
   StrictMock<MockCallback>* callback = new StrictMock<MockCallback>();
@@ -133,7 +133,7 @@ static VideoDecoderConfig GetTestConfig(VideoCodec codec,
   gfx::Size natural_size = coded_size;
 
   return VideoDecoderConfig(
-      codec, VIDEO_CODEC_PROFILE_UNKNOWN, PIXEL_FORMAT_YV12, COLOR_SPACE_JPEG,
+      codec, VIDEO_CODEC_PROFILE_UNKNOWN, PIXEL_FORMAT_I420, COLOR_SPACE_JPEG,
       rotation, coded_size, visible_rect, natural_size, EmptyExtraData(),
       is_encrypted ? AesCtrEncryptionScheme() : Unencrypted());
 }
@@ -158,8 +158,8 @@ VideoDecoderConfig TestVideoConfig::NormalH264() {
 }
 
 // static
-VideoDecoderConfig TestVideoConfig::NormalEncrypted() {
-  return GetTestConfig(kCodecVP8, VIDEO_ROTATION_0, kNormalSize, true);
+VideoDecoderConfig TestVideoConfig::NormalEncrypted(VideoCodec codec) {
+  return GetTestConfig(codec, VIDEO_ROTATION_0, kNormalSize, true);
 }
 
 // static
@@ -173,8 +173,8 @@ VideoDecoderConfig TestVideoConfig::Large(VideoCodec codec) {
 }
 
 // static
-VideoDecoderConfig TestVideoConfig::LargeEncrypted() {
-  return GetTestConfig(kCodecVP8, VIDEO_ROTATION_0, kLargeSize, true);
+VideoDecoderConfig TestVideoConfig::LargeEncrypted(VideoCodec codec) {
+  return GetTestConfig(codec, VIDEO_ROTATION_0, kLargeSize, true);
 }
 
 // static

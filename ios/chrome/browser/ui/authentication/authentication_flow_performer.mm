@@ -16,7 +16,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #include "components/strings/grit/components_strings.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -92,7 +92,6 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
   [_alertCoordinator executeCancelHandler];
   [_alertCoordinator stop];
   if (_navigationController) {
-    [_navigationController settingsWillBeDismissed];
     _navigationController = nil;
     [[_delegate presentingViewController] dismissViewControllerAnimated:NO
                                                              completion:nil];
@@ -409,7 +408,6 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
     strongSelf->_navigationController = nil;
     [[strongSelf delegate] didChooseClearDataPolicy:shouldClearData];
   };
-  [_navigationController settingsWillBeDismissed];
   [[_delegate presentingViewController] dismissViewControllerAnimated:YES
                                                            completion:block];
 }
@@ -427,13 +425,8 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
     strongSelf->_navigationController = nil;
     [[strongSelf delegate] didChooseCancel];
   };
-  [_navigationController settingsWillBeDismissed];
   [[_delegate presentingViewController] dismissViewControllerAnimated:YES
                                                            completion:block];
-}
-
-- (void)closeSettingsAndOpenNewIncognitoTab {
-  NOTREACHED();
 }
 
 - (id<ApplicationCommands, BrowserCommands>)dispatcherForSettings {

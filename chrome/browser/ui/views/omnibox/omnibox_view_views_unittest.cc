@@ -13,6 +13,7 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/command_updater_impl.h"
 #include "chrome/browser/search_engines/template_url_service_factory_test_util.h"
 #include "chrome/browser/ui/omnibox/chrome_omnibox_client.h"
 #include "chrome/browser/ui/omnibox/chrome_omnibox_edit_controller.h"
@@ -208,7 +209,7 @@ class OmniboxViewViewsTest : public ChromeViewsTestBase {
   content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile profile_;
   TemplateURLServiceFactoryTestUtil util_;
-  CommandUpdater command_updater_;
+  CommandUpdaterImpl command_updater_;
   TestToolbarModel toolbar_model_;
   TestingOmniboxEditController omnibox_edit_controller_;
   std::unique_ptr<TestingOmniboxView> omnibox_view_;
@@ -243,12 +244,12 @@ void OmniboxViewViewsTest::SetUp() {
 #endif
   AutocompleteClassifierFactory::GetInstance()->SetTestingFactoryAndUse(
       &profile_, &AutocompleteClassifierFactory::BuildInstanceFor);
-  omnibox_view_ = base::MakeUnique<TestingOmniboxView>(
+  omnibox_view_ = std::make_unique<TestingOmniboxView>(
       &omnibox_edit_controller_,
-      base::MakeUnique<ChromeOmniboxClient>(&omnibox_edit_controller_,
+      std::make_unique<ChromeOmniboxClient>(&omnibox_edit_controller_,
                                             &profile_),
       &command_updater_);
-  test_api_ = base::MakeUnique<views::TextfieldTestApi>(omnibox_view_.get());
+  test_api_ = std::make_unique<views::TextfieldTestApi>(omnibox_view_.get());
   omnibox_view_->Init();
 }
 

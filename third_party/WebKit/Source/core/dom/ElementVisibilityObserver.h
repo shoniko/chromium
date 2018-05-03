@@ -7,6 +7,8 @@
 
 #include <limits>
 
+#include "base/callback.h"
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/intersection_observer/IntersectionObserver.h"
 #include "platform/heap/Heap.h"
@@ -27,10 +29,8 @@ class Element;
 // visibility of an element.
 class CORE_EXPORT ElementVisibilityObserver final
     : public GarbageCollectedFinalized<ElementVisibilityObserver> {
-  WTF_MAKE_NONCOPYABLE(ElementVisibilityObserver);
-
  public:
-  using VisibilityCallback = Function<void(bool), WTF::kSameThreadAffinity>;
+  using VisibilityCallback = base::RepeatingCallback<void(bool)>;
 
   ElementVisibilityObserver(Element*, VisibilityCallback);
   virtual ~ElementVisibilityObserver();
@@ -54,6 +54,7 @@ class CORE_EXPORT ElementVisibilityObserver final
   Member<Element> element_;
   Member<IntersectionObserver> intersection_observer_;
   VisibilityCallback callback_;
+  DISALLOW_COPY_AND_ASSIGN(ElementVisibilityObserver);
 };
 
 }  // namespace blink

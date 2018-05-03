@@ -31,6 +31,7 @@
 #ifndef InspectorPageAgent_h
 #define InspectorPageAgent_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/Page.h"
@@ -60,14 +61,11 @@ using blink::protocol::Maybe;
 
 class CORE_EXPORT InspectorPageAgent final
     : public InspectorBaseAgent<protocol::Page::Metainfo> {
-  WTF_MAKE_NONCOPYABLE(InspectorPageAgent);
-
  public:
   class Client {
    public:
-    virtual ~Client() {}
+    virtual ~Client() = default;
     virtual void PageLayoutInvalidated(bool resized) {}
-    virtual void WaitForCreateWindow(LocalFrame*) {}
   };
 
   enum ResourceType {
@@ -117,13 +115,15 @@ class CORE_EXPORT InspectorPageAgent final
       String* identifier) override;
   protocol::Response removeScriptToEvaluateOnNewDocument(
       const String& identifier) override;
-  protocol::Response setAutoAttachToCreatedPages(bool) override;
+  protocol::Response setLifecycleEventsEnabled(bool) override;
   protocol::Response reload(Maybe<bool> bypass_cache,
                             Maybe<String> script_to_evaluate_on_load) override;
   protocol::Response stopLoading() override;
   protocol::Response setAdBlockingEnabled(bool) override;
   protocol::Response getResourceTree(
       std::unique_ptr<protocol::Page::FrameResourceTree>* frame_tree) override;
+  protocol::Response getFrameTree(
+      std::unique_ptr<protocol::Page::FrameTree>*) override;
   void getResourceContent(const String& frame_id,
                           const String& url,
                           std::unique_ptr<GetResourceContentCallback>) override;
@@ -165,17 +165,19 @@ class CORE_EXPORT InspectorPageAgent final
   void DidRunJavaScriptDialog();
   void DidResizeMainFrame();
   void DidChangeViewport();
-  void LifecycleEvent(LocalFrame*, const char* name, double timestamp);
+  void LifecycleEvent(LocalFrame*,
+                      DocumentLoader*,
+                      const char* name,
+                      double timestamp);
   void PaintTiming(Document*, const char* name, double timestamp);
   void Will(const probe::UpdateLayout&);
   void Did(const probe::UpdateLayout&);
   void Will(const probe::RecalculateStyle&);
   void Did(const probe::RecalculateStyle&);
-  void WindowCreated(LocalFrame*);
   void WindowOpen(Document*,
                   const String&,
                   const AtomicString&,
-                  const String&,
+                  const WebWindowFeatures&,
                   bool);
 
   // Inspector Controller API
@@ -212,7 +214,9 @@ class CORE_EXPORT InspectorPageAgent final
   void PageLayoutInvalidated(bool resized);
 
   std::unique_ptr<protocol::Page::Frame> BuildObjectForFrame(LocalFrame*);
-  std::unique_ptr<protocol::Page::FrameResourceTree> BuildObjectForFrameTree(
+  std::unique_ptr<protocol::Page::FrameTree> BuildObjectForFrameTree(
+      LocalFrame*);
+  std::unique_ptr<protocol::Page::FrameResourceTree> BuildObjectForResourceTree(
       LocalFrame*);
   Member<InspectedFrames> inspected_frames_;
   v8_inspector::V8InspectorSession* v8_session_;
@@ -224,6 +228,7 @@ class CORE_EXPORT InspectorPageAgent final
   bool reloading_;
   Member<InspectorResourceContentLoader> inspector_resource_content_loader_;
   int resource_content_loader_client_id_;
+  DISALLOW_COPY_AND_ASSIGN(InspectorPageAgent);
 };
 
 }  // namespace blink

@@ -8,8 +8,10 @@
 #import <map>
 #import <string>
 
+#include "base/test/scoped_feature_list.h"
 #include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
+#import "ios/chrome/browser/ui/authentication/signin_earlgrey_utils.h"
+#import "ios/chrome/browser/ui/ntp/recent_tabs/recent_tabs_table_view_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/tab_test_util.h"
@@ -17,6 +19,7 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/public/provider/chrome/browser/signin/fake_chrome_identity_service.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
 #import "ui/base/l10n/l10n_util.h"
@@ -24,6 +27,8 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using chrome_test_util::RecentTabsMenuButton;
 
 namespace {
 const char kURLOfTestPage[] = "http://testPage";
@@ -38,32 +43,16 @@ void OpenRecentTabsPanel() {
     chrome_test_util::OpenNewTab();
 
   [ChromeEarlGreyUI openToolsMenu];
-  id<GREYMatcher> open_recent_tabs_button_matcher =
-      grey_accessibilityID(kToolsMenuOtherDevicesId);
-  [[EarlGrey selectElementWithMatcher:open_recent_tabs_button_matcher]
-      performAction:grey_tap()];
-}
-
-// Closes the recent tabs panel, on iPhone.
-void CloseRecentTabsPanelOnIphone() {
-  DCHECK(!IsIPadIdiom());
-
-  id<GREYMatcher> exit_button_matcher = grey_accessibilityID(@"Exit");
-  [[EarlGrey selectElementWithMatcher:exit_button_matcher]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI tapToolsMenuButton:RecentTabsMenuButton()];
 }
 
 // Returns the matcher for the entry of the page in the recent tabs panel.
 id<GREYMatcher> TitleOfTestPage() {
   return grey_allOf(
+      grey_ancestor(grey_accessibilityID(
+          kRecentTabsTableViewControllerAccessibilityIdentifier)),
       chrome_test_util::StaticTextWithAccessibilityLabel(kTitleOfTestPage),
       grey_sufficientlyVisible(), nil);
-}
-
-// Returns the matcher for the Recently closed label.
-id<GREYMatcher> RecentlyClosedLabelMatcher() {
-  return chrome_test_util::StaticTextWithAccessibilityLabelId(
-      IDS_IOS_RECENT_TABS_RECENTLY_CLOSED);
 }
 
 }  // namespace
@@ -81,24 +70,17 @@ id<GREYMatcher> RecentlyClosedLabelMatcher() {
       web::test::HttpServer::MakeUrl(kURLOfTestPage),
       std::string(kHTMLOfTestPage),
   }});
+  [NSUserDefaults.standardUserDefaults setObject:@{}
+                                          forKey:kCollapsedSectionsKey];
 }
 
-- (void)tearDown {
-  if (IsIPadIdiom()) {
-    chrome_test_util::OpenNewTab();
-    NSError* error = nil;
-    [[EarlGrey selectElementWithMatcher:RecentlyClosedLabelMatcher()]
-        assertWithMatcher:grey_notNil()
-                    error:&error];
-    // If the Recent Tabs panel is shown, then switch back to the Most Visited
-    // panel so that tabs opened in other tests will show the Most Visited panel
-    // instead of the Recent Tabs panel.
-    if (!error) {
-      [[EarlGrey selectElementWithMatcher:RecentlyClosedLabelMatcher()]
-          performAction:grey_swipeFastInDirection(kGREYDirectionRight)];
-    }
-    chrome_test_util::CloseCurrentTab();
-  }
+// Closes the recent tabs panel.
+- (void)closeRecentTabs {
+  id<GREYMatcher> exit_button_matcher = grey_accessibilityID(@"Exit");
+  [[EarlGrey selectElementWithMatcher:exit_button_matcher]
+      performAction:grey_tap()];
+  // Wait until the recent tabs panel is dismissed.
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
 }
 
 // Tests that a closed tab appears in the Recent Tabs panel, and that tapping
@@ -115,24 +97,14 @@ id<GREYMatcher> RecentlyClosedLabelMatcher() {
   OpenRecentTabsPanel();
   [[EarlGrey selectElementWithMatcher:TitleOfTestPage()]
       assertWithMatcher:grey_nil()];
+  [self closeRecentTabs];
 
-  // Get rid of the Recent Tabs Panel.
-  if (IsIPadIdiom()) {
-    // On iPad, the Recent Tabs panel is a new page in the navigation history.
-    // Go back to the previous page to restore the test page.
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::BackButton()]
-        performAction:grey_tap()];
-    [ChromeEarlGrey waitForPageToFinishLoading];
-  } else {
-    // On iPhone, the Recent Tabs panel is shown in a modal view.
-    // Close that modal.
-    CloseRecentTabsPanelOnIphone();
-    // Wait until the recent tabs panel is dismissed.
-    [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
-  }
-
-  // Close the tab containing the test page.
+  // Close the tab containing the test page and wait for the stack view to
+  // appear.
   chrome_test_util::CloseCurrentTab();
+  // TODO(crbug.com/783192): ChromeEarlGrey should have a method to close the
+  // current tab and synchronize with the UI.
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
 
   // Open the Recent Tabs panel and check that the test page is present.
   OpenRecentTabsPanel();
@@ -174,6 +146,60 @@ id<GREYMatcher> RecentlyClosedLabelMatcher() {
 
   // Close tab.
   chrome_test_util::CloseCurrentTab();
+}
+
+// Tests that the sign-in promo can be reloaded correctly.
+- (void)testRecentTabSigninPromoReloaded {
+  OpenRecentTabsPanel();
+  // Sign-in promo should be visible with cold state.
+  [SigninEarlGreyUtils
+      checkSigninPromoVisibleWithMode:SigninPromoViewModeColdState
+                          closeButton:NO];
+  ChromeIdentity* identity = [SigninEarlGreyUtils fakeIdentity1];
+  ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()->AddIdentity(
+      identity);
+  // Sign-in promo should be visible with warm state.
+  [SigninEarlGreyUtils
+      checkSigninPromoVisibleWithMode:SigninPromoViewModeWarmState
+                          closeButton:NO];
+  [self closeRecentTabs];
+  ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()
+      ->RemoveIdentity(identity);
+}
+
+// Tests that the sign-in promo can be reloaded correctly while being hidden.
+// crbug.com/776939
+- (void)testRecentTabSigninPromoReloadedWhileHidden {
+  OpenRecentTabsPanel();
+  [SigninEarlGreyUtils
+      checkSigninPromoVisibleWithMode:SigninPromoViewModeColdState
+                          closeButton:NO];
+
+  // Tap on "Other Devices", to hide the sign-in promo.
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabel(
+                                   l10n_util::GetNSString(
+                                       IDS_IOS_RECENT_TABS_OTHER_DEVICES))]
+      performAction:grey_tap()];
+  [SigninEarlGreyUtils checkSigninPromoNotVisible];
+
+  // Add an account.
+  ChromeIdentity* identity = [SigninEarlGreyUtils fakeIdentity1];
+  ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()->AddIdentity(
+      identity);
+
+  // Tap on "Other Devcies", to show the sign-in promo.
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabel(
+                                   l10n_util::GetNSString(
+                                       IDS_IOS_RECENT_TABS_OTHER_DEVICES))]
+      performAction:grey_tap()];
+  [SigninEarlGreyUtils
+      checkSigninPromoVisibleWithMode:SigninPromoViewModeWarmState
+                          closeButton:NO];
+  [self closeRecentTabs];
+  ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()
+      ->RemoveIdentity(identity);
 }
 
 @end

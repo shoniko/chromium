@@ -39,6 +39,8 @@
          count_all_in_varyings_packing)                      \
   GPU_OP(DECODE_ENCODE_SRGB_FOR_GENERATEMIPMAP,              \
          decode_encode_srgb_for_generatemipmap)              \
+  GPU_OP(DEPTH_STENCIL_RENDERBUFFER_RESIZE_EMULATION,        \
+         depth_stencil_renderbuffer_resize_emulation)        \
   GPU_OP(DISABLE_ACCELERATED_VPX_DECODE,                     \
          disable_accelerated_vpx_decode)                     \
   GPU_OP(DISABLE_ANGLE_INSTANCED_ARRAYS,                     \
@@ -107,6 +109,8 @@
          dont_initialize_uninitialized_locals)               \
   GPU_OP(DONT_REMOVE_INVARIANT_FOR_FRAGMENT_INPUT,           \
          dont_remove_invariant_for_fragment_input)           \
+  GPU_OP(DONT_USE_LOOPS_TO_INITIALIZE_VARIABLES,             \
+         dont_use_loops_to_initialize_variables)             \
   GPU_OP(ETC1_POWER_OF_TWO_ONLY,                             \
          etc1_power_of_two_only)                             \
   GPU_OP(EMULATE_ABS_INT_FUNCTION,                           \
@@ -115,6 +119,8 @@
          emulate_isnan_on_float)                             \
   GPU_OP(EXIT_ON_CONTEXT_LOST,                               \
          exit_on_context_lost)                               \
+  GPU_OP(FLUSH_ON_FRAMEBUFFER_CHANGE,                        \
+         flush_on_framebuffer_change)                        \
   GPU_OP(FORCE_CUBE_COMPLETE,                                \
          force_cube_complete)                                \
   GPU_OP(FORCE_CUBE_MAP_POSITIVE_X_ALLOCATION,               \
@@ -149,6 +155,8 @@
          max_copy_texture_chromium_size_262144)              \
   GPU_OP(MAX_FRAGMENT_UNIFORM_VECTORS_32,                    \
          max_fragment_uniform_vectors_32)                    \
+  GPU_OP(MAX_MSAA_SAMPLE_COUNT_4,                             \
+         max_msaa_sample_count_4)                             \
   GPU_OP(MAX_TEXTURE_SIZE_LIMIT_4096,                        \
          max_texture_size_limit_4096)                        \
   GPU_OP(MAX_VARYING_VECTORS_16,                             \

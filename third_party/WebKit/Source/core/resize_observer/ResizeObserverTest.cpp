@@ -16,7 +16,7 @@
 #include "core/testing/sim/SimTest.h"
 #include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/testing/UnitTestHelpers.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 #include "public/web/WebHeap.h"
 
 namespace blink {
@@ -60,11 +60,12 @@ TEST_F(ResizeObserverUnitTest, ResizeObservationSize) {
   LoadURL("https://example.com/");
 
   main_resource.Start();
-  main_resource.Write(
-      "<div id='domTarget' style='width:100px;height:100px'>yo</div>"
-      "<svg height='200' width='200'>"
-      "<circle id='svgTarget' cx='100' cy='100' r='100'/>"
-      "</svg>");
+  main_resource.Write(R"HTML(
+    <div id='domTarget' style='width:100px;height:100px'>yo</div>
+    <svg height='200' width='200'>
+    <circle id='svgTarget' cx='100' cy='100' r='100'/>
+    </svg>
+  )HTML");
   main_resource.Finish();
 
   ResizeObserver::Delegate* delegate =
@@ -115,12 +116,12 @@ TEST_F(ResizeObserverUnitTest, TestMemoryLeaks) {
   // Test whether ResizeObserver is kept alive by direct JS reference
   //
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
-      ScriptSourceCode("var ro = new ResizeObserver( entries => {});"),
+      ScriptSourceCode("var ro = new ResizeObserver( entries => {});"), KURL(),
       ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   ASSERT_EQ(observers.size(), 1U);
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
-      ScriptSourceCode("ro = undefined;"), ScriptFetchOptions(),
+      ScriptSourceCode("ro = undefined;"), KURL(), ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();
@@ -134,14 +135,14 @@ TEST_F(ResizeObserverUnitTest, TestMemoryLeaks) {
                        "var el = document.createElement('div');"
                        "ro.observe(el);"
                        "ro = undefined;"),
-      ScriptFetchOptions(),
+      KURL(), ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   ASSERT_EQ(observers.size(), 1U);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();
   ASSERT_EQ(observers.size(), 1U);
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
-      ScriptSourceCode("el = undefined;"), ScriptFetchOptions(),
+      ScriptSourceCode("el = undefined;"), KURL(), ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();

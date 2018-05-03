@@ -8,7 +8,7 @@
  * @typedef {{defaults: Map<string, !DefaultContentSetting>,
  *            exceptions: !Map<string, !Array<!RawSiteException>>}}
  */
-var SiteSettingsPref;
+let SiteSettingsPref;
 
 /**
  * An example empty pref.
@@ -17,7 +17,7 @@ var SiteSettingsPref;
  * for these instead.
  * @type {SiteSettingsPref}
  */
-var prefsEmpty = {
+const prefsEmpty = {
   defaults: {
     ads: {},
     auto_downloads: {},
@@ -35,6 +35,7 @@ var prefsEmpty = {
     protectedContent: {},
     sound: {},
     unsandboxed_plugins: {},
+    clipboard: {},
   },
   exceptions: {
     ads: [],
@@ -53,6 +54,7 @@ var prefsEmpty = {
     protectedContent: [],
     sound: [],
     unsandboxed_plugins: [],
+    clipboard: [],
   },
 };
 
@@ -125,9 +127,9 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
     this.prefs_ = prefs;
 
     // Notify all listeners that their data may be out of date.
-    for (var type in this.prefs_.exceptions) {
+    for (const type in this.prefs_.exceptions) {
       let exceptionList = this.prefs_.exceptions[type];
-      for (var i = 0; i < exceptionList.length; ++i) {
+      for (let i = 0; i < exceptionList.length; ++i) {
         cr.webUIListenerCallback(
             'contentSettingSitePermissionChanged', type,
             exceptionList[i].origin, '');
@@ -148,7 +150,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
     this.prefs_.defaults = defaultPrefs;
 
     // Notify all listeners that their data may be out of date.
-    for (var type in settings.ContentSettingsTypes) {
+    for (const type in settings.ContentSettingsTypes) {
       cr.webUIListenerCallback(
           'contentSettingCategoryChanged', settings.ContentSettingsTypes[type]);
     }
@@ -163,7 +165,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
    */
   setSingleException(category, newException) {
     // Remove entries from the current prefs which have the same origin.
-    var newPrefs = /** @type {!Array<RawSiteException>} */
+    const newPrefs = /** @type {!Array<RawSiteException>} */
         (this.prefs_.exceptions[category].filter((categoryException) => {
           if (categoryException.origin != newException.origin)
             return true;
@@ -209,10 +211,10 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
 
   /** @override */
   setOriginPermissions(origin, contentTypes, blanketSetting) {
-    for (var type in this.prefs_.exceptions) {
+    for (const type in this.prefs_.exceptions) {
       let exceptionList = this.prefs_.exceptions[type];
-      for (var i = 0; i < exceptionList.length; ++i) {
-        var effectiveSetting = blanketSetting;
+      for (let i = 0; i < exceptionList.length; ++i) {
+        let effectiveSetting = blanketSetting;
         if (blanketSetting == settings.ContentSetting.DEFAULT) {
           effectiveSetting = this.prefs_.defaults[type].setting;
           exceptionList[i].source = settings.SiteSettingSource.DEFAULT;
@@ -230,7 +232,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
   getDefaultValueForContentType(contentType) {
     this.methodCalled('getDefaultValueForContentType', contentType);
 
-    var pref = undefined;
+    let pref = undefined;
     if (contentType == settings.ContentSettingsTypes.ADS) {
       pref = this.prefs_.defaults.ads;
     } else if (
@@ -267,6 +269,8 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
       pref = this.prefs_.defaults.unsandboxed_plugins;
     } else if (contentType == settings.ContentSettingsTypes.PROTECTED_CONTENT) {
       pref = this.prefs_.defaults.protectedContent;
+    } else if (contentType == settings.ContentSettingsTypes.CLIPBOARD) {
+      pref = this.prefs_.defaults.clipboard;
     } else {
       console.log('getDefault received unknown category: ' + contentType);
     }
@@ -279,7 +283,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
   getExceptionList(contentType) {
     this.methodCalled('getExceptionList', contentType);
 
-    var pref = undefined;
+    let pref = undefined;
     if (contentType == settings.ContentSettingsTypes.ADS)
       pref = this.prefs_.exceptions.ads;
     else if (contentType == settings.ContentSettingsTypes.AUTOMATIC_DOWNLOADS)
@@ -314,14 +318,16 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
       pref = this.prefs_.exceptions.sound;
     else if (contentType == settings.ContentSettingsTypes.UNSANDBOXED_PLUGINS)
       pref = this.prefs_.exceptions.unsandboxed_plugins;
+    else if (contentType == settings.ContentSettingsTypes.CLIPBOARD)
+      pref = this.prefs_.exceptions.clipboard;
     else
       console.log('getExceptionList received unknown category: ' + contentType);
 
     assert(pref != undefined, 'Pref is missing for ' + contentType);
 
     if (this.hasIncognito_) {
-      var incognitoElements = [];
-      for (var i = 0; i < pref.length; ++i)
+      const incognitoElements = [];
+      for (let i = 0; i < pref.length; ++i)
         incognitoElements.push(Object.assign({incognito: true}, pref[i]));
       pref = pref.concat(incognitoElements);
     }
@@ -368,7 +374,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
   getOriginPermissions(origin, contentTypes) {
     this.methodCalled('getOriginPermissions', [origin, contentTypes]);
 
-    var exceptionList = [];
+    const exceptionList = [];
     contentTypes.forEach(function(contentType) {
       // Convert |contentType| to its corresponding pref name, if different.
       if (contentType == settings.ContentSettingsTypes.GEOLOCATION) {
@@ -389,8 +395,8 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
         contentType = 'unsandboxed_plugins';
       }
 
-      var setting;
-      var source;
+      let setting;
+      let source;
       this.prefs_.exceptions[contentType].some((originPrefs) => {
         if (originPrefs.origin == origin) {
           setting = originPrefs.setting;
@@ -410,7 +416,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
         displayName: '',
         setting: setting,
         source: source,
-      })
+      });
     }, this);
     return Promise.resolve(exceptionList);
   }

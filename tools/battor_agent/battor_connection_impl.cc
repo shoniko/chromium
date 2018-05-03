@@ -85,7 +85,7 @@ BattOrConnectionImpl::BattOrConnectionImpl(
   tick_clock_ = std::make_unique<base::DefaultTickClock>();
 }
 
-BattOrConnectionImpl::~BattOrConnectionImpl() {}
+BattOrConnectionImpl::~BattOrConnectionImpl() = default;
 
 void BattOrConnectionImpl::Open() {
   if (io_handler_) {
@@ -151,9 +151,9 @@ void BattOrConnectionImpl::SendBytes(BattOrMessageType type,
 
   for (size_t i = 0; i < bytes_to_send; i++) {
     if (bytes[i] == BATTOR_CONTROL_BYTE_START ||
-        bytes[i] == BATTOR_CONTROL_BYTE_END) {
+        bytes[i] == BATTOR_CONTROL_BYTE_END ||
+        bytes[i] == BATTOR_CONTROL_BYTE_ESCAPE)
       data.push_back(BATTOR_CONTROL_BYTE_ESCAPE);
-    }
 
     data.push_back(bytes[i]);
   }

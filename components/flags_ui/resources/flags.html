@@ -1,14 +1,19 @@
 <!doctype html>
-<html dir="$i18n{textdirection}" lang="$i18n{language}">
+<html dir="ltr" lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
+<if expr="not is_ios">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
+</if>
+
 <link rel="stylesheet" href="flags.css">
 
 <if expr="is_ios">
-<!-- TODO(crbug.com/487000): Remove this once injected by web. -->
-<script src="chrome://resources/js/ios/web_ui.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, maximum-scale=1">
+  <link rel="stylesheet" href="chrome://resources/css/text_defaults.css">
+  <!-- TODO(crbug.com/487000): Remove this once injected by web. -->
+  <script src="chrome://resources/js/ios/web_ui.js"></script>
 </if>
 
 <script src="chrome://resources/js/util.js"></script>
@@ -18,33 +23,47 @@
   <div class="flex-container">
     <div class="flex">
       <div class="search-container">
-        <input type="text" id="search" placeholder="$i18n{flagsSearchPlaceholder}"  tabindex="1">
+        <input type="text" id="search" placeholder="Search flags" tabindex="1">
         <button class="clear-search" title="Clear search" tabindex="2"></button>
       </div>
     </div>
     <div class="flex">
-      <button id="experiment-reset-all" type="button" tabindex="3">$i18n{resetAllButton}</button>
+      <button id="experiment-reset-all" type="button" tabindex="3">
+        Reset all to default
+      </button>
     </div>
   </div>
 </div>
 <div id="body-container" style="visibility:hidden">
   <div id="flagsTemplate">
     <div class="flex-container">
-      <div class="flex"><h2 class="section-header-title">$i18n{flagsTitle}</h2></div>
+      <div class="flex"><h2 class="section-header-title">Experiments</h2></div>
       <span id="version" class="flex">$i18n{version}</span>
     </div>
     <div class="blurb-container">
-      <span class="blurb-warning">$i18n{flagsWarningHeader}</span>
-      <span>$i18n{flagsBlurb}</span>
+      <span class="blurb-warning">
+         Warning: Experimental features ahead!
+      </span>
+      <span>
+        By enabling these features, you could lose browser data or
+        compromise your security or privacy. Enabled features apply to all
+        users of this browser.
+      </span>
 <if expr="chromeos">
       <p id="owner-warning">
-        <span>$i18n{ownerWarning}</span>
+        <span>Flags that apply system-wide can only be set by the owner: $i18n{ownerEmail}</span>
       </p>
 </if>
     </div>
     <p class="promo">
-      <span id="channel-promo-beta" hidden>$i18nRaw{channelPromoBeta}</span>
-      <span id="channel-promo-dev" hidden>$i18nRaw{channelPromoDev}</span>
+      <span id="channel-promo-beta" hidden>
+        Interested in cool new Chrome features? Try our
+        <a href="https://chrome.com/beta">beta channel</a>.
+      </span>
+      <span id="channel-promo-dev" hidden>
+        Interested in cool new Chrome features? Try our
+        <a href="https://chrome.com/dev">dev channel</a>
+      </span>
     </p>
     <ul class="tabs" role="tablist">
       <li class="selected">
@@ -54,15 +73,55 @@
             tabindex="4">Available</a>
         <div id="tab-content-available" class="tab-content"
             role="tabpanel" aria-labelledby="tab-available" aria-hidden="false">
-          <div class="experiment"
-              jsselect="supportedFeatures"
-              jsvalues="id:internal_name">
+          <!-- Non default experiments. -->
+          <div jsselect="supportedFeatures"
+              jsvalues="id:internal_name; class: is_default ? 'hidden' : 'experiment'"
+              jsdisplay="!is_default">
             <div class="experiment-default"
                 jsvalues="class: is_default ? 'experiment-default flex-container'
                     : 'experiment-switched flex-container'">
               <div class="flex">
                 <h3 class="experiment-name" jscontent="name"
-                    jsvalues="title: is_default ? '' : 'Experiment enabled'">Name</h3>
+                    jsvalues="title: is_default ? '' : 'Experiment enabled'"></h3>
+                <p>
+                  <span jsvalues=".innerHTML:description"></span> –
+                  <span class="platforms" jscontent="supported_platforms.join(', ')"></span>
+                </p>
+                <a class="permalink" jsvalues="href: '#' + internal_name"
+                    jscontent="'#' + internal_name" tabindex="6"></a>
+              </div>
+              <div class="flex experiment-actions">
+                <div jsdisplay="options && options.length > 0">
+                  <select class="experiment-select" tabindex="6"
+                      jsvalues=".internal_name:internal_name;.disabled:!enabled;">
+                    <option jsvalues=".selected:selected;"
+                        jsselect="options"
+                        jscontent="description">
+                    </option>
+                  </select>
+                </div>
+                <select class="experiment-enable-disable" tabindex="6"
+                    jsdisplay="enabled !== undefined"
+                    jsvalues=".internal_name:internal_name;">
+                  <option jsvalues=".selected:!enabled; data-default: enabled ? 1 : 0"
+                      value="disabled">Disabled</option>
+                  <option jsvalues=".selected:enabled; data-default: !enabled ? 1 : 0"
+                      value="enabled">Enabled</option>
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <!-- Experiments with default settings. -->
+          <div class="experiment" jsselect="supportedFeatures"
+              jsvalues="id:internal_name; class: is_default ? 'experiment' : 'hidden'"
+              jsdisplay="is_default">
+            <div class="experiment-default"
+                jsvalues="class: is_default ? 'experiment-default flex-container'
+                    : 'experiment-switched flex-container'">
+              <div class="flex">
+                <h3 class="experiment-name" jscontent="name"
+                    jsvalues="title: is_default ? '' : 'Experiment enabled'"></h3>
                 <p>
                   <span jsvalues=".innerHTML:description"></span> –
                   <span class="platforms" jscontent="supported_platforms.join(', ')"></span>
@@ -74,24 +133,25 @@
                 <div jsdisplay="options && options.length > 0">
                   <select class="experiment-select" tabindex="6"
                       jsvalues=".internal_name:internal_name;.disabled:!enabled">
-                    <option jsvalues=".selected:selected"
+                    <option jsvalues=".selected:selected;"
                         jsselect="options"
-                        jscontent="description">NAME
+                        jscontent="description">
                     </option>
                   </select>
                 </div>
-                <span>
-                  <button class="experiment-disable-link"
-                      jsvalues=".internal_name:internal_name"
-                      jsdisplay="enabled" href="#" tabindex="6">$i18n{disable}</button>
-                  <button class="experiment-enable-link"
-                      jsvalues=".internal_name:internal_name"
-                      jsdisplay="!enabled" href="#" tabindex="6">$i18n{enable}</button>
-                </span>
+                <!-- Represent enabled / disabled options in a drop down -->
+                <select class="experiment-enable-disable" tabindex="6"
+                    jsdisplay="enabled !== undefined"
+                    jsvalues=".internal_name:internal_name;">
+                  <option jsvalues=".selected:!enabled; data-default:!enabled ? 1 : 0"
+                      value="disabled">Disabled</option>
+                  <option jsvalues=".selected:enabled; data-default: enabled ? 1 : 0"
+                      value="enabled">Enabled</option>
+                </select>
               </div>
             </div>
           </div>
-          <div class="no-match hidden">$i18n{flagsNoMatches}</div>
+          <div class="no-match hidden">No matching experiments</div>
         </div>
       </li>
 <!-- Unsupported experiments are not shown on iOS -->
@@ -119,10 +179,12 @@
                     jsvalues="href: '#' + internal_name"
                     jscontent="'#' + internal_name" tabindex="7"></a>
               </div>
-              <div class="flex experiment-actions">$i18n{flagsNotSupported}</div>
+              <div class="flex experiment-actions">Not available on your platform.</div>
             </div>
           </div>
-          <div class="no-match hidden">$i18n{flagsNoMatches}</div>
+          <div class="no-match hidden">
+            No matching experiments
+          </div>
         </div>
       </li>
 </if>
@@ -131,9 +193,16 @@
       <div class="flex-container">
         <div class="flex restart-notice" jstcache="0">$i18n{flagsRestartNotice}</div>
         <div class="flex">
+<if expr="not is_ios">
           <button class="experiment-restart-button" type="button" tabindex="8">
-            $i18n{flagsRestartButton}
+<if expr="not is_chromeos">
+          Relaunch Now
+</if>
+<if expr="is_chromeos">
+          Restart Now
+</if>
           </button>
+</if>
         </div>
       </div>
     </div>

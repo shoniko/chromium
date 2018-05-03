@@ -4,16 +4,16 @@
 
 #include "modules/payments/PaymentRequestUpdateEvent.h"
 
+#include "base/location.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptFunction.h"
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "modules/payments/PaymentUpdater.h"
 #include "platform/wtf/text/WTFString.h"
-#include "public/platform/WebTraceLocation.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 namespace {
@@ -85,7 +85,7 @@ class UpdatePaymentDetailsErrorFunction : public ScriptFunction {
 
 }  // namespace
 
-PaymentRequestUpdateEvent::~PaymentRequestUpdateEvent() {}
+PaymentRequestUpdateEvent::~PaymentRequestUpdateEvent() = default;
 
 PaymentRequestUpdateEvent* PaymentRequestUpdateEvent::Create(
     ExecutionContext* execution_context,
@@ -96,8 +96,6 @@ PaymentRequestUpdateEvent* PaymentRequestUpdateEvent::Create(
 
 void PaymentRequestUpdateEvent::SetPaymentDetailsUpdater(
     PaymentUpdater* updater) {
-  DCHECK(!abort_timer_.IsActive());
-  abort_timer_.StartOneShot(kAbortTimeout, BLINK_FROM_HERE);
   updater_ = updater;
 }
 
@@ -123,6 +121,9 @@ void PaymentRequestUpdateEvent::updateWith(ScriptState* script_state,
   stopPropagation();
   stopImmediatePropagation();
   wait_for_update_ = true;
+
+  DCHECK(!abort_timer_.IsActive());
+  abort_timer_.StartOneShot(kAbortTimeout, FROM_HERE);
 
   promise.Then(
       UpdatePaymentDetailsFunction::CreateFunction(script_state, this),
@@ -162,10 +163,9 @@ PaymentRequestUpdateEvent::PaymentRequestUpdateEvent(
     const PaymentRequestUpdateEventInit& init)
     : Event(type, init),
       wait_for_update_(false),
-      abort_timer_(
-          TaskRunnerHelper::Get(TaskType::kUserInteraction, execution_context),
-          this,
-          &PaymentRequestUpdateEvent::OnUpdateEventTimeout) {}
+      abort_timer_(execution_context->GetTaskRunner(TaskType::kUserInteraction),
+                   this,
+                   &PaymentRequestUpdateEvent::OnUpdateEventTimeout) {}
 
 void PaymentRequestUpdateEvent::OnUpdateEventTimeout(TimerBase*) {
   OnUpdatePaymentDetailsFailure("Timed out waiting for a response to a '" +

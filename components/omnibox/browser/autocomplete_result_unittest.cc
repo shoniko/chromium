@@ -7,14 +7,15 @@
 #include <stddef.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
@@ -67,7 +68,7 @@ void PopulateAutocompleteMatchesFromTestData(
 // A simple AutocompleteProvider that does nothing.
 class MockAutocompleteProvider : public AutocompleteProvider {
  public:
-  MockAutocompleteProvider(Type type): AutocompleteProvider(type) {}
+  explicit MockAutocompleteProvider(Type type): AutocompleteProvider(type) {}
 
   void Start(const AutocompleteInput& input, bool minimal_changes) override {}
 
@@ -102,7 +103,7 @@ class AutocompleteResultTest : public testing::Test {
     // a DCHECK.
     field_trial_list_.reset();
     field_trial_list_.reset(new base::FieldTrialList(
-        base::MakeUnique<metrics::SHA1EntropyProvider>("foo")));
+        std::make_unique<metrics::SHA1EntropyProvider>("foo")));
     variations::testing::ClearAllVariationParams();
 
     // Create the list of mock providers.  5 is enough.
@@ -215,8 +216,8 @@ void AutocompleteResultTest::RunCopyOldMatchesTest(
   AutocompleteResult current_result;
   current_result.AppendMatches(input, current_matches);
   current_result.SortAndCull(input, template_url_service_.get());
-  current_result.CopyOldMatches(
-      input, last_result, template_url_service_.get());
+  current_result.CopyOldMatches(input, &last_result,
+                                template_url_service_.get());
 
   AssertResultMatches(current_result, expected, expected_size);
 }
@@ -394,13 +395,153 @@ TEST_F(AutocompleteResultTest, SortAndCullEmptyDestinationURLs) {
   EXPECT_EQ(1000, result.match_at(3)->relevance);
 }
 
+#if !(defined(OS_ANDROID) || defined(OS_IOS))
+// Tests which remove results only work on desktop.
+
+TEST_F(AutocompleteResultTest, SortAndCullTailSuggestions) {
+  // clang-format off
+  TestData data[] = {
+      {1, 1, 500,  true},
+      {2, 1, 1100, false},
+      {3, 1, 1000, false},
+      {4, 1, 1300, false},
+      {5, 1, 1200, false},
+  };
+  // clang-format on
+
+  ACMatches matches;
+  PopulateAutocompleteMatches(data, arraysize(data), &matches);
+  // These will get sorted up, but still removed.
+  matches[3].type = AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
+  matches[4].type = AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
+
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  AutocompleteResult result;
+  result.AppendMatches(input, matches);
+  result.SortAndCull(input, template_url_service_.get());
+
+  EXPECT_EQ(3UL, result.size());
+  EXPECT_NE(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+            result.match_at(0)->type);
+  EXPECT_NE(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+            result.match_at(1)->type);
+  EXPECT_NE(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+            result.match_at(2)->type);
+}
+
+TEST_F(AutocompleteResultTest, SortAndCullKeepDefaultTailSuggestions) {
+  // clang-format off
+  TestData data[] = {
+      {1, 1, 500,  true},
+      {2, 1, 1100, false},
+      {3, 1, 1000, false},
+      {4, 1, 1300, false},
+      {5, 1, 1200, false},
+  };
+  // clang-format on
+
+  ACMatches matches;
+  PopulateAutocompleteMatches(data, arraysize(data), &matches);
+  // Make sure that even bad tail suggestions, if the only default match,
+  // are kept.
+  matches[0].type = AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
+  matches[1].type = AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
+  matches[2].type = AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
+
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  AutocompleteResult result;
+  result.AppendMatches(input, matches);
+  result.SortAndCull(input, template_url_service_.get());
+
+  EXPECT_EQ(3UL, result.size());
+  EXPECT_EQ(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+            result.match_at(0)->type);
+  EXPECT_EQ(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+            result.match_at(1)->type);
+  EXPECT_EQ(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+            result.match_at(2)->type);
+}
+
+TEST_F(AutocompleteResultTest, SortAndCullKeepMoreDefaultTailSuggestions) {
+  // clang-format off
+  TestData data[] = {
+      {1, 1, 500,  true},   // Low score non-tail default
+      {2, 1, 1100, false},  // Tail
+      {3, 1, 1000, true},   // Allow a tail suggestion to be the default.
+      {4, 1, 1300, false},  // Tail
+      {5, 1, 1200, false},  // Tail
+  };
+  // clang-format on
+
+  ACMatches matches;
+  PopulateAutocompleteMatches(data, arraysize(data), &matches);
+  // Make sure that even a bad non-tail default suggestion is kept.
+  for (size_t i = 1; i < 5; ++i)
+    matches[i].type = AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
+
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  AutocompleteResult result;
+  result.AppendMatches(input, matches);
+  result.SortAndCull(input, template_url_service_.get());
+
+  EXPECT_EQ(5UL, result.size());
+  // Non-tail default must be first, regardless of score
+  EXPECT_NE(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+            result.match_at(0)->type);
+  for (size_t i = 1; i < 5; ++i) {
+    EXPECT_EQ(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+              result.match_at(i)->type);
+    EXPECT_FALSE(result.match_at(i)->allowed_to_be_default_match);
+  }
+}
+
+#endif
+
+TEST_F(AutocompleteResultTest, SortAndCullOnlyTailSuggestions) {
+  // clang-format off
+  TestData data[] = {
+      {1, 1, 500,  true},   // Allow a bad non-tail default.
+      {2, 1, 1100, false},  // Tail
+      {3, 1, 1000, false},  // Tail
+      {4, 1, 1300, false},  // Tail
+      {5, 1, 1200, false},  // Tail
+  };
+  // clang-format on
+
+  ACMatches matches;
+  PopulateAutocompleteMatches(data, arraysize(data), &matches);
+  // These will not be removed.
+  for (size_t i = 1; i < 5; ++i)
+    matches[i].type = AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
+
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  AutocompleteResult result;
+  result.AppendMatches(input, matches);
+  result.SortAndCull(input, template_url_service_.get());
+
+  EXPECT_EQ(5UL, result.size());
+  EXPECT_NE(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+            result.match_at(0)->type);
+  for (size_t i = 1; i < 5; ++i)
+    EXPECT_EQ(AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
+              result.match_at(i)->type);
+}
+
 TEST_F(AutocompleteResultTest, SortAndCullDuplicateSearchURLs) {
   // Register a template URL that corresponds to 'foo' search engine.
   TemplateURLData url_data;
   url_data.SetShortName(base::ASCIIToUTF16("unittest"));
   url_data.SetKeyword(base::ASCIIToUTF16("foo"));
   url_data.SetURL("http://www.foo.com/s?q={searchTerms}");
-  template_url_service_.get()->Add(base::MakeUnique<TemplateURL>(url_data));
+  template_url_service_.get()->Add(std::make_unique<TemplateURL>(url_data));
 
   TestData data[] = {
     { 0, 1, 1300, true },
@@ -444,7 +585,7 @@ TEST_F(AutocompleteResultTest, SortAndCullWithMatchDups) {
   url_data.SetShortName(base::ASCIIToUTF16("unittest"));
   url_data.SetKeyword(base::ASCIIToUTF16("foo"));
   url_data.SetURL("http://www.foo.com/s?q={searchTerms}");
-  template_url_service_.get()->Add(base::MakeUnique<TemplateURL>(url_data));
+  template_url_service_.get()->Add(std::make_unique<TemplateURL>(url_data));
 
   AutocompleteMatch dup_match;
   dup_match.destination_url = GURL("http://www.foo.com/s?q=foo&oq=dup");
@@ -685,13 +826,13 @@ TEST_F(AutocompleteResultTest, InlineTailPrefixes) {
     std::vector<ACMatchClassification> before_contents_class;
     std::vector<ACMatchClassification> after_contents_class;
   } cases[] = {
-      // It should fix-up this match, since prefix matches.
+      // It should not touch this, since it's not a tail suggestion.
       {
           AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
           "superman",
           "superman",
           {{0, ACMatchClassification::NONE}, {5, ACMatchClassification::MATCH}},
-          {{0, ACMatchClassification::DIM}, {5, ACMatchClassification::MATCH}},
+          {{0, ACMatchClassification::NONE}, {5, ACMatchClassification::MATCH}},
       },
       // Make sure it finds this tail suggestion, and prepends appropriately.
       {
@@ -699,16 +840,10 @@ TEST_F(AutocompleteResultTest, InlineTailPrefixes) {
           "star",
           "superstar",
           {{0, ACMatchClassification::MATCH}},
-          {{0, ACMatchClassification::DIM}, {5, ACMatchClassification::MATCH}},
+          {{0, ACMatchClassification::INVISIBLE},
+           {5, ACMatchClassification::MATCH}},
       },
-      // It should not touch this one, since prefix doesn't match.
-      {
-          AutocompleteMatchType::SEARCH_SUGGEST,
-          "suppertime",
-          "suppertime",
-          {{0, ACMatchClassification::NONE}, {3, ACMatchClassification::MATCH}},
-          {{0, ACMatchClassification::NONE}, {3, ACMatchClassification::MATCH}},
-      }};
+  };
   ACMatches matches;
   for (const auto& test_case : cases) {
     AutocompleteMatch match;

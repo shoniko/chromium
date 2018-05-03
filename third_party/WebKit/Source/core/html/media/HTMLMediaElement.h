@@ -28,19 +28,19 @@
 #define HTMLMediaElement_h
 
 #include <memory>
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/Nullable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "core/CoreExport.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/dom/SuspendableObject.h"
+#include "core/dom/PausableObject.h"
 #include "core/dom/events/MediaElementEventQueue.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/media/MediaControls.h"
 #include "platform/Supplementable.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/audio/AudioSourceProvider.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/network/mime/MIMETypeRegistry.h"
 #include "public/platform/WebAudioSourceProviderClient.h"
@@ -81,7 +81,7 @@ class CORE_EXPORT HTMLMediaElement
     : public HTMLElement,
       public Supplementable<HTMLMediaElement>,
       public ActiveScriptWrappable<HTMLMediaElement>,
-      public SuspendableObject,
+      public PausableObject,
       private WebMediaPlayerClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(HTMLMediaElement);
@@ -251,7 +251,7 @@ class CORE_EXPORT HTMLMediaElement
   void DisableAutomaticTextTrackSelection();
 
   // EventTarget function.
-  // Both Node (via HTMLElement) and SuspendableObject define this method, which
+  // Both Node (via HTMLElement) and PausableObject define this method, which
   // causes an ambiguity error at compile time. This class's constructor
   // ensures that both implementations return document, so return the result
   // of one of them here.
@@ -299,7 +299,7 @@ class CORE_EXPORT HTMLMediaElement
 
   // Checks to see if current media data is CORS-same-origin as the
   // specified origin.
-  bool IsMediaDataCORSSameOrigin(SecurityOrigin*) const;
+  bool IsMediaDataCORSSameOrigin(const SecurityOrigin*) const;
 
   // Returns this media element is in a cross-origin frame.
   bool IsInCrossOriginFrame() const;
@@ -325,6 +325,8 @@ class CORE_EXPORT HTMLMediaElement
 
   WebMediaPlayer::LoadType GetLoadType() const;
 
+  bool HasMediaSource() const { return media_source_; }
+
  protected:
   HTMLMediaElement(const QualifiedName&, Document&);
   ~HTMLMediaElement() override;
@@ -334,6 +336,8 @@ class CORE_EXPORT HTMLMediaElement
   void FinishParsingChildren() final;
   bool IsURLAttribute(const Attribute&) const override;
   void AttachLayoutTree(AttachContext&) override;
+  void ParserDidSetAttributes() override;
+  void CopyNonAttributePropertiesFromElement(const Element&) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;
@@ -362,13 +366,13 @@ class CORE_EXPORT HTMLMediaElement
   bool LayoutObjectIsNeeded(const ComputedStyle&) override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
   void DidNotifySubtreeInsertionsToDocument() override;
-  void DidRecalcStyle() final;
+  void DidRecalcStyle(StyleRecalcChange) final;
 
   bool CanStartSelection() const override { return false; }
 
   bool IsInteractiveContent() const final;
 
-  // SuspendableObject functions.
+  // PausableObject functions.
   void ContextDestroyed(ExecutionContext*) override;
 
   virtual void UpdateDisplayState() {}
@@ -568,7 +572,7 @@ class CORE_EXPORT HTMLMediaElement
   double duration_;
 
   // The last time a timeupdate event was sent (wall clock).
-  double last_time_update_event_wall_time_;
+  TimeTicks last_time_update_event_wall_time_;
 
   // The last time a timeupdate event was sent in movie time.
   double last_time_update_event_media_time_;
@@ -675,7 +679,7 @@ class CORE_EXPORT HTMLMediaElement
     explicit AudioClientImpl(AudioSourceProviderClient* client)
         : client_(client) {}
 
-    ~AudioClientImpl() override {}
+    ~AudioClientImpl() override = default;
 
     // WebAudioSourceProviderClient
     void SetFormat(size_t number_of_channels, float sample_rate) override;
@@ -694,7 +698,7 @@ class CORE_EXPORT HTMLMediaElement
    public:
     AudioSourceProviderImpl() : web_audio_source_provider_(nullptr) {}
 
-    ~AudioSourceProviderImpl() override {}
+    ~AudioSourceProviderImpl() override = default;
 
     // Wraps the given WebAudioSourceProvider.
     void Wrap(WebAudioSourceProvider*);
@@ -724,6 +728,7 @@ class CORE_EXPORT HTMLMediaElement
   friend class MediaControlInputElementTest;
   friend class MediaControlsOrientationLockDelegateTest;
   friend class MediaControlsRotateToFullscreenDelegateTest;
+  friend class MediaControlLoadingPanelElementTest;
 
   Member<AutoplayPolicy> autoplay_policy_;
 

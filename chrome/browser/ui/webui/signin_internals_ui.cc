@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/signin_internals_ui.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -16,8 +17,8 @@
 #include "components/grit/components_resources.h"
 #include "components/signin/core/browser/about_signin_internals.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "components/signin/core/common/signin_features.h"
+#include "components/signin/core/browser/profile_management_switches.h"
+#include "components/signin/core/browser/signin_features.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 
@@ -46,9 +47,9 @@ SignInInternalsUI::SignInInternalsUI(content::WebUI* web_ui)
     if (about_signin_internals)
       about_signin_internals->AddSigninObserver(this);
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-    if (signin::IsDiceMigrationEnabled()) {
+    if (signin::IsDiceEnabledForProfile(profile->GetPrefs())) {
       web_ui->AddMessageHandler(
-          base::MakeUnique<SigninDiceInternalsHandler>(profile));
+          std::make_unique<SigninDiceInternalsHandler>(profile));
     }
 #endif
   }

@@ -4,11 +4,13 @@
 
 #include "chrome/browser/search_provider_logos/logo_service_factory.h"
 
+#include "base/bind.h"
 #include "base/feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/suggestions/image_decoder_impl.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/search_provider_logos/logo_service.h"
 #include "components/search_provider_logos/logo_service_impl.h"
@@ -21,14 +23,18 @@
 using search_provider_logos::LogoService;
 using search_provider_logos::LogoServiceImpl;
 
-#if defined(OS_ANDROID)
-using chrome::android::GetIsChromeHomeEnabled;
-#endif  // defined(OS_ANDROID)
-
 namespace {
 
 constexpr base::FilePath::CharType kCachedLogoDirectory[] =
     FILE_PATH_LITERAL("Search Logos");
+
+bool UseGrayLogo() {
+#if defined(OS_ANDROID)
+  return !chrome::android::GetIsChromeHomeEnabled();
+#else
+  return false;
+#endif
+}
 
 }  // namespace
 
@@ -47,6 +53,7 @@ LogoServiceFactory::LogoServiceFactory()
     : BrowserContextKeyedServiceFactory(
           "LogoService",
           BrowserContextDependencyManager::GetInstance()) {
+  DependsOn(GaiaCookieManagerServiceFactory::GetInstance());
   DependsOn(TemplateURLServiceFactory::GetInstance());
 }
 
@@ -56,13 +63,10 @@ KeyedService* LogoServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   Profile* profile = static_cast<Profile*>(context);
   DCHECK(!profile->IsOffTheRecord());
-#if defined(OS_ANDROID)
-  bool use_gray_background = !GetIsChromeHomeEnabled();
-#else
-  bool use_gray_background = false;
-#endif
-  return new LogoServiceImpl(profile->GetPath().Append(kCachedLogoDirectory),
-                             TemplateURLServiceFactory::GetForProfile(profile),
-                             base::MakeUnique<suggestions::ImageDecoderImpl>(),
-                             profile->GetRequestContext(), use_gray_background);
+  return new LogoServiceImpl(
+      profile->GetPath().Append(kCachedLogoDirectory),
+      GaiaCookieManagerServiceFactory::GetForProfile(profile),
+      TemplateURLServiceFactory::GetForProfile(profile),
+      base::MakeUnique<suggestions::ImageDecoderImpl>(),
+      profile->GetRequestContext(), base::BindRepeating(&UseGrayLogo));
 }

@@ -15,7 +15,8 @@ const int kDeviceCountMetricThresholdMins = 60;
 
 namespace media_router {
 
-DeviceCountMetrics::DeviceCountMetrics() : clock_(new base::DefaultClock()) {}
+DeviceCountMetrics::DeviceCountMetrics()
+    : clock_(base::DefaultClock::GetInstance()) {}
 DeviceCountMetrics::~DeviceCountMetrics() = default;
 
 void DeviceCountMetrics::RecordDeviceCountsIfNeeded(
@@ -30,7 +31,7 @@ void DeviceCountMetrics::RecordDeviceCountsIfNeeded(
   device_count_metrics_record_time_ = now;
 }
 
-void DeviceCountMetrics::SetClockForTest(std::unique_ptr<base::Clock> clock) {
+void DeviceCountMetrics::SetClockForTest(base::Clock* clock) {
   clock_ = std::move(clock);
 }
 
@@ -89,9 +90,10 @@ const char CastAnalytics::kHistogramCastMdnsChannelOpenFailure[] =
 
 // static
 void CastAnalytics::RecordCastChannelConnectResult(
-    bool channel_opened_successfully) {
-  UMA_HISTOGRAM_BOOLEAN(kHistogramCastChannelConnectResult,
-                        channel_opened_successfully);
+    MediaRouterChannelConnectResults result) {
+  DCHECK_LT(result, MediaRouterChannelConnectResults::TOTAL_COUNT);
+  UMA_HISTOGRAM_ENUMERATION(kHistogramCastChannelConnectResult, result,
+                            MediaRouterChannelConnectResults::TOTAL_COUNT);
 }
 
 // static
@@ -112,5 +114,17 @@ void CastAnalytics::RecordDeviceChannelOpenDuration(
     UMA_HISTOGRAM_TIMES(kHistogramCastMdnsChannelOpenFailure, duration);
   }
 }
+
+void WiredDisplayDeviceCountMetrics::RecordDeviceCounts(
+    size_t available_device_count,
+    size_t known_device_count) {
+  // Record just the available device count, because for wired displays, all
+  // the known displays are available.
+  UMA_HISTOGRAM_COUNTS_100(kHistogramWiredDisplayDeviceCount,
+                           available_device_count);
+}
+
+const char WiredDisplayDeviceCountMetrics::kHistogramWiredDisplayDeviceCount[] =
+    "MediaRouter.WiredDisplay.AvailableDevicesCount";
 
 }  // namespace media_router

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
 import("//media/media_options.gni")
 
@@ -18,10 +19,9 @@ group("browser") {
   }
 }
 
-source_set("browser_sources") {
+jumbo_source_set("browser_sources") {
   # External code should depend on via ":browser" above.
   visibility = [ "//content/*" ]
-
   sources = [
     "android/android_overlay_provider.h",
     "android/browser_media_player_manager_register.cc",
@@ -115,12 +115,15 @@ source_set("browser_sources") {
     "download_manager.h",
     "download_manager_delegate.cc",
     "download_manager_delegate.h",
+    "download_request_utils.h",
     "download_save_info.cc",
     "download_save_info.h",
+    "download_source.h",
     "download_url_parameters.cc",
     "download_url_parameters.h",
     "favicon_status.cc",
     "favicon_status.h",
+    "file_url_loader.h",
     "focused_node_details.h",
     "font_list_async.h",
     "frame_service_base.h",
@@ -137,7 +140,6 @@ source_set("browser_sources") {
     "guest_mode.cc",
     "guest_mode.h",
     "histogram_fetcher.h",
-    "ignore_errors_cert_verifier.h",
     "indexed_db_context.h",
     "indexed_db_info.h",
     "interstitial_page.h",
@@ -176,7 +178,6 @@ source_set("browser_sources") {
     "navigation_type.h",
     "navigation_ui_data.h",
     "network_quality_observer_factory.h",
-    "network_service_instance.cc",
     "network_service_instance.h",
     "notification_database_data.cc",
     "notification_database_data.h",
@@ -222,14 +223,13 @@ source_set("browser_sources") {
     "render_widget_host_iterator.h",
     "render_widget_host_view.h",
     "render_widget_host_view_mac_delegate.h",
+    "replaced_navigation_entry_data.h",
     "resource_context.h",
     "resource_dispatcher_host.h",
     "resource_dispatcher_host_delegate.cc",
     "resource_dispatcher_host_delegate.h",
     "resource_dispatcher_host_login_delegate.h",
     "resource_hints.h",
-    "resource_request_details.cc",
-    "resource_request_details.h",
     "resource_request_info.h",
     "resource_throttle.cc",
     "resource_throttle.h",
@@ -246,6 +246,7 @@ source_set("browser_sources") {
     "service_worker_usage_info.h",
     "session_storage_namespace.h",
     "session_storage_usage_info.h",
+    "shared_worker_service.h",
     "site_instance.h",
     "speech_recognition_event_listener.h",
     "speech_recognition_manager.h",
@@ -287,8 +288,6 @@ source_set("browser_sources") {
     "web_contents_media_capture_id.h",
     "web_contents_observer.cc",
     "web_contents_observer.h",
-    "web_contents_unresponsive_state.cc",
-    "web_contents_unresponsive_state.h",
     "web_contents_user_data.h",
     "web_contents_view_delegate.cc",
     "web_contents_view_delegate.h",
@@ -302,9 +301,6 @@ source_set("browser_sources") {
     "websocket_handshake_request_info.h",
     "webvr_service_provider.cc",
     "webvr_service_provider.h",
-    "worker_service.h",
-    "worker_service_observer.h",
-    "zygote_handle_linux.h",
     "zygote_host_linux.h",
   ]
   configs += [
@@ -318,6 +314,7 @@ source_set("browser_sources") {
     "//ipc",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",
+    "//services/network/public/interfaces",
     "//services/resource_coordinator/public/cpp:resource_coordinator_cpp",
     "//services/service_manager/public/cpp",
 
@@ -332,11 +329,12 @@ source_set("browser_sources") {
     "//cc",
     "//content/browser",  # Must not be public_deps!
     "//device/geolocation",
+    "//device/usb/public/interfaces",
     "//gpu",
+    "//gpu/command_buffer/service:gles2",
     "//media",
     "//net",
     "//ppapi/c",
-    "//services/device/public/interfaces",
     "//ui/accessibility",
     "//ui/base",
     "//ui/events",
@@ -380,6 +378,8 @@ source_set("browser_sources") {
     sources += [
       "desktop_capture.cc",
       "desktop_capture.h",
+      "webrtc_log.cc",
+      "webrtc_log.h",
     ]
     deps += [ "//third_party/webrtc/modules/desktop_capture" ]
   }

@@ -20,6 +20,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "components/autofill/core/common/autofill_data_validation.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_regexes.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/autofill_util.h"
@@ -189,9 +190,8 @@ const base::string16 CombineAndCollapseWhitespace(
   if (prefix_trailing_whitespace || suffix_leading_whitespace ||
       force_whitespace) {
     return prefix_trimmed + base::ASCIIToUTF16(" ") + suffix_trimmed;
-  } else {
-    return prefix_trimmed + suffix_trimmed;
   }
+  return prefix_trimmed + suffix_trimmed;
 }
 
 // This is a helper function for the FindChildText() function (see below).
@@ -715,8 +715,7 @@ base::string16 InferLabelForElement(const WebFormControlElement& element,
   inferred_label = InferLabelFromValueAttr(element);
   if (IsLabelValid(inferred_label, stop_words))
     return inferred_label;
-  else
-    return base::string16();
+  return base::string16();
 }
 
 // Fills |option_strings| with the values of the <option> elements present in
@@ -793,12 +792,18 @@ void ForEachMatchingFormFieldCommon(
     const WebInputElement* input_element = ToWebInputElement(element);
     CR_DEFINE_STATIC_LOCAL(WebString, kValue, ("value"));
     CR_DEFINE_STATIC_LOCAL(WebString, kPlaceholder, ("placeholder"));
+
     if (!force_override && !is_initiating_element &&
         // A text field, with a non-empty value that is NOT the value of the
         // input field's "value" or "placeholder" attribute, is skipped.
+        // Some sites fill the fields with formatting string. To tell the
+        // difference between the values entered by the user and the site, we'll
+        // sanitize the value. If the sanitized value is empty, it means that
+        // the site has filled the field, in this case, the field is not
+        // skipped.
         (IsAutofillableInputElement(input_element) ||
          IsTextAreaElement(*element)) &&
-        !element->Value().IsEmpty() &&
+        !SanitizedFieldIsEmpty(element->Value().Utf16()) &&
         (!element->HasAttribute(kValue) ||
          element->GetAttribute(kValue) != element->Value()) &&
         (!element->HasAttribute(kPlaceholder) ||
@@ -1004,14 +1009,13 @@ void MatchLabelsAndFields(
           if (field_data) {
             field_data = nullptr;
             break;
-          } else {
-            field_data = iter.second;
           }
+          field_data = iter.second;
         }
       }
     } else if (control.IsFormControlElement()) {
       WebFormControlElement form_control = control.To<WebFormControlElement>();
-      if (form_control.FormControlType() == kHidden)
+      if (form_control.FormControlTypeForAutofill() == kHidden)
         continue;
       // Typical case: look up |field_data| in |element_map|.
       auto iter = element_map->find(form_control);
@@ -1145,6 +1149,13 @@ bool UnownedFormElementsAndFieldSetsToFormData(
     FormData* form,
     FormFieldData* field) {
   form->origin = GetCanonicalOriginForDocument(document);
+  if (document.GetFrame()) {
+    form->main_frame_origin = document.GetFrame()->Top()->GetSecurityOrigin();
+  } else {
+    form->main_frame_origin = url::Origin();
+    NOTREACHED();
+  }
+
   form->is_form_tag = false;
 
   return FormOrFieldsetsToFormData(
@@ -1267,7 +1278,8 @@ GURL GetCanonicalOriginForDocument(const WebDocument& document) {
 
 bool IsMonthInput(const WebInputElement* element) {
   CR_DEFINE_STATIC_LOCAL(WebString, kMonth, ("month"));
-  return element && !element->IsNull() && element->FormControlType() == kMonth;
+  return element && !element->IsNull() &&
+         element->FormControlTypeForAutofill() == kMonth;
 }
 
 // All text fields, including password fields, should be extracted.
@@ -1278,13 +1290,14 @@ bool IsTextInput(const WebInputElement* element) {
 bool IsSelectElement(const WebFormControlElement& element) {
   // Static for improved performance.
   CR_DEFINE_STATIC_LOCAL(WebString, kSelectOne, ("select-one"));
-  return !element.IsNull() && element.FormControlType() == kSelectOne;
+  return !element.IsNull() &&
+         element.FormControlTypeForAutofill() == kSelectOne;
 }
 
 bool IsTextAreaElement(const WebFormControlElement& element) {
   // Static for improved performance.
   CR_DEFINE_STATIC_LOCAL(WebString, kTextArea, ("textarea"));
-  return !element.IsNull() && element.FormControlType() == kTextArea;
+  return !element.IsNull() && element.FormControlTypeForAutofill() == kTextArea;
 }
 
 bool IsCheckableElement(const WebInputElement* element) {
@@ -1365,7 +1378,7 @@ void WebFormControlElementToFormField(
   if (id != field->name)
     field->id = id;
 
-  field->form_control_type = element.FormControlType().Utf8();
+  field->form_control_type = element.FormControlTypeForAutofill().Utf8();
   field->autocomplete_attribute = element.GetAttribute(kAutocomplete).Utf8();
   if (field->autocomplete_attribute.size() > kMaxDataLength) {
     // Discard overly long attribute values to avoid DOS-ing the browser
@@ -1463,14 +1476,19 @@ bool WebFormElementToFormData(
     ExtractMask extract_mask,
     FormData* form,
     FormFieldData* field) {
-  const WebLocalFrame* frame = form_element.GetDocument().GetFrame();
+  WebLocalFrame* frame = form_element.GetDocument().GetFrame();
   if (!frame)
     return false;
 
   form->name = GetFormIdentifier(form_element);
   form->origin = GetCanonicalOriginForDocument(frame->GetDocument());
   form->action = frame->GetDocument().CompleteURL(form_element.Action());
-
+  if (frame->Top()) {
+    form->main_frame_origin = frame->Top()->GetSecurityOrigin();
+  } else {
+    form->main_frame_origin = url::Origin();
+    NOTREACHED();
+  }
   // If the completed URL is not valid, just use the action we get from
   // WebKit.
   if (!form->action.is_valid())
@@ -1520,6 +1538,13 @@ bool UnownedCheckoutFormElementsAndFieldSetsToFormData(
     ExtractMask extract_mask,
     FormData* form,
     FormFieldData* field) {
+  if (!base::FeatureList::IsEnabled(
+          features::kAutofillRestrictUnownedFieldsToFormlessCheckout)) {
+    return UnownedFormElementsAndFieldSetsToFormData(
+        fieldsets, control_elements, element, document, nullptr, extract_mask,
+        form, field);
+  }
+
   // Only attempt formless Autofill on checkout flows. This avoids the many
   // false positives found on the non-checkout web. See
   // http://crbug.com/462375.
@@ -1577,11 +1602,14 @@ bool UnownedCheckoutFormElementsAndFieldSetsToFormData(
   // Since it's not a checkout flow, only add fields that have a non-"off"
   // autocomplete attribute to the formless autofill.
   CR_DEFINE_STATIC_LOCAL(WebString, kOffAttribute, ("off"));
+  CR_DEFINE_STATIC_LOCAL(WebString, kFalseAttribute, ("false"));
   std::vector<WebFormControlElement> elements_with_autocomplete;
   for (const WebFormControlElement& element : control_elements) {
     blink::WebString autocomplete = element.GetAttribute("autocomplete");
-    if (autocomplete.length() && autocomplete != kOffAttribute)
+    if (autocomplete.length() && autocomplete != kOffAttribute &&
+        autocomplete != kFalseAttribute) {
       elements_with_autocomplete.push_back(element);
+    }
   }
 
   if (elements_with_autocomplete.empty())
@@ -1800,6 +1828,18 @@ void PreviewSuggestion(const base::string16& suggestion,
 
 base::string16 FindChildText(const WebNode& node) {
   return FindChildTextWithIgnoreList(node, std::set<WebNode>());
+}
+
+base::string16 FindChildTextWithIgnoreListForTesting(
+    const WebNode& node,
+    const std::set<WebNode>& divs_to_skip) {
+  return FindChildTextWithIgnoreList(node, divs_to_skip);
+}
+
+base::string16 InferLabelForElementForTesting(
+    const WebFormControlElement& element,
+    const std::vector<base::char16>& stop_words) {
+  return InferLabelForElement(element, stop_words);
 }
 
 }  // namespace form_util

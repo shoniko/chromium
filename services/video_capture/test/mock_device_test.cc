@@ -72,20 +72,20 @@ MockDeviceTest::MockDeviceTest() : ref_factory_(base::Bind(&base::DoNothing)) {}
 MockDeviceTest::~MockDeviceTest() = default;
 
 void MockDeviceTest::SetUp() {
-  message_loop_ = base::MakeUnique<base::MessageLoop>();
-  auto mock_device_factory = base::MakeUnique<MockDeviceFactory>();
+  message_loop_ = std::make_unique<base::MessageLoop>();
+  auto mock_device_factory = std::make_unique<MockDeviceFactory>();
   // We keep a pointer to the MockDeviceFactory as a member so that we can
   // invoke its AddMockDevice(). Ownership of the MockDeviceFactory is moved
   // to the DeviceFactoryMediaToMojoAdapter.
   mock_device_factory_ = mock_device_factory.get();
-  auto video_capture_system = base::MakeUnique<media::VideoCaptureSystemImpl>(
+  auto video_capture_system = std::make_unique<media::VideoCaptureSystemImpl>(
       std::move(mock_device_factory));
   mock_device_factory_adapter_ =
-      base::MakeUnique<DeviceFactoryMediaToMojoAdapter>(
+      std::make_unique<DeviceFactoryMediaToMojoAdapter>(
           ref_factory_.CreateRef(), std::move(video_capture_system),
           base::Bind(CreateJpegDecoder));
 
-  mock_factory_binding_ = base::MakeUnique<mojo::Binding<mojom::DeviceFactory>>(
+  mock_factory_binding_ = std::make_unique<mojo::Binding<mojom::DeviceFactory>>(
       mock_device_factory_adapter_.get(), mojo::MakeRequest(&factory_));
 
   media::VideoCaptureDeviceDescriptor mock_descriptor;
@@ -107,12 +107,12 @@ void MockDeviceTest::SetUp() {
   requested_settings_.requested_format.frame_size = gfx::Size(800, 600);
   requested_settings_.requested_format.frame_rate = 15;
   requested_settings_.resolution_change_policy =
-      media::RESOLUTION_POLICY_FIXED_RESOLUTION;
+      media::ResolutionChangePolicy::FIXED_RESOLUTION;
   requested_settings_.power_line_frequency =
       media::PowerLineFrequency::FREQUENCY_DEFAULT;
 
   mock_receiver_ =
-      base::MakeUnique<MockReceiver>(mojo::MakeRequest(&mock_receiver_proxy_));
+      std::make_unique<MockReceiver>(mojo::MakeRequest(&mock_receiver_proxy_));
 }
 
 }  // namespace video_capture

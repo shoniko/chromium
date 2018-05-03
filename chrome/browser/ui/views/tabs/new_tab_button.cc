@@ -84,6 +84,7 @@ int NewTabButton::GetTopOffset() {
 void NewTabButton::ShowPromoForLastActiveBrowser() {
   BrowserView* browser = static_cast<BrowserView*>(
       BrowserList::GetInstance()->GetLastActive()->window());
+
   browser->tabstrip()->new_tab_button()->ShowPromo();
 }
 

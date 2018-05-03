@@ -35,10 +35,10 @@
 #include "core/dom/SyncReattachContext.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/LocalDOMWindow.h"
-#include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLImageFallbackHelper.h"
 #include "core/html/HTMLPictureElement.h"
 #include "core/html/HTMLSourceElement.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "core/html/forms/FormAssociated.h"
 #include "core/html/forms/HTMLFormElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
@@ -47,9 +47,10 @@
 #include "core/imagebitmap/ImageBitmap.h"
 #include "core/imagebitmap/ImageBitmapOptions.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/layout/AdjustForAbsoluteZoom.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutImage.h"
-#include "core/layout/api/LayoutImageItem.h"
+#include "core/layout/ng/layout_ng_block_flow.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/media_type_names.h"
 #include "core/page/ChromeClient.h"
@@ -110,7 +111,7 @@ HTMLImageElement* HTMLImageElement::Create(Document& document,
   return new HTMLImageElement(document, created_by_parser);
 }
 
-HTMLImageElement::~HTMLImageElement() {}
+HTMLImageElement::~HTMLImageElement() = default;
 
 void HTMLImageElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(image_loader_);
@@ -163,7 +164,7 @@ bool HTMLImageElement::IsPresentationAttribute(
 void HTMLImageElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == widthAttr) {
     AddHTMLLengthToStyle(style, CSSPropertyWidth, value);
   } else if (name == heightAttr) {
@@ -233,8 +234,8 @@ void HTMLImageElement::SetBestFitURLAndDPRFromImageCandidate(
     UseCounter::Count(GetDocument(), WebFeature::kSrcsetXDescriptor);
   }
   if (GetLayoutObject() && GetLayoutObject()->IsImage()) {
-    LayoutImageItem(ToLayoutImage(GetLayoutObject()))
-        .SetImageDevicePixelRatio(image_device_pixel_ratio_);
+    ToLayoutImage(GetLayoutObject())
+        ->SetImageDevicePixelRatio(image_device_pixel_ratio_);
 
     if (old_image_device_pixel_ratio != image_device_pixel_ratio_)
       ToLayoutImage(GetLayoutObject())->IntrinsicSizeChanged();
@@ -273,8 +274,9 @@ void HTMLImageElement::ParseAttribute(
       UseCounter::Count(GetDocument(),
                         WebFeature::kHTMLImageElementReferrerPolicyAttribute);
     }
-  } else if (name == asyncAttr &&
-             RuntimeEnabledFeatures::ImageAsyncAttributeEnabled()) {
+  } else if (name == decodingAttr &&
+             RuntimeEnabledFeatures::ImageDecodingAttributeEnabled()) {
+    UseCounter::Count(GetDocument(), WebFeature::kImageDecodingAttribute);
     decoding_mode_ = ParseImageDecodingMode(params.new_value);
   } else {
     HTMLElement::ParseAttribute(params);
@@ -354,7 +356,9 @@ LayoutObject* HTMLImageElement::CreateLayoutObject(const ComputedStyle& style) {
 
   switch (layout_disposition_) {
     case LayoutDisposition::kFallbackContent:
-      return new LayoutBlockFlow(this);
+      if (!RuntimeEnabledFeatures::LayoutNGEnabled())
+        return new LayoutBlockFlow(this);
+      return new LayoutNGBlockFlow(this);
     case LayoutDisposition::kPrimaryContent: {
       LayoutImage* image = new LayoutImage(this);
       image->SetImageResource(LayoutImageResource::Create());
@@ -374,16 +378,9 @@ void HTMLImageElement::AttachLayoutTree(AttachContext& context) {
   if (GetLayoutObject() && GetLayoutObject()->IsImage()) {
     LayoutImage* layout_image = ToLayoutImage(GetLayoutObject());
     LayoutImageResource* layout_image_resource = layout_image->ImageResource();
-    if (is_fallback_image_) {
-      float device_scale_factor =
-          blink::DeviceScaleFactorDeprecated(layout_image->GetFrame());
-      std::pair<Image*, float> broken_image_and_image_scale_factor =
-          ImageResourceContent::BrokenImage(device_scale_factor);
-      ImageResourceContent* new_image_resource =
-          ImageResourceContent::CreateLoaded(
-              broken_image_and_image_scale_factor.first);
-      layout_image->ImageResource()->SetImageResource(new_image_resource);
-    }
+    if (is_fallback_image_)
+      layout_image_resource->UseBrokenImage();
+
     if (layout_image_resource->HasImage())
       return;
 
@@ -506,15 +503,15 @@ unsigned HTMLImageElement::naturalHeight() const {
 
 unsigned HTMLImageElement::LayoutBoxWidth() const {
   LayoutBox* box = GetLayoutBox();
-  return box ? AdjustForAbsoluteZoom(box->ContentBoxRect().PixelSnappedWidth(),
-                                     box)
+  return box ? AdjustForAbsoluteZoom::AdjustInt(
+                   box->ContentBoxRect().PixelSnappedWidth(), box)
              : 0;
 }
 
 unsigned HTMLImageElement::LayoutBoxHeight() const {
   LayoutBox* box = GetLayoutBox();
-  return box ? AdjustForAbsoluteZoom(box->ContentBoxRect().PixelSnappedHeight(),
-                                     box)
+  return box ? AdjustForAbsoluteZoom::AdjustInt(
+                   box->ContentBoxRect().PixelSnappedHeight(), box)
              : 0;
 }
 
@@ -526,12 +523,12 @@ const String& HTMLImageElement::currentSrc() const {
   // Return the picked URL string in case of load error.
   if (GetImageLoader().HadError())
     return best_fit_image_url_;
-  // Initially, the pending request turns into current request when it is either
-  // available or broken.  We use the image's dimensions as a proxy to it being
-  // in any of these states.
+  // Initially, the pending request turns into current request when it is
+  // either available or broken. Check for the resource being in error or
+  // having an image to determine these states.
   ImageResourceContent* image_content = GetImageLoader().GetContent();
-  if (!image_content || !image_content->GetImage() ||
-      !image_content->GetImage()->width())
+  if (!image_content ||
+      (!image_content->ErrorOccurred() && !image_content->HasImage()))
     return g_empty_atom;
 
   return image_content->Url().GetString();
@@ -639,18 +636,18 @@ bool HTMLImageElement::IsInteractiveContent() const {
 
 FloatSize HTMLImageElement::DefaultDestinationSize(
     const FloatSize& default_object_size) const {
-  ImageResourceContent* image = CachedImage();
-  if (!image)
+  ImageResourceContent* image_content = CachedImage();
+  if (!image_content)
     return FloatSize();
 
-  if (image->GetImage() && image->GetImage()->IsSVGImage())
-    return ToSVGImage(CachedImage()->GetImage())
-        ->ConcreteObjectSize(default_object_size);
+  Image* image = image_content->GetImage();
+  if (image->IsSVGImage())
+    return ToSVGImage(image)->ConcreteObjectSize(default_object_size);
 
-  LayoutSize size(image->IntrinsicSize(
+  LayoutSize size(image_content->IntrinsicSize(
       LayoutObject::ShouldRespectImageOrientation(GetLayoutObject())));
   if (GetLayoutObject() && GetLayoutObject()->IsLayoutImage() &&
-      image->GetImage() && !image->GetImage()->HasRelativeSize())
+      !image->HasRelativeSize())
     size.Scale(ToLayoutImage(GetLayoutObject())->ImageDevicePixelRatio());
   return FloatSize(size);
 }
@@ -762,10 +759,9 @@ void HTMLImageElement::EnsureCollapsedOrFallbackContent() {
     return;
 
   ImageResourceContent* image_content = GetImageLoader().GetContent();
-  bool resource_error_indicates_element_should_be_collapsed =
-      image_content &&
-      image_content->GetResourceError().ShouldCollapseInitiator();
-  SetLayoutDisposition(resource_error_indicates_element_should_be_collapsed
+  Optional<ResourceError> error =
+      image_content ? image_content->GetResourceError() : WTF::nullopt;
+  SetLayoutDisposition(error && error->ShouldCollapseInitiator()
                            ? LayoutDisposition::kCollapsed
                            : LayoutDisposition::kFallbackContent);
 }
@@ -793,7 +789,7 @@ void HTMLImageElement::SetLayoutDisposition(
   } else {
     if (layout_disposition_ == LayoutDisposition::kFallbackContent) {
       EventDispatchForbiddenScope::AllowUserAgentEvents allow_events;
-      EnsureUserAgentShadowRoot();
+      EnsureUserAgentShadowRootV1();
     }
     LazyReattachIfAttached();
   }

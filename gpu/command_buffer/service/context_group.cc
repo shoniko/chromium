@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
+#include "gpu/command_buffer/service/decoder_context.h"
 #include "gpu/command_buffer/service/framebuffer_manager.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_passthrough.h"
 #include "gpu/command_buffer/service/gpu_preferences.h"
@@ -126,7 +127,7 @@ ContextGroup::ContextGroup(
 }
 
 gpu::ContextResult ContextGroup::Initialize(
-    GLES2Decoder* decoder,
+    DecoderContext* decoder,
     ContextType context_type,
     const DisallowedFeatures& disallowed_features) {
   switch (context_type) {
@@ -181,8 +182,8 @@ gpu::ContextResult ContextGroup::Initialize(
   GLint max_samples = 0;
   if (feature_info_->feature_flags().chromium_framebuffer_multisample ||
       feature_info_->feature_flags().multisampled_render_to_texture) {
-    if (feature_info_->feature_flags(
-            ).use_img_for_multisampled_render_to_texture) {
+    if (feature_info_->feature_flags()
+            .use_img_for_multisampled_render_to_texture) {
       glGetIntegerv(GL_MAX_SAMPLES_IMG, &max_samples);
     } else {
       glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
@@ -527,7 +528,7 @@ gpu::ContextResult ContextGroup::Initialize(
 
 namespace {
 
-bool IsNull(const base::WeakPtr<gles2::GLES2Decoder>& decoder) {
+bool IsNull(const base::WeakPtr<DecoderContext>& decoder) {
   return !decoder;
 }
 
@@ -557,9 +558,9 @@ void ContextGroup::ReportProgress() {
     progress_reporter_->ReportProgress();
 }
 
-void ContextGroup::Destroy(GLES2Decoder* decoder, bool have_context) {
+void ContextGroup::Destroy(DecoderContext* decoder, bool have_context) {
   decoders_.erase(std::remove_if(decoders_.begin(), decoders_.end(),
-                                 WeakPtrEquals<gles2::GLES2Decoder>(decoder)),
+                                 WeakPtrEquals<DecoderContext>(decoder)),
                   decoders_.end());
   // If we still have contexts do nothing.
   if (HaveContexts()) {
@@ -582,7 +583,9 @@ void ContextGroup::Destroy(GLES2Decoder* decoder, bool have_context) {
   }
 
   if (texture_manager_ != NULL) {
-    texture_manager_->Destroy(have_context);
+    if (!have_context)
+      texture_manager_->MarkContextLost();
+    texture_manager_->Destroy();
     texture_manager_.reset();
     ReportProgress();
   }

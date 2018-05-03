@@ -28,10 +28,13 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
+#include "content/public/test/url_loader_interceptor.h"
 #include "net/base/net_errors.h"
 #include "net/dns/dns_test_util.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/url_request/url_request_failed_job.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/url_request/url_request_filter.h"
@@ -478,6 +481,10 @@ class DnsProbeBrowserTest : public InProcessBrowserTest {
   bool awaiting_dns_probe_status_;
   // Queue of statuses received but not yet consumed by WaitForSentStatus().
   std::list<DnsProbeStatus> dns_probe_status_queue_;
+
+  // Implements handling of http(s)://mock.failed.request for network service
+  // that URLRequestFailedJob does.
+  std::unique_ptr<content::URLLoaderInterceptor> url_loader_interceptor_;
 };
 
 DnsProbeBrowserTest::DnsProbeBrowserTest()
@@ -504,6 +511,16 @@ void DnsProbeBrowserTest::SetUpOnMainThread() {
       BindOnce(&DnsProbeBrowserTestIOThreadHelper::SetUpOnIOThread,
                Unretained(helper_), g_browser_process->io_thread()));
 
+  if (base::FeatureList::IsEnabled(features::kNetworkService)) {
+    // Just instantiating this helper is enough to respond to
+    // http(s)://mock.failed.request requests.
+    url_loader_interceptor_ =
+        std::make_unique<content::URLLoaderInterceptor>(base::BindRepeating(
+            [](content::URLLoaderInterceptor::RequestParams* params) {
+              return false;
+            }));
+  }
+
   SetActiveBrowser(browser());
 }
 
@@ -513,6 +530,8 @@ void DnsProbeBrowserTest::TearDownOnMainThread() {
       BindOnce(
           &DnsProbeBrowserTestIOThreadHelper::CleanUpOnIOThreadAndDeleteHelper,
           Unretained(helper_)));
+
+  url_loader_interceptor_.reset();
 
   NetErrorTabHelper::set_state_for_testing(
       NetErrorTabHelper::TESTING_DEFAULT);
@@ -887,8 +906,10 @@ IN_PROC_BROWSER_TEST_F(DnsProbeBrowserTest, CorrectionsLoadStoppedSlowProbe) {
 IN_PROC_BROWSER_TEST_F(DnsProbeBrowserTest, NoProbeInSubframe) {
   SetCorrectionServiceBroken(false);
 
+  ASSERT_TRUE(embedded_test_server()->Start());
+
   NavigateToURL(browser(),
-                URLRequestMockHTTPJob::GetMockUrl("iframe_dns_error.html"));
+                embedded_test_server()->GetURL("/iframe_dns_error.html"));
 
   // By the time NavigateToURL returns, the browser will have seen the failed
   // provisional load.  If a probe was started (or considered but not run),

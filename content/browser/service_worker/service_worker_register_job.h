@@ -15,15 +15,11 @@
 #include "content/browser/service_worker/service_worker_register_job_base.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/common/service_worker/service_worker_status_code.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_event_status.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
-
-namespace {
-class InstallEventMethodsReceiver;
-}  // namespace
 
 // Handles the initial registration of a Service Worker and the
 // subsequent update of existing registrations.
@@ -63,10 +59,7 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
 
   // Registers a callback to be called when the promise would resolve (whether
   // successfully or not). Multiple callbacks may be registered.
-  // If |provider_host| is not NULL, its process will be regarded as a candidate
-  // process to run the worker.
-  void AddCallback(const RegistrationCallback& callback,
-                   ServiceWorkerProviderHost* provider_host);
+  void AddCallback(const RegistrationCallback& callback);
 
   // ServiceWorkerRegisterJobBase implementation:
   void Start() override;
@@ -125,10 +118,9 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   void OnStartWorkerFinished(ServiceWorkerStatusCode status);
   void OnStoreRegistrationComplete(ServiceWorkerStatusCode status);
   void InstallAndContinue();
-  void DispatchInstallEvent();
+  void DispatchInstallEvent(ServiceWorkerStatusCode start_worker_status);
   void OnInstallFinished(
       int request_id,
-      std::unique_ptr<InstallEventMethodsReceiver> install_event_methods,
       blink::mojom::ServiceWorkerEventStatus event_status,
       bool has_fetch_handler,
       base::Time dispatch_event_time);

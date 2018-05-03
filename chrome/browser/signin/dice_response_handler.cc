@@ -13,6 +13,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
@@ -20,13 +21,14 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
+#include "components/signin/core/browser/about_signin_internals.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_metrics.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -38,12 +40,14 @@ namespace {
 // The UMA histograms that logs events related to Dice responses.
 const char kDiceResponseHeaderHistogram[] = "Signin.DiceResponseHeader";
 const char kDiceTokenFetchResultHistogram[] = "Signin.DiceTokenFetchResult";
+const char kChromePrimaryAccountStateOnWebSignoutHistogram[] =
+    "Signin.ChromePrimaryAccountStateOnWebSignout";
 
 // Used for UMA. Do not reorder, append new values at the end.
 enum DiceResponseHeader {
   // Received a signin header.
   kSignin = 0,
-  // Received a signout header including the primary account.
+  // Received a signout header including the Chrome primary account.
   kSignoutPrimary = 1,
   // Received a signout header for other account(s).
   kSignoutSecondary = 2,
@@ -66,6 +70,21 @@ enum DiceTokenFetchResult {
   kDiceTokenFetchResultCount
 };
 
+// Used for UMA. Do not reorder, append new values at the end.
+enum ChromePrimaryAccountStateInGaiaCookies {
+  // The user is not authenticated in Chrome.
+  kNoChromePrimaryAccount = 0,
+  // The user is authenticated in Chrome with the first Gaia account.
+  kChromePrimaryAccountIsFirstGaiaAccount = 1,
+  // The user is authenticated in Chrome with another Gaia account.
+  kChromePrimaryAccountIsSecondaryGaiaAccount = 2,
+  // The user is authenticated in Chrome with an account that is not in Gaia
+  // cookies.
+  kChromePrimaryAccountIsNotInGaiaAccounts = 3,
+
+  kChromePrimaryAccountStateInGaiaCookiesCount
+};
+
 class DiceResponseHandlerFactory : public BrowserContextKeyedServiceFactory {
  public:
   // Returns an instance of the factory singleton.
@@ -85,6 +104,7 @@ class DiceResponseHandlerFactory : public BrowserContextKeyedServiceFactory {
       : BrowserContextKeyedServiceFactory(
             "DiceResponseHandler",
             BrowserContextDependencyManager::GetInstance()) {
+    DependsOn(AboutSigninInternalsFactory::GetInstance());
     DependsOn(AccountReconcilorFactory::GetInstance());
     DependsOn(AccountTrackerServiceFactory::GetInstance());
     DependsOn(ChromeSigninClientFactory::GetInstance());
@@ -106,7 +126,8 @@ class DiceResponseHandlerFactory : public BrowserContextKeyedServiceFactory {
         SigninManagerFactory::GetForProfile(profile),
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
         AccountTrackerServiceFactory::GetForProfile(profile),
-        AccountReconcilorFactory::GetForProfile(profile));
+        AccountReconcilorFactory::GetForProfile(profile),
+        AboutSigninInternalsFactory::GetForProfile(profile));
   }
 };
 
@@ -123,6 +144,12 @@ void RecordDiceFetchTokenResult(DiceTokenFetchResult result) {
                             kDiceTokenFetchResultCount);
 }
 
+void RecordGaiaSignoutMetrics(ChromePrimaryAccountStateInGaiaCookies state) {
+  UMA_HISTOGRAM_ENUMERATION(kChromePrimaryAccountStateOnWebSignoutHistogram,
+                            state,
+                            kChromePrimaryAccountStateInGaiaCookiesCount);
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -135,18 +162,23 @@ DiceResponseHandler::DiceTokenFetcher::DiceTokenFetcher(
     const std::string& authorization_code,
     SigninClient* signin_client,
     AccountReconcilor* account_reconcilor,
-    std::unique_ptr<ProcessDiceHeaderObserver> observer,
+    std::unique_ptr<ProcessDiceHeaderDelegate> delegate,
     DiceResponseHandler* dice_response_handler)
     : gaia_id_(gaia_id),
       email_(email),
       authorization_code_(authorization_code),
-      observer_(std::move(observer)),
+      delegate_(std::move(delegate)),
       dice_response_handler_(dice_response_handler),
       timeout_closure_(
           base::Bind(&DiceResponseHandler::DiceTokenFetcher::OnTimeout,
                      base::Unretained(this))) {
   DCHECK(dice_response_handler_);
-  if (signin::IsDiceMigrationEnabled()) {
+  // When DICE migration is enabled, Chrome is not using the Gaia chrome sync
+  // endpoint when the user is signing in to Chrome. So the delegate must be
+  // asked to start syncing as soon as the refresh token is received.
+  should_enable_sync_ = signin::GetAccountConsistencyMethod() ==
+                        signin::AccountConsistencyMethod::kDicePrepareMigration;
+  if (signin::IsDicePrepareMigrationEnabled()) {
     account_reconcilor_lock_ =
         base::MakeUnique<AccountReconcilor::Lock>(account_reconcilor);
   }
@@ -176,8 +208,7 @@ void DiceResponseHandler::DiceTokenFetcher::OnClientOAuthSuccess(
   RecordDiceFetchTokenResult(kFetchSuccess);
   gaia_auth_fetcher_.reset();
   timeout_closure_.Cancel();
-  dice_response_handler_->OnTokenExchangeSuccess(
-      this, gaia_id_, email_, result.refresh_token, std::move(observer_));
+  dice_response_handler_->OnTokenExchangeSuccess(this, result.refresh_token);
   // |this| may be deleted at this point.
 }
 
@@ -204,41 +235,48 @@ DiceResponseHandler::DiceResponseHandler(
     SigninManager* signin_manager,
     ProfileOAuth2TokenService* profile_oauth2_token_service,
     AccountTrackerService* account_tracker_service,
-    AccountReconcilor* account_reconcilor)
+    AccountReconcilor* account_reconcilor,
+    AboutSigninInternals* about_signin_internals)
     : signin_manager_(signin_manager),
       signin_client_(signin_client),
       token_service_(profile_oauth2_token_service),
       account_tracker_service_(account_tracker_service),
-      account_reconcilor_(account_reconcilor) {
+      account_reconcilor_(account_reconcilor),
+      about_signin_internals_(about_signin_internals) {
   DCHECK(signin_client_);
   DCHECK(signin_manager_);
   DCHECK(token_service_);
   DCHECK(account_tracker_service_);
   DCHECK(account_reconcilor_);
+  DCHECK(about_signin_internals_);
 }
 
 DiceResponseHandler::~DiceResponseHandler() {}
 
 void DiceResponseHandler::ProcessDiceHeader(
     const signin::DiceResponseParams& dice_params,
-    std::unique_ptr<ProcessDiceHeaderObserver> observer) {
+    std::unique_ptr<ProcessDiceHeaderDelegate> delegate) {
   DCHECK(signin::IsDiceFixAuthErrorsEnabled());
-  DCHECK(observer);
+  DCHECK(delegate);
   switch (dice_params.user_intention) {
-    case signin::DiceAction::SIGNIN:
-      ProcessDiceSigninHeader(
-          dice_params.signin_info.gaia_id, dice_params.signin_info.email,
-          dice_params.signin_info.authorization_code, std::move(observer));
-      return;
-    case signin::DiceAction::SIGNOUT: {
-      const signin::DiceResponseParams::SignoutInfo& signout_info =
-          dice_params.signout_info;
-      DCHECK_GT(signout_info.gaia_id.size(), 0u);
-      DCHECK_EQ(signout_info.gaia_id.size(), signout_info.email.size());
-      DCHECK_EQ(signout_info.gaia_id.size(), signout_info.session_index.size());
-      ProcessDiceSignoutHeader(signout_info.gaia_id, signout_info.email);
+    case signin::DiceAction::SIGNIN: {
+      const signin::DiceResponseParams::AccountInfo& info =
+          dice_params.signin_info->account_info;
+      ProcessDiceSigninHeader(info.gaia_id, info.email,
+                              dice_params.signin_info->authorization_code,
+                              std::move(delegate));
       return;
     }
+    case signin::DiceAction::ENABLE_SYNC: {
+      const signin::DiceResponseParams::AccountInfo& info =
+          dice_params.enable_sync_info->account_info;
+      ProcessEnableSyncHeader(info.gaia_id, info.email, std::move(delegate));
+      return;
+    }
+    case signin::DiceAction::SIGNOUT:
+      DCHECK_GT(dice_params.signout_info->account_infos.size(), 0u);
+      ProcessDiceSignoutHeader(dice_params.signout_info->account_infos);
+      return;
     case signin::DiceAction::NONE:
       NOTREACHED() << "Invalid Dice response parameters.";
       return;
@@ -252,7 +290,7 @@ size_t DiceResponseHandler::GetPendingDiceTokenFetchersCountForTesting() const {
 
 bool DiceResponseHandler::CanGetTokenForAccount(const std::string& gaia_id,
                                                 const std::string& email) {
-  if (signin::IsDiceMigrationEnabled())
+  if (signin::IsDicePrepareMigrationEnabled())
     return true;
 
   // When using kDiceFixAuthErrors, only get a token if the account matches
@@ -272,7 +310,7 @@ void DiceResponseHandler::ProcessDiceSigninHeader(
     const std::string& gaia_id,
     const std::string& email,
     const std::string& authorization_code,
-    std::unique_ptr<ProcessDiceHeaderObserver> observer) {
+    std::unique_ptr<ProcessDiceHeaderDelegate> delegate) {
   DCHECK(!gaia_id.empty());
   DCHECK(!email.empty());
   DCHECK(!authorization_code.empty());
@@ -291,18 +329,36 @@ void DiceResponseHandler::ProcessDiceSigninHeader(
       return;  // There is already a request in flight with the same parameters.
     }
   }
-  observer->WillStartRefreshTokenFetch(gaia_id, email);
   token_fetchers_.push_back(base::MakeUnique<DiceTokenFetcher>(
       gaia_id, email, authorization_code, signin_client_, account_reconcilor_,
-      std::move(observer), this));
+      std::move(delegate), this));
+}
+
+void DiceResponseHandler::ProcessEnableSyncHeader(
+    const std::string& gaia_id,
+    const std::string& email,
+    std::unique_ptr<ProcessDiceHeaderDelegate> delegate) {
+  VLOG(1) << "Start processing Dice enable sync response";
+  for (auto it = token_fetchers_.begin(); it != token_fetchers_.end(); ++it) {
+    DiceTokenFetcher* fetcher = it->get();
+    if (fetcher->gaia_id() == gaia_id) {
+      DCHECK_EQ(fetcher->email(), email);
+      // If there is a fetch in progress for a resfresh token for the given
+      // account, then simply mark it to enable sync after the refresh token is
+      // available.
+      fetcher->set_should_enable_sync(true);
+      return;  // There is already a request in flight with the same parameters.
+    }
+  }
+  std::string account_id =
+      account_tracker_service_->PickAccountIdForAccount(gaia_id, email);
+  delegate->EnableSync(account_id);
 }
 
 void DiceResponseHandler::ProcessDiceSignoutHeader(
-    const std::vector<std::string>& gaia_ids,
-    const std::vector<std::string>& emails) {
-  DCHECK_EQ(gaia_ids.size(), emails.size());
+    const std::vector<signin::DiceResponseParams::AccountInfo>& account_infos) {
   VLOG(1) << "Start processing Dice signout response";
-  if (!signin::IsDiceMigrationEnabled()) {
+  if (!signin::IsDicePrepareMigrationEnabled()) {
     // Ignore signout responses when using kDiceFixAuthErrors.
     DCHECK_EQ(signin::AccountConsistencyMethod::kDiceFixAuthErrors,
               signin::GetAccountConsistencyMethod());
@@ -311,13 +367,24 @@ void DiceResponseHandler::ProcessDiceSignoutHeader(
 
   // If one of the signed out accounts is the main Chrome account, then force a
   // complete signout. Otherwise simply revoke the corresponding tokens.
-  std::string current_account = signin_manager_->GetAuthenticatedAccountId();
-  std::vector<std::string> signed_out_accounts;
-  for (unsigned int i = 0; i < gaia_ids.size(); ++i) {
+  std::string primary_account = signin_manager_->GetAuthenticatedAccountId();
+  std::vector<std::string> accounts_to_revoke;
+  for (const auto& account_info : account_infos) {
     std::string signed_out_account =
-        account_tracker_service_->PickAccountIdForAccount(gaia_ids[i],
-                                                          emails[i]);
-    if (signed_out_account == current_account) {
+        account_tracker_service_->PickAccountIdForAccount(account_info.gaia_id,
+                                                          account_info.email);
+    if (signed_out_account == primary_account) {
+      RecordDiceResponseHeader(kSignoutPrimary);
+      RecordGaiaSignoutMetrics(
+          (account_info.session_index == 0)
+              ? kChromePrimaryAccountIsFirstGaiaAccount
+              : kChromePrimaryAccountIsSecondaryGaiaAccount);
+
+      // If Dice migration is not complete, the token for the main account must
+      // not be deleted when signing out of the web.
+      if (!signin::IsDiceEnabledForProfile(signin_client_->GetPrefs()))
+        continue;
+
       VLOG(1) << "[Dice] Signing out all accounts.";
       RecordDiceResponseHeader(kSignoutPrimary);
       signin_manager_->SignOutAndRemoveAllAccounts(
@@ -327,12 +394,19 @@ void DiceResponseHandler::ProcessDiceSignoutHeader(
       token_fetchers_.clear();
       return;
     } else {
-      signed_out_accounts.push_back(signed_out_account);
+      accounts_to_revoke.push_back(signed_out_account);
     }
   }
 
-  RecordDiceResponseHeader(kSignoutSecondary);
-  for (const auto& account : signed_out_accounts) {
+  if (signin::IsDiceEnabledForProfile(signin_client_->GetPrefs()) ||
+      accounts_to_revoke.size() == account_infos.size()) {
+    RecordDiceResponseHeader(kSignoutSecondary);
+    RecordGaiaSignoutMetrics(primary_account.empty()
+                                 ? kNoChromePrimaryAccount
+                                 : kChromePrimaryAccountIsNotInGaiaAccounts);
+  }
+
+  for (const auto& account : accounts_to_revoke) {
     VLOG(1) << "[Dice]: Revoking token for account: " << account;
     token_service_->RevokeCredentials(account);
     // If a token fetch is in flight for the same account, cancel it.
@@ -360,27 +434,34 @@ void DiceResponseHandler::DeleteTokenFetcher(DiceTokenFetcher* token_fetcher) {
 
 void DiceResponseHandler::OnTokenExchangeSuccess(
     DiceTokenFetcher* token_fetcher,
-    std::string gaia_id,
-    std::string email,
-    std::string refresh_token,
-    std::unique_ptr<ProcessDiceHeaderObserver> observer) {
+    const std::string& refresh_token) {
+  const std::string& email = token_fetcher->email();
+  const std::string& gaia_id = token_fetcher->gaia_id();
   if (!CanGetTokenForAccount(gaia_id, email))
     return;
-
+  VLOG(1) << "[Dice] OAuth success for email " << email;
+  bool should_enable_sync = token_fetcher->should_enable_sync();
   std::string account_id =
       account_tracker_service_->SeedAccountInfo(gaia_id, email);
-  VLOG(1) << "[Dice] OAuth success for account: " << account_id;
-  DeleteTokenFetcher(token_fetcher);
-
-  // Store the new account and start sync if needed.
   token_service_->UpdateCredentials(account_id, refresh_token);
-  observer->DidFinishRefreshTokenFetch(gaia_id, email);
+  about_signin_internals_->OnRefreshTokenReceived(
+      base::StringPrintf("Successful (%s)", account_id.c_str()));
+  if (should_enable_sync)
+    token_fetcher->delegate()->EnableSync(account_id);
+
+  DeleteTokenFetcher(token_fetcher);
 }
 
 void DiceResponseHandler::OnTokenExchangeFailure(
     DiceTokenFetcher* token_fetcher,
     const GoogleServiceAuthError& error) {
-  // TODO(droger): Handle authentication errors.
-  VLOG(1) << "[Dice] OAuth failed with error: " << error.ToString();
+  const std::string& email = token_fetcher->email();
+  const std::string& gaia_id = token_fetcher->gaia_id();
+  std::string account_id =
+      account_tracker_service_->PickAccountIdForAccount(gaia_id, email);
+  about_signin_internals_->OnRefreshTokenReceived(
+      base::StringPrintf("Failure (%s)", account_id.c_str()));
+  token_fetcher->delegate()->HandleTokenExchangeFailure(email, error);
+
   DeleteTokenFetcher(token_fetcher);
 }

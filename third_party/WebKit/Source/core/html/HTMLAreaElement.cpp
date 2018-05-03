@@ -53,7 +53,7 @@ inline HTMLAreaElement::HTMLAreaElement(Document& document)
 // HTMLAreaElement.h, when including HTMLAreaElement.h, msvc tries to expand
 // the destructor and causes a compile error because of lack of blink::Path
 // definition.
-HTMLAreaElement::~HTMLAreaElement() {}
+HTMLAreaElement::~HTMLAreaElement() = default;
 
 DEFINE_NODE_FACTORY(HTMLAreaElement)
 
@@ -166,7 +166,7 @@ Path HTMLAreaElement::GetPath(const LayoutObject* container_object) const {
     }
 
     // Cache the original path, not depending on containerObject.
-    path_ = WTF::MakeUnique<Path>(path);
+    path_ = std::make_unique<Path>(path);
   }
 
   // Zoom the path into coordinates of the container object.
@@ -210,7 +210,7 @@ void HTMLAreaElement::SetFocused(bool should_be_focused,
 
   HTMLAnchorElement::SetFocused(should_be_focused, focus_type);
 
-  HTMLImageElement* image_element = this->ImageElement();
+  HTMLImageElement* image_element = ImageElement();
   if (!image_element)
     return;
 
@@ -221,14 +221,17 @@ void HTMLAreaElement::SetFocused(bool should_be_focused,
   ToLayoutImage(layout_object)->AreaElementFocusChanged(this);
 }
 
-void HTMLAreaElement::UpdateFocusAppearance(
-    SelectionBehaviorOnFocus selection_behavior) {
+void HTMLAreaElement::UpdateFocusAppearanceWithOptions(
+    SelectionBehaviorOnFocus selection_behavior,
+    const FocusOptions& options) {
   GetDocument().UpdateStyleAndLayoutTreeForNode(this);
   if (!IsFocusable())
     return;
 
-  if (HTMLImageElement* image_element = this->ImageElement())
-    image_element->UpdateFocusAppearance(selection_behavior);
+  if (HTMLImageElement* image_element = ImageElement()) {
+    image_element->UpdateFocusAppearanceWithOptions(selection_behavior,
+                                                    options);
+  }
 }
 
 }  // namespace blink

@@ -12,9 +12,11 @@
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/layer_observer.h"
 
+namespace ui {
+
 namespace {
 
-const int kDefaultTransitionDurationMs = 200;
+const int kScopedLayerAnimationDefaultTransitionDurationMs = 200;
 
 template <typename Trait>
 class ScopedLayerAnimationObserver : public ui::ImplicitAnimationObserver,
@@ -104,8 +106,6 @@ void AddScopedDeferredPaintingObserverRecursive(
 
 }  // namespace
 
-namespace ui {
-
 // ScopedLayerAnimationSettings ------------------------------------------------
 ScopedLayerAnimationSettings::ScopedLayerAnimationSettings(
     scoped_refptr<LayerAnimator> animator)
@@ -115,8 +115,8 @@ ScopedLayerAnimationSettings::ScopedLayerAnimationSettings(
       old_transition_duration_(animator->GetTransitionDuration()),
       old_tween_type_(animator->tween_type()),
       old_preemption_strategy_(animator->preemption_strategy()) {
-  SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(kDefaultTransitionDurationMs));
+  SetTransitionDuration(base::TimeDelta::FromMilliseconds(
+      kScopedLayerAnimationDefaultTransitionDurationMs));
 }
 
 ScopedLayerAnimationSettings::~ScopedLayerAnimationSettings() {
@@ -127,10 +127,13 @@ ScopedLayerAnimationSettings::~ScopedLayerAnimationSettings() {
   animator_->set_tween_type(old_tween_type_);
   animator_->set_preemption_strategy(old_preemption_strategy_);
 
-  for (std::set<ImplicitAnimationObserver*>::const_iterator i =
-       observers_.begin(); i != observers_.end(); ++i) {
-    animator_->observers_.RemoveObserver(*i);
-    (*i)->SetActive(true);
+  for (auto* observer : observers_) {
+    // Directly remove |observer| from |LayerAnimator::observers_| rather than
+    // calling LayerAnimator::RemoveObserver(), to avoid removing it from the
+    // observer list of LayerAnimationSequences that have already been
+    // scheduled.
+    animator_->observers_.RemoveObserver(observer);
+    observer->SetActive(true);
   }
 }
 

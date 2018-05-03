@@ -15,6 +15,7 @@
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
 #include "cc/paint/paint_record.h"
+#include "cc/paint/paint_text_blob.h"
 #include "third_party/skia/include/utils/SkNoDrawCanvas.h"
 
 namespace cc {
@@ -88,7 +89,7 @@ class CC_PAINT_EXPORT RecordPaintCanvas final : public PaintCanvas {
                   SkScalar top,
                   const PaintFlags* flags) override;
 
-  void drawTextBlob(sk_sp<SkTextBlob> blob,
+  void drawTextBlob(scoped_refptr<PaintTextBlob> blob,
                     SkScalar x,
                     SkScalar y,
                     const PaintFlags& flags) override;
@@ -102,6 +103,7 @@ class CC_PAINT_EXPORT RecordPaintCanvas final : public PaintCanvas {
   void Annotate(AnnotationType type,
                 const SkRect& rect,
                 sk_sp<SkData> data) override;
+  void recordCustomData(uint32_t id) override;
 
   // Don't shadow non-virtual helper functions.
   using PaintCanvas::clipRect;
@@ -115,6 +117,8 @@ class CC_PAINT_EXPORT RecordPaintCanvas final : public PaintCanvas {
  private:
   const SkNoDrawCanvas* GetCanvas() const;
   SkNoDrawCanvas* GetCanvas();
+
+  bool InitializedWithRecordingBounds() const;
 
   DisplayItemList* list_;
 

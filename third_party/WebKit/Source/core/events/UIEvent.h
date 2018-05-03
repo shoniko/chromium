@@ -26,7 +26,6 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/events/Event.h"
-#include "core/dom/events/EventDispatchMediator.h"
 #include "core/events/UIEventInit.h"
 #include "core/frame/DOMWindow.h"
 
@@ -88,7 +87,7 @@ class CORE_EXPORT UIEvent : public Event {
           const UIEventInit&,
           TimeTicks platform_time_stamp);
   UIEvent(const AtomicString& type, const UIEventInit& init)
-      : UIEvent(type, init, TimeTicks::Now()) {}
+      : UIEvent(type, init, CurrentTimeTicks()) {}
 
  private:
   Member<AbstractView> view_;

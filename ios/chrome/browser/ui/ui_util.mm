@@ -9,7 +9,9 @@
 
 #include "base/feature_list.h"
 #include "base/logging.h"
-#import "ios/chrome/browser/ui/toolbar/toolbar_controller_base_feature.h"
+#include "ios/chrome/app/tests_hook.h"
+#import "ios/chrome/browser/ui/toolbar/public/toolbar_controller_base_feature.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_private_base_feature.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ui/base/device_form_factor.h"
 #include "ui/gfx/ios/uikit_util.h"
@@ -33,14 +35,8 @@ bool IsHighResScreen() {
 
 bool IsPortrait() {
   UIInterfaceOrientation orient = GetInterfaceOrientation();
-// If building with an SDK prior to iOS 8 don't worry about
-// UIInterfaceOrientationUnknown because it wasn't defined.
-#if !defined(__IPHONE_8_0) || __IPHONE_OS_VERSION_MAX_ALLOWED < __IPHONE_8_0
-  return UIInterfaceOrientationIsPortrait(orient);
-#else
   return UIInterfaceOrientationIsPortrait(orient) ||
          orient == UIInterfaceOrientationUnknown;
-#endif  // SDK
 }
 
 bool IsLandscape() {
@@ -61,14 +57,25 @@ bool IsIPhoneX() {
           CGRectGetHeight([[UIScreen mainScreen] nativeBounds]) == 2436);
 }
 
+bool IsAdaptiveToolbarEnabled() {
+  if (tests_hook::ForceAdaptiveToolbar())
+    return true;
+  return base::FeatureList::IsEnabled(kAdaptiveToolbar);
+}
+
+bool IsSafeAreaCompatibleToolbarEnabled() {
+  return (IsIPhoneX() &&
+          base::FeatureList::IsEnabled(kSafeAreaCompatibleToolbar)) ||
+         base::FeatureList::IsEnabled(kCleanToolbar);
+}
+
 CGFloat StatusBarHeight() {
   // This is a temporary solution until usage of StatusBarHeight has been
   // replaced with topLayoutGuide.
 
   if (IsIPhoneX()) {
-    if (base::FeatureList::IsEnabled(kSafeAreaCompatibleToolbar)) {
-      CGRect statusBarFrame = [UIApplication sharedApplication].statusBarFrame;
-      return CGRectGetHeight(statusBarFrame);
+    if (IsSafeAreaCompatibleToolbarEnabled()) {
+      return IsPortrait() ? 44 : 0;
     } else {
       // Return the height of the portrait status bar even in landscape because
       // the Toolbar does not properly layout itself if the status bar height

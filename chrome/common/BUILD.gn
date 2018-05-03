@@ -34,15 +34,15 @@ buildflag_header("features") {
   header = "features.h"
   flags = [
     "ENABLE_APP_LIST=$enable_app_list",
-    "ENABLE_BACKGROUND=$enable_background",
+    "ENABLE_BACKGROUND_MODE=$enable_background_mode",
+    "ENABLE_BACKGROUND_CONTENTS=$enable_background_contents",
     "ENABLE_BASIC_PRINT_DIALOG=$enable_basic_print_dialog",
     "ENABLE_CAPTIVE_PORTAL_DETECTION=$enable_captive_portal_detection",
+    "ENABLE_DOWNLOADABLE_STRINGS=$enable_downloadable_strings",
     "ENABLE_GOOGLE_NOW=$enable_google_now",
     "ENABLE_HANGOUT_SERVICES_EXTENSION=$enable_hangout_services_extension",
     "ENABLE_ONE_CLICK_SIGNIN=$enable_one_click_signin",
     "ENABLE_NATIVE_NOTIFICATIONS=$enable_native_notifications",
-    "ENABLE_NATIVE_WINDOW_NAV_BUTTONS=$enable_native_window_nav_buttons",
-    "ENABLE_PACKAGE_MASH_SERVICES=$enable_package_mash_services",
     "ENABLE_SERVICE_DISCOVERY=$enable_service_discovery",
     "ENABLE_SESSION_SERVICE=$enable_session_service",
     "ENABLE_SUPERVISED_USERS=$enable_supervised_users",
@@ -103,6 +103,7 @@ static_library("common") {
     "attrition_experiments.h",
     "auto_start_linux.cc",
     "auto_start_linux.h",
+    "browser_controls_state_param_traits.h",
     "child_process_logging.h",
     "child_process_logging_win.cc",
     "chrome_content_client.cc",
@@ -156,13 +157,16 @@ static_library("common") {
     "page_load_metrics/page_track_decider.h",
     "partial_circular_buffer.cc",
     "partial_circular_buffer.h",
-    "pause_tabs_field_trial.h",
     "pdf_uma.cc",
     "pdf_uma.h",
     "pref_names_util.cc",
     "pref_names_util.h",
     "prerender_messages.h",
     "prerender_types.h",
+    "prerender_url_loader_throttle.cc",
+    "prerender_url_loader_throttle.h",
+    "prerender_util.cc",
+    "prerender_util.h",
     "profiling.cc",
     "profiling.h",
     "ref_counted_util.h",
@@ -172,16 +176,12 @@ static_library("common") {
     "search/instant_types.cc",
     "search/instant_types.h",
     "search/ntp_logging_events.h",
-    "search/search_urls.cc",
-    "search/search_urls.h",
     "secure_origin_whitelist.cc",
     "secure_origin_whitelist.h",
     "ssl_insecure_content.cc",
     "ssl_insecure_content.h",
     "stack_sampling_configuration.cc",
     "stack_sampling_configuration.h",
-    "switch_utils.cc",
-    "switch_utils.h",
     "trace_event_args_whitelist.cc",
     "trace_event_args_whitelist.h",
     "tts_messages.h",
@@ -191,6 +191,7 @@ static_library("common") {
     "url_constants.h",
     "web_application_info.cc",
     "web_application_info.h",
+    "web_application_info_provider_param_traits.h",
     "webui_url_constants.cc",
     "webui_url_constants.h",
   ]
@@ -216,9 +217,7 @@ static_library("common") {
     "//chrome:strings",
     "//chrome/app/theme:theme_resources",
     "//chrome/common:constants",
-    "//chrome/common/media_router/mojo:dial_utility_interfaces",
     "//chrome/common/net",
-    "//chrome/common/printing:interfaces",
     "//chrome/common/profiling",
     "//chrome/installer/util:with_no_strings",
     "//components/cast_certificate",
@@ -260,7 +259,6 @@ static_library("common") {
     "//google_apis",
     "//gpu/command_buffer/service",
     "//gpu/config",
-    "//gpu/config:crash_keys",
     "//ipc",
     "//media",
     "//mojo/edk/system",
@@ -328,8 +326,6 @@ static_library("common") {
       "extensions/extension_constants.h",
       "extensions/extension_metrics.cc",
       "extensions/extension_metrics.h",
-      "extensions/extension_process_policy.cc",
-      "extensions/extension_process_policy.h",
       "extensions/image_writer/image_writer_util_mac.cc",
       "extensions/image_writer/image_writer_util_mac.h",
       "extensions/manifest_handlers/app_icon_color_info.cc",
@@ -413,8 +409,7 @@ static_library("common") {
       "//components/printing/common",
       "//printing",
     ]
-    if (enable_print_preview) {
-      # Full printing support.
+    if (enable_print_preview && !is_chromeos) {
       sources += [
         "service_process_util.cc",
         "service_process_util.h",
@@ -566,6 +561,7 @@ static_library("constants") {
     "//extensions/features",
     "//printing/features",
     "//rlz/features",
+    "//ui/base:ui_features",
   ]
   deps = [
     ":channel_info",
@@ -668,8 +664,7 @@ mojom("mojo_bindings") {
     "cache_stats_recorder.mojom",
     "chrome_render_frame.mojom",
     "constants.mojom",
-    "file_patcher.mojom",
-    "insecure_content_renderer.mojom",
+    "content_settings_renderer.mojom",
     "navigation_corrector.mojom",
     "net_benchmarking.mojom",
     "network_diagnostics.mojom",
@@ -681,29 +676,28 @@ mojom("mojo_bindings") {
   ]
 
   if (is_win) {
-    sources += [
-      "conflicts/module_event_sink_win.mojom",
-      "shell_handler_win.mojom",
-    ]
-  }
-
-  if (is_chromeos) {
-    sources += [ "zip_file_creator.mojom" ]
-  }
-
-  if (safe_browsing_mode == 1) {
-    sources += [ "safe_browsing/safe_archive_analyzer.mojom" ]
+    sources += [ "conflicts/module_event_sink_win.mojom" ]
   }
 
   public_deps = [
     "//components/content_settings/core/common:mojo_bindings",
+    "//content/public/common:interfaces",
     "//mojo/common:common_custom_types",
     "//third_party/WebKit/public:mojo_bindings",
     "//ui/gfx/geometry/mojo",
     "//url/mojo:url_mojom_gurl",
+    "//url/mojo:url_mojom_origin",
   ]
 
-  overridden_deps = [ "//third_party/WebKit/public:mojo_bindings" ]
+  if (safe_browsing_mode == 1) {
+    public_deps += [ "//chrome/services/file_util/public/interfaces" ]
+  }
+
+  overridden_deps = [
+    "//third_party/WebKit/public:mojo_bindings",
+    "//content/public/common:interfaces",
+  ]
+
   component_deps = [ "//content/public/common" ]
 
   # TODO(crbug.com/714018): Convert the implementation to use OnceCallback.
@@ -744,12 +738,14 @@ mojom("client_hints_mojom") {
   ]
 }
 
-mojom("service_process_mojom") {
-  sources = [
-    "cloud_print.mojom",
-    "service_process.mojom",
-  ]
-  public_deps = [
-    "//mojo/common:common_custom_types",
-  ]
+if (enable_print_preview && !is_chromeos) {
+  mojom("service_process_mojom") {
+    sources = [
+      "cloud_print.mojom",
+      "service_process.mojom",
+    ]
+    public_deps = [
+      "//mojo/common:common_custom_types",
+    ]
+  }
 }

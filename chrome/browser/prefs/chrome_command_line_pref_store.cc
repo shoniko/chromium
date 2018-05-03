@@ -29,6 +29,7 @@
 #include "components/ssl_config/ssl_config_switches.h"
 #include "components/sync/base/pref_names.h"
 #include "content/public/common/content_switches.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/display/display_switches.h"
 
@@ -48,6 +49,12 @@ const CommandLinePrefStore::SwitchToPreferenceMapEntry
         {switches::kAuthAndroidNegotiateAccountType,
          prefs::kAuthAndroidNegotiateAccountType},
 #endif
+        {switches::kUnsafelyTreatInsecureOriginAsSecure,
+         prefs::kUnsafelyTreatInsecureOriginAsSecure},
+        // TODO(https://crbug.com/760761): This is not the ideal way to
+        // implement this. Refactor enterprise policy and command line handling
+        // so that this line isn't necessary, if possible.
+        {switches::kIsolateOrigins, prefs::kIsolateOrigins},
 };
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry
@@ -62,10 +69,8 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         {switches::kEnableCloudPrintProxy, prefs::kCloudPrintProxyEnabled,
          true},
         {switches::kAllowOutdatedPlugins, prefs::kPluginsAllowOutdated, true},
-        {switches::kAlwaysAuthorizePlugins, prefs::kPluginsAlwaysAuthorize,
-         true},
         {switches::kNoPings, prefs::kEnableHyperlinkAuditing, false},
-        {switches::kNoReferrers, prefs::kEnableReferrers, false},
+        {network::switches::kNoReferrers, prefs::kEnableReferrers, false},
         {switches::kAllowRunningInsecureContent,
          prefs::kWebKitAllowRunningInsecureContent, true},
         {switches::kAllowCrossOriginAuthPrompt,
@@ -86,6 +91,7 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         {switches::kUseSystemDefaultPrinter,
          prefs::kPrintPreviewUseSystemDefaultPrinter, true},
 #endif
+        {switches::kSitePerProcess, prefs::kSitePerProcess, true},
 };
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry

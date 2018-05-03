@@ -6,11 +6,12 @@
 
 #include <gtk/gtk.h>
 
+#include "chrome/browser/ui/libgtkui/gtk3_background_painter.h"
 #include "chrome/browser/ui/libgtkui/gtk_util.h"
 #include "ui/base/glib/scoped_gobject.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_source.h"
-#include "ui/views/resources/grit/views_resources.h"
+#include "ui/views/widget/widget.h"
 
 namespace libgtkui {
 
@@ -28,9 +29,8 @@ const char* ButtonStyleClassFromButtonType(
     case chrome::FrameButtonDisplayType::kMinimize:
       return "minimize";
     case chrome::FrameButtonDisplayType::kMaximize:
-      return "maximize";
     case chrome::FrameButtonDisplayType::kRestore:
-      return "restore";
+      return "maximize";
     case chrome::FrameButtonDisplayType::kClose:
       return "close";
     default:
@@ -128,17 +128,27 @@ gfx::Size GetMinimumWidgetSize(gfx::Size content_size,
   return widget_rect.size();
 }
 
+ScopedStyleContext CreateHeaderContext(bool maximized) {
+  std::string window_selector = "GtkWindow#window.background";
+  if (maximized)
+    window_selector += ".maximized";
+  return AppendCssNodeToStyleContext(
+      AppendCssNodeToStyleContext(nullptr, window_selector),
+      "GtkHeaderBar#headerbar.header-bar.titlebar");
+}
+
 void CalculateUnscaledButtonSize(chrome::FrameButtonDisplayType type,
+                                 bool maximized,
                                  gfx::Size* button_size,
                                  gfx::Insets* button_margin) {
   // views::ImageButton expects the images for each state to be of the
   // same size, but GTK can, in general, use a differnetly-sized
   // button for each state.  For this reason, render buttons for all
   // states at the size of a GTK_STATE_FLAG_NORMAL button.
-  auto button_context = GetStyleContextFromCss(
-      "GtkHeaderBar#headerbar.header-bar.titlebar "
+  auto button_context = AppendCssNodeToStyleContext(
+      CreateHeaderContext(maximized),
       "GtkButton#button.titlebutton." +
-      std::string(ButtonStyleClassFromButtonType(type)));
+          std::string(ButtonStyleClassFromButtonType(type)));
 
   ScopedGObject<GdkPixbuf> icon_pixbuf =
       LoadNavButtonIcon(type, button_context, 1);
@@ -156,14 +166,23 @@ void CalculateUnscaledButtonSize(chrome::FrameButtonDisplayType type,
       MarginFromStyleContext(button_context, GTK_STATE_FLAG_NORMAL);
 }
 
+ScopedStyleContext CreateAvatarButtonContext(GtkStyleContext* header_context) {
+  return AppendCssNodeToStyleContext(
+      header_context, GtkVersionCheck(3, 20)
+                          ? "GtkButton#button.image-button.toggle"
+                          : "GtkToggleButton#button.image-button");
+}
+
 class NavButtonImageSource : public gfx::ImageSkiaSource {
  public:
   NavButtonImageSource(chrome::FrameButtonDisplayType type,
                        views::Button::ButtonState state,
+                       bool maximized,
                        bool active,
                        gfx::Size button_size)
       : type_(type),
         state_(state),
+        maximized_(maximized),
         active_(active),
         button_size_(button_size) {}
 
@@ -174,9 +193,8 @@ class NavButtonImageSource : public gfx::ImageSkiaSource {
     // RenderNavButton() is called at most once for each needed scale
     // factor.  Additionally, buttons in the HOVERED or PRESSED states
     // are not actually rendered until they are needed.
-    auto button_context = GetStyleContextFromCss(
-        "GtkHeaderBar#headerbar.header-bar.titlebar "
-        "GtkButton#button.titlebutton");
+    auto button_context = AppendCssNodeToStyleContext(
+        CreateHeaderContext(maximized_), "GtkButton#button.titlebutton");
     gtk_style_context_add_class(button_context,
                                 ButtonStyleClassFromButtonType(type_));
     GtkStateFlags button_state = GtkStateFlagsFromButtonState(state_);
@@ -185,6 +203,18 @@ class NavButtonImageSource : public gfx::ImageSkiaSource {
           static_cast<GtkStateFlags>(button_state | GTK_STATE_FLAG_BACKDROP);
     }
     gtk_style_context_set_state(button_context, button_state);
+
+    // Gtk header bars usually have the same height in both maximized and
+    // restored windows.  But chrome's tabstrip background has a smaller height
+    // when maximized.  To prevent buttons from clipping outside of this region,
+    // they are scaled down.  However, this is problematic for themes that do
+    // not expect this case and use bitmaps for frame buttons (like the Breeze
+    // theme).  When the background-size is set to auto, the background bitmap
+    // is not scaled for the (unexpected) smaller button size, and the button's
+    // edges appear cut off.  To fix this, manually set the background to scale
+    // to the button size when it would have clipped.
+    ApplyCssToContext(button_context,
+                      ".titlebutton { background-size: contain; }");
 
     // Gtk doesn't support fractional scale factors, but chrome does.
     // Rendering the button background and border at a fractional
@@ -233,6 +263,7 @@ class NavButtonImageSource : public gfx::ImageSkiaSource {
  private:
   chrome::FrameButtonDisplayType type_;
   views::Button::ButtonState state_;
+  bool maximized_;
   bool active_;
   gfx::Size button_size_;
 };
@@ -246,15 +277,11 @@ NavButtonProviderGtk3::~NavButtonProviderGtk3() {}
 void NavButtonProviderGtk3::RedrawImages(int top_area_height,
                                          bool maximized,
                                          bool active) {
-  auto header_context =
-      GetStyleContextFromCss("GtkHeaderBar#headerbar.header-bar.titlebar");
+  auto header_context = CreateHeaderContext(maximized);
 
   GtkBorder header_padding;
   gtk_style_context_get_padding(header_context, GTK_STATE_FLAG_NORMAL,
                                 &header_padding);
-  GtkBorder header_border;
-  gtk_style_context_get_border(header_context, GTK_STATE_FLAG_NORMAL,
-                               &header_border);
 
   double scale = 1.0f;
   std::map<chrome::FrameButtonDisplayType, gfx::Size> button_sizes;
@@ -266,54 +293,54 @@ void NavButtonProviderGtk3::RedrawImages(int top_area_height,
       chrome::FrameButtonDisplayType::kClose,
   };
   for (auto type : display_types) {
-    CalculateUnscaledButtonSize(type, &button_sizes[type],
+    CalculateUnscaledButtonSize(type, maximized, &button_sizes[type],
                                 &button_margins[type]);
     int button_unconstrained_height = button_sizes[type].height() +
                                       button_margins[type].top() +
                                       button_margins[type].bottom();
 
-    int needed_height = header_border.top + header_padding.top +
-                        button_unconstrained_height + header_padding.bottom +
-                        header_border.bottom;
+    int needed_height = header_padding.top + button_unconstrained_height +
+                        header_padding.bottom;
 
     if (needed_height > top_area_height)
       scale =
           std::min(scale, static_cast<double>(top_area_height) / needed_height);
   }
 
+  top_area_spacing_ = InsetsFromGtkBorder(header_padding);
   top_area_spacing_ =
-      InsetsFromGtkBorder(header_padding) + InsetsFromGtkBorder(header_border);
-  top_area_spacing_ = gfx::Insets(scale * top_area_spacing_.top() + 0.5f,
-                                  scale * top_area_spacing_.left() + 0.5f,
-                                  scale * top_area_spacing_.bottom() + 0.5f,
-                                  scale * top_area_spacing_.right() + 0.5f);
+      gfx::Insets(std::round(scale * top_area_spacing_.top()),
+                  std::round(scale * top_area_spacing_.left()),
+                  std::round(scale * top_area_spacing_.bottom()),
+                  std::round(scale * top_area_spacing_.right()));
 
-  inter_button_spacing_ = scale * kHeaderSpacing + 0.5f;
+  inter_button_spacing_ = std::round(scale * kHeaderSpacing);
 
   for (auto type : display_types) {
     double button_height =
         scale * (button_sizes[type].height() + button_margins[type].top() +
                  button_margins[type].bottom());
     double available_height =
-        top_area_height - scale * ((header_padding.top + header_padding.bottom +
-                                    header_border.top + header_border.bottom));
+        top_area_height - scale * (header_padding.top + header_padding.bottom);
     double scaled_button_offset = (available_height - button_height) / 2;
 
     gfx::Size size = button_sizes[type];
-    size = gfx::Size(scale * size.width() + 0.5f, scale * size.height() + 0.5f);
+    size = gfx::Size(std::round(scale * size.width()),
+                     std::round(scale * size.height()));
     gfx::Insets margin = button_margins[type];
-    margin = gfx::Insets(
-        scale * (header_border.top + header_padding.top + margin.top()) +
-            scaled_button_offset + 0.5f,
-        0, scale * margin.left() + 0.5f, scale * margin.right() + 0.5f);
+    margin =
+        gfx::Insets(std::round(scale * (header_padding.top + margin.top()) +
+                               scaled_button_offset),
+                    std::round(scale * margin.left()), 0,
+                    std::round(scale * margin.right()));
 
     button_margins_[type] = margin;
 
     for (size_t state = 0; state < views::Button::STATE_COUNT; state++) {
       button_images_[type][state] = gfx::ImageSkia(
           std::make_unique<NavButtonImageSource>(
-              type, static_cast<views::Button::ButtonState>(state), active,
-              size),
+              type, static_cast<views::Button::ButtonState>(state), maximized,
+              active, size),
           size);
     }
   }
@@ -340,6 +367,81 @@ gfx::Insets NavButtonProviderGtk3::GetTopAreaSpacing() const {
 
 int NavButtonProviderGtk3::GetInterNavButtonSpacing() const {
   return inter_button_spacing_;
+}
+
+std::unique_ptr<views::Background>
+NavButtonProviderGtk3::CreateAvatarButtonBackground(
+    const views::Button* avatar_button) const {
+  auto header_context = CreateHeaderContext(false);
+  auto button_context = CreateAvatarButtonContext(header_context);
+  return std::make_unique<Gtk3BackgroundPainter>(avatar_button,
+                                                 std::move(button_context));
+}
+
+void NavButtonProviderGtk3::CalculateCaptionButtonLayout(
+    const gfx::Size& content_size,
+    int top_area_height,
+    gfx::Size* caption_button_size,
+    gfx::Insets* caption_button_spacing) const {
+  auto header_context = CreateHeaderContext(false);
+  gfx::InsetsF header_padding =
+      PaddingFromStyleContext(header_context, GTK_STATE_FLAG_NORMAL);
+
+  auto button_context = CreateAvatarButtonContext(header_context);
+  gfx::InsetsF button_padding =
+      PaddingFromStyleContext(button_context, GTK_STATE_FLAG_NORMAL);
+  gfx::InsetsF button_border =
+      BorderFromStyleContext(button_context, GTK_STATE_FLAG_NORMAL);
+  gfx::InsetsF button_margin =
+      MarginFromStyleContext(button_context, GTK_STATE_FLAG_NORMAL);
+
+  float content_width = content_size.width();
+  float content_height = content_size.height();
+  if (GtkVersionCheck(3, 20)) {
+    int min_width, min_height;
+    gtk_style_context_get(button_context, GTK_STATE_FLAG_NORMAL, "min-width",
+                          &min_width, "min-height", &min_height, NULL);
+    content_width = std::max(content_width, static_cast<float>(min_width));
+    content_height = std::max(content_height, static_cast<float>(min_height));
+  }
+
+  gfx::InsetsF scalable_insets =
+      header_padding + button_padding + button_border + button_margin;
+  float scalable_height =
+      scalable_insets.top() + scalable_insets.bottom() + content_height;
+
+  float scale = scalable_height > top_area_height && scalable_height != 0
+                    ? top_area_height / scalable_height
+                    : 1.0f;
+  header_padding = header_padding.Scale(scale);
+  button_padding = button_padding.Scale(scale);
+  button_border = button_border.Scale(scale);
+  button_margin = button_margin.Scale(scale);
+  // Don't scale |content_width| down if the button is wide.
+  if (content_width <= content_height)
+    content_width *= scale;
+  content_height *= scale;
+
+  float button_height = content_height + button_border.top() +
+                        button_border.bottom() + button_padding.top() +
+                        button_padding.bottom();
+  float button_height_with_margin =
+      button_height + button_margin.top() + button_margin.bottom();
+  float shiftable_region_start = header_padding.top();
+  float shiftable_region_end = top_area_height - header_padding.bottom();
+  float button_offset_in_shiftable_region =
+      (shiftable_region_end - shiftable_region_start -
+       button_height_with_margin) /
+      2;
+
+  *caption_button_size = gfx::Size(
+      std::round(content_width + button_border.left() + button_border.right() +
+                 button_padding.left() + button_padding.right()),
+      std::round(button_height));
+  *caption_button_spacing = gfx::Insets(
+      std::round(shiftable_region_start + button_margin.top() +
+                 button_offset_in_shiftable_region),
+      std::round(button_margin.left()), 0, std::round(button_margin.right()));
 }
 
 }  // namespace libgtkui

@@ -2,34 +2,44 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/blocked_content/safe_browsing_triggered_popup_blocker.h"
+
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "chrome/browser/ui/blocked_content/safe_browsing_triggered_popup_blocker.h"
-
-#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/test/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/test_safe_browsing_database_helper.h"
+#include "chrome/browser/ui/blocked_content/safe_browsing_triggered_popup_blocker.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "components/url_pattern_index/proto/rules.pb.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
+#include "components/policy/core/common/mock_configuration_policy_provider.h"
+#include "components/policy/core/common/policy_map.h"
+#include "components/policy/core/common/policy_types.h"
+#include "components/policy/policy_constants.h"
+#include "components/prefs/pref_service.h"
+#include "components/safe_browsing/db/safebrowsing.pb.h"
+#include "components/safe_browsing/db/v4_embedded_test_server_util.h"
+#include "components/safe_browsing/db/v4_test_util.h"
+#include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -43,14 +53,17 @@ using safe_browsing::SubresourceFilterLevel;
 
 namespace {
 
-base::LazyInstance<std::vector<std::string>>::Leaky error_messages_ =
+base::LazyInstance<std::vector<std::string>>::Leaky g_error_messages_ =
     LAZY_INSTANCE_INITIALIZER;
 
 class ScopedLoggingObserver {
  public:
-  ScopedLoggingObserver() {
+  ScopedLoggingObserver()
+      : old_log_handler_(logging::GetLogMessageHandler()),
+        error_index_(g_error_messages_.Get().size()) {
     logging::SetLogMessageHandler(&ScopedLoggingObserver::LogHandler);
   }
+  ~ScopedLoggingObserver() { logging::SetLogMessageHandler(old_log_handler_); }
 
   void RoundTripAndVerifyLogMessages(
       content::WebContents* web_contents,
@@ -62,7 +75,8 @@ class ScopedLoggingObserver {
     for (size_t i = 0; i < messages_expected.size(); i++)
       verify_messages_expected[i] = false;
 
-    for (const auto& message : error_messages_.Get()) {
+    for (size_t i = error_index_; i < g_error_messages_.Get().size(); ++i) {
+      const std::string& message = g_error_messages_.Get()[i];
       for (size_t i = 0; i < messages_expected.size(); i++) {
         verify_messages_expected[i] |=
             (message.find(messages_expected[i]) != std::string::npos);
@@ -85,9 +99,16 @@ class ScopedLoggingObserver {
                          size_t message_start,
                          const std::string& str) {
     if (file && std::string("CONSOLE") == file)
-      error_messages_.Get().push_back(str);
+      g_error_messages_.Get().push_back(str);
     return false;
   }
+
+  logging::LogMessageHandlerFunction old_log_handler_;
+
+  // The index into |g_error_messages| when this object was instantiated. Used
+  // for iterating through messages received since this object was created.
+  size_t error_index_;
+  DISALLOW_COPY_AND_ASSIGN(ScopedLoggingObserver);
 };
 
 }  // namespace
@@ -96,25 +117,26 @@ class ScopedLoggingObserver {
 class SafeBrowsingTriggeredPopupBlockerBrowserTest
     : public InProcessBrowserTest {
  public:
-  SafeBrowsingTriggeredPopupBlockerBrowserTest() {}
-  ~SafeBrowsingTriggeredPopupBlockerBrowserTest() override {}
-
-  void SetUp() override {
-    std::vector<safe_browsing::ListIdentifier> list_ids = {
-        safe_browsing::GetUrlSubresourceFilterId()};
-    database_helper_ =
-        base::MakeUnique<TestSafeBrowsingDatabaseHelper>(std::move(list_ids));
-
-    InProcessBrowserTest::SetUp();
-  }
-  void SetUpCommandLine(base::CommandLine* command_line) override {
+  SafeBrowsingTriggeredPopupBlockerBrowserTest() {
     // Note the safe browsing popup blocker is still reliant on
     // SubresourceFilter to get notifications from the safe browsing navigation
     // throttle. We could consider separating that out in the future.
-    command_line->AppendSwitchASCII(
-        switches::kEnableFeatures,
-        "SubresourceFilter,AbusiveExperienceEnforce");
+    scoped_feature_list_.InitWithFeatures(
+        {subresource_filter::kSafeBrowsingSubresourceFilter,
+         kAbusiveExperienceEnforce},
+        {});
   }
+
+  ~SafeBrowsingTriggeredPopupBlockerBrowserTest() override {}
+
+  void SetUp() override {
+    database_helper_ = CreateTestDatabase();
+    EXPECT_CALL(provider_, IsInitializationComplete(testing::_))
+        .WillRepeatedly(testing::Return(true));
+    policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
+    InProcessBrowserTest::SetUp();
+  }
+
   void SetUpOnMainThread() override {
     base::FilePath test_data_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
@@ -133,18 +155,26 @@ class SafeBrowsingTriggeredPopupBlockerBrowserTest
     return browser()->tab_strip_model()->GetActiveWebContents();
   }
 
+  virtual std::unique_ptr<TestSafeBrowsingDatabaseHelper> CreateTestDatabase() {
+    std::vector<safe_browsing::ListIdentifier> list_ids = {
+        safe_browsing::GetUrlSubresourceFilterId()};
+    return std::make_unique<TestSafeBrowsingDatabaseHelper>(
+        std::make_unique<safe_browsing::TestV4GetHashProtocolManagerFactory>(),
+        std::move(list_ids));
+  }
+
   void ConfigureAsAbusive(const GURL& url) {
     safe_browsing::ThreatMetadata metadata;
     metadata.subresource_filter_match = {
         {SubresourceFilterType::ABUSIVE, SubresourceFilterLevel::ENFORCE}};
-    database_helper_->MarkUrlAsMatchingListIdWithMetadata(
+    database_helper_->AddFullHashToDbAndFullHashCache(
         url, safe_browsing::GetUrlSubresourceFilterId(), metadata);
   }
   void ConfigureAsAbusiveWarn(const GURL& url) {
     safe_browsing::ThreatMetadata metadata;
     metadata.subresource_filter_match = {
         {SubresourceFilterType::ABUSIVE, SubresourceFilterLevel::WARN}};
-    database_helper()->MarkUrlAsMatchingListIdWithMetadata(
+    database_helper()->AddFullHashToDbAndFullHashCache(
         url, safe_browsing::GetUrlSubresourceFilterId(), metadata);
   }
 
@@ -152,16 +182,78 @@ class SafeBrowsingTriggeredPopupBlockerBrowserTest
     return database_helper_.get();
   }
 
+  void UpdatePolicy(const policy::PolicyMap& policy) {
+    provider_.UpdateChromePolicy(policy);
+    base::RunLoop().RunUntilIdle();
+  }
+
  private:
+  base::test::ScopedFeatureList scoped_feature_list_;
   std::unique_ptr<TestSafeBrowsingDatabaseHelper> database_helper_;
   std::unique_ptr<SafeBrowsingTriggeredPopupBlocker> popup_blocker_;
+  policy::MockConfigurationPolicyProvider provider_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingTriggeredPopupBlockerBrowserTest);
 };
 
+// The boolean parameter is whether to ignore sublists.
 class SafeBrowsingTriggeredPopupBlockerParamBrowserTest
     : public SafeBrowsingTriggeredPopupBlockerBrowserTest,
       public testing::WithParamInterface<bool> {};
+
+// This test harness does not mock the safe browsing v4 hash protocol manager.
+// Instead, it mocks actual HTTP responses from the v4 server by redirecting
+// requests to a custom test server with a special full hash request handler.
+class SafeBrowsingTriggeredInterceptingBrowserTest
+    : public SafeBrowsingTriggeredPopupBlockerBrowserTest {
+ public:
+  SafeBrowsingTriggeredInterceptingBrowserTest()
+      : safe_browsing_server_(
+            std::make_unique<net::test_server::EmbeddedTestServer>()) {}
+  ~SafeBrowsingTriggeredInterceptingBrowserTest() override {}
+
+  // SafeBrowsingTriggeredPopupBlockerBrowserTest:
+  void SetUp() override {
+    ASSERT_TRUE(safe_browsing_server_->InitializeAndListen());
+    SafeBrowsingTriggeredPopupBlockerBrowserTest::SetUp();
+  }
+  std::unique_ptr<TestSafeBrowsingDatabaseHelper> CreateTestDatabase()
+      override {
+    std::vector<safe_browsing::ListIdentifier> list_ids = {
+        safe_browsing::GetUrlSubresourceFilterId()};
+    // Send a nullptr TestV4GetHashProtocolManager so full hash requests aren't
+    // mocked.
+    return std::make_unique<TestSafeBrowsingDatabaseHelper>(
+        nullptr, std::move(list_ids));
+  }
+
+  net::test_server::EmbeddedTestServer* safe_browsing_server() {
+    return safe_browsing_server_.get();
+  }
+
+  safe_browsing::ThreatMatch GetAbusiveMatch(const GURL& url,
+                                             const std::string& abusive_value) {
+    safe_browsing::ThreatMatch threat_match;
+    threat_match.set_threat_type(safe_browsing::SUBRESOURCE_FILTER);
+    threat_match.set_platform_type(
+        safe_browsing::GetUrlSubresourceFilterId().platform_type());
+    threat_match.set_threat_entry_type(safe_browsing::URL);
+
+    safe_browsing::FullHash enforce_full_hash = safe_browsing::GetFullHash(url);
+    threat_match.mutable_threat()->set_hash(enforce_full_hash);
+    threat_match.mutable_cache_duration()->set_seconds(300);
+
+    safe_browsing::ThreatEntryMetadata::MetadataEntry* threat_meta =
+        threat_match.mutable_threat_entry_metadata()->add_entries();
+    threat_meta->set_key("sf_absv");
+    threat_meta->set_value(abusive_value);
+    return threat_match;
+  }
+
+ private:
+  std::unique_ptr<net::test_server::EmbeddedTestServer> safe_browsing_server_;
+  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingTriggeredInterceptingBrowserTest);
+};
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingTriggeredPopupBlockerBrowserTest,
                        NoFeature_AllowCreatingNewWindows) {
@@ -186,6 +278,57 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingTriggeredPopupBlockerBrowserTest,
   EXPECT_TRUE(opened_window);
   EXPECT_FALSE(TabSpecificContentSettings::FromWebContents(web_contents)
                    ->IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
+}
+
+IN_PROC_BROWSER_TEST_F(SafeBrowsingTriggeredPopupBlockerBrowserTest,
+                       DrivenByEnterprisePolicy) {
+  // Disable Abusive experience intervention policy.
+  policy::PolicyMap policy;
+  policy.Set(policy::key::kAbusiveExperienceInterventionEnforce,
+             policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+             policy::POLICY_SOURCE_ENTERPRISE_DEFAULT,
+             std::make_unique<base::Value>(false), nullptr);
+  UpdatePolicy(policy);
+
+  const char kWindowOpenPath[] = "/subresource_filter/window_open.html";
+  GURL a_url(embedded_test_server()->GetURL("a.com", kWindowOpenPath));
+  ConfigureAsAbusive(a_url);
+
+  // Navigate to a_url, should not trigger the popup blocker.
+  ui_test_utils::NavigateToURL(browser(), a_url);
+  bool opened_window = false;
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(web_contents, "openWindow()",
+                                                   &opened_window));
+  EXPECT_TRUE(opened_window);
+  EXPECT_FALSE(TabSpecificContentSettings::FromWebContents(web_contents)
+                   ->IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
+
+  // Since the policy change can take effect without browser restart, verify
+  // that enabling the policy here should disallow opening new tabs or windows
+  // from any new tab opened after the policy is set.
+  policy.Set(policy::key::kAbusiveExperienceInterventionEnforce,
+             policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+             policy::POLICY_SOURCE_ENTERPRISE_DEFAULT,
+             std::make_unique<base::Value>(true), nullptr);
+  UpdatePolicy(policy);
+
+  // Open a new tab to make sure the SafeBrowsingTriggeredPopupBlocker gets
+  // created for the new tab.
+  chrome::NewTab(browser());
+
+  // Navigate to a_url, should trigger the popup blocker.
+  ui_test_utils::NavigateToURL(browser(), a_url);
+  opened_window = false;
+  content::WebContents* web_contents1 =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+      web_contents1, "openWindow()", &opened_window));
+  EXPECT_FALSE(opened_window);
+  // Make sure the popup UI was shown.
+  EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents1)
+                  ->IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
 }
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingTriggeredPopupBlockerBrowserTest,
@@ -226,7 +369,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingTriggeredPopupBlockerBrowserTest,
 
   // Mark as matching social engineering, not subresource filter.
   safe_browsing::ThreatMetadata metadata;
-  database_helper()->MarkUrlAsMatchingListIdWithMetadata(
+  database_helper()->AddFullHashToDbAndFullHashCache(
       a_url, safe_browsing::GetUrlSocEngId(), metadata);
 
   // Navigate to a_url, should not trigger the popup blocker.
@@ -435,7 +578,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingTriggeredPopupBlockerParamBrowserTest,
 
   // Do not set the ABUSIVE bit.
   safe_browsing::ThreatMetadata metadata;
-  database_helper()->MarkUrlAsMatchingListIdWithMetadata(
+  database_helper()->AddFullHashToDbAndFullHashCache(
       url, safe_browsing::GetUrlSubresourceFilterId(), metadata);
 
   // Navigate to url, should not trigger the popup blocker.
@@ -506,4 +649,67 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingTriggeredPopupBlockerBrowserTest,
 
   log_observer.RoundTripAndVerifyLogMessages(
       web_contents(), {kAbusiveWarnMessage}, {kAbusiveEnforceMessage});
+}
+
+IN_PROC_BROWSER_TEST_F(SafeBrowsingTriggeredInterceptingBrowserTest,
+                       AbusiveMetadata) {
+  const char kWindowOpenPath[] = "/subresource_filter/window_open.html";
+  const GURL no_match_url(
+      embedded_test_server()->GetURL("no_match.com", kWindowOpenPath));
+  const GURL enforce_url(
+      embedded_test_server()->GetURL("enforce.com", kWindowOpenPath));
+  const GURL warn_url(
+      embedded_test_server()->GetURL("warn.com", kWindowOpenPath));
+
+  // Mark the prefixes as bad so that safe browsing will request full hashes
+  // from the v4 server. Even mark the no_match URL as bad just to test that the
+  // custom server handler is working properly.
+  database_helper()->LocallyMarkPrefixAsBad(
+      no_match_url, safe_browsing::GetUrlSubresourceFilterId());
+  database_helper()->LocallyMarkPrefixAsBad(
+      warn_url, safe_browsing::GetUrlSubresourceFilterId());
+  database_helper()->LocallyMarkPrefixAsBad(
+      enforce_url, safe_browsing::GetUrlSubresourceFilterId());
+
+  // Register the V4 server to handle full hash requests for the two URLs, with
+  // the given ThreatMatches, then start accepting connections on the v4 server.
+  // Then, start the server.
+  std::map<GURL, safe_browsing::ThreatMatch> response_map{
+      {enforce_url, GetAbusiveMatch(enforce_url, "enforce")},
+      {warn_url, GetAbusiveMatch(warn_url, "warn")}};
+  safe_browsing::StartRedirectingV4RequestsForTesting(response_map,
+                                                      safe_browsing_server());
+  safe_browsing_server()->StartAcceptingConnections();
+
+  // URL with no match should not trigger the blocker.
+  {
+    ScopedLoggingObserver log_observer;
+    ui_test_utils::NavigateToURL(browser(), no_match_url);
+    bool opened_window = false;
+    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+        web_contents(), "openWindow()", &opened_window));
+    EXPECT_TRUE(opened_window);
+    log_observer.RoundTripAndVerifyLogMessages(
+        web_contents(), {}, {kAbusiveEnforceMessage, kAbusiveWarnMessage});
+  }
+  {
+    ScopedLoggingObserver log_observer;
+    ui_test_utils::NavigateToURL(browser(), enforce_url);
+    bool opened_window = false;
+    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+        web_contents(), "openWindow()", &opened_window));
+    EXPECT_FALSE(opened_window);
+    log_observer.RoundTripAndVerifyLogMessages(
+        web_contents(), {kAbusiveEnforceMessage}, {kAbusiveWarnMessage});
+  }
+  {
+    ScopedLoggingObserver log_observer;
+    ui_test_utils::NavigateToURL(browser(), warn_url);
+    bool opened_window = false;
+    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+        web_contents(), "openWindow()", &opened_window));
+    EXPECT_TRUE(opened_window);
+    log_observer.RoundTripAndVerifyLogMessages(
+        web_contents(), {kAbusiveWarnMessage}, {kAbusiveEnforceMessage});
+  }
 }

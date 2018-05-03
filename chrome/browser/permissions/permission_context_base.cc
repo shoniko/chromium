@@ -85,7 +85,7 @@ const char PermissionContextBase::kPermissionsKillSwitchBlockedValue[] =
 PermissionContextBase::PermissionContextBase(
     Profile* profile,
     ContentSettingsType content_settings_type,
-    blink::WebFeaturePolicyFeature feature_policy_feature)
+    blink::FeaturePolicyFeature feature_policy_feature)
     : profile_(profile),
       content_settings_type_(content_settings_type),
       feature_policy_feature_(feature_policy_feature),
@@ -207,8 +207,8 @@ void PermissionContextBase::ContinueRequestPermission(
   }
 
   // We are going to show a prompt now.
-  PermissionUmaUtil::PermissionRequested(
-      content_settings_type_, requesting_origin, embedding_origin, profile_);
+  PermissionUmaUtil::PermissionRequested(content_settings_type_,
+                                         requesting_origin);
   PermissionUmaUtil::RecordEmbargoPromptSuppression(
       PermissionEmbargoStatus::NOT_EMBARGOED);
 
@@ -283,8 +283,8 @@ void PermissionContextBase::ResetPermission(const GURL& requesting_origin,
                                             const GURL& embedding_origin) {
   HostContentSettingsMapFactory::GetForProfile(profile_)
       ->SetContentSettingDefaultScope(requesting_origin, embedding_origin,
-                                      content_settings_storage_type(),
-                                      std::string(), CONTENT_SETTING_DEFAULT);
+                                      content_settings_type_, std::string(),
+                                      CONTENT_SETTING_DEFAULT);
 }
 
 void PermissionContextBase::CancelPermissionRequest(
@@ -314,7 +314,7 @@ ContentSetting PermissionContextBase::GetPermissionStatusInternal(
     const GURL& embedding_origin) const {
   return HostContentSettingsMapFactory::GetForProfile(profile_)
       ->GetContentSetting(requesting_origin, embedding_origin,
-                          content_settings_storage_type(), std::string());
+                          content_settings_type_, std::string());
 }
 
 void PermissionContextBase::DecidePermission(
@@ -338,7 +338,7 @@ void PermissionContextBase::DecidePermission(
           requesting_origin, content_settings_type_, user_gesture,
           base::Bind(&PermissionContextBase::PermissionDecided,
                      weak_factory_.GetWeakPtr(), id, requesting_origin,
-                     embedding_origin, user_gesture, callback),
+                     embedding_origin, callback),
           base::Bind(&PermissionContextBase::CleanUpRequest,
                      weak_factory_.GetWeakPtr(), id));
   PermissionRequest* request = request_ptr.get();
@@ -355,38 +355,15 @@ void PermissionContextBase::PermissionDecided(
     const PermissionRequestID& id,
     const GURL& requesting_origin,
     const GURL& embedding_origin,
-    bool user_gesture,
     const BrowserPermissionCallback& callback,
-    bool persist,
     ContentSetting content_setting) {
-  PermissionRequestGestureType gesture_type =
-      user_gesture ? PermissionRequestGestureType::GESTURE
-                   : PermissionRequestGestureType::NO_GESTURE;
-  PermissionEmbargoStatus embargo_status =
-      PermissionEmbargoStatus::NOT_EMBARGOED;
   DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
          content_setting == CONTENT_SETTING_BLOCK ||
          content_setting == CONTENT_SETTING_DEFAULT);
-  if (content_setting == CONTENT_SETTING_ALLOW) {
-    PermissionUmaUtil::PermissionGranted(content_settings_type_, gesture_type,
-                                         requesting_origin, profile_);
-  } else if (content_setting == CONTENT_SETTING_BLOCK) {
-    PermissionUmaUtil::PermissionDenied(content_settings_type_, gesture_type,
-                                        requesting_origin, profile_);
-  } else {
-    PermissionUmaUtil::PermissionDismissed(content_settings_type_, gesture_type,
-                                           requesting_origin, profile_);
-
-    if (PermissionDecisionAutoBlocker::GetForProfile(profile_)
-            ->RecordDismissAndEmbargo(requesting_origin,
-                                      content_settings_type_)) {
-      embargo_status = PermissionEmbargoStatus::REPEATED_DISMISSALS;
-    }
-  }
-  PermissionUmaUtil::RecordEmbargoStatus(embargo_status);
-
   UserMadePermissionDecision(id, requesting_origin, embedding_origin,
                              content_setting);
+
+  bool persist = content_setting != CONTENT_SETTING_DEFAULT;
   NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
                       persist, content_setting);
 }
@@ -434,13 +411,8 @@ void PermissionContextBase::UpdateContentSetting(
 
   HostContentSettingsMapFactory::GetForProfile(profile_)
       ->SetContentSettingDefaultScope(requesting_origin, embedding_origin,
-                                      content_settings_storage_type(),
-                                      std::string(), content_setting);
-}
-
-ContentSettingsType PermissionContextBase::content_settings_storage_type()
-    const {
-  return PermissionUtil::GetContentSettingsStorageType(content_settings_type_);
+                                      content_settings_type_, std::string(),
+                                      content_setting);
 }
 
 bool PermissionContextBase::PermissionAllowedByFeaturePolicy(
@@ -452,7 +424,7 @@ bool PermissionContextBase::PermissionAllowedByFeaturePolicy(
   }
 
   // Some features don't have an associated feature policy yet. Allow those.
-  if (feature_policy_feature_ == blink::WebFeaturePolicyFeature::kNotFound)
+  if (feature_policy_feature_ == blink::FeaturePolicyFeature::kNotFound)
     return true;
 
   return rfh->IsFeatureEnabled(feature_policy_feature_);

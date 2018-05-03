@@ -30,6 +30,7 @@
 #include "media/media_features.h"
 #include "ppapi/features/features.h"
 #include "printing/features/features.h"
+#include "services/network/public/interfaces/network_service.mojom.h"
 
 class ChromeChildProcessWatcher;
 class ChromeDeviceClient;
@@ -60,21 +61,21 @@ class ChromeNetLog;
 }
 
 namespace policy {
-class BrowserPolicyConnector;
+class ChromeBrowserPolicyConnector;
 class PolicyService;
-};
+}  // namespace policy
 
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess,
                            public KeepAliveStateObserver {
  public:
   // |local_state_task_runner| must be a shutdown-blocking task runner.
-  BrowserProcessImpl(base::SequencedTaskRunner* local_state_task_runner,
-                     const base::CommandLine& command_line);
+  explicit BrowserProcessImpl(
+      base::SequencedTaskRunner* local_state_task_runner);
   ~BrowserProcessImpl() override;
 
   // Called before the browser threads are created.
-  void PreCreateThreads();
+  void PreCreateThreads(const base::CommandLine& command_line);
 
   // Called after the threads have been created but before the message loops
   // starts running. Allows the browser process to do any initialization that
@@ -100,6 +101,7 @@ class BrowserProcessImpl : public BrowserProcess,
   rappor::RapporServiceImpl* rappor_service() override;
   IOThread* io_thread() override;
   SystemNetworkContextManager* system_network_context_manager() override;
+  content::NetworkConnectionTracker* network_connection_tracker() override;
   WatchDogThread* watchdog_thread() override;
   ProfileManager* profile_manager() override;
   PrefService* local_state() override;
@@ -110,11 +112,13 @@ class BrowserProcessImpl : public BrowserProcess,
   NotificationUIManager* notification_ui_manager() override;
   NotificationPlatformBridge* notification_platform_bridge() override;
   message_center::MessageCenter* message_center() override;
-  policy::BrowserPolicyConnector* browser_policy_connector() override;
+  policy::ChromeBrowserPolicyConnector* browser_policy_connector() override;
   policy::PolicyService* policy_service() override;
   IconManager* icon_manager() override;
   GpuModeManager* gpu_mode_manager() override;
-  GpuProfileCache* gpu_profile_cache() override;
+#if defined(OS_ANDROID)
+  GpuDriverInfoManager* gpu_driver_info_manager() override;
+#endif
   void CreateDevToolsHttpProtocolHandler(const std::string& ip,
                                          uint16_t port) override;
   void CreateDevToolsAutoOpener() override;
@@ -137,6 +141,8 @@ class BrowserProcessImpl : public BrowserProcess,
       override;
   subresource_filter::ContentRulesetService*
   subresource_filter_ruleset_service() override;
+  optimization_guide::OptimizationGuideService* optimization_guide_service()
+      override;
 
 #if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
   void StartAutoupdateTimer() override;
@@ -179,6 +185,7 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateSafeBrowsingService();
   void CreateSafeBrowsingDetectionService();
   void CreateSubresourceFilterRulesetService();
+  void CreateOptimizationGuideService();
   void CreateStatusTray();
   void CreateBackgroundModeManager();
   void CreateGCMDriver();
@@ -202,24 +209,30 @@ class BrowserProcessImpl : public BrowserProcess,
 
   std::unique_ptr<IOThread> io_thread_;
 
-  bool created_watchdog_thread_;
+  bool created_watchdog_thread_ = false;
   std::unique_ptr<WatchDogThread> watchdog_thread_;
 
-  bool created_browser_policy_connector_;
+  bool created_browser_policy_connector_ = false;
   // Must be destroyed after |local_state_|.
-  std::unique_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
+  std::unique_ptr<policy::ChromeBrowserPolicyConnector>
+      browser_policy_connector_;
 
-  bool created_profile_manager_;
+  bool created_profile_manager_ = false;
   std::unique_ptr<ProfileManager> profile_manager_;
 
   std::unique_ptr<PrefService> local_state_;
 
   std::unique_ptr<SystemNetworkContextManager> system_network_context_manager_;
 
-  bool created_icon_manager_;
+  std::unique_ptr<content::NetworkConnectionTracker>
+      network_connection_tracker_;
+
+  bool created_icon_manager_ = false;
   std::unique_ptr<IconManager> icon_manager_;
 
-  std::unique_ptr<GpuProfileCache> gpu_profile_cache_;
+#if defined(OS_ANDROID)
+  std::unique_ptr<GpuDriverInfoManager> gpu_driver_info_manager_;
+#endif
 
   std::unique_ptr<GpuModeManager> gpu_mode_manager_;
 
@@ -247,30 +260,34 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   // Manager for desktop notification UI.
-  bool created_notification_ui_manager_;
+  bool created_notification_ui_manager_ = false;
   std::unique_ptr<NotificationUIManager> notification_ui_manager_;
 
   std::unique_ptr<IntranetRedirectDetector> intranet_redirect_detector_;
 
   std::unique_ptr<StatusTray> status_tray_;
 
-  bool created_notification_bridge_;
+  bool created_notification_bridge_ = false;
   std::unique_ptr<NotificationPlatformBridge> notification_bridge_;
 
-#if BUILDFLAG(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
   std::unique_ptr<BackgroundModeManager> background_mode_manager_;
 #endif
 
-  bool created_safe_browsing_service_;
+  bool created_safe_browsing_service_ = false;
   scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_service_;
 
-  bool created_subresource_filter_ruleset_service_;
+  bool created_subresource_filter_ruleset_service_ = false;
   std::unique_ptr<subresource_filter::ContentRulesetService>
       subresource_filter_ruleset_service_;
 
-  bool shutting_down_;
+  bool created_optimization_guide_service_ = false;
+  std::unique_ptr<optimization_guide::OptimizationGuideService>
+      optimization_guide_service_;
 
-  bool tearing_down_;
+  bool shutting_down_ = false;
+
+  bool tearing_down_ = false;
 
   // Ensures that all the print jobs are finished before closing the browser.
   std::unique_ptr<printing::PrintJobManager> print_job_manager_;
@@ -303,7 +320,8 @@ class BrowserProcessImpl : public BrowserProcess,
   // Gets called by autoupdate timer to see if browser needs restart and can be
   // restarted, and if that's the case, restarts the browser.
   void OnAutoupdateTimer();
-  bool CanAutorestartForUpdate() const;
+  bool IsRunningInBackground() const;
+  void OnPendingRestartResult(bool is_update_pending_restart);
   void RestartBackgroundInstance();
 #endif  // defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
 
@@ -344,7 +362,8 @@ class BrowserProcessImpl : public BrowserProcess,
   std::unique_ptr<resource_coordinator::TabManager> tab_manager_;
 #endif
 
-  shell_integration::DefaultWebClientState cached_default_web_client_state_;
+  shell_integration::DefaultWebClientState cached_default_web_client_state_ =
+      shell_integration::UNKNOWN_DEFAULT;
 
   std::unique_ptr<physical_web::PhysicalWebDataSource>
       physical_web_data_source_;

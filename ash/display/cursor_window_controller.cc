@@ -40,8 +40,8 @@ const int kMaxLargeCursorSize = 64;
 
 class CursorWindowDelegate : public aura::WindowDelegate {
  public:
-  CursorWindowDelegate() {}
-  ~CursorWindowDelegate() override {}
+  CursorWindowDelegate() = default;
+  ~CursorWindowDelegate() override = default;
 
   // aura::WindowDelegate overrides:
   gfx::Size GetMinimumSize() const override { return size_; }
@@ -91,13 +91,7 @@ class CursorWindowDelegate : public aura::WindowDelegate {
 };
 
 CursorWindowController::CursorWindowController()
-    : is_cursor_compositing_enabled_(false),
-      container_(NULL),
-      cursor_type_(ui::CursorType::kNone),
-      visible_(true),
-      cursor_size_(ui::CursorSize::kNormal),
-      large_cursor_size_in_dip_(ash::kDefaultLargeCursorSize),
-      delegate_(new CursorWindowDelegate()) {}
+    : delegate_(new CursorWindowDelegate()) {}
 
 CursorWindowController::~CursorWindowController() {
   SetContainer(NULL);
@@ -126,10 +120,13 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
     // The active pref service can be null early in startup.
     return false;
   }
+  display::DisplayManager* display_manager = Shell::Get()->display_manager();
   return prefs->GetBoolean(prefs::kAccessibilityLargeCursorEnabled) ||
          prefs->GetBoolean(prefs::kAccessibilityHighContrastEnabled) ||
          prefs->GetBoolean(prefs::kAccessibilityScreenMagnifierEnabled) ||
-         prefs->GetBoolean(prefs::kNightLightEnabled);
+         prefs->GetBoolean(prefs::kNightLightEnabled) ||
+         (display_manager->is_multi_mirroring_enabled() &&
+          display_manager->IsInSoftwareMirrorMode());
 }
 
 void CursorWindowController::SetCursorCompositingEnabled(bool enabled) {
@@ -150,13 +147,16 @@ void CursorWindowController::UpdateContainer() {
     if (display.is_valid())
       SetDisplay(display);
   } else {
-    aura::Window* mirror_window = Shell::Get()
-                                      ->window_tree_host_manager()
-                                      ->mirror_window_controller()
-                                      ->GetWindow();
-    if (mirror_window)
-      display_ = display::Screen::GetScreen()->GetPrimaryDisplay();
-    SetContainer(mirror_window);
+    aura::Window::Windows mirror_windows = Shell::Get()
+                                               ->window_tree_host_manager()
+                                               ->mirror_window_controller()
+                                               ->GetAllRootWindows();
+    if (mirror_windows.empty()) {
+      SetContainer(nullptr);
+      return;
+    }
+    display_ = display::Screen::GetScreen()->GetPrimaryDisplay();
+    SetContainer(mirror_windows[0]);
   }
   // Updates the hot point based on the current display.
   UpdateCursorImage();
@@ -166,10 +166,10 @@ void CursorWindowController::SetDisplay(const display::Display& display) {
   if (!is_cursor_compositing_enabled_)
     return;
 
-  // TODO(oshima): Do not updatethe composition cursor when crossing
+  // TODO(oshima): Do not update the composition cursor when crossing
   // display in unified desktop mode for now. crbug.com/517222.
   if (Shell::Get()->display_manager()->IsInUnifiedMode() &&
-      display.id() != display::DisplayManager::kUnifiedDisplayId) {
+      display.id() != display::kUnifiedDisplayId) {
     return;
   }
 

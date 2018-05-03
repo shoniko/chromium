@@ -5,8 +5,8 @@
 #include "components/autofill/content/common/autofill_types_struct_traits.h"
 
 #include "base/i18n/rtl.h"
-#include "ipc/ipc_message_utils.h"
 #include "mojo/common/common_custom_types_struct_traits.h"
+#include "mojo/common/time_struct_traits.h"
 #include "url/mojo/origin_struct_traits.h"
 #include "url/mojo/url_gurl_struct_traits.h"
 
@@ -417,6 +417,56 @@ bool EnumTraits<autofill::mojom::PasswordFormFieldPredictionType,
 }
 
 // static
+autofill::mojom::SubmissionSource EnumTraits<
+    autofill::mojom::SubmissionSource,
+    autofill::SubmissionSource>::ToMojom(autofill::SubmissionSource input) {
+  switch (input) {
+    case autofill::SubmissionSource::SAME_DOCUMENT_NAVIGATION:
+      return autofill::mojom::SubmissionSource::SAME_DOCUMENT_NAVIGATION;
+    case autofill::SubmissionSource::XHR_SUCCEEDED:
+      return autofill::mojom::SubmissionSource::XHR_SUCCEEDED;
+    case autofill::SubmissionSource::FRAME_DETACHED:
+      return autofill::mojom::SubmissionSource::FRAME_DETACHED;
+    case autofill::SubmissionSource::DOM_MUTATION_AFTER_XHR:
+      return autofill::mojom::SubmissionSource::DOM_MUTATION_AFTER_XHR;
+    case autofill::SubmissionSource::PROBABLY_FORM_SUBMITTED:
+      return autofill::mojom::SubmissionSource::PROBABLY_FORM_SUBMITTED;
+    case autofill::SubmissionSource::FORM_SUBMISSION:
+      return autofill::mojom::SubmissionSource::FORM_SUBMISSION;
+  }
+  NOTREACHED();
+  return autofill::mojom::SubmissionSource::FORM_SUBMISSION;
+}
+
+// static
+bool EnumTraits<autofill::mojom::SubmissionSource, autofill::SubmissionSource>::
+    FromMojom(autofill::mojom::SubmissionSource input,
+              autofill::SubmissionSource* output) {
+  switch (input) {
+    case autofill::mojom::SubmissionSource::SAME_DOCUMENT_NAVIGATION:
+      *output = autofill::SubmissionSource::SAME_DOCUMENT_NAVIGATION;
+      return true;
+    case autofill::mojom::SubmissionSource::XHR_SUCCEEDED:
+      *output = autofill::SubmissionSource::XHR_SUCCEEDED;
+      return true;
+    case autofill::mojom::SubmissionSource::FRAME_DETACHED:
+      *output = autofill::SubmissionSource::FRAME_DETACHED;
+      return true;
+    case autofill::mojom::SubmissionSource::DOM_MUTATION_AFTER_XHR:
+      *output = autofill::SubmissionSource::DOM_MUTATION_AFTER_XHR;
+      return true;
+    case autofill::mojom::SubmissionSource::PROBABLY_FORM_SUBMITTED:
+      *output = autofill::SubmissionSource::PROBABLY_FORM_SUBMITTED;
+      return true;
+    case autofill::mojom::SubmissionSource::FORM_SUBMISSION:
+      *output = autofill::SubmissionSource::FORM_SUBMISSION;
+      return true;
+  }
+  NOTREACHED();
+  return false;
+}
+
+// static
 bool StructTraits<
     autofill::mojom::FormFieldDataDataView,
     autofill::FormFieldData>::Read(autofill::mojom::FormFieldDataDataView data,
@@ -475,6 +525,8 @@ bool StructTraits<autofill::mojom::FormDataDataView, autofill::FormData>::Read(
   if (!data.ReadOrigin(&out->origin))
     return false;
   if (!data.ReadAction(&out->action))
+    return false;
+  if (!data.ReadMainFrameOrigin(&out->main_frame_origin))
     return false;
 
   out->is_form_tag = data.is_form_tag();
@@ -639,6 +691,7 @@ bool StructTraits<
   out->is_public_suffix_match = data.is_public_suffix_match();
   out->is_affiliation_based_match = data.is_affiliation_based_match();
   out->does_look_like_signup_form = data.does_look_like_signup_form();
+  out->only_for_fallback_saving = data.only_for_fallback_saving();
 
   return true;
 }

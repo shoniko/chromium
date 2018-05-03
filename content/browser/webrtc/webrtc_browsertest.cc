@@ -53,6 +53,15 @@ class MAYBE_WebRtcBrowserTest : public WebRtcContentBrowserTestBase {
   }
 };
 
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, CanSetupAudioAndVideoCall) {
+  MakeTypicalPeerConnectionCall("call({video: true, audio: true});");
+}
+
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
+                       CanSetupDefaultVideoCallWithOldGetUserMedia) {
+  MakeTypicalPeerConnectionCall("oldStyleCall();");
+}
+
 // These tests will make a complete PeerConnection-based call and verify that
 // video is playing for the call.
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
@@ -92,11 +101,6 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
   const std::string javascript =
       "callAndDisableLocalVideo({video: true});";
   MakeTypicalPeerConnectionCall(javascript);
-}
-
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       CanSetupAudioAndVideoCall) {
-  MakeTypicalPeerConnectionCall("call({video: true, audio: true});");
 }
 
 
@@ -236,5 +240,14 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
   MakeTypicalPeerConnectionCall(
       "testGetSettingsWhenRemoteDimensionsUnknown();");
 }
+
+#if defined(OS_ANDROID)
+// This test is to make sure HW H264 work normally on supported devices, since
+// there is no SW H264 fallback available on Android.
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
+                       CanSetupH264VideoCallOnSupportedDevice) {
+  MakeTypicalPeerConnectionCall("CanSetupH264VideoCallOnSupportedDevice();");
+}
+#endif
 
 }  // namespace content

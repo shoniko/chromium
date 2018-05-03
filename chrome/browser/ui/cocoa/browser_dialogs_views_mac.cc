@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <utility>
 
 #include "chrome/browser/ui/bookmarks/bookmark_bubble_sign_in_delegate.h"
@@ -92,7 +93,7 @@ void ShowBookmarkBubbleViewsAtPoint(const gfx::Point& anchor_point,
 
 std::unique_ptr<BubbleUi> BuildViewsExtensionInstalledBubbleUi(
     ExtensionInstalledBubble* bubble) {
-  return base::MakeUnique<ExtensionInstalledBubbleUi>(bubble);
+  return std::make_unique<ExtensionInstalledBubbleUi>(bubble);
 }
 
 void ShowZoomBubbleViewsAtPoint(content::WebContents* web_contents,
@@ -120,17 +121,21 @@ bool IsZoomBubbleViewsShown() {
   return ZoomBubbleView::GetZoomBubble() != nullptr;
 }
 
-void ContentSettingBubbleViewsBridge::Show(gfx::NativeView parent_view,
-                                           ContentSettingBubbleModel* model,
-                                           content::WebContents* web_contents,
-                                           const gfx::Point& anchor,
-                                           LocationBarDecoration* decoration) {
+gfx::NativeWindow ContentSettingBubbleViewsBridge::Show(
+    gfx::NativeView parent_view,
+    ContentSettingBubbleModel* model,
+    content::WebContents* web_contents,
+    const gfx::Point& anchor,
+    LocationBarDecoration* decoration) {
   ContentSettingBubbleContents* contents = new ContentSettingBubbleContents(
       model, web_contents, nullptr, views::BubbleBorder::Arrow::TOP_RIGHT);
   contents->set_parent_window(parent_view);
   contents->SetAnchorRect(gfx::Rect(anchor, gfx::Size()));
-  views::BubbleDialogDelegateView::CreateBubble(contents)->Show();
+  views::Widget* widget =
+      views::BubbleDialogDelegateView::CreateBubble(contents);
+  widget->Show();
   KeepBubbleAnchored(contents, decoration);
+  return widget->GetNativeWindow();
 }
 
 void ShowUpdateChromeDialogViews(gfx::NativeWindow parent) {

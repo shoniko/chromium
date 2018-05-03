@@ -7,11 +7,11 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/user_metrics.h"
 #include "base/pickle.h"
@@ -28,6 +28,8 @@
 #include "content/browser/frame_host/render_frame_proxy_host.h"
 #include "content/browser/frame_host/render_widget_host_view_guest.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/browser/mus_util.h"
+#include "content/browser/renderer_host/cursor_manager.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
@@ -40,7 +42,6 @@
 #include "content/common/drag_messages.h"
 #include "content/common/input/ime_text_span_conversions.h"
 #include "content/common/input_messages.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/common/text_input_state.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
@@ -53,6 +54,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/drop_data.h"
+#include "ui/base/ui_base_switches_util.h"
 #include "ui/events/blink/web_input_event_traits.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
@@ -188,11 +190,11 @@ int BrowserPluginGuest::LoadURLWithParams(
   return GetGuestProxyRoutingID();
 }
 
-void BrowserPluginGuest::GuestResizeDueToAutoResize(const gfx::Size& new_size) {
-  if (last_seen_view_size_ != new_size) {
-    delegate_->GuestSizeChanged(new_size);
-    last_seen_view_size_ = new_size;
-  }
+void BrowserPluginGuest::ResizeDueToAutoResize(const gfx::Size& new_size,
+                                               uint64_t sequence_number) {
+  SendMessageToEmbedder(
+      std::make_unique<BrowserPluginMsg_ResizeDueToAutoResize>(
+          browser_plugin_instance_id_, sequence_number));
 }
 
 void BrowserPluginGuest::SizeContents(const gfx::Size& new_size) {
@@ -256,7 +258,7 @@ void BrowserPluginGuest::SetTooltipText(const base::string16& tooltip_text) {
     return;
   current_tooltip_text_ = tooltip_text;
 
-  SendMessageToEmbedder(base::MakeUnique<BrowserPluginMsg_SetTooltipText>(
+  SendMessageToEmbedder(std::make_unique<BrowserPluginMsg_SetTooltipText>(
       browser_plugin_instance_id_, tooltip_text));
 }
 
@@ -309,7 +311,8 @@ bool BrowserPluginGuest::OnMessageReceivedFromEmbedder(
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_SetFocus, OnSetFocus)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_SetVisibility, OnSetVisibility)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_UnlockMouse_ACK, OnUnlockMouseAck)
-    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_UpdateGeometry, OnUpdateGeometry)
+    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_UpdateResizeParams,
+                        OnUpdateResizeParams)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_SatisfySequence, OnSatisfySequence)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_RequireSequence, OnRequireSequence)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -328,7 +331,7 @@ void BrowserPluginGuest::InitInternal(
   UpdateVisibility();
 
   is_full_page_plugin_ = params.is_full_page_plugin;
-  guest_window_rect_ = params.view_rect;
+  frame_rect_ = params.frame_rect;
 
   if (owner_web_contents_ != owner_web_contents) {
     WebContentsViewGuest* new_view = nullptr;
@@ -426,7 +429,7 @@ void BrowserPluginGuest::EmbedderVisibilityChanged(bool visible) {
 }
 
 void BrowserPluginGuest::PointerLockPermissionResponse(bool allow) {
-  SendMessageToEmbedder(base::MakeUnique<BrowserPluginMsg_SetMouseLock>(
+  SendMessageToEmbedder(std::make_unique<BrowserPluginMsg_SetMouseLock>(
       browser_plugin_instance_id(), allow));
 }
 
@@ -434,8 +437,11 @@ void BrowserPluginGuest::SetChildFrameSurface(
     const viz::SurfaceInfo& surface_info,
     const viz::SurfaceSequence& sequence) {
   has_attached_since_surface_set_ = false;
-  SendMessageToEmbedder(base::MakeUnique<BrowserPluginMsg_SetChildFrameSurface>(
-      browser_plugin_instance_id(), surface_info, sequence));
+  if (!switches::IsMusHostingViz()) {
+    SendMessageToEmbedder(
+        std::make_unique<BrowserPluginMsg_SetChildFrameSurface>(
+            browser_plugin_instance_id(), surface_info, sequence));
+  }
 }
 
 void BrowserPluginGuest::OnSatisfySequence(
@@ -460,7 +466,7 @@ void BrowserPluginGuest::ResendEventToEmbedder(
   RenderWidgetHostViewBase* view =
       static_cast<RenderWidgetHostViewBase*>(GetOwnerRenderWidgetHostView());
 
-  gfx::Vector2d offset_from_embedder = guest_window_rect_.OffsetFromOrigin();
+  gfx::Vector2d offset_from_embedder = frame_rect_.OffsetFromOrigin();
   if (event.GetType() == blink::WebInputEvent::kGestureScrollUpdate) {
     blink::WebGestureEvent resent_gesture_event;
     memcpy(&resent_gesture_event, &event, sizeof(blink::WebGestureEvent));
@@ -498,9 +504,8 @@ gfx::Point BrowserPluginGuest::GetCoordinatesInEmbedderWebContents(
   gfx::Point point(relative_point);
 
   // Add the offset form the embedder web contents view.
-  point +=
-      owner_rwhv->TransformPointToRootCoordSpace(guest_window_rect_.origin())
-          .OffsetFromOrigin();
+  point += owner_rwhv->TransformPointToRootCoordSpace(frame_rect_.origin())
+               .OffsetFromOrigin();
   if (embedder_web_contents()->GetBrowserPluginGuest()) {
     // |point| is currently with respect to the top-most view (outermost
     // WebContents). We should subtract a displacement to find the point with
@@ -522,7 +527,7 @@ gfx::Point BrowserPluginGuest::GetScreenCoordinates(
     return relative_position;
 
   gfx::Point screen_pos(relative_position);
-  screen_pos += guest_window_rect_.OffsetFromOrigin();
+  screen_pos += frame_rect_.OffsetFromOrigin();
   return screen_pos;
 }
 
@@ -547,14 +552,13 @@ void BrowserPluginGuest::SendMessageToEmbedder(
     rwh->Send(msg.release());
 }
 
-void BrowserPluginGuest::DragSourceEndedAt(int client_x,
-                                           int client_y,
-                                           int screen_x,
-                                           int screen_y,
+void BrowserPluginGuest::DragSourceEndedAt(float client_x,
+                                           float client_y,
+                                           float screen_x,
+                                           float screen_y,
                                            blink::WebDragOperation operation) {
   web_contents()->GetRenderViewHost()->GetWidget()->DragSourceEndedAt(
-      gfx::Point(client_x, client_y),
-      gfx::Point(screen_x, screen_y),
+      gfx::PointF(client_x, client_y), gfx::PointF(screen_x, screen_y),
       operation);
   seen_embedder_drag_source_ended_at_ = true;
   EndSystemDragIfApplicable();
@@ -664,8 +668,7 @@ void BrowserPluginGuest::SendTextInputTypeChangedToView(
 
   if (last_text_input_state_.get()) {
     guest_rwhv->TextInputStateChanged(*last_text_input_state_);
-    if (auto* rwh =
-            RenderWidgetHostImpl::From(guest_rwhv->GetRenderWidgetHost())) {
+    if (auto* rwh = guest_rwhv->GetRenderWidgetHostImpl()) {
       // We need composition range information for some IMEs. To get the
       // updates, we need to explicitly ask the renderer to monitor and send the
       // composition information changes. RenderWidgetHostView of the page will
@@ -700,11 +703,13 @@ void BrowserPluginGuest::RenderViewReady() {
   // In case we've created a new guest render process after a crash, let the
   // associated BrowserPlugin know. We only need to send this if we're attached,
   // as guest_crashed_ is cleared automatically on attach anyways.
-  if (attached()) {
+  if (attached() && !switches::IsMusHostingViz()) {
     RenderWidgetHostViewGuest* rwhv = static_cast<RenderWidgetHostViewGuest*>(
         web_contents()->GetRenderWidgetHostView());
-    SendMessageToEmbedder(base::MakeUnique<BrowserPluginMsg_GuestReady>(
-        browser_plugin_instance_id(), rwhv->GetFrameSinkId()));
+    if (rwhv) {
+      SendMessageToEmbedder(std::make_unique<BrowserPluginMsg_GuestReady>(
+          browser_plugin_instance_id(), rwhv->GetFrameSinkId()));
+    }
   }
 
   RenderWidgetHostImpl::From(rvh->GetWidget())
@@ -713,7 +718,7 @@ void BrowserPluginGuest::RenderViewReady() {
 }
 
 void BrowserPluginGuest::RenderProcessGone(base::TerminationStatus status) {
-  SendMessageToEmbedder(base::MakeUnique<BrowserPluginMsg_GuestGone>(
+  SendMessageToEmbedder(std::make_unique<BrowserPluginMsg_GuestGone>(
       browser_plugin_instance_id()));
   switch (status) {
 #if defined(OS_CHROMEOS)
@@ -846,7 +851,7 @@ void BrowserPluginGuest::OnWillAttachComplete(
   RenderWidgetHostViewGuest* rwhv = static_cast<RenderWidgetHostViewGuest*>(
       web_contents()->GetRenderWidgetHostView());
   if (rwhv)
-    rwhv->RegisterFrameSinkId();
+    rwhv->OnAttached();
   has_render_view_ = true;
 
   RecordAction(base::UserMetricsAction("BrowserPlugin.Guest.Attached"));
@@ -867,8 +872,13 @@ void BrowserPluginGuest::OnDetach(int browser_plugin_instance_id) {
       static_cast<RenderWidgetHostViewChildFrame*>(
           web_contents()->GetRenderWidgetHostView());
   // If the guest is terminated, our host may already be gone.
-  if (rwhv)
+  if (rwhv) {
     rwhv->UnregisterFrameSinkId();
+    RenderWidgetHostViewBase* root_view =
+        RenderWidgetHostViewGuest::GetRootView(rwhv);
+    if (root_view)
+      root_view->GetCursorManager()->ViewBeingDestroyed(rwhv);
+  }
 
   delegate_->DidDetach();
 }
@@ -877,7 +887,7 @@ void BrowserPluginGuest::OnDragStatusUpdate(int browser_plugin_instance_id,
                                             blink::WebDragStatus drag_status,
                                             const DropData& drop_data,
                                             blink::WebDragOperationsMask mask,
-                                            const gfx::Point& location) {
+                                            const gfx::PointF& location) {
   RenderViewHost* host = GetWebContents()->GetRenderViewHost();
   auto* embedder = owner_web_contents_->GetBrowserPluginEmbedder();
   DropData filtered_data(drop_data);
@@ -900,7 +910,7 @@ void BrowserPluginGuest::OnDragStatusUpdate(int browser_plugin_instance_id,
       break;
     case blink::kWebDragStatusLeave:
       embedder->DragLeftGuest(this);
-      widget->DragTargetDragLeave(gfx::Point(), gfx::Point());
+      widget->DragTargetDragLeave(gfx::PointF(), gfx::PointF());
       ignore_dragged_url_ = true;
       break;
     case blink::kWebDragStatusDrop:
@@ -1048,7 +1058,7 @@ void BrowserPluginGuest::OnSetVisibility(int browser_plugin_instance_id,
 }
 
 void BrowserPluginGuest::OnUnlockMouse() {
-  SendMessageToEmbedder(base::MakeUnique<BrowserPluginMsg_SetMouseLock>(
+  SendMessageToEmbedder(std::make_unique<BrowserPluginMsg_SetMouseLock>(
       browser_plugin_instance_id(), false));
 }
 
@@ -1064,25 +1074,46 @@ void BrowserPluginGuest::OnUnlockMouseAck(int browser_plugin_instance_id) {
   mouse_locked_ = false;
 }
 
-void BrowserPluginGuest::OnUpdateGeometry(
+void BrowserPluginGuest::OnUpdateResizeParams(
     int browser_plugin_instance_id,
-    const gfx::Rect& view_rect,
+    const gfx::Rect& frame_rect,
+    const ScreenInfo& screen_info,
+    uint64_t sequence_number,
     const viz::LocalSurfaceId& local_surface_id) {
-  // The plugin has moved within the embedder without resizing or the
-  // embedder/container's view rect changing.
-  guest_window_rect_ = view_rect;
-  GetWebContents()->SendScreenRects();
-  if (local_surface_id_ != local_surface_id) {
-    local_surface_id_ = local_surface_id;
-    RenderWidgetHostView* view = web_contents()->GetRenderWidgetHostView();
-    if (view)
-      view->GetRenderWidgetHost()->WasResized();
+  if ((frame_rect_.size() != frame_rect.size() ||
+       screen_info_ != screen_info) &&
+      local_surface_id_ == local_surface_id) {
+    SiteInstance* owner_site_instance = delegate_->GetOwnerSiteInstance();
+    bad_message::ReceivedBadMessage(
+        owner_site_instance->GetProcess(),
+        bad_message::BPG_RESIZE_PARAMS_CHANGED_LOCAL_SURFACE_ID_UNCHANGED);
+    return;
   }
+
+  screen_info_ = screen_info;
+  frame_rect_ = frame_rect;
+  GetWebContents()->SendScreenRects();
+  local_surface_id_ = local_surface_id;
+
+  RenderWidgetHostView* view = web_contents()->GetRenderWidgetHostView();
+  if (!view)
+    return;
+
+  RenderWidgetHostImpl* render_widget_host =
+      RenderWidgetHostImpl::From(view->GetRenderWidgetHost());
+  DCHECK(render_widget_host);
+
+  if (render_widget_host->auto_resize_enabled()) {
+    render_widget_host->DidAllocateLocalSurfaceIdForAutoResize(sequence_number);
+    return;
+  }
+
+  render_widget_host->WasResized();
 }
 
 void BrowserPluginGuest::OnHasTouchEventHandlers(bool accept) {
   SendMessageToEmbedder(
-      base::MakeUnique<BrowserPluginMsg_ShouldAcceptTouchEvents>(
+      std::make_unique<BrowserPluginMsg_ShouldAcceptTouchEvents>(
           browser_plugin_instance_id(), accept));
 }
 
@@ -1097,7 +1128,7 @@ void BrowserPluginGuest::OnShowPopup(
         guest->GetRenderWidgetHostView()->TransformPointToRootCoordSpace(
             translated_bounds.origin()));
   } else {
-    translated_bounds.Offset(guest_window_rect_.OffsetFromOrigin());
+    translated_bounds.Offset(frame_rect_.OffsetFromOrigin());
   }
   BrowserPluginPopupMenuHelper popup_menu_helper(
       owner_web_contents_->GetMainFrame(), render_frame_host);
@@ -1118,7 +1149,7 @@ void BrowserPluginGuest::OnShowWidget(int route_id,
 }
 
 void BrowserPluginGuest::OnTakeFocus(bool reverse) {
-  SendMessageToEmbedder(base::MakeUnique<BrowserPluginMsg_AdvanceFocus>(
+  SendMessageToEmbedder(std::make_unique<BrowserPluginMsg_AdvanceFocus>(
       browser_plugin_instance_id(), reverse));
 }
 

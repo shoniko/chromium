@@ -8,7 +8,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -143,7 +142,7 @@ class VideoFrameStreamTest
     // parameterized tests which need to pass in all combinations.
     std::vector<std::unique_ptr<VideoDecoder>> decoders;
     for (int i = 0; i < 3; ++i) {
-      auto decoder = base::MakeUnique<FakeVideoDecoder>(
+      auto decoder = std::make_unique<FakeVideoDecoder>(
           GetDecoderName(i), GetParam().decoding_delay,
           GetParam().parallel_decoding,
           base::Bind(&VideoFrameStreamTest::OnBytesDecoded,
@@ -200,6 +199,9 @@ class VideoFrameStreamTest
       decoder_ = nullptr;
       return;
     }
+
+    // Ensure there's a media log created whenever selecting a decoder.
+    EXPECT_MEDIA_LOG(HasSubstr("for video decoding, config"));
 
     std::string name = decoder->GetDisplayName();
     ASSERT_TRUE(GetDecoderName(0) == name || GetDecoderName(1) == name ||
@@ -364,8 +366,10 @@ class VideoFrameStreamTest
   void SatisfyPendingCallback(PendingState state) {
     DCHECK_NE(state, NOT_PENDING);
     switch (state) {
-      case DEMUXER_READ_NORMAL:
       case DEMUXER_READ_CONFIG_CHANGE:
+        EXPECT_MEDIA_LOG(HasSubstr("decoder config changed"))
+            .Times(testing::AtLeast(1));
+      case DEMUXER_READ_NORMAL:
         demuxer_stream_->SatisfyRead();
         break;
 

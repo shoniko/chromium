@@ -12,21 +12,15 @@
 #include "core/html/forms/FormController.h"
 #include "core/html/forms/FormData.h"
 #include "core/html/forms/HTMLFormElement.h"
-#include "core/testing/DummyPageHolder.h"
-#include "core/url/URLSearchParams.h"
+#include "core/testing/PageTestBase.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
-class PasswordCredentialTest : public ::testing::Test {
+class PasswordCredentialTest : public PageTestBase {
  protected:
-  void SetUp() override {
-    dummy_page_holder_ = DummyPageHolder::Create();
-    document_ = &dummy_page_holder_->GetDocument();
-  }
-
-  Document& GetDocument() const { return *document_; }
+  void SetUp() override { PageTestBase::SetUp(IntSize()); }
 
   HTMLFormElement* PopulateForm(const char* enctype, const char* html) {
     StringBuilder b;
@@ -35,17 +29,11 @@ class PasswordCredentialTest : public ::testing::Test {
     b.Append("'>");
     b.Append(html);
     b.Append("</form></body></html>");
-    GetDocument().documentElement()->SetInnerHTMLFromString(b.ToString());
-    GetDocument().View()->UpdateAllLifecyclePhases();
-    HTMLFormElement* form =
-        ToHTMLFormElement(GetDocument().getElementById("theForm"));
+    SetHtmlInnerHTML(b.ToString().Utf8().data());
+    HTMLFormElement* form = ToHTMLFormElement(GetElementById("theForm"));
     EXPECT_NE(nullptr, form);
     return form;
   }
-
- private:
-  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
-  Persistent<Document> document_;
 };
 
 TEST_F(PasswordCredentialTest, CreateFromMultipartForm) {
@@ -63,23 +51,12 @@ TEST_F(PasswordCredentialTest, CreateFromMultipartForm) {
   PasswordCredential* credential =
       PasswordCredential::Create(form, ASSERT_NO_EXCEPTION);
   ASSERT_NE(nullptr, credential);
-  EXPECT_EQ("theId", credential->idName());
-  EXPECT_EQ("thePassword", credential->passwordName());
 
   EXPECT_EQ("musterman", credential->id());
   EXPECT_EQ("sekrit", credential->password());
   EXPECT_EQ(KURL("https://example.com/photo"), credential->iconURL());
   EXPECT_EQ("friendly name", credential->name());
   EXPECT_EQ("password", credential->type());
-
-  FormDataOrURLSearchParams additional_data;
-  credential->additionalData(additional_data);
-  ASSERT_TRUE(additional_data.GetAsFormData());
-  EXPECT_TRUE(additional_data.GetAsFormData()->has("theId"));
-  EXPECT_TRUE(additional_data.GetAsFormData()->has("thePassword"));
-  EXPECT_TRUE(additional_data.GetAsFormData()->has("theIcon"));
-  EXPECT_TRUE(additional_data.GetAsFormData()->has("theName"));
-  EXPECT_TRUE(additional_data.GetAsFormData()->has("theExtraField"));
 }
 
 TEST_F(PasswordCredentialTest, CreateFromURLEncodedForm) {
@@ -97,23 +74,12 @@ TEST_F(PasswordCredentialTest, CreateFromURLEncodedForm) {
   PasswordCredential* credential =
       PasswordCredential::Create(form, ASSERT_NO_EXCEPTION);
   ASSERT_NE(nullptr, credential);
-  EXPECT_EQ("theId", credential->idName());
-  EXPECT_EQ("thePassword", credential->passwordName());
 
   EXPECT_EQ("musterman", credential->id());
   EXPECT_EQ("sekrit", credential->password());
   EXPECT_EQ(KURL("https://example.com/photo"), credential->iconURL());
   EXPECT_EQ("friendly name", credential->name());
   EXPECT_EQ("password", credential->type());
-
-  FormDataOrURLSearchParams additional_data;
-  credential->additionalData(additional_data);
-  ASSERT_TRUE(additional_data.IsURLSearchParams());
-  EXPECT_TRUE(additional_data.GetAsURLSearchParams()->has("theId"));
-  EXPECT_TRUE(additional_data.GetAsURLSearchParams()->has("thePassword"));
-  EXPECT_TRUE(additional_data.GetAsURLSearchParams()->has("theIcon"));
-  EXPECT_TRUE(additional_data.GetAsURLSearchParams()->has("theName"));
-  EXPECT_TRUE(additional_data.GetAsURLSearchParams()->has("theExtraField"));
 }
 
 TEST_F(PasswordCredentialTest, CreateFromFormNoPassword) {

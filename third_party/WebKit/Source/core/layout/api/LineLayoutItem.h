@@ -39,9 +39,9 @@ class LineLayoutItem {
   explicit LineLayoutItem(WTF::HashTableDeletedValueType)
       : layout_object_(kHashTableDeletedValue) {}
 
-  LineLayoutItem(std::nullptr_t) : layout_object_(0) {}
+  LineLayoutItem(std::nullptr_t) : layout_object_(nullptr) {}
 
-  LineLayoutItem() : layout_object_(0) {}
+  LineLayoutItem() : layout_object_(nullptr) {}
 
   explicit operator bool() const { return layout_object_; }
 
@@ -123,9 +123,12 @@ class LineLayoutItem {
 
   Document& GetDocument() const { return layout_object_->GetDocument(); }
 
-  // TODO(dgrogan): This is the only caller: move the logic from LayoutObject
-  // to here.
-  bool PreservesNewline() const { return layout_object_->PreservesNewline(); }
+  bool PreservesNewline() const {
+    if (IsSVGInlineText())
+      return false;
+
+    return Style()->PreserveNewline();
+  }
 
   unsigned length() const { return layout_object_->length(); }
 
@@ -215,8 +218,11 @@ class LineLayoutItem {
 
   bool SelfNeedsLayout() const { return layout_object_->SelfNeedsLayout(); }
 
-  // TODO(dgrogan/eae): Why does layoutObject need to know if its ancestor
-  // line box is dirty at all?
+  // |SetAncestorLineBoxDirty()| invalidates |layout_object|, should be
+  // |LayoutInline|, with |kLineBoxesChanged|.
+  // Note: |AncestorLineBoxDirty| flag itself is used for preventing
+  // invalidation on |layout_object_| more than once and used only in
+  // |LineBoxList::DirtyLinesFromChangedChild()|.
   void SetAncestorLineBoxDirty() const {
     layout_object_->SetAncestorLineBoxDirty();
   }
@@ -247,7 +253,7 @@ class LineLayoutItem {
 
   // TODO(dgrogan/eae): Needed for Color::current. Can we move this somewhere?
   Color ResolveColor(const ComputedStyle& style_to_use,
-                     CSSPropertyID color_property) {
+                     const CSSProperty& color_property) {
     return layout_object_->ResolveColor(style_to_use, color_property);
   }
 
@@ -291,6 +297,9 @@ class LineLayoutItem {
   }
 
   LayoutRect VisualRect() const { return layout_object_->VisualRect(); }
+  LayoutRect PartialInvalidationRect() const {
+    return layout_object_->PartialInvalidationRect();
+  }
 
   bool IsHashTableDeletedValue() const {
     return layout_object_ == kHashTableDeletedValue;

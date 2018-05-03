@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #import "base/mac/mac_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -17,6 +16,7 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
+#include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
@@ -114,7 +114,7 @@ LocationBarViewMac::LocationBarViewMac(AutocompleteTextField* field,
       ContentSettingImageModel::GenerateContentSettingImageModels();
   for (auto& model : models) {
     content_setting_decorations_.push_back(
-        base::MakeUnique<ContentSettingDecoration>(std::move(model), this,
+        std::make_unique<ContentSettingDecoration>(std::move(model), this,
                                                    profile));
   }
 
@@ -191,11 +191,19 @@ void LocationBarViewMac::UpdateSaveCreditCardIcon() {
   autofill::SaveCardBubbleControllerImpl* controller =
       autofill::SaveCardBubbleControllerImpl::FromWebContents(web_contents);
   bool enabled = controller && controller->IsIconVisible();
-  command_updater()->UpdateCommandEnabled(IDC_SAVE_CREDIT_CARD_FOR_PAGE,
-                                          enabled);
+  if (!command_updater()->UpdateCommandEnabled(
+          IDC_SAVE_CREDIT_CARD_FOR_PAGE, enabled)) {
+    enabled = enabled && command_updater()->IsCommandEnabled(
+        IDC_SAVE_CREDIT_CARD_FOR_PAGE);
+  }
   save_credit_card_decoration_->SetIcon(IsLocationBarDark());
   save_credit_card_decoration_->SetVisible(enabled);
   OnDecorationsChanged();
+}
+
+void LocationBarViewMac::UpdateFindBarIconVisibility() {
+  // TODO(crbug/651643): Implement for mac.
+  NOTIMPLEMENTED();
 }
 
 void LocationBarViewMac::UpdateBookmarkStarVisibility() {
@@ -377,6 +385,7 @@ void LocationBarViewMac::Layout() {
       [cell availableWidthInFrame:[[cell controlView] frame]];
   is_width_available_for_security_verbose_ = available_width >= kMinURLWidth;
 
+  NSString* a11y_description = @"";
   if (!keyword.empty() && !is_keyword_hint) {
     // Switch from location icon to keyword mode.
     selected_keyword_decoration_->SetVisible(true);
@@ -387,12 +396,16 @@ void LocationBarViewMac::Layout() {
     // Design we need to set its color, which we cannot do until we know the
     // theme (by being installed in a browser window).
     selected_keyword_decoration_->SetImage(GetKeywordImage(keyword));
+    a11y_description = selected_keyword_decoration_->GetAccessibilityLabel();
   } else if (!keyword.empty() && is_keyword_hint) {
     keyword_hint_decoration_->SetKeyword(short_name, is_extension_keyword);
     keyword_hint_decoration_->SetVisible(true);
+    a11y_description = keyword_hint_decoration_->GetAccessibilityLabel();
   } else {
     UpdatePageInfoText();
   }
+  [cell accessibilitySetOverrideValue:a11y_description
+                         forAttribute:NSAccessibilityDescriptionAttribute];
 
   if (!page_info_decoration_->IsVisible())
     page_info_decoration_->ResetAnimation();
@@ -586,8 +599,9 @@ void LocationBarViewMac::UpdatePageInfoText() {
   PageInfoVerboseType type = GetPageInfoVerboseType();
   if (type == PageInfoVerboseType::kEVCert) {
     label = GetToolbarModel()->GetEVCertName();
-  } else if (type == PageInfoVerboseType::kExtension) {
-    label = GetExtensionName(GetToolbarModel()->GetURL(), GetWebContents());
+  } else if (type == PageInfoVerboseType::kExtension && GetWebContents()) {
+    label = extensions::ui_util::GetEnabledExtensionNameForUrl(
+        GetToolbarModel()->GetURL(), GetWebContents()->GetBrowserContext());
   } else if (type == PageInfoVerboseType::kChrome) {
     label = l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
   } else if (type == PageInfoVerboseType::kSecurity &&
@@ -619,7 +633,10 @@ void LocationBarViewMac::UpdateTranslateDecoration() {
   translate::LanguageState& language_state =
       ChromeTranslateClient::FromWebContents(web_contents)->GetLanguageState();
   bool enabled = language_state.translate_enabled();
-  command_updater()->UpdateCommandEnabled(IDC_TRANSLATE_PAGE, enabled);
+  if (!command_updater()->UpdateCommandEnabled(IDC_TRANSLATE_PAGE, enabled)) {
+    enabled = enabled && command_updater()->IsCommandEnabled(
+        IDC_TRANSLATE_PAGE);
+  }
   translate_decoration_->SetVisible(enabled);
   translate_decoration_->SetLit(language_state.IsPageTranslated(),
                                 IsLocationBarDark());
@@ -639,6 +656,7 @@ void LocationBarViewMac::AnimatePageInfoIfPossible(bool tab_changed) {
   using SecurityLevel = security_state::SecurityLevel;
   SecurityLevel new_security_level = GetToolbarModel()->GetSecurityLevel(false);
   bool is_new_security_level = security_level_ != new_security_level;
+  SecurityLevel old_security_level = security_level_;
   security_level_ = new_security_level;
 
   if (tab_changed)
@@ -648,6 +666,14 @@ void LocationBarViewMac::AnimatePageInfoIfPossible(bool tab_changed) {
   // isn't updated from a tab switch.
   if (GetPageInfoVerboseType() != PageInfoVerboseType::kSecurity ||
       !HasSecurityVerboseText() || tab_changed) {
+    page_info_decoration_->ShowWithoutAnimation();
+    return;
+  }
+
+  // Do not animate HTTP_SHOW_WARNING to DANGEROUS transitions because they look
+  // messy/confusing.
+  if (old_security_level == security_state::HTTP_SHOW_WARNING &&
+      security_level_ == security_state::DANGEROUS) {
     page_info_decoration_->ShowWithoutAnimation();
     return;
   }

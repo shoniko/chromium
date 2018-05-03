@@ -17,7 +17,6 @@
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
@@ -61,7 +60,8 @@ const char kDefaultScreenshotFileName[] = "screenshot.png";
 // Default file name for pdf. Can be overriden by "--print-to-pdf" switch.
 const char kDefaultPDFFileName[] = "output.pdf";
 
-bool ParseWindowSize(std::string window_size, gfx::Size* parsed_window_size) {
+bool ParseWindowSize(const std::string& window_size,
+                     gfx::Size* parsed_window_size) {
   int width, height = 0;
   if (sscanf(window_size.c_str(), "%d%*[x,]%d", &width, &height) >= 2 &&
       width >= 0 && height >= 0) {
@@ -128,7 +128,7 @@ HeadlessShell::HeadlessShell()
       weak_factory_(this) {
 }
 
-HeadlessShell::~HeadlessShell() {}
+HeadlessShell::~HeadlessShell() = default;
 
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
 void HeadlessShell::OnStart(HeadlessBrowser* browser) {
@@ -154,17 +154,17 @@ void HeadlessShell::OnStart(HeadlessBrowser* browser) {
   DeterministicHttpProtocolHandler* https_handler = nullptr;
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDeterministicFetch)) {
-    deterministic_dispatcher_.reset(
-        new DeterministicDispatcher(browser_->BrowserIOThread()));
+    deterministic_dispatcher_ =
+        std::make_unique<DeterministicDispatcher>(browser_->BrowserIOThread());
 
     ProtocolHandlerMap protocol_handlers;
     protocol_handlers[url::kHttpScheme] =
-        base::MakeUnique<DeterministicHttpProtocolHandler>(
+        std::make_unique<DeterministicHttpProtocolHandler>(
             deterministic_dispatcher_.get(), browser->BrowserIOThread());
     http_handler = static_cast<DeterministicHttpProtocolHandler*>(
         protocol_handlers[url::kHttpScheme].get());
     protocol_handlers[url::kHttpsScheme] =
-        base::MakeUnique<DeterministicHttpProtocolHandler>(
+        std::make_unique<DeterministicHttpProtocolHandler>(
             deterministic_dispatcher_.get(), browser->BrowserIOThread());
     https_handler = static_cast<DeterministicHttpProtocolHandler*>(
         protocol_handlers[url::kHttpsScheme].get());
@@ -377,7 +377,7 @@ void HeadlessShell::OnRequestIntercepted(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (params.GetIsNavigationRequest()) {
     deterministic_dispatcher_->NavigationRequested(
-        base::MakeUnique<ShellNavigationRequest>(weak_factory_.GetWeakPtr(),
+        std::make_unique<ShellNavigationRequest>(weak_factory_.GetWeakPtr(),
                                                  params.GetInterceptionId()));
     return;
   }
@@ -504,23 +504,31 @@ void HeadlessShell::WriteFile(const std::string& file_path_switch,
                               const std::string& default_file_name,
                               const std::string& base64_data) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
   base::FilePath file_name =
       base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
           file_path_switch);
   if (file_name.empty())
     file_name = base::FilePath().AppendASCII(default_file_name);
 
-  file_proxy_ = base::MakeUnique<base::FileProxy>(file_task_runner_.get());
+  std::string decoded_data;
+  if (!base::Base64Decode(base64_data, &decoded_data)) {
+    LOG(ERROR) << "Failed to decode base64 data";
+    OnFileOpened(std::string(), file_name, base::File::FILE_ERROR_FAILED);
+    return;
+  }
+
+  file_proxy_ = std::make_unique<base::FileProxy>(file_task_runner_.get());
   if (!file_proxy_->CreateOrOpen(
           file_name, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE,
           base::Bind(&HeadlessShell::OnFileOpened, weak_factory_.GetWeakPtr(),
-                     base64_data, file_name))) {
+                     decoded_data, file_name))) {
     // Operation could not be started.
     OnFileOpened(std::string(), file_name, base::File::FILE_ERROR_FAILED);
   }
 }
 
-void HeadlessShell::OnFileOpened(const std::string& base64_data,
+void HeadlessShell::OnFileOpened(const std::string& decoded_data,
                                  const base::FilePath file_name,
                                  base::File::Error error_code) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -531,16 +539,7 @@ void HeadlessShell::OnFileOpened(const std::string& base64_data,
     return;
   }
 
-  std::string decoded_data;
-  if (!base::Base64Decode(base64_data, &decoded_data)) {
-    LOG(ERROR) << "Failed to decode base64 data";
-    OnFileWritten(file_name, base64_data.size(), base::File::FILE_ERROR_FAILED,
-                  0);
-    return;
-  }
-
-  scoped_refptr<net::IOBufferWithSize> buf =
-      new net::IOBufferWithSize(decoded_data.size());
+  auto buf = base::MakeRefCounted<net::IOBufferWithSize>(decoded_data.size());
   memcpy(buf->data(), decoded_data.data(), decoded_data.size());
 
   if (!file_proxy_->Write(
@@ -732,7 +731,7 @@ int HeadlessShellMain(int argc, const char** argv) {
   if (command_line.HasSwitch(switches::kProxyServer)) {
     std::string proxy_server =
         command_line.GetSwitchValueASCII(switches::kProxyServer);
-    std::unique_ptr<net::ProxyConfig> proxy_config(new net::ProxyConfig);
+    auto proxy_config = std::make_unique<net::ProxyConfig>();
     proxy_config->proxy_rules().ParseFromString(proxy_server);
     if (command_line.HasSwitch(switches::kProxyBypassList)) {
       std::string bypass_list =

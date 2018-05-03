@@ -15,7 +15,6 @@
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -25,6 +24,7 @@
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_undo_delegate.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/bookmarks/browser/titled_url_match.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/bookmarks/test/test_bookmark_client.h"
 #include "components/favicon_base/favicon_callback.h"
@@ -131,7 +131,7 @@ void PopulateNodeImpl(const std::vector<std::string>& description,
       // in debugging.
       static int next_folder_id = 1;
       TestNode* new_node = parent->Add(
-          base::MakeUnique<TestNode>(base::IntToString16(next_folder_id++),
+          std::make_unique<TestNode>(base::IntToString16(next_folder_id++),
                                      BookmarkNode::FOLDER),
           parent->child_count());
       PopulateNodeImpl(description, index, new_node);
@@ -145,7 +145,7 @@ void PopulateNodeImpl(const std::vector<std::string>& description,
       // likely means a space was forgotten.
       DCHECK(element.find('[') == std::string::npos);
       DCHECK(element.find(']') == std::string::npos);
-      parent->Add(base::MakeUnique<TestNode>(base::UTF8ToUTF16(element),
+      parent->Add(std::make_unique<TestNode>(base::UTF8ToUTF16(element),
                                              BookmarkNode::URL),
                   parent->child_count());
     }
@@ -427,7 +427,7 @@ class BookmarkModelTest : public testing::Test,
     model_->RemoveObserver(this);
 
     BookmarkPermanentNodeList extra_nodes;
-    extra_nodes.push_back(base::MakeUnique<BookmarkPermanentNode>(100));
+    extra_nodes.push_back(std::make_unique<BookmarkPermanentNode>(100));
     BookmarkPermanentNode* extra_node = extra_nodes.back().get();
 
     std::unique_ptr<TestBookmarkClient> client(new TestBookmarkClient);
@@ -1200,6 +1200,24 @@ TEST_F(BookmarkModelTest, GetMostRecentlyAddedUserNodeForURLSkipsManagedNodes) {
   EXPECT_EQ(user, model_->GetMostRecentlyAddedUserNodeForURL(url));
 }
 
+// Verifies that renaming a bookmark folder does not add the folder node to the
+// autocomplete index. crbug.com/778266
+TEST_F(BookmarkModelTest, RenamedFolderNodeExcludedFromIndex) {
+  // Add a folder.
+  const BookmarkNode* folder =
+      model_->AddFolder(model_->other_node(), 0, ASCIIToUTF16("MyFavorites"));
+
+  // Change the folder title.
+  model_->SetTitle(folder, ASCIIToUTF16("MyBookmarks"));
+
+  // There should be no matching bookmarks.
+  std::vector<TitledUrlMatch> matches;
+  model_->GetBookmarksMatching(ASCIIToUTF16("MyB"), /*max_count = */ 1,
+                               query_parser::MatchingAlgorithm::DEFAULT,
+                               &matches);
+  EXPECT_TRUE(matches.empty());
+}
+
 TEST(BookmarkNodeTest, NodeMetaInfo) {
   GURL url;
   BookmarkNode node(url);
@@ -1295,7 +1313,7 @@ class BookmarkModelFaviconTest : public testing::Test,
       favicon_base::FaviconImageResult image_result;
       image_result.image = image;
       image_result.icon_url = icon_url;
-      model_->OnFaviconDataAvailable(node, favicon_base::IconType::FAVICON,
+      model_->OnFaviconDataAvailable(node, favicon_base::IconType::kFavicon,
                                      image_result);
   }
 

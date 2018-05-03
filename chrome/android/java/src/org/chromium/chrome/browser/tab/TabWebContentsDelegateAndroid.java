@@ -509,6 +509,25 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
     }
 
     @Override
+    public int getTopControlsHeight() {
+        return mTab.getTopControlsHeight();
+    }
+
+    @Override
+    public int getBottomControlsHeight() {
+        return mTab.getBottomControlsHeight();
+    }
+
+    @Override
+    public boolean controlsResizeView() {
+        return mTab.controlsResizeView();
+    }
+
+    private float getDipScale() {
+        return mTab.getWindowAndroid().getDisplay().getDipScale();
+    }
+
+    @Override
     public ContentVideoViewEmbedder getContentVideoViewEmbedder() {
         return new ActivityContentVideoViewEmbedder(mTab.getActivity()) {
             @Override
@@ -541,10 +560,15 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
         };
     }
 
+    public void showFramebustBlockInfobarForTesting(String url) {
+        nativeShowFramebustBlockInfoBar(mTab.getWebContents(), url);
+    }
+
     private static native void nativeOnRendererUnresponsive(WebContents webContents);
     private static native void nativeOnRendererResponsive(WebContents webContents);
     private static native boolean nativeIsCapturingAudio(WebContents webContents);
     private static native boolean nativeIsCapturingVideo(WebContents webContents);
     private static native boolean nativeIsCapturingScreen(WebContents webContents);
     private static native void nativeNotifyStopped(WebContents webContents);
+    private static native void nativeShowFramebustBlockInfoBar(WebContents webContents, String url);
 }

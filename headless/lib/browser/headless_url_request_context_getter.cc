@@ -8,16 +8,21 @@
 #include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "base/task_scheduler/post_task.h"
+#include "build/build_config.h"
+#include "components/cookie_config/cookie_store_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/devtools_network_transaction_factory.h"
+#include "headless/app/headless_shell_switches.h"
 #include "headless/lib/browser/headless_browser_context_impl.h"
 #include "headless/lib/browser/headless_browser_context_options.h"
 #include "headless/lib/browser/headless_network_delegate.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/mapped_host_resolver.h"
+#include "net/http/http_auth_handler_factory.h"
+#include "net/http/http_auth_preferences.h"
+#include "net/http/http_auth_scheme.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
 #include "net/proxy/proxy_service.h"
@@ -25,6 +30,12 @@
 #include "net/ssl/default_channel_id_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#include "base/command_line.h"
+#include "components/os_crypt/key_storage_config_linux.h"
+#include "components/os_crypt/os_crypt.h"
+#endif
 
 namespace headless {
 
@@ -76,29 +87,55 @@ HeadlessURLRequestContextGetter::~HeadlessURLRequestContextGetter() {
 net::URLRequestContext*
 HeadlessURLRequestContextGetter::GetURLRequestContext() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+
+  if (shut_down_)
+    return nullptr;
+
   if (!url_request_context_) {
     net::URLRequestContextBuilder builder;
 
-    // Don't store cookies in incognito mode or if no user-data-dir was
-    // specified
-    // TODO: Enable this always once saving/restoring sessions is implemented
-    // (https://crbug.com/617931)
-    if (headless_browser_context_ &&
-        !headless_browser_context_->IsOffTheRecord() &&
-        !headless_browser_context_->options()->user_data_dir().empty()) {
-      content::CookieStoreConfig cookie_config(
-          headless_browser_context_->GetPath().Append(
-              FILE_PATH_LITERAL("Cookies")),
-          content::CookieStoreConfig::PERSISTANT_SESSION_COOKIES, NULL);
-      std::unique_ptr<net::CookieStore> cookie_store =
-          CreateCookieStore(cookie_config);
-      std::unique_ptr<net::ChannelIDService> channel_id_service =
-          base::MakeUnique<net::ChannelIDService>(
-              new net::DefaultChannelIDStore(nullptr));
+    {
+      base::AutoLock lock(lock_);
+      // Don't store cookies in incognito mode or if no user-data-dir was
+      // specified
+      // TODO: Enable this always once saving/restoring sessions is implemented
+      // (https://crbug.com/617931)
+      if (headless_browser_context_ &&
+          !headless_browser_context_->IsOffTheRecord() &&
+          !headless_browser_context_->options()->user_data_dir().empty()) {
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+        std::unique_ptr<os_crypt::Config> config(new os_crypt::Config());
+        base::CommandLine* command_line =
+            base::CommandLine::ForCurrentProcess();
+        config->store =
+            command_line->GetSwitchValueASCII(switches::kPasswordStore);
+        config->product_name = "HeadlessChrome";
+        // OSCrypt may target keyring, which requires calls from the main
+        // thread.
+        config->main_thread_runner =
+            content::BrowserThread::GetTaskRunnerForThread(
+                content::BrowserThread::UI);
+        config->should_use_preference = false;
+        config->user_data_path = headless_browser_context_->GetPath();
+        OSCrypt::SetConfig(std::move(config));
+#endif
 
-      cookie_store->SetChannelIDServiceID(channel_id_service->GetUniqueID());
-      builder.SetCookieAndChannelIdStores(std::move(cookie_store),
-                                          std::move(channel_id_service));
+        content::CookieStoreConfig cookie_config(
+            headless_browser_context_->GetPath().Append(
+                FILE_PATH_LITERAL("Cookies")),
+            false, true, NULL);
+        cookie_config.crypto_delegate =
+            cookie_config::GetCookieCryptoDelegate();
+        std::unique_ptr<net::CookieStore> cookie_store =
+            CreateCookieStore(cookie_config);
+        std::unique_ptr<net::ChannelIDService> channel_id_service =
+            std::make_unique<net::ChannelIDService>(
+                new net::DefaultChannelIDStore(nullptr));
+
+        cookie_store->SetChannelIDServiceID(channel_id_service->GetUniqueID());
+        builder.SetCookieAndChannelIdStores(std::move(cookie_store),
+                                            std::move(channel_id_service));
+      }
     }
 
     builder.set_accept_language(
@@ -116,17 +153,29 @@ HeadlessURLRequestContextGetter::GetURLRequestContext() {
     {
       base::AutoLock lock(lock_);
       builder.set_network_delegate(
-          base::MakeUnique<HeadlessNetworkDelegate>(headless_browser_context_));
+          std::make_unique<HeadlessNetworkDelegate>(headless_browser_context_));
     }
 
+    std::unique_ptr<net::HostResolver> host_resolver(
+        net::HostResolver::CreateDefaultResolver(net_log_));
+
     if (!host_resolver_rules_.empty()) {
-      std::unique_ptr<net::HostResolver> host_resolver(
-          net::HostResolver::CreateDefaultResolver(net_log_));
       std::unique_ptr<net::MappedHostResolver> mapped_host_resolver(
           new net::MappedHostResolver(std::move(host_resolver)));
       mapped_host_resolver->SetRulesFromString(host_resolver_rules_);
-      builder.set_host_resolver(std::move(mapped_host_resolver));
+      host_resolver = std::move(mapped_host_resolver);
     }
+
+    net::HttpAuthPreferences* prefs(new net::HttpAuthPreferences());
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+    prefs->SetServerWhitelist(
+        command_line->GetSwitchValueASCII(switches::kAuthServerWhitelist));
+    std::unique_ptr<net::HttpAuthHandlerRegistryFactory> factory =
+        net::HttpAuthHandlerRegistryFactory::CreateDefault(host_resolver.get());
+    factory->SetHttpAuthPreferences(net::kNegotiateAuthScheme,
+                                    std::move(prefs));
+    builder.SetHttpAuthHandlerFactory(std::move(factory));
+    builder.set_host_resolver(std::move(host_resolver));
 
     // Extra headers are required for network emulation and are removed in
     // DevToolsNetworkTransaction. If a protocol handler is set for http or
@@ -168,6 +217,13 @@ net::HostResolver* HeadlessURLRequestContextGetter::host_resolver() const {
 void HeadlessURLRequestContextGetter::OnHeadlessBrowserContextDestruct() {
   base::AutoLock lock(lock_);
   headless_browser_context_ = nullptr;
+}
+
+void HeadlessURLRequestContextGetter::NotifyContextShuttingDown() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  shut_down_ = true;
+  net::URLRequestContextGetter::NotifyContextShuttingDown();
+  url_request_context_ = nullptr;  // deletes it
 }
 
 }  // namespace headless

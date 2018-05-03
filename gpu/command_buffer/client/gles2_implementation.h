@@ -20,9 +20,11 @@
 #include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "gpu/command_buffer/client/buffer_tracker.h"
 #include "gpu/command_buffer/client/client_context_state.h"
+#include "gpu/command_buffer/client/client_transfer_cache.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_impl_export.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -30,10 +32,11 @@
 #include "gpu/command_buffer/client/mapped_memory.h"
 #include "gpu/command_buffer/client/ref_counted.h"
 #include "gpu/command_buffer/client/share_group.h"
+#include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/capabilities.h"
+#include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/command_buffer/common/context_result.h"
 #include "gpu/command_buffer/common/debug_marker_manager.h"
-#include "gpu/command_buffer/common/gles2_cmd_utils.h"
 
 #if DCHECK_IS_ON() && !defined(__native_client__) && \
     !defined(GLES2_CONFORMANCE_TESTS)
@@ -105,9 +108,7 @@ namespace gpu {
 
 class GpuControl;
 class IdAllocator;
-class ScopedTransferBufferPtr;
 struct SharedMemoryLimits;
-class TransferBufferInterface;
 
 namespace gles2 {
 
@@ -192,9 +193,12 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   // ContextSupport implementation.
   void FlushPendingWork() override;
   void SignalSyncToken(const gpu::SyncToken& sync_token,
-                       const base::Closure& callback) override;
+                       base::OnceClosure callback) override;
   bool IsSyncTokenSignaled(const gpu::SyncToken& sync_token) override;
-  void SignalQuery(uint32_t query, const base::Closure& callback) override;
+  void SignalQuery(uint32_t query, base::OnceClosure callback) override;
+  void GetGpuFence(uint32_t gpu_fence_id,
+                   base::OnceCallback<void(std::unique_ptr<gfx::GpuFence>)>
+                       callback) override;
   void SetAggressivelyFreeResources(bool aggressively_free_resources) override;
   void Swap() override;
   void SwapWithBounds(const std::vector<gfx::Rect>& rects) override;
@@ -207,12 +211,23 @@ class GLES2_IMPL_EXPORT GLES2Implementation
                             const gfx::RectF& uv_rect) override;
   uint64_t ShareGroupTracingGUID() const override;
   void SetErrorMessageCallback(
-      const base::Callback<void(const char*, int32_t)>& callback) override;
-  void AddLatencyInfo(
-      const std::vector<ui::LatencyInfo>& latency_info) override;
+      base::RepeatingCallback<void(const char*, int32_t)> callback) override;
+  void SetSnapshotRequested() override;
   bool ThreadSafeShallowLockDiscardableTexture(uint32_t texture_id) override;
   void CompleteLockDiscardableTexureOnContextThread(
       uint32_t texture_id) override;
+  bool ThreadsafeDiscardableTextureIsDeletedForTracing(
+      uint32_t texture_id) override;
+  void CreateTransferCacheEntry(
+      const cc::ClientTransferCacheEntry& entry) override;
+  bool ThreadsafeLockTransferCacheEntry(cc::TransferCacheEntryType type,
+                                        uint32_t id) override;
+  void UnlockTransferCacheEntries(
+      const std::vector<std::pair<cc::TransferCacheEntryType, uint32_t>>&
+          entries) override;
+  void DeleteTransferCacheEntry(cc::TransferCacheEntryType type,
+                                uint32_t id) override;
+  unsigned int GetTransferBufferFreeSize() const override;
 
   // TODO(danakj): Move to ContextSupport once ContextProvider doesn't need to
   // intercept it.
@@ -525,6 +540,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void DeleteShaderStub(GLsizei n, const GLuint* shaders);
   void DeleteSamplersStub(GLsizei n, const GLuint* samplers);
   void DeleteSyncStub(GLsizei n, const GLuint* syncs);
+  void DestroyGpuFenceCHROMIUMHelper(GLuint client_id);
 
   void BufferDataHelper(
       GLenum target, GLsizeiptr size, const void* data, GLenum usage);
@@ -626,7 +642,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void FinishHelper();
   void FlushHelper();
 
-  void RunIfContextNotLost(const base::Closure& callback);
+  void RunIfContextNotLost(base::OnceClosure callback);
 
   // Validate if an offset is valid, i.e., non-negative and fit into 32-bit.
   // If not, generate an approriate error, and return false.
@@ -780,6 +796,12 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   // Changed every time a flush or finish occurs.
   uint32_t flush_id_;
 
+  // Avoid recycling of client-allocated GpuFence IDs by saving the
+  // last-allocated one and requesting the next one to be higher than that.
+  // This will wrap around as needed, but the space should be plenty big enough
+  // to avoid collisions.
+  uint32_t last_gpu_fence_id_ = 0;
+
   // Maximum amount of extra memory from the mapped memory pool to use when
   // needing to transfer something exceeding the default transfer buffer.
   uint32_t max_extra_transfer_buffer_size_;
@@ -808,6 +830,9 @@ class GLES2_IMPL_EXPORT GLES2Implementation
       id_allocators_[static_cast<int>(IdNamespaces::kNumIdNamespaces)];
 
   std::unique_ptr<BufferTracker> buffer_tracker_;
+  ClientTransferCache transfer_cache_;
+
+  base::Optional<ScopedTransferBufferPtr> raster_mapped_buffer_;
 
   base::Callback<void(const char*, int32_t)> error_message_callback_;
   base::Closure lost_context_callback_;

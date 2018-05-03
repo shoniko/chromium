@@ -11,6 +11,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/chrome_paths.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_clipping_feature.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "testing/gtest_mac.h"
 #include "testing/platform_test.h"
@@ -27,7 +28,7 @@
 
 namespace {
 
-class OmniboxTextFieldIOSTest : public PlatformTest {
+class OmniboxTextFieldTest : public PlatformTest {
  protected:
   void SetUp() override {
     PlatformTest::SetUp();
@@ -112,7 +113,7 @@ class OmniboxTextFieldIOSTest : public PlatformTest {
   OmniboxTextFieldIOS* textfield_;
 };
 
-TEST_F(OmniboxTextFieldIOSTest, enterPreEditState_preEditTextAlignment_short) {
+TEST_F(OmniboxTextFieldTest, enterPreEditState_preEditTextAlignment_short) {
   [textfield_ setText:@"s"];
   [textfield_ becomeFirstResponder];
   [textfield_ enterPreEditState];
@@ -121,7 +122,7 @@ TEST_F(OmniboxTextFieldIOSTest, enterPreEditState_preEditTextAlignment_short) {
   [textfield_ resignFirstResponder];
 }
 
-TEST_F(OmniboxTextFieldIOSTest, enterPreEditState_preEditTextAlignment_long) {
+TEST_F(OmniboxTextFieldTest, enterPreEditState_preEditTextAlignment_long) {
   [textfield_ setText:@"some really long text that is wider than the omnibox"];
   [textfield_ becomeFirstResponder];
   [textfield_ enterPreEditState];
@@ -130,7 +131,7 @@ TEST_F(OmniboxTextFieldIOSTest, enterPreEditState_preEditTextAlignment_long) {
   [textfield_ resignFirstResponder];
 }
 
-TEST_F(OmniboxTextFieldIOSTest, enterPreEditState_preEditTextAlignment_change) {
+TEST_F(OmniboxTextFieldTest, enterPreEditState_preEditTextAlignment_change) {
   [textfield_ setText:@"s"];
   [textfield_ becomeFirstResponder];
   [textfield_ enterPreEditState];
@@ -142,7 +143,13 @@ TEST_F(OmniboxTextFieldIOSTest, enterPreEditState_preEditTextAlignment_change) {
   [textfield_ resignFirstResponder];
 }
 
-TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_entireURLFits) {
+TEST_F(OmniboxTextFieldTest, rectForDrawTextInRect_entireURLFits) {
+  if (base::FeatureList::IsEnabled(kClippingTextfield)) {
+    // This test is expected to not work with new text field clipping because
+    // the code to implement clipping will be removed.
+    return;
+  }
+
   NSString* text = @"http://www.google.com";
   [textfield_ setText:text];
   CGSize textSize = [[textfield_ attributedText] size];
@@ -153,7 +160,13 @@ TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_entireURLFits) {
   ExpectRectEqual(inputRect, actualRect);
 }
 
-TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_clippedPrefix) {
+TEST_F(OmniboxTextFieldTest, rectForDrawTextInRect_clippedPrefix) {
+  if (base::FeatureList::IsEnabled(kClippingTextfield)) {
+    // This test is expected to not work with new text field clipping because
+    // the code to implement clipping will be removed.
+    return;
+  }
+
   NSString* text = @"http://www.google.com";
   [textfield_ setText:text];
   CGSize textSize = [[textfield_ attributedText] size];
@@ -167,7 +180,13 @@ TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_clippedPrefix) {
   ExpectRectEqual(expectedRect, actualRect);
 }
 
-TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_clippedSuffix) {
+TEST_F(OmniboxTextFieldTest, rectForDrawTextInRect_clippedSuffix) {
+  if (base::FeatureList::IsEnabled(kClippingTextfield)) {
+    // This test is expected to not work with new text field clipping because
+    // the code to implement clipping will be removed.
+    return;
+  }
+
   NSString* text = @"http://www.google.com/somelongpath";
   [textfield_ setText:text];
   CGSize textSize = [[textfield_ attributedText] size];
@@ -179,7 +198,13 @@ TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_clippedSuffix) {
   ExpectRectEqual(expectedRect, actualRect);
 }
 
-TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_noScheme) {
+TEST_F(OmniboxTextFieldTest, rectForDrawTextInRect_noScheme) {
+  if (base::FeatureList::IsEnabled(kClippingTextfield)) {
+    // This test is expected to not work with new text field clipping because
+    // the code to implement clipping will be removed.
+    return;
+  }
+
   NSString* text = @"www.google.com";
   [textfield_ setText:text];
   CGSize textSize = [[textfield_ attributedText] size];
@@ -191,7 +216,13 @@ TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_noScheme) {
 
 // When the text doesn't contain a host the method bails early and returns
 // the |rect| passed in.
-TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_noHost) {
+TEST_F(OmniboxTextFieldTest, rectForDrawTextInRect_noHost) {
+  if (base::FeatureList::IsEnabled(kClippingTextfield)) {
+    // This test is expected to not work with new text field clipping because
+    // the code to implement clipping will be removed.
+    return;
+  }
+
   NSString* text = @"http://";
   [textfield_ setText:text];
   CGSize textSize = [[textfield_ attributedText] size];
@@ -201,7 +232,7 @@ TEST_F(OmniboxTextFieldIOSTest, rectForDrawTextInRect_noHost) {
   ExpectRectEqual(inputRect, actualRect);
 }
 
-TEST_F(OmniboxTextFieldIOSTest, SelectedRanges) {
+TEST_F(OmniboxTextFieldTest, SelectedRanges) {
   base::FilePath test_data_directory;
   ASSERT_TRUE(PathService::Get(ios::DIR_TEST_DATA, &test_data_directory));
   base::FilePath test_file = test_data_directory.Append(
@@ -220,14 +251,14 @@ TEST_F(OmniboxTextFieldIOSTest, SelectedRanges) {
   }
 }
 
-TEST_F(OmniboxTextFieldIOSTest, SelectExitsPreEditState) {
+TEST_F(OmniboxTextFieldTest, SelectExitsPreEditState) {
   [textfield_ enterPreEditState];
   EXPECT_TRUE([textfield_ isPreEditing]);
   [textfield_ select:nil];
   EXPECT_FALSE([textfield_ isPreEditing]);
 }
 
-TEST_F(OmniboxTextFieldIOSTest, SelectAllExitsPreEditState) {
+TEST_F(OmniboxTextFieldTest, SelectAllExitsPreEditState) {
   [textfield_ enterPreEditState];
   EXPECT_TRUE([textfield_ isPreEditing]);
   [textfield_ selectAll:nil];

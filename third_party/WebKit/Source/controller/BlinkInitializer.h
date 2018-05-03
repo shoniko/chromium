@@ -9,10 +9,11 @@
 
 namespace blink {
 
-class LocalFrame;
-
 class BlinkInitializer : public ModulesInitializer {
- private:
+ public:
+  void RegisterInterfaces(service_manager::BinderRegistry&) override;
+  void OnClearWindowObjectInMainWorld(Document&,
+                                      const Settings&) const override;
   void InitLocalFrame(LocalFrame&) const override;
 };
 

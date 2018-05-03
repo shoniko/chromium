@@ -13,8 +13,7 @@
 namespace net {
 
 SSLConfigService::SSLConfigService()
-    : observer_list_(base::ObserverList<Observer>::NOTIFY_EXISTING_ONLY) {
-}
+    : observer_list_(base::ObserverListPolicy::EXISTING_ONLY) {}
 
 // GlobalSSLObject holds a reference to a global SSL object, such as the
 // CRLSet. It simply wraps a lock  around a scoped_refptr so that getting a
@@ -73,8 +72,7 @@ void SSLConfigService::NotifySSLConfigChange() {
     observer.OnSSLConfigChanged();
 }
 
-SSLConfigService::~SSLConfigService() {
-}
+SSLConfigService::~SSLConfigService() = default;
 
 void SSLConfigService::ProcessConfigUpdate(const SSLConfig& old_config,
                                            const SSLConfig& new_config) {

@@ -44,11 +44,12 @@ class SSLErrorUI {
              const net::SSLInfo& ssl_info,
              int display_options,  // Bitmask of SSLErrorOptionsMask values.
              const base::Time& time_triggered,
+             const GURL& support_url,
              ControllerClient* controller);
   virtual ~SSLErrorUI();
 
   virtual void PopulateStringsForHTML(base::DictionaryValue* load_time_data);
-  virtual void HandleCommand(SecurityInterstitialCommands command);
+  virtual void HandleCommand(SecurityInterstitialCommand command);
 
  protected:
   const net::SSLInfo& ssl_info() const;
@@ -64,6 +65,7 @@ class SSLErrorUI {
   const int cert_error_;
   const net::SSLInfo ssl_info_;
   const base::Time time_triggered_;
+  const GURL support_url_;
 
   // Set by the |display_options|.
   const bool requested_strict_enforcement_;

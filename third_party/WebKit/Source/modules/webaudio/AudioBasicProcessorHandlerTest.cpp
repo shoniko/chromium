@@ -7,7 +7,6 @@
 #include "modules/webaudio/AudioBasicProcessorHandler.h"
 #include "modules/webaudio/OfflineAudioContext.h"
 #include "platform/audio/AudioProcessor.h"
-#include "platform/wtf/PtrUtil.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -30,7 +29,7 @@ class MockProcessorNode final : public AudioNode {
   MockProcessorNode(BaseAudioContext& context) : AudioNode(context) {
     SetHandler(AudioBasicProcessorHandler::Create(
         AudioHandler::kNodeTypeWaveShaper, *this, 48000,
-        WTF::MakeUnique<MockAudioProcessor>()));
+        std::make_unique<MockAudioProcessor>()));
     Handler().Initialize();
   }
 };

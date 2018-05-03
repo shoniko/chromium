@@ -54,6 +54,7 @@
 #include "jingle/glue/thread_wrapper.h"
 #include "media/base/media_permission.h"
 #include "media/filters/ffmpeg_glue.h"
+#include "media/media_features.h"
 #include "media/video/gpu_video_accelerator_factories.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
@@ -63,7 +64,10 @@
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/webrtc/api/mediaconstraintsinterface.h"
+#include "third_party/webrtc/api/video_codecs/video_decoder_factory.h"
+#include "third_party/webrtc/api/video_codecs/video_encoder_factory.h"
 #include "third_party/webrtc/api/videosourceproxy.h"
+#include "third_party/webrtc/media/engine/convert_legacy_video_factory.h"
 #include "third_party/webrtc/modules/video_coding/codecs/h264/include/h264.h"
 #include "third_party/webrtc/rtc_base/refcountedobject.h"
 #include "third_party/webrtc/rtc_base/ssladapter.h"
@@ -103,10 +107,10 @@ bool IsValidPortRange(uint16_t min_port, uint16_t max_port) {
 
 PeerConnectionDependencyFactory::PeerConnectionDependencyFactory(
     P2PSocketDispatcher* p2p_socket_dispatcher)
-    : network_manager_(NULL),
+    : network_manager_(nullptr),
       p2p_socket_dispatcher_(p2p_socket_dispatcher),
-      signaling_thread_(NULL),
-      worker_thread_(NULL),
+      signaling_thread_(nullptr),
+      worker_thread_(nullptr),
       chrome_signaling_thread_("Chrome_libJingle_Signaling"),
       chrome_worker_thread_("Chrome_libJingle_WorkerThread") {
   TryScheduleStunProbeTrial();
@@ -120,13 +124,14 @@ PeerConnectionDependencyFactory::~PeerConnectionDependencyFactory() {
 
 std::unique_ptr<blink::WebRTCPeerConnectionHandler>
 PeerConnectionDependencyFactory::CreateRTCPeerConnectionHandler(
-    blink::WebRTCPeerConnectionHandlerClient* client) {
+    blink::WebRTCPeerConnectionHandlerClient* client,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   // Save histogram data so we can see how much PeerConnetion is used.
   // The histogram counts the number of calls to the JS API
   // webKitRTCPeerConnection.
   UpdateWebRTCMethodCount(WEBKIT_RTC_PEER_CONNECTION);
 
-  return base::MakeUnique<RTCPeerConnectionHandler>(client, this);
+  return std::make_unique<RTCPeerConnectionHandler>(client, this, task_runner);
 }
 
 const scoped_refptr<webrtc::PeerConnectionFactoryInterface>&
@@ -152,7 +157,7 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
 
   DVLOG(1) << "PeerConnectionDependencyFactory::CreatePeerConnectionFactory()";
 
-#if BUILDFLAG(RTC_USE_H264) && !defined(MEDIA_DISABLE_FFMPEG)
+#if BUILDFLAG(RTC_USE_H264) && BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
   // Building /w |rtc_use_h264|, is the corresponding run-time feature enabled?
   if (base::FeatureList::IsEnabled(kWebRtcH264WithOpenH264FFmpeg)) {
     // |H264DecoderImpl| may be used which depends on FFmpeg, therefore we need
@@ -164,7 +169,7 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
   }
 #else
   webrtc::DisableRtcUseH264();
-#endif  // BUILDFLAG(RTC_USE_H264) && !defined(MEDIA_DISABLE_FFMPEG)
+#endif  // BUILDFLAG(RTC_USE_H264) && BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
 
   base::MessageLoop::current()->AddDestructionObserver(this);
   // To allow sending to the signaling/worker threads.
@@ -253,10 +258,17 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
     encoder_factory.reset();
 #endif
 
+  // TODO(magjed): Update RTCVideoEncoderFactory/RTCVideoDecoderFactory to new
+  // interface and let Chromium be responsible in what order video codecs are
+  // listed, instead of using
+  // cricket::ConvertVideoEncoderFactory/cricket::ConvertVideoDecoderFactory.
   pc_factory_ = webrtc::CreatePeerConnectionFactory(
-      worker_thread_, signaling_thread_, audio_device_.get(),
-      CreateWebrtcAudioEncoderFactory(), CreateWebrtcAudioDecoderFactory(),
-      encoder_factory.release(), decoder_factory.release());
+      worker_thread_ /* network thread */, worker_thread_, signaling_thread_,
+      audio_device_.get(), CreateWebrtcAudioEncoderFactory(),
+      CreateWebrtcAudioDecoderFactory(),
+      cricket::ConvertVideoEncoderFactory(std::move(encoder_factory)),
+      cricket::ConvertVideoDecoderFactory(std::move(decoder_factory)),
+      nullptr /* audio_mixer */, nullptr /* audio_processing */);
   CHECK(pc_factory_.get());
 
   webrtc::PeerConnectionFactoryInterface::Options factory_options;
@@ -273,7 +285,7 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
 }
 
 bool PeerConnectionDependencyFactory::PeerConnectionFactoryCreated() {
-  return pc_factory_.get() != NULL;
+  return pc_factory_.get() != nullptr;
 }
 
 scoped_refptr<webrtc::PeerConnectionInterface>
@@ -284,7 +296,7 @@ PeerConnectionDependencyFactory::CreatePeerConnection(
   CHECK(web_frame);
   CHECK(observer);
   if (!GetPcFactory().get())
-    return NULL;
+    return nullptr;
 
   // Copy the flag from Preference associated with this WebLocalFrame.
   P2PPortAllocator::Config port_config;
@@ -513,12 +525,12 @@ void PeerConnectionDependencyFactory::CreateIpcNetworkManagerOnWorkerThread(
 void PeerConnectionDependencyFactory::DeleteIpcNetworkManager() {
   DCHECK(chrome_worker_thread_.task_runner()->BelongsToCurrentThread());
   delete network_manager_;
-  network_manager_ = NULL;
+  network_manager_ = nullptr;
 }
 
 void PeerConnectionDependencyFactory::CleanupPeerConnectionFactory() {
   DVLOG(1) << "PeerConnectionDependencyFactory::CleanupPeerConnectionFactory()";
-  pc_factory_ = NULL;
+  pc_factory_ = nullptr;
   if (network_manager_) {
     // The network manager needs to free its resources on the thread they were
     // created, which is the worked thread.

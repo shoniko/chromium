@@ -6,6 +6,7 @@
 #define GridTrackSizingAlgorithm_h
 
 #include <memory>
+#include "base/macros.h"
 #include "core/layout/LayoutBox.h"
 #include "core/style/GridPositionsResolver.h"
 #include "core/style/GridTrackSize.h"
@@ -38,6 +39,7 @@ class GridTrack {
   void SetBaseSize(LayoutUnit);
 
   LayoutUnit GrowthLimit() const;
+  bool GrowthLimitIsInfinite() const { return growth_limit_ == kInfinity; }
   void SetGrowthLimit(LayoutUnit);
 
   bool InfiniteGrowthPotential() const;
@@ -59,7 +61,6 @@ class GridTrack {
   void SetGrowthLimitCap(Optional<LayoutUnit>);
 
  private:
-  bool GrowthLimitIsInfinite() const { return growth_limit_ == kInfinity; }
   bool IsGrowthLimitBiggerThanBaseSize() const;
   void EnsureGrowthLimitIsBiggerThanBaseSize();
 
@@ -173,6 +174,7 @@ class GridTrackSizingAlgorithm final {
 
   // Data.
   bool needs_setup_{true};
+  bool is_in_perform_layout_{true};
   Optional<LayoutUnit> available_space_columns_;
   Optional<LayoutUnit> available_space_rows_;
 
@@ -225,7 +227,6 @@ class GridTrackSizingAlgorithm final {
 };
 
 class GridTrackSizingAlgorithmStrategy {
-  WTF_MAKE_NONCOPYABLE(GridTrackSizingAlgorithmStrategy);
   USING_FAST_MALLOC(GridTrackSizingAlgorithmStrategy);
 
  public:
@@ -255,7 +256,7 @@ class GridTrackSizingAlgorithmStrategy {
   virtual LayoutUnit MinLogicalWidthForChild(
       LayoutBox&,
       Length child_min_size,
-      GridTrackSizingDirection) const = 0;
+      LayoutUnit available_size) const = 0;
   virtual void LayoutGridItemForMinSizeComputation(
       LayoutBox&,
       bool override_size_has_changed) const = 0;
@@ -264,7 +265,8 @@ class GridTrackSizingAlgorithmStrategy {
 
   bool UpdateOverrideContainingBlockContentSizeForChild(
       LayoutBox&,
-      GridTrackSizingDirection) const;
+      GridTrackSizingDirection,
+      Optional<LayoutUnit> = WTF::nullopt) const;
   LayoutUnit ComputeTrackBasedSize() const;
   Optional<LayoutUnit> ExtentForBaselineAlignment(LayoutBox&) const;
 
@@ -277,6 +279,7 @@ class GridTrackSizingAlgorithmStrategy {
   Optional<LayoutUnit> AvailableSpace() const {
     return algorithm_.AvailableSpace();
   }
+  void SetNeedsLayoutForChild(LayoutBox&) const;
 
   // Helper functions
   static bool HasOverrideContainingBlockContentSizeForChild(
@@ -299,6 +302,9 @@ class GridTrackSizingAlgorithmStrategy {
       GridTrackSizingDirection);
 
   GridTrackSizingAlgorithm& algorithm_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(GridTrackSizingAlgorithmStrategy);
 };
 }
 

@@ -33,8 +33,12 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
 #include "public/platform/WebURLLoader.h"
-#include "public/platform/scheduler/single_thread_task_runner.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace blink {
 
@@ -49,7 +53,7 @@ class WebURLRequest;
 // DocumentLoader.
 class WebServiceWorkerNetworkProvider {
  public:
-  virtual ~WebServiceWorkerNetworkProvider() {}
+  virtual ~WebServiceWorkerNetworkProvider() = default;
 
   // A request is about to be sent out, and the client may modify it. Request
   // is writable, and changes to the URL, for example, will change the request
@@ -73,7 +77,7 @@ class WebServiceWorkerNetworkProvider {
   // and only if servicification is enabled.
   virtual std::unique_ptr<WebURLLoader> CreateURLLoader(
       const WebURLRequest& request,
-      SingleThreadTaskRunnerRefPtr task_runner) {
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     return nullptr;
   }
 };

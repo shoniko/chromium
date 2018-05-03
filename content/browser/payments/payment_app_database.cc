@@ -93,7 +93,7 @@ std::unique_ptr<StoredPaymentApp> ToStoredPaymentApp(const std::string& input) {
   if (!app_proto.ParseFromString(input))
     return std::unique_ptr<StoredPaymentApp>();
 
-  std::unique_ptr<StoredPaymentApp> app = base::MakeUnique<StoredPaymentApp>();
+  std::unique_ptr<StoredPaymentApp> app = std::make_unique<StoredPaymentApp>();
   app->registration_id = app_proto.registration_id();
   app->scope = GURL(app_proto.scope());
   app->name = app_proto.name();
@@ -113,7 +113,7 @@ std::unique_ptr<StoredPaymentApp> ToStoredPaymentApp(const std::string& input) {
     gfx::Image icon_image = gfx::Image::CreateFrom1xPNGBytes(
         reinterpret_cast<const unsigned char*>(icon_raw_data.data()),
         icon_raw_data.size());
-    app->icon = base::MakeUnique<SkBitmap>(icon_image.AsBitmap());
+    app->icon = std::make_unique<SkBitmap>(icon_image.AsBitmap());
   }
 
   return app;
@@ -249,8 +249,7 @@ void PaymentAppDatabase::FetchAndWritePaymentAppInfo(
     FetchAndWritePaymentAppInfoCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  payment_app_info_fetcher_ = new PaymentAppInfoFetcher();
-  payment_app_info_fetcher_->Start(
+  PaymentAppInfoFetcher::Start(
       context, service_worker_context_,
       base::BindOnce(&PaymentAppDatabase::FetchPaymentAppInfoCallback,
                      weak_ptr_factory_.GetWeakPtr(), scope, user_hint,
@@ -263,8 +262,6 @@ void PaymentAppDatabase::FetchPaymentAppInfoCallback(
     FetchAndWritePaymentAppInfoCallback callback,
     std::unique_ptr<PaymentAppInfoFetcher::PaymentAppInfo> app_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  payment_app_info_fetcher_ = nullptr;
 
   service_worker_context_->FindReadyRegistrationForPattern(
       scope,
@@ -289,10 +286,7 @@ void PaymentAppDatabase::DidFindRegistrationToWritePaymentAppInfo(
   StoredPaymentAppProto payment_app_proto;
   payment_app_proto.set_registration_id(registration->id());
   payment_app_proto.set_scope(registration->pattern().spec());
-  payment_app_proto.set_name(
-      app_info->name.empty()
-          ? GURL(payment_app_proto.scope()).GetOrigin().spec()
-          : app_info->name);
+  payment_app_proto.set_name(app_info->name);
   payment_app_proto.set_icon(app_info->icon);
   payment_app_proto.set_prefer_related_applications(
       app_info->prefer_related_applications);
@@ -459,6 +453,15 @@ void PaymentAppDatabase::DidReadAllPaymentInstruments(
 
     for (const auto& method : instrument_proto.enabled_methods()) {
       apps[id]->enabled_methods.push_back(method);
+    }
+
+    apps[id]->capabilities.emplace_back(StoredCapabilities());
+    for (const auto& network : instrument_proto.supported_card_networks()) {
+      apps[id]->capabilities.back().supported_card_networks.emplace_back(
+          network);
+    }
+    for (const auto& type : instrument_proto.supported_card_types()) {
+      apps[id]->capabilities.back().supported_card_types.emplace_back(type);
     }
   }
 
@@ -655,6 +658,12 @@ void PaymentAppDatabase::DidFindRegistrationToWritePaymentInstrument(
   }
   instrument_proto.set_stringified_capabilities(
       instrument->stringified_capabilities);
+  for (const auto& network : instrument->supported_networks) {
+    instrument_proto.add_supported_card_networks(static_cast<int32_t>(network));
+  }
+  for (const auto& type : instrument->supported_types) {
+    instrument_proto.add_supported_card_types(static_cast<int32_t>(type));
+  }
 
   std::string serialized_instrument;
   bool success = instrument_proto.SerializeToString(&serialized_instrument);

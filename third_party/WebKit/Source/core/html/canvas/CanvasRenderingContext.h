@@ -26,15 +26,15 @@
 #ifndef CanvasRenderingContext_h
 #define CanvasRenderingContext_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
-#include "core/html/HTMLCanvasElement.h"
 #include "core/html/canvas/CanvasContextCreationAttributes.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "core/layout/HitTestCanvasResult.h"
 #include "core/offscreencanvas/OffscreenCanvas.h"
 #include "platform/graphics/CanvasColorParams.h"
 #include "platform/graphics/ColorBehavior.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/text/StringHash.h"
 #include "public/platform/WebThread.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
@@ -44,11 +44,9 @@ namespace blink {
 
 class CanvasImageSource;
 class HTMLCanvasElement;
-class ImageData;
 class ImageBitmap;
 class WebLayer;
 
-constexpr const char* kLegacyCanvasColorSpaceName = "legacy-srgb";
 constexpr const char* kSRGBCanvasColorSpaceName = "srgb";
 constexpr const char* kRec2020CanvasColorSpaceName = "rec2020";
 constexpr const char* kP3CanvasColorSpaceName = "p3";
@@ -60,11 +58,10 @@ constexpr const char* kF16CanvasPixelFormatName = "float16";
 
 class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
                                            public WebThread::TaskObserver {
-  WTF_MAKE_NONCOPYABLE(CanvasRenderingContext);
   USING_PRE_FINALIZER(CanvasRenderingContext, Dispose);
 
  public:
-  virtual ~CanvasRenderingContext() {}
+  virtual ~CanvasRenderingContext() = default;
 
   // A Canvas can either be "2D" or "webgl" but never both. If you request a 2D
   // canvas and the existing context is already 2D, just return that. If the
@@ -92,9 +89,7 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
 
   const CanvasColorParams& ColorParams() const { return color_params_; }
 
-  virtual scoped_refptr<StaticBitmapImage> GetImage(AccelerationHint,
-                                                    SnapshotReason) const = 0;
-  virtual ImageData* ToImageData(SnapshotReason reason) { return nullptr; }
+  virtual scoped_refptr<StaticBitmapImage> GetImage(AccelerationHint) const = 0;
   virtual ContextType GetContextType() const = 0;
   virtual bool IsComposited() const = 0;
   virtual bool IsAccelerated() const = 0;
@@ -166,13 +161,18 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   virtual void SetFilterQuality(SkFilterQuality) { NOTREACHED(); }
   virtual void Reshape(int width, int height) { NOTREACHED(); }
   virtual void MarkLayerComposited() { NOTREACHED(); }
-  virtual ImageData* PaintRenderingResultsToImageData(SourceDrawingBuffer) {
+  virtual scoped_refptr<Uint8Array> PaintRenderingResultsToDataArray(
+      SourceDrawingBuffer) {
     NOTREACHED();
     return nullptr;
   }
-  virtual int ExternallyAllocatedBytesPerPixel() {
+  virtual int ExternallyAllocatedBufferCountPerPixel() {
     NOTREACHED();
     return 0;
+  }
+  virtual IntSize DrawingBufferSize() const {
+    NOTREACHED();
+    return IntSize(0, 0);
   }
 
   // ImageBitmap-specific interface
@@ -181,7 +181,7 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   // OffscreenCanvas-specific methods
   virtual ImageBitmap* TransferToImageBitmap(ScriptState*) { return nullptr; }
 
-  bool WouldTaintOrigin(CanvasImageSource*, SecurityOrigin*);
+  bool WouldTaintOrigin(CanvasImageSource*, const SecurityOrigin*);
   void DidMoveToNewDocument(Document*);
 
   void DetachHost() { host_ = nullptr; }
@@ -206,6 +206,8 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   CanvasColorParams color_params_;
   CanvasContextCreationAttributes creation_attributes_;
   bool finalize_frame_scheduled_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(CanvasRenderingContext);
 };
 
 }  // namespace blink

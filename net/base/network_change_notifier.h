@@ -253,6 +253,9 @@ class NET_EXPORT NetworkChangeNotifier {
 
   virtual ~NetworkChangeNotifier();
 
+  // Returns the factory or nullptr if it is not set.
+  static NetworkChangeNotifierFactory* GetFactory();
+
   // Replaces the default class factory instance of NetworkChangeNotifier class.
   // The method will take over the ownership of |factory| object.
   static void SetFactory(NetworkChangeNotifierFactory* factory);
@@ -304,8 +307,8 @@ class NET_EXPORT NetworkChangeNotifier {
   // Returns a theoretical upper limit (in Mbps) on download bandwidth given a
   // connection subtype. The mapping of connection type to maximum bandwidth is
   // provided in the NetInfo spec: http://w3c.github.io/netinfo/.
-  // TODO(jkarlin): Rename to GetMaxBandwidthMbpsForConnectionSubtype.
-  static double GetMaxBandwidthForConnectionSubtype(ConnectionSubtype subtype);
+  static double GetMaxBandwidthMbpsForConnectionSubtype(
+      ConnectionSubtype subtype);
 
   // Returns true if the platform supports use of APIs based on NetworkHandles.
   // Public methods that use NetworkHandles are GetNetworkConnectionType(),

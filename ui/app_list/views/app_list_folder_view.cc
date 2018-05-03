@@ -6,11 +6,10 @@
 
 #include <algorithm>
 
+#include "ash/app_list/model/app_list_folder_item.h"
+#include "ash/app_list/model/app_list_model.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/app_list/app_list_constants.h"
-#include "ui/app_list/app_list_features.h"
-#include "ui/app_list/app_list_folder_item.h"
-#include "ui/app_list/app_list_model.h"
 #include "ui/app_list/views/app_list_item_view.h"
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/apps_container_view.h"
@@ -55,9 +54,7 @@ AppListFolderView::AppListFolderView(AppsContainerView* container_view,
       view_model_(new views::ViewModel),
       model_(model),
       folder_item_(NULL),
-      hide_for_reparent_(false),
-      is_fullscreen_app_list_enabled_(features::IsFullscreenAppListEnabled()),
-      is_app_list_focus_enabled_(features::IsAppListFocusEnabled()) {
+      hide_for_reparent_(false) {
   AddChildView(folder_header_view_);
   view_model_->Add(folder_header_view_, kIndexFolderHeader);
 
@@ -111,8 +108,8 @@ void AppListFolderView::ScheduleShowHideAnimation(bool show,
   UpdateFolderNameVisibility(true);
 
   ui::ScopedLayerAnimationSettings animation(layer()->GetAnimator());
-  animation.SetTweenType(
-      show ? kFolderFadeInTweenType : kFolderFadeOutTweenType);
+  animation.SetTweenType(show ? kFolderFadeInTweenType
+                              : kFolderFadeOutTweenType);
   animation.AddObserver(this);
   animation.SetTransitionDuration(base::TimeDelta::FromMilliseconds(
       show ? kFolderTransitionInDurationMs : kFolderTransitionOutDurationMs));
@@ -122,45 +119,13 @@ void AppListFolderView::ScheduleShowHideAnimation(bool show,
 }
 
 gfx::Size AppListFolderView::CalculatePreferredSize() const {
-  if (is_fullscreen_app_list_enabled_)
-    return gfx::Size(kAppsFolderPreferredWidth, kAppsFolderPreferredHeight);
-
-  const gfx::Size header_size = folder_header_view_->GetPreferredSize();
-  const gfx::Size grid_size = items_grid_view_->GetPreferredSize();
-  int width = std::max(header_size.width(), grid_size.width());
-  int height = header_size.height() + grid_size.height();
-  return gfx::Size(width, height);
+  gfx::Size size(kAppsFolderPreferredWidth, kAppsFolderPreferredHeight);
+  return size;
 }
 
 void AppListFolderView::Layout() {
   CalculateIdealBounds();
   views::ViewModelUtils::SetViewBoundsToIdealBounds(*view_model_);
-}
-
-bool AppListFolderView::OnKeyPressed(const ui::KeyEvent& event) {
-  if (is_app_list_focus_enabled_) {
-    // TODO(weidongg/766807) Remove this function when the flag is enabled by
-    // default.
-    return false;
-  }
-  // Process TAB if focus should go to header; otherwise, AppsGridView will do
-  // the right thing.
-  if (event.key_code() == ui::VKEY_TAB) {
-    if (items_grid_view_->has_selected_view() == event.IsShiftDown() &&
-        !folder_header_view_->HasTextFocus()) {
-      folder_header_view_->SetTextFocus();
-      items_grid_view_->ClearAnySelectedView();
-      return true;
-    } else {
-      GiveBackFocusToSearchBox();
-    }
-  }
-
-  // This will select an app in the list, so we need to relinquish focus.
-  if (event.key_code() == ui::VKEY_DOWN)
-    GiveBackFocusToSearchBox();
-
-  return items_grid_view_->OnKeyPressed(event);
 }
 
 void AppListFolderView::OnAppListItemWillBeDeleted(AppListItem* item) {
@@ -221,15 +186,13 @@ void AppListFolderView::StartSetupDragInRootLevelAppsGridView(
   // root level grid view.
   gfx::RectF rect_f(original_drag_view->bounds());
   views::View::ConvertRectToTarget(items_grid_view_,
-                                   container_view_->apps_grid_view(),
-                                   &rect_f);
+                                   container_view_->apps_grid_view(), &rect_f);
   gfx::Rect rect_in_root_grid_view = gfx::ToEnclosingRect(rect_f);
 
   container_view_->apps_grid_view()
-      ->InitiateDragFromReparentItemInRootLevelGridView(original_drag_view,
-                                                        rect_in_root_grid_view,
-                                                        drag_point_in_root_grid,
-                                                        has_native_drag);
+      ->InitiateDragFromReparentItemInRootLevelGridView(
+          original_drag_view, rect_in_root_grid_view, drag_point_in_root_grid,
+          has_native_drag);
 }
 
 gfx::Rect AppListFolderView::GetItemIconBoundsAt(int index) {
@@ -256,8 +219,8 @@ void AppListFolderView::UpdateFolderViewBackground(bool show_bubble) {
     UpdateFolderNameVisibility(false);
 
   container_view_->folder_background_view()->UpdateFolderContainerBubble(
-      show_bubble ? FolderBackgroundView::SHOW_BUBBLE :
-                    FolderBackgroundView::HIDE_BUBBLE);
+      show_bubble ? FolderBackgroundView::SHOW_BUBBLE
+                  : FolderBackgroundView::HIDE_BUBBLE);
 }
 
 void AppListFolderView::UpdateFolderNameVisibility(bool visible) {
@@ -275,8 +238,8 @@ bool AppListFolderView::IsPointOutsideOfFolderBoundary(
 
   gfx::Point center = GetLocalBounds().CenterPoint();
   float delta = (point - center).Length();
-  return delta > container_view_->folder_background_view()->
-      GetFolderContainerBubbleRadius() + kOutOfFolderContainerBubbleDelta;
+  return delta >
+         kFolderBackgroundBubbleRadius + kOutOfFolderContainerBubbleDelta;
 }
 
 // When user drags a folder item out of the folder boundary ink bubble, the
@@ -296,11 +259,10 @@ void AppListFolderView::ReparentItem(
     bool has_native_drag) {
   // Convert the drag point relative to the root level AppsGridView.
   gfx::Point to_root_level_grid = drag_point_in_folder_grid;
-  ConvertPointToTarget(items_grid_view_,
-                       container_view_->apps_grid_view(),
+  ConvertPointToTarget(items_grid_view_, container_view_->apps_grid_view(),
                        &to_root_level_grid);
-  StartSetupDragInRootLevelAppsGridView(
-      original_drag_view, to_root_level_grid, has_native_drag);
+  StartSetupDragInRootLevelAppsGridView(original_drag_view, to_root_level_grid,
+                                        has_native_drag);
   container_view_->ReparentFolderItemTransit(folder_item_);
 }
 

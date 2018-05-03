@@ -21,10 +21,8 @@
 
 namespace ui {
 
-namespace test {
-class DeviceDataManagerTestAPI;
-}  // namespace test
-
+class DeviceDataManagerTest;
+class InputDeviceClientTestApi;
 class InputDeviceEventObserver;
 
 // Keeps track of device mappings and event transformations.
@@ -62,7 +60,6 @@ class EVENTS_DEVICES_EXPORT DeviceDataManager
   bool AreDeviceListsComplete() const override;
   bool AreTouchscreensEnabled() const override;
   bool AreTouchscreenTargetDisplaysValid() const override;
-
   void AddObserver(InputDeviceEventObserver* observer) override;
   void RemoveObserver(InputDeviceEventObserver* observer) override;
 
@@ -84,7 +81,8 @@ class EVENTS_DEVICES_EXPORT DeviceDataManager
   void OnStylusStateChanged(StylusState state) override;
 
  private:
-  friend class test::DeviceDataManagerTestAPI;
+  friend class DeviceDataManagerTest;
+  friend class InputDeviceClientTestApi;
 
   void ClearTouchDeviceAssociations();
   void UpdateTouchInfoFromTransform(

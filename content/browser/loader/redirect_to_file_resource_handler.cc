@@ -13,11 +13,11 @@
 #include "content/browser/loader/resource_controller.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/loader/temporary_file_stream.h"
-#include "content/public/common/resource_response.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/net_errors.h"
+#include "services/network/public/cpp/resource_response.h"
 #include "storage/browser/blob/shareable_file_reference.h"
 
 using storage::ShareableFileReference;
@@ -84,7 +84,7 @@ class RedirectToFileResourceHandler::Writer {
   }
 
   void Close() {
-    handler_ = NULL;
+    handler_ = nullptr;
     if (!is_writing_)
       CloseAndDelete();
   }
@@ -139,7 +139,7 @@ RedirectToFileResourceHandler::~RedirectToFileResourceHandler() {
   // Orphan the writer to asynchronously close and release the temporary file.
   if (writer_) {
     writer_->Close();
-    writer_ = NULL;
+    writer_ = nullptr;
   }
 }
 
@@ -150,7 +150,7 @@ void RedirectToFileResourceHandler::
 }
 
 void RedirectToFileResourceHandler::OnResponseStarted(
-    ResourceResponse* response,
+    network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
   if (!writer_) {
     response_pending_file_creation_ = response;
@@ -260,7 +260,7 @@ void RedirectToFileResourceHandler::DidCreateTemporaryFile(
   writer_ = new Writer(this, std::move(file_stream), deletable_file);
 
   if (response_pending_file_creation_) {
-    scoped_refptr<ResourceResponse> response =
+    scoped_refptr<network::ResourceResponse> response =
         std::move(response_pending_file_creation_);
     request()->LogUnblocked();
     OnResponseStarted(response.get(), ReleaseController());

@@ -27,10 +27,10 @@
 #define MediaElementAudioSourceNode_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "modules/webaudio/AudioNode.h"
 #include "platform/audio/AudioSourceProviderClient.h"
 #include "platform/audio/MultiChannelResampler.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/ThreadingPrimitives.h"
 
 namespace blink {
@@ -107,6 +107,8 @@ class MediaElementAudioSourceHandler final : public AudioHandler {
   // The value of mediaElement()->currentSrc().string() in the ctor and
   // onCurrentSrcChanged().  Protected by |m_processLock|.
   String current_src_string_;
+
+  scoped_refptr<WebTaskRunner> task_runner_;
 };
 
 class MediaElementAudioSourceNode final : public AudioNode,

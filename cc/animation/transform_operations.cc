@@ -30,8 +30,7 @@ TransformOperations::TransformOperations(const TransformOperations& other) {
   }
 }
 
-TransformOperations::~TransformOperations() {
-}
+TransformOperations::~TransformOperations() = default;
 
 TransformOperations& TransformOperations::operator=(
     const TransformOperations& other) {
@@ -308,8 +307,8 @@ bool TransformOperations::BlendInternal(const TransformOperations& from,
     for (size_t i = 0; i < num_operations; ++i) {
       TransformOperation blended;
       if (!TransformOperation::BlendTransformOperations(
-              from_identity ? 0 : &from.operations_[i],
-              to_identity ? 0 : &operations_[i], progress, &blended)) {
+              from_identity ? nullptr : &from.operations_[i],
+              to_identity ? nullptr : &operations_[i], progress, &blended)) {
         return false;
       }
       result->Append(blended);

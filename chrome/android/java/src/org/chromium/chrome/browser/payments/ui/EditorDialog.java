@@ -97,6 +97,7 @@ public class EditorDialog
     private Animator mDialogInOutAnimator;
     @Nullable
     private Runnable mDeleteRunnable;
+    private boolean mIsDismissed;
     /**
      * Builds the editor dialog.
      *
@@ -112,6 +113,7 @@ public class EditorDialog
         mContext = activity;
         mObserverForTest = observerForTest;
         mHandler = new Handler();
+        mIsDismissed = false;
         mEditorActionListener = new TextView.OnEditorActionListener() {
             @Override
             public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
@@ -309,8 +311,17 @@ public class EditorDialog
         mDialogInOutAnimator.start();
     }
 
+    public void setAsNotDismissed() {
+        mIsDismissed = false;
+    }
+
+    public boolean isDismissed() {
+        return mIsDismissed;
+    }
+
     @Override
     public void onDismiss(DialogInterface dialog) {
+        mIsDismissed = true;
         if (mEditorModel != null) mEditorModel.cancel();
         removeTextChangedListenersAndInputFilters();
     }
@@ -485,10 +496,12 @@ public class EditorDialog
      * @param editorModel The description of the editor user interface to display.
      */
     public void show(EditorModel editorModel) {
+        // If an asynchronous task calls show, while the activity is already finishing, return.
+        if (((Activity) mContext).isFinishing()) return;
+
         setOnShowListener(this);
         setOnDismissListener(this);
         mEditorModel = editorModel;
-
         mLayout = LayoutInflater.from(mContext).inflate(R.layout.payment_request_editor, null);
         setContentView(mLayout);
 
@@ -510,7 +523,7 @@ public class EditorDialog
 
     @Override
     public void onShow(DialogInterface dialog) {
-        if (mDialogInOutAnimator != null) return;
+        if (mDialogInOutAnimator != null && mIsDismissed) return;
 
         // Hide keyboard and disable EditText views for animation efficiency.
         if (getCurrentFocus() != null) UiUtils.hideKeyboard(getCurrentFocus());

@@ -88,12 +88,6 @@ std::string ChromeURLs() {
   html += "<h2>List of Chrome URLs</h2>\n<ul>\n";
   std::vector<std::string> hosts(kChromeHostURLs,
                                  kChromeHostURLs + kNumberOfChromeHostURLs);
-  // Remove chrome://bookmarks from list of hosts for iPhone because it is not
-  // possible to open bookmarks via URL on the iPhone form factor.
-  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE) {
-    hosts.erase(
-        std::remove(hosts.begin(), hosts.end(), kChromeUIBookmarksHost));
-  }
   std::sort(hosts.begin(), hosts.end());
   for (std::vector<std::string>::const_iterator i = hosts.begin();
        i != hosts.end(); ++i)

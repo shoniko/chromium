@@ -17,6 +17,7 @@
 #include "storage/browser/blob/blob_data_item.h"
 #include "storage/browser/blob/blob_data_snapshot.h"
 #include "storage/browser/blob/shareable_file_reference.h"
+#include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/storage_browser_export.h"
 
 namespace disk_cache {
@@ -39,9 +40,9 @@ class STORAGE_EXPORT BlobDataBuilder {
   static base::FilePath GetFutureFileItemPath(uint64_t file_id);
 
   // Returns if the given item was created by AppendFutureFile.
-  static bool IsFutureFileItem(const DataElement& element);
+  static bool IsFutureFileItem(const network::DataElement& element);
   // Returns |file_id| given to AppendFutureFile.
-  static uint64_t GetFutureFileID(const DataElement& element);
+  static uint64_t GetFutureFileID(const network::DataElement& element);
 
   explicit BlobDataBuilder(const std::string& uuid);
   BlobDataBuilder(BlobDataBuilder&&);
@@ -54,7 +55,11 @@ class STORAGE_EXPORT BlobDataBuilder {
   // it's a 'bytes' element. Data elements of BYTES_DESCRIPTION or
   // DISK_CACHE_ENTRY types are not valid IPC data element types, and cannot be
   // given to this method.
-  void AppendIPCDataElement(const DataElement& ipc_data);
+  // |file_system_context| needs to be set if data element is of type
+  // FILE_FILESYSTEM.
+  void AppendIPCDataElement(
+      const network::DataElement& ipc_data,
+      const scoped_refptr<FileSystemContext>& file_system_context);
 
   // Copies the given data into the blob.
   void AppendData(const std::string& data) {
@@ -64,32 +69,61 @@ class STORAGE_EXPORT BlobDataBuilder {
   // Copies the given data into the blob.
   void AppendData(const char* data, size_t length);
 
+  // Represents a piece of unpopulated data.
+  class STORAGE_EXPORT FutureData {
+   public:
+    FutureData(FutureData&&);
+    FutureData& operator=(FutureData&&);
+    ~FutureData();
+
+    // Populates a part of an item previously allocated with AppendFutureData.
+    // The first call to PopulateFutureData lazily allocates the memory for the
+    // data element.
+    // Returns true if:
+    // * The offset and length are valid, and
+    // * data is a valid pointer.
+    bool Populate(base::span<const char> data, size_t offset) const;
+
+    // Same as Populate, but rather than passing in the data to be
+    // copied, this method returns a pointer where the caller can copy |length|
+    // bytes of data to.
+    // Returns nullptr if:
+    // * The offset and length are not valid.
+    base::span<char> GetDataToPopulate(size_t offset, size_t length) const;
+
+   private:
+    friend class BlobDataBuilder;
+    FutureData(scoped_refptr<BlobDataItem>);
+
+    scoped_refptr<BlobDataItem> item_;
+    DISALLOW_COPY_AND_ASSIGN(FutureData);
+  };
+
   // Adds an item that is flagged for future data population. The memory is not
   // allocated until the first call to PopulateFutureData. Returns the index of
   // the item (to be used in PopulateFutureData). |length| cannot be 0.
-  size_t AppendFutureData(size_t length);
+  FutureData AppendFutureData(size_t length);
 
-  // Populates a part of an item previously allocated with AppendFutureData.
-  // The first call to PopulateFutureData lazily allocates the memory for the
-  // data element.
-  // Returns true if:
-  // * The item was created by using AppendFutureData,
-  // * The offset and length are valid, and
-  // * data is a valid pointer.
-  bool PopulateFutureData(size_t index,
-                          const char* data,
-                          size_t offset,
-                          size_t length);
+  // Represents an unpopulated file.
+  class STORAGE_EXPORT FutureFile {
+   public:
+    FutureFile(FutureFile&&);
+    FutureFile& operator=(FutureFile&&);
+    ~FutureFile();
 
-  // Same as PopulateFutureData, but rather than passing in the data to be
-  // copied, this method returns a pointer where the caller can copy |length|
-  // bytes of data to.
-  // Returns nullptr if:
-  // * The item was not created by using AppendFutureData, or
-  // * The offset and length are not valid.
-  char* GetFutureDataPointerToPopulate(size_t index,
-                                       size_t offset,
-                                       size_t length);
+    // Populates a part of an item previously allocated with AppendFutureFile.
+    // Returns false if:
+    // * The item has already been populated.
+    bool Populate(scoped_refptr<ShareableFileReference> file_reference,
+                  const base::Time& expected_modification_time);
+
+   private:
+    friend class BlobDataBuilder;
+    FutureFile(scoped_refptr<BlobDataItem>);
+
+    scoped_refptr<BlobDataItem> item_;
+    DISALLOW_COPY_AND_ASSIGN(FutureFile);
+  };
 
   // Adds an item that is flagged for future data population. Use
   // 'PopulateFutureFile' to set the file path and expected modification time
@@ -99,16 +133,9 @@ class STORAGE_EXPORT BlobDataBuilder {
   // different offsets and lengths. The |file_id| is used to differentiate
   // between different 'future' files that will be used to store data for these
   // items.
-  size_t AppendFutureFile(uint64_t offset, uint64_t length, uint64_t file_id);
-
-  // Populates a part of an item previously allocated with AppendFutureFile.
-  // Returns true if:
-  // * The item was created by using AppendFutureFile and
-  // * The filepath is valid.
-  bool PopulateFutureFile(
-      size_t index,
-      const scoped_refptr<ShareableFileReference>& file_reference,
-      const base::Time& expected_modification_time);
+  FutureFile AppendFutureFile(uint64_t offset,
+                              uint64_t length,
+                              uint64_t file_id);
 
   // You must know the length of the file, you cannot use kuint64max to specify
   // the whole file.  This method creates a ShareableFileReference to the given
@@ -122,10 +149,12 @@ class STORAGE_EXPORT BlobDataBuilder {
 
   void AppendBlob(const std::string& uuid);
 
-  void AppendFileSystemFile(const GURL& url,
-                            uint64_t offset,
-                            uint64_t length,
-                            const base::Time& expected_modification_time);
+  void AppendFileSystemFile(
+      const GURL& url,
+      uint64_t offset,
+      uint64_t length,
+      const base::Time& expected_modification_time,
+      scoped_refptr<FileSystemContext> file_system_context);
 
   void AppendDiskCacheEntry(const scoped_refptr<DataHandle>& data_handle,
                             disk_cache::Entry* disk_cache_entry,

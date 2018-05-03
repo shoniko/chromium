@@ -225,11 +225,7 @@ _default_toolchain = ""
 if (target_os == "android") {
   assert(host_os == "linux" || host_os == "mac",
          "Android builds are only supported on Linux and Mac hosts.")
-  if (is_clang) {
-    _default_toolchain = "//build/toolchain/android:android_clang_$target_cpu"
-  } else {
-    _default_toolchain = "//build/toolchain/android:android_$target_cpu"
-  }
+  _default_toolchain = "//build/toolchain/android:android_clang_$target_cpu"
 } else if (target_os == "chromeos" || target_os == "linux") {
   # See comments in build/toolchain/cros/BUILD.gn about board compiles.
   if (is_clang) {
@@ -246,9 +242,10 @@ if (target_os == "android") {
   _default_toolchain = host_toolchain
 } else if (target_os == "win") {
   # On Windows we use the same toolchain for host and target by default.
-  # Beware, win cross builds mostly don't work yet, see docs/win_cross.md
-  # TODO(thakis): Allow on Mac as well soon.
-  assert(host_os != "mac", "https://crbug.com/774209")
+  # Beware, win cross builds have some caveats, see docs/win_cross.md
+  # TODO(thakis): See if we want to make 32-bit builds on mac hosts work.
+  assert(host_os != "mac" || target_cpu == "x64",
+         "Mac hosts can only build 64-bit chrome/win, https://crbug.com/794838")
   if (is_clang) {
     _default_toolchain = "//build/toolchain/win:win_clang_$target_cpu"
   } else {
@@ -528,6 +525,10 @@ default_compiler_configs = [
   "//build/config/compiler:default_optimization",
   "//build/config/compiler:default_stack_frames",
   "//build/config/compiler:default_symbols",
+
+  # TODO(crbug.com/795158): Remove once libwidevinecdmadapter.so is fixed.
+  "//build/config/compiler:default_fatal_linker_warnings",
+  "//build/config/compiler:no_exceptions",
   "//build/config/compiler:no_rtti",
   "//build/config/compiler:runtime_library",
   "//build/config/coverage:default_coverage",
@@ -549,7 +550,6 @@ if (current_os == "winrt_81" || current_os == "winrt_81_phone" ||
 }
 
 if (is_posix) {
-  default_compiler_configs += [ "//build/config/gcc:no_exceptions" ]
   if (current_os != "aix") {
     default_compiler_configs +=
         [ "//build/config/gcc:symbol_visibility_hidden" ]
@@ -559,6 +559,11 @@ if (is_posix) {
 if (is_android) {
   default_compiler_configs +=
       [ "//build/config/android:default_cygprofile_instrumentation" ]
+}
+
+if (is_win) {
+  default_compiler_configs +=
+      [ "//build/config/win:default_cygprofile_instrumentation" ]
 }
 
 if (is_clang && !is_nacl) {

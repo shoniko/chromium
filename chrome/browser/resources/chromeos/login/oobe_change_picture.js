@@ -63,6 +63,18 @@ Polymer({
     firstDefaultImageIndex: Number,
 
     /**
+     * True when camera video mode is enabled.
+     * @private {boolean}
+     */
+    cameraVideoModeEnabled: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('changePictureVideoModeEnabled');
+      },
+      readOnly: true,
+    },
+
+    /**
      * The currently selected item. This property is bound to the iron-selector
      * and never directly assigned. This may be undefined momentarily as
      * the selection changes due to iron-selector implementation details.
@@ -77,6 +89,7 @@ Polymer({
   listeners: {
     'discard-image': 'onDiscardImage_',
     'image-activate': 'onImageActivate_',
+    'focus-action': 'onFocusAction_',
     'photo-taken': 'onPhotoTaken_',
     'switch-mode': 'onSwitchMode_',
   },
@@ -180,6 +193,11 @@ Polymer({
     this.selectImage_(event.detail);
   },
 
+  /** Focus the action button in the picture pane. */
+  onFocusAction_: function() {
+    /** CrPicturePaneElement */ (this.$.picturePane).focusActionButton();
+  },
+
   /**
    * @param {!{detail: !{photoDataUrl: string}}} event
    * @private
@@ -187,8 +205,8 @@ Polymer({
   onPhotoTaken_: function(event) {
     chrome.send('photoTaken', [event.detail.photoDataUrl]);
     this.pictureList_.setOldImageUrl(event.detail.photoDataUrl);
-
     this.pictureList_.setFocus();
+    this.sendSelectImage_(CrPicture.SelectionTypes.OLD, '');
     announceAccessibleMessage(
         loadTimeData.getString('photoCaptureAccessibleText'));
   },

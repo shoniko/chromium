@@ -10,14 +10,15 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "platform/PlatformExport.h"
 #include "platform/scheduler/base/task_queue.h"
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/scheduler/child/web_task_runner_impl.h"
-#include "platform/scheduler/renderer/auto_advancing_virtual_time_domain.h"
 #include "platform/scheduler/renderer/task_queue_throttler.h"
 #include "platform/scheduler/renderer/web_view_scheduler.h"
+#include "platform/scheduler/util/tracing_helper.h"
 
 namespace base {
 namespace trace_event {
@@ -33,9 +34,7 @@ class RendererSchedulerImpl;
 class CPUTimeBudgetPool;
 class WebFrameSchedulerImpl;
 
-class PLATFORM_EXPORT WebViewSchedulerImpl
-    : public WebViewScheduler,
-      public AutoAdvancingVirtualTimeDomain::Observer {
+class PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
  public:
   WebViewSchedulerImpl(
       WebScheduler::InterventionReporter* intervention_reporter,
@@ -51,22 +50,22 @@ class PLATFORM_EXPORT WebViewSchedulerImpl
   std::unique_ptr<WebFrameScheduler> CreateFrameScheduler(
       BlameContext* blame_context,
       WebFrameScheduler::FrameType frame_type) override;
-  void EnableVirtualTime() override;
+  base::TimeTicks EnableVirtualTime() override;
   void DisableVirtualTimeForTesting() override;
   bool VirtualTimeAllowedToAdvance() const override;
   void SetVirtualTimePolicy(VirtualTimePolicy virtual_time_policy) override;
-  void GrantVirtualTimeBudget(base::TimeDelta budget,
-                              WTF::Closure budget_exhausted_callback) override;
+  void GrantVirtualTimeBudget(
+      base::TimeDelta budget,
+      base::OnceClosure budget_exhausted_callback) override;
   void SetMaxVirtualTimeTaskStarvationCount(
       int max_task_starvation_count) override;
   void AudioStateChanged(bool is_audio_playing) override;
+  bool IsPlayingAudio() const override;
+  bool IsExemptFromBudgetBasedThrottling() const override;
   bool HasActiveConnectionForTest() const override;
   void RequestBeginMainFrameNotExpected(bool new_state) override;
   void AddVirtualTimeObserver(VirtualTimeObserver*) override;
   void RemoveVirtualTimeObserver(VirtualTimeObserver*) override;
-
-  // AutoAdvancingVirtualTimeDomain::Observer implementation:
-  void OnVirtualTimeAdvanced() override;
 
   // Virtual for testing.
   virtual void ReportIntervention(const std::string& message);
@@ -75,20 +74,8 @@ class PLATFORM_EXPORT WebViewSchedulerImpl
       base::trace_event::BlameContext* blame_context,
       WebFrameScheduler::FrameType frame_type);
 
-  void DidStartLoading(unsigned long identifier);
-  void DidStopLoading(unsigned long identifier);
-  void IncrementBackgroundParserCount();
-  void DecrementBackgroundParserCount();
   void Unregister(WebFrameSchedulerImpl* frame_scheduler);
   void OnNavigation();
-  void WillNavigateBackForwardSoon(WebFrameSchedulerImpl* frame_scheduler);
-  void DidBeginProvisionalLoad(WebFrameSchedulerImpl* frame_scheduler);
-  void DidEndProvisionalLoad(WebFrameSchedulerImpl* frame_scheduler);
-
-  void OnBeginNestedRunLoop();
-  void OnExitNestedRunLoop();
-
-  bool IsAudioPlaying() const;
 
   void OnConnectionUpdated();
 
@@ -99,19 +86,17 @@ class PLATFORM_EXPORT WebViewSchedulerImpl
 
   void AsValueInto(base::trace_event::TracedValue* state) const;
 
+  base::WeakPtr<WebViewSchedulerImpl> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
+
  private:
   friend class WebFrameSchedulerImpl;
 
   CPUTimeBudgetPool* BackgroundCPUTimeBudgetPool();
   void MaybeInitializeBackgroundCPUTimeBudgetPool();
 
-  void SetAllowVirtualTimeToAdvance(bool allow_virtual_time_to_advance);
-  void ApplyVirtualTimePolicy();
-
   void OnThrottlingReported(base::TimeDelta throttling_duration);
-
-  static const char* VirtualTimePolicyToString(
-      VirtualTimePolicy virtual_time_policy);
 
   // Depending on page visibility, either turns throttling off, or schedules a
   // call to enable it after a grace period.
@@ -122,37 +107,20 @@ class PLATFORM_EXPORT WebViewSchedulerImpl
   // number of active connections.
   void UpdateBackgroundBudgetPoolThrottlingState();
 
-  void NotifyVirtualTimePaused();
-
+  TraceableVariableController tracing_controller_;
   std::set<WebFrameSchedulerImpl*> frame_schedulers_;
-  std::set<unsigned long> pending_loads_;
-  std::set<WebFrameSchedulerImpl*> provisional_loads_;
-  std::set<WebFrameSchedulerImpl*> expect_backward_forwards_navigation_;
   WebScheduler::InterventionReporter* intervention_reporter_;  // Not owned.
   RendererSchedulerImpl* renderer_scheduler_;
-  VirtualTimePolicy virtual_time_policy_;
-  scoped_refptr<WebTaskRunnerImpl> virtual_time_control_task_queue_;
-  TaskHandle virtual_time_budget_expired_task_handle_;
-  int background_parser_count_;
-
-  // The maximum number amount of delayed task starvation we will allow in
-  // VirtualTimePolicy::ADVANCE or VirtualTimePolicy::DETERMINISTIC_LOADING
-  // unless the run_loop is nested (in which case infinite starvation is
-  // allowed). NB a value of 0 allows infinite starvation.
-  int max_task_starvation_count_;
 
   bool page_visible_;
   bool disable_background_timer_throttling_;
-  bool allow_virtual_time_to_advance_;
-  bool virtual_time_;
   bool is_audio_playing_;
   bool reported_background_throttling_since_navigation_;
   bool has_active_connection_;
   bool nested_runloop_;
   CPUTimeBudgetPool* background_time_budget_pool_;  // Not owned.
   WebViewScheduler::WebViewSchedulerDelegate* delegate_;  // Not owned.
-  base::ObserverList<VirtualTimeObserver> virtual_time_observers_;
-  base::TimeTicks initial_virtual_time_;
+  base::WeakPtrFactory<WebViewSchedulerImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewSchedulerImpl);
 };

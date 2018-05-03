@@ -11,14 +11,13 @@
 #include <utility>
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/logging.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/display/display.h"
 #include "ui/display/display_layout.h"
 #include "ui/display/display_switches.h"
-#include "ui/display/manager/chromeos/touchscreen_util.h"
+#include "ui/display/manager/chromeos/touch_device_manager.h"
 #include "ui/display/manager/display_layout_store.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/display_manager_utilities.h"
@@ -41,13 +40,10 @@ struct DeviceScaleFactorDPIThreshold {
 
 const DeviceScaleFactorDPIThreshold kThresholdTableForInternal[] = {
     {220.0f, 2.0f},
-    {200.0f, 1.6f},
+    {180.0f, 1.6f},
     {150.0f, 1.25f},
     {0.0f, 1.0f},
 };
-
-// 1 inch in mm.
-const float kInchInMm = 25.4f;
 
 // The minimum pixel width whose monitor can be called as '4K'.
 const int kMinimumWidthFor4K = 3840;
@@ -145,9 +141,12 @@ MultipleDisplayState DisplayChangeObserver::GetStateForDisplayIds(
   UpdateInternalDisplay(display_states);
   if (display_states.size() == 1)
     return MULTIPLE_DISPLAY_STATE_SINGLE;
-  if (display_states.size() > 2) {
-    // TODO(weidongg/607844) Remove this once multi-display mirroring is
-    // implemented.
+  if (!display_manager_->is_multi_mirroring_enabled() &&
+      display_states.size() > 2) {
+    // TODO(weidongg/774795): Remove this condition when multi-mirroring is
+    // enabled by default.
+    // When multi-mirroring is disabled, mirroring across 3+ displays are not
+    // supported, so default to EXTENDED.
     return MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED;
   }
   DisplayIdList list =
@@ -155,9 +154,9 @@ MultipleDisplayState DisplayChangeObserver::GetStateForDisplayIds(
                             [](const DisplaySnapshot* display_state) {
                               return display_state->display_id();
                             });
-  bool mirrored = display_manager_->layout_store()->GetMirrorMode(list);
-  return mirrored ? MULTIPLE_DISPLAY_STATE_DUAL_MIRROR
-                  : MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED;
+  return display_manager_->ShouldSetMirrorModeOn(list)
+             ? MULTIPLE_DISPLAY_STATE_DUAL_MIRROR
+             : MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED;
 }
 
 bool DisplayChangeObserver::GetResolutionForDisplayId(int64_t display_id,
@@ -182,7 +181,7 @@ void DisplayChangeObserver::OnDisplayModeChanged(
     displays.emplace_back(CreateManagedDisplayInfo(state, mode_info));
   }
 
-  AssociateTouchscreens(
+  display_manager_->touch_device_manager()->AssociateTouchscreens(
       &displays,
       ui::InputDeviceManager::GetInstance()->GetTouchscreenDevices());
   display_manager_->OnNativeDisplaysChanged(displays);
@@ -218,12 +217,11 @@ void DisplayChangeObserver::OnTouchscreenDeviceConfigurationChanged() {
 
 void DisplayChangeObserver::UpdateInternalDisplay(
     const DisplayConfigurator::DisplayStateList& display_states) {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  bool use_first_display_as_internal =
-      command_line->HasSwitch(::switches::kUseFirstDisplayAsInternal);
+  bool force_first_display_internal = ForceFirstDisplayInternal();
+
   for (auto* state : display_states) {
     if (state->type() == DISPLAY_CONNECTION_TYPE_INTERNAL ||
-        (use_first_display_as_internal &&
+        (force_first_display_internal &&
          (!Display::HasInternalDisplay() ||
           state->display_id() == Display::InternalDisplayId()))) {
       if (Display::HasInternalDisplay())
@@ -303,6 +301,7 @@ ManagedDisplayInfo DisplayChangeObserver::CreateManagedDisplayInfo(
       state->is_aspect_preserving_scaling());
   if (dpi)
     new_info.set_device_dpi(dpi);
+  new_info.set_color_space(state->color_space());
 
   ManagedDisplayInfo::ManagedDisplayModeList display_modes =
       (state->type() == DISPLAY_CONNECTION_TYPE_INTERNAL)

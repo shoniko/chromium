@@ -14,16 +14,8 @@
 
 namespace blink {
 
-NGBaseLayoutAlgorithmTest::NGBaseLayoutAlgorithmTest() {
-  RuntimeEnabledFeatures::SetLayoutNGEnabled(true);
-}
-
-NGBaseLayoutAlgorithmTest::~NGBaseLayoutAlgorithmTest() {
-  RuntimeEnabledFeatures::SetLayoutNGEnabled(false);
-}
-
 void NGBaseLayoutAlgorithmTest::SetUp() {
-  RenderingTest::SetUp();
+  NGLayoutTest::SetUp();
   EnableCompositing();
 }
 
@@ -62,7 +54,7 @@ const NGPhysicalBoxFragment* FragmentChildIterator::NextChild() {
 }
 
 scoped_refptr<NGConstraintSpace> ConstructBlockLayoutTestConstraintSpace(
-    NGWritingMode writing_mode,
+    WritingMode writing_mode,
     TextDirection direction,
     NGLogicalSize size,
     bool shrink_to_fit,

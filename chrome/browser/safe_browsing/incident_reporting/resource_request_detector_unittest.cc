@@ -81,7 +81,7 @@ class ResourceRequestDetectorTest : public testing::Test {
             new StrictMock<safe_browsing::MockIncidentReceiver>()),
         mock_database_manager_(new StrictMock<MockSafeBrowsingDatabaseManager>),
         fake_resource_request_detector_(
-            base::MakeUnique<FakeResourceRequestDetector>(
+            std::make_unique<FakeResourceRequestDetector>(
                 mock_database_manager_,
                 base::WrapUnique(mock_incident_receiver_))) {}
 
@@ -105,7 +105,8 @@ class ResourceRequestDetectorTest : public testing::Test {
         /*render_frame_id=*/MSG_ROUTING_NONE,
         /*is_main_frame=*/true,
         /*allow_download=*/true,
-        /*is_async=*/false, content::PREVIEWS_OFF);
+        /*is_async=*/false, content::PREVIEWS_OFF,
+        /*navigation_ui_data*/ nullptr);
 
     return url_request;
   }

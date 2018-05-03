@@ -19,7 +19,10 @@ class FakeVoiceInteractionFrameworkInstance
   ~FakeVoiceInteractionFrameworkInstance() override;
 
   // mojom::VoiceInteractionFrameworkInstance overrides:
-  void Init(mojom::VoiceInteractionFrameworkHostPtr host_ptr) override;
+  void InitDeprecated(
+      mojom::VoiceInteractionFrameworkHostPtr host_ptr) override;
+  void Init(mojom::VoiceInteractionFrameworkHostPtr host_ptr,
+            InitCallback callback) override;
   void StartVoiceInteractionSession(bool homescreen_is_active) override;
   void ToggleVoiceInteractionSession(bool homescreen_is_active) override;
   void StartVoiceInteractionSessionForRegion(const gfx::Rect& region) override;
@@ -67,7 +70,8 @@ class FakeVoiceInteractionFrameworkInstance
   size_t start_session_for_region_count_ = 0u;
   gfx::Rect selected_region_;
   mojom::VoiceInteractionFrameworkHostPtr host_;
-  ash::VoiceInteractionState state_ = ash::VoiceInteractionState::STOPPED;
+  arc::mojom::VoiceInteractionState state_ =
+      arc::mojom::VoiceInteractionState::STOPPED;
 
   DISALLOW_COPY_AND_ASSIGN(FakeVoiceInteractionFrameworkInstance);
 };

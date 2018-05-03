@@ -468,7 +468,6 @@ TEST_F(VisibleUnitsTest, endOfSentence) {
       "<p><i id=three>333</i> <content select=#two></content> <content "
       "select=#one></content> <i id=four>4444</i></p>";
   SetBodyContent(body_content);
-  SetShadowContent(shadow_content, "host");
   ShadowRoot* shadow_root = SetShadowContent(shadow_content, "host");
 
   Node* one = GetDocument().getElementById("one")->firstChild();
@@ -927,28 +926,6 @@ TEST_F(VisibleUnitsTest, isVisuallyEquivalentCandidateWithDocument) {
   UpdateAllLifecyclePhases();
 
   EXPECT_FALSE(IsVisuallyEquivalentCandidate(Position(&GetDocument(), 0)));
-}
-
-TEST_F(VisibleUnitsTest, localCaretRectOfPosition) {
-  const char* body_content =
-      "<p id='host'><b id='one'>1</b></p><b id='two'>22</b>";
-  const char* shadow_content =
-      "<b id='two'>22</b><content select=#one></content><b id='three'>333</b>";
-  SetBodyContent(body_content);
-  SetShadowContent(shadow_content, "host");
-
-  Element* one = GetDocument().getElementById("one");
-
-  const LocalCaretRect& caret_rect_from_dom_tree =
-      LocalCaretRectOfPosition(Position(one->firstChild(), 0));
-
-  const LocalCaretRect& caret_rect_from_flat_tree =
-      LocalCaretRectOfPosition(PositionInFlatTree(one->firstChild(), 0));
-
-  EXPECT_FALSE(caret_rect_from_dom_tree.IsEmpty());
-  EXPECT_EQ(caret_rect_from_dom_tree.layout_object,
-            caret_rect_from_flat_tree.layout_object);
-  EXPECT_EQ(caret_rect_from_dom_tree.rect, caret_rect_from_flat_tree.rect);
 }
 
 TEST_F(VisibleUnitsTest, logicalEndOfLine) {
@@ -1814,6 +1791,24 @@ TEST_F(VisibleUnitsTest,
   EXPECT_EQ(Position(one->firstChild(), 7),
             PreviousRootInlineBoxCandidatePosition(
                 two->lastChild(), visible_position, kContentIsEditable));
+}
+
+static unsigned MockBoundarySearch(const UChar*,
+                                   unsigned,
+                                   unsigned,
+                                   BoundarySearchContextAvailability,
+                                   bool&) {
+  return true;
+}
+
+// Regression test for crbug.com/788661
+TEST_F(VisibleUnitsTest, NextBoundaryOfEditableTableWithLeadingSpaceInOutput) {
+  VisiblePosition pos = CreateVisiblePosition(SetCaretTextToBody(
+      // The leading whitespace is necessary for bug repro
+      "<output> <table contenteditable><!--|--></table></output>"));
+  Position result = NextBoundary(pos, MockBoundarySearch);
+  EXPECT_EQ("<output> <table contenteditable>|</table></output>",
+            GetCaretTextFromBody(result));
 }
 
 }  // namespace blink

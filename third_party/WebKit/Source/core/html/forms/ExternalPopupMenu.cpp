@@ -32,7 +32,7 @@
 
 #include "build/build_config.h"
 #include "core/dom/NodeComputedStyle.h"
-#include "core/dom/TaskRunnerHelper.h"
+#include "core/events/CurrentInputEvent.h"
 #include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
@@ -46,6 +46,7 @@
 #include "platform/geometry/IntPoint.h"
 #include "platform/text/TextDirection.h"
 #include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebCoalescedInputEvent.h"
 #include "public/platform/WebMouseEvent.h"
 #include "public/platform/WebVector.h"
@@ -66,13 +67,12 @@ ExternalPopupMenu::ExternalPopupMenu(LocalFrame& frame,
     : owner_element_(owner_element),
       local_frame_(frame),
       web_view_(web_view),
-      dispatch_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &frame),
-          this,
-          &ExternalPopupMenu::DispatchEvent),
+      dispatch_event_timer_(frame.GetTaskRunner(TaskType::kUnspecedTimer),
+                            this,
+                            &ExternalPopupMenu::DispatchEvent),
       web_external_popup_menu_(nullptr) {}
 
-ExternalPopupMenu::~ExternalPopupMenu() {}
+ExternalPopupMenu::~ExternalPopupMenu() = default;
 
 void ExternalPopupMenu::Trace(blink::Visitor* visitor) {
   visitor->Trace(owner_element_);
@@ -119,12 +119,12 @@ void ExternalPopupMenu::Show() {
   if (!ShowInternal())
     return;
 #if defined(OS_MACOSX)
-  const WebInputEvent* current_event = WebViewImpl::CurrentInputEvent();
+  const WebInputEvent* current_event = CurrentInputEvent::Get();
   if (current_event && current_event->GetType() == WebInputEvent::kMouseDown) {
     synthetic_event_ = WTF::WrapUnique(new WebMouseEvent);
     *synthetic_event_ = *static_cast<const WebMouseEvent*>(current_event);
     synthetic_event_->SetType(WebInputEvent::kMouseUp);
-    dispatch_event_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    dispatch_event_timer_.StartOneShot(TimeDelta(), FROM_HERE);
     // FIXME: show() is asynchronous. If preparing a popup is slow and a
     // user released the mouse button before showing the popup, mouseup and
     // click events are correctly dispatched. Dispatching the synthetic
@@ -154,10 +154,10 @@ void ExternalPopupMenu::UpdateFromElement(UpdateReason reason) {
       if (needs_update_)
         return;
       needs_update_ = true;
-      TaskRunnerHelper::Get(TaskType::kUserInteraction,
-                            &owner_element_->GetDocument())
-          ->PostTask(BLINK_FROM_HERE, WTF::Bind(&ExternalPopupMenu::Update,
-                                                WrapPersistent(this)));
+      owner_element_->GetDocument()
+          .GetTaskRunner(TaskType::kUserInteraction)
+          ->PostTask(FROM_HERE, WTF::Bind(&ExternalPopupMenu::Update,
+                                          WrapPersistent(this)));
       break;
 
     case kByStyleChange:

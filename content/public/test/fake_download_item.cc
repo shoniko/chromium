@@ -231,7 +231,7 @@ void FakeDownloadItem::Cancel(bool user_cancel) {
 }
 
 void FakeDownloadItem::Remove() {
-  NOTREACHED();
+  removed_ = true;
 }
 
 void FakeDownloadItem::OpenDownload() {
@@ -441,6 +441,10 @@ void FakeDownloadItem::SetDisplayName(const base::FilePath& name) {
 std::string FakeDownloadItem::DebugString(bool verbose) const {
   NOTREACHED();
   return std::string();
+}
+
+void FakeDownloadItem::SimulateErrorForTesting(DownloadInterruptReason reason) {
+  NOTREACHED();
 }
 
 }  // namespace content

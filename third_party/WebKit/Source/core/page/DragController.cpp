@@ -28,6 +28,7 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "build/build_config.h"
 #include "core/clipboard/DataObject.h"
@@ -63,7 +64,7 @@
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/resource/ImageResourceContent.h"
@@ -85,8 +86,7 @@
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/CurrentTime.h"
-#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebDragData.h"
 #include "public/platform/WebDragOperation.h"
@@ -130,7 +130,7 @@ static WebMouseEvent CreateMouseEvent(DragData* drag_data) {
                     drag_data->GlobalPosition().Y()),
       WebPointerProperties::Button::kLeft, 0,
       static_cast<WebInputEvent::Modifiers>(drag_data->GetModifiers()),
-      TimeTicks::Now().InSeconds());
+      CurrentTimeTicks().InSeconds());
   // TODO(dtapuska): Really we should chnage DragData to store the viewport
   // coordinates and scale.
   result.SetFrameScale(1);
@@ -293,8 +293,12 @@ void DragController::PerformDrag(DragData* drag_data, LocalFrame& local_root) {
 
   if (OperationForLoad(drag_data, local_root) != kDragOperationNone) {
     if (page_->GetSettings().GetNavigateOnDragDrop()) {
-      page_->MainFrame()->Navigate(
-          FrameLoadRequest(nullptr, ResourceRequest(drag_data->AsURL())));
+      ResourceRequest resource_request(drag_data->AsURL());
+      // TODO(mkwst): Perhaps this should use a unique origin as the requestor
+      // origin rather than the origin of the dragged data URL?
+      resource_request.SetRequestorOrigin(
+          SecurityOrigin::Create(KURL(drag_data->AsURL())));
+      page_->MainFrame()->Navigate(FrameLoadRequest(nullptr, resource_request));
     }
 
     // TODO(bokan): This case happens when we end a URL drag inside a guest
@@ -354,7 +358,7 @@ static Element* ElementUnderMouse(Document* document_under_mouse,
                                   const LayoutPoint& point) {
   HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive);
   HitTestResult result(request, point);
-  document_under_mouse->GetLayoutViewItem().HitTest(result);
+  document_under_mouse->GetLayoutView()->HitTest(result);
 
   Node* n = result.InnerNode();
   while (n && !n->IsElementNode())
@@ -482,7 +486,7 @@ static bool SetSelectionToDragCaret(LocalFrame* frame,
                                     VisibleSelection& drag_caret,
                                     Range*& range,
                                     const LayoutPoint& point) {
-  frame->Selection().SetSelection(drag_caret.AsSelection());
+  frame->Selection().SetSelectionAndEndTyping(drag_caret.AsSelection());
   if (frame->Selection()
           .ComputeVisibleSelectionInDOMTreeDeprecated()
           .IsNone()) {
@@ -495,7 +499,7 @@ static bool SetSelectionToDragCaret(LocalFrame* frame,
     if (!position.IsConnected())
       return false;
 
-    frame->Selection().SetSelection(
+    frame->Selection().SetSelectionAndEndTyping(
         SelectionInDOMTree::Builder().Collapse(position).Build());
     drag_caret =
         frame->Selection().ComputeVisibleSelectionInDOMTreeDeprecated();
@@ -645,7 +649,7 @@ bool DragController::ConcludeEditDrag(DragData* drag_data) {
               delete_mode, drag_caret.Base()))
         return false;
 
-      inner_frame->Selection().SetSelection(
+      inner_frame->Selection().SetSelectionAndEndTyping(
           SelectionInDOMTree::Builder()
               .SetBaseAndExtent(EphemeralRange(range))
               .Build());
@@ -699,7 +703,7 @@ bool DragController::CanProcessDrag(DragData* drag_data,
   if (!drag_data->ContainsCompatibleContent())
     return false;
 
-  if (local_root.ContentLayoutItem().IsNull())
+  if (!local_root.ContentLayoutObject())
     return false;
 
   LayoutPoint point = local_root.View()->RootFrameToContents(
@@ -908,7 +912,7 @@ static void PrepareDataTransferForImageDrag(LocalFrame* source,
     // TODO(editing-dev): We should use |EphemeralRange| instead of |Range|.
     Range* range = source->GetDocument()->createRange();
     range->selectNode(node, ASSERT_NO_EXCEPTION);
-    source->Selection().SetSelection(
+    source->Selection().SetSelectionAndEndTyping(
         SelectionInDOMTree::Builder()
             .SetBaseAndExtent(EphemeralRange(range))
             .Build());
@@ -923,7 +927,7 @@ bool DragController::PopulateDragDataTransfer(LocalFrame* src,
   DCHECK(DragTypeIsValid(state.drag_type_));
 #endif
   DCHECK(src);
-  if (!src->View() || src->ContentLayoutItem().IsNull())
+  if (!src->View() || !src->ContentLayoutObject())
     return false;
 
   HitTestResult hit_test_result =
@@ -1046,7 +1050,7 @@ static std::unique_ptr<DragImage> DragImageForImage(
   if (image->IsSVGImage()) {
     KURL url = element->GetDocument().CompleteURL(element->ImageSourceURL());
     svg_image = SVGImageForContainer::Create(
-        ToSVGImage(image), image_element_size_in_pixels, 1, url);
+        ToSVGImage(image), LayoutSize(image_element_size_in_pixels), 1, url);
     image = svg_image.get();
   }
 
@@ -1054,7 +1058,7 @@ static std::unique_ptr<DragImage> DragImageForImage(
       element->EnsureComputedStyle()->ImageRendering() ==
               EImageRendering::kPixelated
           ? kInterpolationNone
-          : kInterpolationHigh;
+          : kInterpolationDefault;
   RespectImageOrientationEnum should_respect_image_orientation =
       LayoutObject::ShouldRespectImageOrientation(element->GetLayoutObject());
   ImageOrientation orientation;
@@ -1138,13 +1142,12 @@ std::unique_ptr<DragImage> DragController::DragImageForSelection(
   GlobalPaintFlags paint_flags =
       kGlobalPaintSelectionOnly | kGlobalPaintFlattenCompositingLayers;
 
-  PaintRecordBuilder builder(
-      DataTransfer::DeviceSpaceRect(painting_rect, frame));
+  PaintRecordBuilder builder;
   frame.View()->PaintContents(builder.Context(), paint_flags,
                               EnclosingIntRect(painting_rect));
   return DataTransfer::CreateDragImageForFrame(
-      frame, opacity, kDoNotRespectImageOrientation, painting_rect, builder,
-      PropertyTreeState::Root());
+      frame, opacity, kDoNotRespectImageOrientation, painting_rect.Size(),
+      painting_rect.Location(), builder, PropertyTreeState::Root());
 }
 
 bool DragController::StartDrag(LocalFrame* src,
@@ -1155,7 +1158,7 @@ bool DragController::StartDrag(LocalFrame* src,
   DCHECK(DragTypeIsValid(state.drag_type_));
 #endif
   DCHECK(src);
-  if (!src->View() || src->ContentLayoutItem().IsNull())
+  if (!src->View() || !src->ContentLayoutObject())
     return false;
 
   HitTestResult hit_test_result =
@@ -1247,7 +1250,7 @@ bool DragController::StartDrag(LocalFrame* src,
               src->Selection()
                   .ComputeVisibleSelectionInDOMTreeDeprecated()
                   .Base())) {
-        src->Selection().SetSelection(
+        src->Selection().SetSelectionAndEndTyping(
             SelectionInDOMTree::Builder().SelectAllChildren(*node).Build());
       }
     }

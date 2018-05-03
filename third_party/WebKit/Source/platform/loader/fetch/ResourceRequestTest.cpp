@@ -25,23 +25,24 @@ TEST(ResourceRequestTest, CrossThreadResourceRequestData) {
   original.SetHTTPMethod(HTTPNames::GET);
   original.SetHTTPHeaderField(AtomicString("Foo"), AtomicString("Bar"));
   original.SetHTTPHeaderField(AtomicString("Piyo"), AtomicString("Fuga"));
-  original.SetPriority(kResourceLoadPriorityLow, 20);
+  original.SetPriority(ResourceLoadPriority::kLow, 20);
 
-  RefPtr<EncodedFormData> original_body(EncodedFormData::Create("Test Body"));
+  scoped_refptr<EncodedFormData> original_body(
+      EncodedFormData::Create("Test Body"));
   original.SetHTTPBody(original_body);
   original.SetAllowStoredCredentials(false);
   original.SetReportUploadProgress(false);
   original.SetHasUserGesture(false);
   original.SetDownloadToFile(false);
   original.SetServiceWorkerMode(WebURLRequest::ServiceWorkerMode::kAll);
-  original.SetFetchRequestMode(WebURLRequest::kFetchRequestModeCORS);
+  original.SetFetchRequestMode(network::mojom::FetchRequestMode::kCORS);
   original.SetFetchCredentialsMode(
-      WebURLRequest::kFetchCredentialsModeSameOrigin);
+      network::mojom::FetchCredentialsMode::kSameOrigin);
   original.SetRequestorID(30);
-  original.SetRequestorProcessID(40);
+  original.SetPluginChildID(40);
   original.SetAppCacheHostID(50);
   original.SetRequestContext(WebURLRequest::kRequestContextAudio);
-  original.SetFrameType(WebURLRequest::kFrameTypeNested);
+  original.SetFrameType(network::mojom::RequestContextFrameType::kNested);
   original.SetHTTPReferrer(
       Referrer("http://www.example.com/referrer.htm", kReferrerPolicyDefault));
 
@@ -56,7 +57,7 @@ TEST(ResourceRequestTest, CrossThreadResourceRequestData) {
   EXPECT_STREQ("GET", original.HttpMethod().Utf8().data());
   EXPECT_STREQ("Bar", original.HttpHeaderFields().Get("Foo").Utf8().data());
   EXPECT_STREQ("Fuga", original.HttpHeaderFields().Get("Piyo").Utf8().data());
-  EXPECT_EQ(kResourceLoadPriorityLow, original.Priority());
+  EXPECT_EQ(ResourceLoadPriority::kLow, original.Priority());
   EXPECT_STREQ("Test Body",
                original.HttpBody()->FlattenToString().Utf8().data());
   EXPECT_FALSE(original.AllowStoredCredentials());
@@ -65,15 +66,16 @@ TEST(ResourceRequestTest, CrossThreadResourceRequestData) {
   EXPECT_FALSE(original.DownloadToFile());
   EXPECT_EQ(WebURLRequest::ServiceWorkerMode::kAll,
             original.GetServiceWorkerMode());
-  EXPECT_EQ(WebURLRequest::kFetchRequestModeCORS,
+  EXPECT_EQ(network::mojom::FetchRequestMode::kCORS,
             original.GetFetchRequestMode());
-  EXPECT_EQ(WebURLRequest::kFetchCredentialsModeSameOrigin,
+  EXPECT_EQ(network::mojom::FetchCredentialsMode::kSameOrigin,
             original.GetFetchCredentialsMode());
   EXPECT_EQ(30, original.RequestorID());
-  EXPECT_EQ(40, original.RequestorProcessID());
+  EXPECT_EQ(40, original.GetPluginChildID());
   EXPECT_EQ(50, original.AppCacheHostID());
   EXPECT_EQ(WebURLRequest::kRequestContextAudio, original.GetRequestContext());
-  EXPECT_EQ(WebURLRequest::kFrameTypeNested, original.GetFrameType());
+  EXPECT_EQ(network::mojom::RequestContextFrameType::kNested,
+            original.GetFrameType());
   EXPECT_STREQ("http://www.example.com/referrer.htm",
                original.HttpReferrer().Utf8().data());
   EXPECT_EQ(kReferrerPolicyDefault, original.GetReferrerPolicy());
@@ -91,7 +93,7 @@ TEST(ResourceRequestTest, CrossThreadResourceRequestData) {
                copy1.RequestorOrigin()->Host().Utf8().data());
   EXPECT_STREQ("GET", copy1.HttpMethod().Utf8().data());
   EXPECT_STREQ("Bar", copy1.HttpHeaderFields().Get("Foo").Utf8().data());
-  EXPECT_EQ(kResourceLoadPriorityLow, copy1.Priority());
+  EXPECT_EQ(ResourceLoadPriority::kLow, copy1.Priority());
   EXPECT_STREQ("Test Body", copy1.HttpBody()->FlattenToString().Utf8().data());
   EXPECT_FALSE(copy1.AllowStoredCredentials());
   EXPECT_FALSE(copy1.ReportUploadProgress());
@@ -99,14 +101,16 @@ TEST(ResourceRequestTest, CrossThreadResourceRequestData) {
   EXPECT_FALSE(copy1.DownloadToFile());
   EXPECT_EQ(WebURLRequest::ServiceWorkerMode::kAll,
             copy1.GetServiceWorkerMode());
-  EXPECT_EQ(WebURLRequest::kFetchRequestModeCORS, copy1.GetFetchRequestMode());
-  EXPECT_EQ(WebURLRequest::kFetchCredentialsModeSameOrigin,
+  EXPECT_EQ(network::mojom::FetchRequestMode::kCORS,
+            copy1.GetFetchRequestMode());
+  EXPECT_EQ(network::mojom::FetchCredentialsMode::kSameOrigin,
             copy1.GetFetchCredentialsMode());
   EXPECT_EQ(30, copy1.RequestorID());
-  EXPECT_EQ(40, copy1.RequestorProcessID());
+  EXPECT_EQ(40, copy1.GetPluginChildID());
   EXPECT_EQ(50, copy1.AppCacheHostID());
   EXPECT_EQ(WebURLRequest::kRequestContextAudio, copy1.GetRequestContext());
-  EXPECT_EQ(WebURLRequest::kFrameTypeNested, copy1.GetFrameType());
+  EXPECT_EQ(network::mojom::RequestContextFrameType::kNested,
+            copy1.GetFrameType());
   EXPECT_STREQ("http://www.example.com/referrer.htm",
                copy1.HttpReferrer().Utf8().data());
   EXPECT_EQ(kReferrerPolicyDefault, copy1.GetReferrerPolicy());
@@ -116,8 +120,8 @@ TEST(ResourceRequestTest, CrossThreadResourceRequestData) {
   copy1.SetHasUserGesture(true);
   copy1.SetDownloadToFile(true);
   copy1.SetServiceWorkerMode(WebURLRequest::ServiceWorkerMode::kNone);
-  copy1.SetFetchRequestMode(WebURLRequest::kFetchRequestModeNoCORS);
-  copy1.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeInclude);
+  copy1.SetFetchRequestMode(network::mojom::FetchRequestMode::kNoCORS);
+  copy1.SetFetchCredentialsMode(network::mojom::FetchCredentialsMode::kInclude);
 
   std::unique_ptr<CrossThreadResourceRequestData> data2(copy1.CopyData());
   ResourceRequest copy2(data2.get());
@@ -127,9 +131,9 @@ TEST(ResourceRequestTest, CrossThreadResourceRequestData) {
   EXPECT_TRUE(copy2.DownloadToFile());
   EXPECT_EQ(WebURLRequest::ServiceWorkerMode::kNone,
             copy2.GetServiceWorkerMode());
-  EXPECT_EQ(WebURLRequest::kFetchRequestModeNoCORS,
+  EXPECT_EQ(network::mojom::FetchRequestMode::kNoCORS,
             copy1.GetFetchRequestMode());
-  EXPECT_EQ(WebURLRequest::kFetchCredentialsModeInclude,
+  EXPECT_EQ(network::mojom::FetchCredentialsMode::kInclude,
             copy1.GetFetchCredentialsMode());
 }
 

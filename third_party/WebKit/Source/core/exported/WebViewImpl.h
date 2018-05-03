@@ -35,13 +35,10 @@
 
 #include "build/build_config.h"
 #include "core/CoreExport.h"
-#include "core/editing/spellcheck/SpellCheckerClientImpl.h"
 #include "core/exported/WebPagePopupImpl.h"
 #include "core/frame/ResizeViewportAnchor.h"
 #include "core/page/ChromeClient.h"
-#include "core/page/ContextMenuClient.h"
 #include "core/page/ContextMenuProvider.h"
-#include "core/page/EditorClient.h"
 #include "core/page/EventWithHitTestResults.h"
 #include "core/page/PageWidgetDelegate.h"
 #include "core/page/ScopedPagePauser.h"
@@ -103,9 +100,10 @@ class CORE_EXPORT WebViewImpl final
       public WebScheduler::InterventionReporter,
       public WebViewScheduler::WebViewSchedulerDelegate {
  public:
-  static WebViewImpl* Create(WebViewClient*, WebPageVisibilityState);
+  static WebViewImpl* Create(WebViewClient*,
+                             mojom::PageVisibilityState,
+                             WebViewImpl* opener);
   static HashSet<WebViewImpl*>& AllInstances();
-  static const WebInputEvent* CurrentInputEvent();
   // Returns true if popup menus should be rendered by the browser, false if
   // they should be rendered by WebKit (which is the default).
   static bool UseExternalPopupMenus();
@@ -121,7 +119,7 @@ class CORE_EXPORT WebViewImpl final
   void SetSuppressFrameRequestsWorkaroundFor704763Only(bool) override;
   void BeginFrame(double last_frame_time_monotonic) override;
 
-  void UpdateAllLifecyclePhases() override;
+  void UpdateLifecycle(LifecycleUpdate requested_update) override;
   void Paint(WebCanvas*, const WebRect&) override;
 #if defined(OS_ANDROID)
   void PaintIgnoringCompositing(WebCanvas*, const WebRect&) override;
@@ -131,8 +129,8 @@ class CORE_EXPORT WebViewImpl final
       WebCompositeAndReadbackAsyncCallback*) override;
   void ThemeChanged() override;
   WebInputEventResult HandleInputEvent(const WebCoalescedInputEvent&) override;
+  WebInputEventResult DispatchBufferedTouchEvents() override;
   void SetCursorVisibilityState(bool is_visible) override;
-  bool HasTouchEventHandlersAt(const WebPoint&) override;
 
   void ApplyViewportDeltas(const WebFloatSize& visual_viewport_delta,
                            const WebFloatSize& layout_viewport_delta,
@@ -143,14 +141,9 @@ class CORE_EXPORT WebViewImpl final
                                          bool has_scrolled_by_touch) override;
   void MouseCaptureLost() override;
   void SetFocus(bool enable) override;
-  WebRange CompositionRange() override;
   WebColor BackgroundColor() const override;
   WebPagePopupImpl* GetPagePopup() const override;
   bool SelectionBounds(WebRect& anchor, WebRect& focus) const override;
-  bool SelectionTextDirection(WebTextDirection& start,
-                              WebTextDirection& end) const override;
-  bool IsSelectionAnchorFirst() const override;
-  void SetTextDirection(WebTextDirection) override;
   bool IsAcceleratedCompositingActive() const override;
   void WillCloseLayerTreeView() override;
   void DidAcquirePointerLock() override;
@@ -160,7 +153,6 @@ class CORE_EXPORT WebViewImpl final
 
   // WebView methods:
   virtual bool IsWebView() const { return true; }
-  void SetCredentialManagerClient(WebCredentialManagerClient*) override;
   void SetPrerendererClient(WebPrerendererClient*) override;
   WebSettings* GetSettings() override;
   WebString PageEncoding() const override;
@@ -183,7 +175,7 @@ class CORE_EXPORT WebViewImpl final
   void FocusDocumentView(WebFrame*) override;
   void SetInitialFocus(bool reverse) override;
   void ClearFocusedElement() override;
-  bool ScrollFocusedEditableElementIntoRect(const WebRect&) override;
+  bool ScrollFocusedEditableElementIntoView() override;
   void SmoothScroll(int target_x, int target_y, long duration_ms) override;
   void ZoomToFindInPageRect(const WebRect&);
   void AdvanceFocus(bool reverse) override;
@@ -247,7 +239,10 @@ class CORE_EXPORT WebViewImpl final
   // WebScheduler::InterventionReporter implementation:
   void ReportIntervention(const WebString& message) override;
 
+  // WebViewScheduler::WebViewSchedulerDelegate implementation:
   void RequestBeginMainFrameNotExpected(bool new_state) override;
+  void SetPageStopped(bool stopped) override;
+
   void DidUpdateFullscreenSize();
 
   float DefaultMinimumPageScaleFactor() const;
@@ -362,7 +357,7 @@ class CORE_EXPORT WebViewImpl final
   }
 
   WebViewScheduler* Scheduler() const override;
-  void SetVisibilityState(WebPageVisibilityState, bool) override;
+  void SetVisibilityState(mojom::PageVisibilityState, bool) override;
 
   bool HasOpenedPopup() const { return page_popup_.get(); }
 
@@ -449,7 +444,7 @@ class CORE_EXPORT WebViewImpl final
   // changed.
   void DidUpdateBrowserControls();
 
-  void SetScrollBoundaryBehavior(const WebScrollBoundaryBehavior&);
+  void SetOverscrollBehavior(const WebOverscrollBehavior&);
 
   void ForceNextWebGLContextCreationToFail() override;
   void ForceNextDrawingBufferCreationToFail() override;
@@ -460,8 +455,6 @@ class CORE_EXPORT WebViewImpl final
   PageScaleConstraintsSet& GetPageScaleConstraintsSet() const;
 
   FloatSize ElasticOverscroll() const { return elastic_overscroll_; }
-
-  double LastFrameTimeMonotonic() const { return last_frame_time_monotonic_; }
 
   class ChromeClient& GetChromeClient() const {
     return *chrome_client_.Get();
@@ -477,9 +470,9 @@ class CORE_EXPORT WebViewImpl final
     last_hidden_page_popup_ = page_popup;
   }
 
-  void RequestDecode(const PaintImage&, WTF::Function<void(bool)> callback);
-
  private:
+  WebInputEventResult HandleInputEventInternal(
+      const WebCoalescedInputEvent&) override;
   void SetPageScaleFactorAndLocation(float, const FloatPoint&);
   void PropagateZoomFactorToLocalFrameRoots(Frame*, float);
 
@@ -510,7 +503,7 @@ class CORE_EXPORT WebViewImpl final
   friend class WebViewFrameWidget;
   friend class WTF::RefCounted<WebViewImpl>;
 
-  explicit WebViewImpl(WebViewClient*, WebPageVisibilityState);
+  WebViewImpl(WebViewClient*, mojom::PageVisibilityState, WebViewImpl* opener);
   ~WebViewImpl() override;
 
   void HideSelectPopup();
@@ -570,9 +563,6 @@ class CORE_EXPORT WebViewImpl final
   WebViewClient* client_;  // Can be 0 (e.g. unittests, shared workers, etc.)
 
   Persistent<ChromeClient> chrome_client_;
-  ContextMenuClient context_menu_client_;
-  EditorClient editor_client_;
-  SpellCheckerClientImpl spell_checker_client_impl_;
 
   WebSize size_;
   // If true, automatically resize the layout view around its content.
@@ -690,8 +680,6 @@ class CORE_EXPORT WebViewImpl final
 
   const std::unique_ptr<WebViewScheduler> scheduler_;
 
-  double last_frame_time_monotonic_;
-
   // TODO(lfg): This is used in order to disable compositor visibility while
   // the page is still visible. This is needed until the WebView and WebWidget
   // split is complete, since in out-of-process iframes the page can be
@@ -699,8 +687,6 @@ class CORE_EXPORT WebViewImpl final
   bool override_compositor_visibility_;
 
   Persistent<ResizeViewportAnchor> resize_viewport_anchor_;
-
-  static const WebInputEvent* current_input_event_;
 };
 
 // We have no ways to check if the specified WebView is an instance of

@@ -12,7 +12,6 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -23,6 +22,7 @@
 #include "components/safe_browsing/db/v4_protocol_manager_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "crypto/sha2.h"
 
 using content::BrowserThread;
 using base::TimeTicks;
@@ -310,7 +310,7 @@ bool V4LocalDatabaseManager::CheckBrowseUrl(const GURL& url,
     return true;
   }
 
-  std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
+  std::unique_ptr<PendingCheck> check = std::make_unique<PendingCheck>(
       client, ClientCallbackType::CHECK_BROWSE_URL,
       CreateStoresToCheckFromSBThreatTypeSet(threat_types),
       std::vector<GURL>(1, url));
@@ -327,7 +327,7 @@ bool V4LocalDatabaseManager::CheckDownloadUrl(
     return true;
   }
 
-  std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
+  std::unique_ptr<PendingCheck> check = std::make_unique<PendingCheck>(
       client, ClientCallbackType::CHECK_DOWNLOAD_URLS,
       StoresToCheck({GetUrlMalBinId()}), url_chain);
 
@@ -343,7 +343,7 @@ bool V4LocalDatabaseManager::CheckExtensionIDs(
     return true;
   }
 
-  std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
+  std::unique_ptr<PendingCheck> check = std::make_unique<PendingCheck>(
       client, ClientCallbackType::CHECK_EXTENSION_IDS,
       StoresToCheck({GetChromeExtMalwareId()}), extension_ids);
 
@@ -364,7 +364,7 @@ bool V4LocalDatabaseManager::CheckResourceUrl(const GURL& url, Client* client) {
     return true;
   }
 
-  std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
+  std::unique_ptr<PendingCheck> check = std::make_unique<PendingCheck>(
       client, ClientCallbackType::CHECK_RESOURCE_URL, stores_to_check,
       std::vector<GURL>(1, url));
 
@@ -382,7 +382,7 @@ bool V4LocalDatabaseManager::CheckUrlForSubresourceFilter(const GURL& url,
     return true;
   }
 
-  std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
+  std::unique_ptr<PendingCheck> check = std::make_unique<PendingCheck>(
       client, ClientCallbackType::CHECK_URL_FOR_SUBRESOURCE_FILTER,
       stores_to_check, std::vector<GURL>(1, url));
 
@@ -404,23 +404,11 @@ AsyncMatch V4LocalDatabaseManager::CheckCsdWhitelistUrl(const GURL& url,
     return AsyncMatch::MATCH;
   }
 
-  std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
+  std::unique_ptr<PendingCheck> check = std::make_unique<PendingCheck>(
       client, ClientCallbackType::CHECK_CSD_WHITELIST, stores_to_check,
       std::vector<GURL>(1, url));
 
   return HandleWhitelistCheck(std::move(check));
-}
-
-bool V4LocalDatabaseManager::MatchCsdWhitelistUrl(const GURL& url) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  StoresToCheck stores_to_check({GetUrlCsdWhitelistId()});
-  if (!AreAllStoresAvailableNow(stores_to_check)) {
-    // Fail open: Whitelist everything. See CheckCsdWhitelistUrl.
-    return true;
-  }
-
-  return HandleUrlSynchronously(url, stores_to_check);
 }
 
 bool V4LocalDatabaseManager::MatchDownloadWhitelistString(
@@ -434,14 +422,15 @@ bool V4LocalDatabaseManager::MatchDownloadWhitelistString(
     return false;
   }
 
-  return HandleHashSynchronously(str, stores_to_check);
+  return HandleHashSynchronously(crypto::SHA256HashString(str),
+                                 stores_to_check);
 }
 
 bool V4LocalDatabaseManager::MatchDownloadWhitelistUrl(const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   StoresToCheck stores_to_check({GetUrlCsdDownloadWhitelistId()});
-  if (!AreAllStoresAvailableNow(stores_to_check)) {
+  if (!AreAllStoresAvailableNow(stores_to_check) || !CanCheckUrl(url)) {
     // Fail close: Whitelist nothing. This may generate download-protection
     // pings for whitelisted domains, but that's fine.
     return false;
@@ -470,20 +459,10 @@ ThreatSource V4LocalDatabaseManager::GetThreatSource() const {
   return ThreatSource::LOCAL_PVER4;
 }
 
-bool V4LocalDatabaseManager::IsCsdWhitelistKillSwitchOn() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return false;
-}
-
 bool V4LocalDatabaseManager::IsDownloadProtectionEnabled() const {
   // TODO(vakh): Investigate the possibility of using a command line switch for
   // this instead.
   return true;
-}
-
-bool V4LocalDatabaseManager::IsMalwareKillSwitchOn() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return false;
 }
 
 bool V4LocalDatabaseManager::IsSupported() const {
@@ -796,7 +775,7 @@ bool V4LocalDatabaseManager::HandleHashSynchronously(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   std::set<FullHash> hashes{hash};
-  std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
+  std::unique_ptr<PendingCheck> check = std::make_unique<PendingCheck>(
       nullptr, ClientCallbackType::CHECK_OTHER, stores_to_check, hashes);
 
   FullHashToStoreAndHashPrefixesMap full_hash_to_store_and_hash_prefixes;
@@ -808,7 +787,7 @@ bool V4LocalDatabaseManager::HandleUrlSynchronously(
     const StoresToCheck& stores_to_check) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
+  std::unique_ptr<PendingCheck> check = std::make_unique<PendingCheck>(
       nullptr, ClientCallbackType::CHECK_OTHER, stores_to_check,
       std::vector<GURL>(1, url));
 

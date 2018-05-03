@@ -12,6 +12,7 @@ import logging
 import os
 import unittest
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,15 +30,18 @@ _TEST_OUTPUT_DIR = os.path.join(_TEST_DATA_DIR, 'mock_output_directory')
 _TEST_TOOL_PREFIX = os.path.join(
     os.path.abspath(_TEST_DATA_DIR), 'mock_toolchain', '')
 _TEST_MAP_PATH = os.path.join(_TEST_DATA_DIR, 'test.map')
-_TEST_ELF_PATH = os.path.join(_TEST_OUTPUT_DIR, 'elf')
+_TEST_PAK_PATH = os.path.join(_TEST_OUTPUT_DIR, 'en-US.pak')
+_TEST_PAK_INFO_PATH = os.path.join(_TEST_OUTPUT_DIR, 'en-US.pak.info')
+_TEST_ELF_PATH = os.path.join(_TEST_OUTPUT_DIR, 'elf')  # Dynamically created
+_TEST_ELF_FILE_BEGIN = os.path.join(_TEST_OUTPUT_DIR, 'elf.begin')
 
 update_goldens = False
 
 
-def _AssertGolden(expected_lines, actual_lines):
+def _AssertGolden(expected_lines, actual_lines, golden_path):
   expected = list(expected_lines)
   actual = list(l + '\n' for l in actual_lines)
-  assert actual == expected, ('Did not match .golden.\n' +
+  assert actual == expected, (('Did not match %s.\n' % golden_path) +
       ''.join(difflib.unified_diff(expected, actual, 'expected', 'actual')))
 
 
@@ -61,7 +65,7 @@ def _CompareWithGolden(name=None):
         logging.info('Wrote %s', golden_path)
       else:
         with open(golden_path) as file_obj:
-          _AssertGolden(file_obj, actual_lines)
+          _AssertGolden(file_obj, actual_lines, golden_path)
     return inner
   return real_decorator
 
@@ -96,46 +100,81 @@ def _DiffCounts(sym):
 
 class IntegrationTest(unittest.TestCase):
   maxDiff = None  # Don't trucate diffs in errors.
-  cached_size_info = [None, None, None]
+  cached_size_info = {}
 
-  def _CloneSizeInfo(self, use_output_directory=True, use_elf=True):
+  @classmethod
+  def setUpClass(cls):
+    shutil.copy(_TEST_ELF_FILE_BEGIN, _TEST_ELF_PATH)
+    with open(_TEST_ELF_PATH, 'a') as elf_file:
+      data = '0'
+      # Exactly 128MB of data (2^27), extra bytes will be accounted in overhead.
+      for _ in range(27):
+        data = data + data
+      elf_file.write(data)
+
+  @classmethod
+  def tearDownClass(cls):
+    os.remove(_TEST_ELF_PATH)
+
+  def _CloneSizeInfo(self, use_output_directory=True, use_elf=True,
+                     use_pak=False):
     assert not use_elf or use_output_directory
-    i = int(use_output_directory) + int(use_elf)
-    if not IntegrationTest.cached_size_info[i]:
+    cache_key = (use_output_directory, use_elf, use_pak)
+    if cache_key not in IntegrationTest.cached_size_info:
       elf_path = _TEST_ELF_PATH if use_elf else None
       output_directory = _TEST_OUTPUT_DIR if use_output_directory else None
-      IntegrationTest.cached_size_info[i] = archive.CreateSizeInfo(
-          _TEST_MAP_PATH, elf_path, _TEST_TOOL_PREFIX, output_directory)
+      if use_pak:
+        section_sizes, raw_symbols = archive.CreateSectionSizesAndSymbols(
+            map_path=_TEST_MAP_PATH, tool_prefix=_TEST_TOOL_PREFIX,
+            elf_path=elf_path, output_directory=output_directory,
+            pak_files=[_TEST_PAK_PATH], pak_info_file=_TEST_PAK_INFO_PATH)
+      else:
+        section_sizes, raw_symbols = archive.CreateSectionSizesAndSymbols(
+            map_path=_TEST_MAP_PATH, tool_prefix=_TEST_TOOL_PREFIX,
+            elf_path=elf_path, output_directory=output_directory)
+      metadata = None
       if use_elf:
         with _AddMocksToPath():
-          IntegrationTest.cached_size_info[i].metadata = archive.CreateMetadata(
+          metadata = archive.CreateMetadata(
               _TEST_MAP_PATH, elf_path, None, _TEST_TOOL_PREFIX,
               output_directory)
-    return copy.deepcopy(IntegrationTest.cached_size_info[i])
+      IntegrationTest.cached_size_info[cache_key] = archive.CreateSizeInfo(
+          section_sizes, raw_symbols, metadata=metadata)
+    return copy.deepcopy(IntegrationTest.cached_size_info[cache_key])
+
+  def _DoArchive(self, archive_path, use_output_directory=True, use_elf=True,
+                 use_pak=False, debug_measures=False):
+    args = [archive_path, '--map-file', _TEST_MAP_PATH]
+    if use_output_directory:
+      # Let autodetection find output_directory when --elf-file is used.
+      if not use_elf:
+        args += ['--output-directory', _TEST_OUTPUT_DIR]
+    else:
+      args += ['--no-source-paths']
+    if use_elf:
+      args += ['--elf-file', _TEST_ELF_PATH]
+    if use_pak:
+      args += ['--pak-file', _TEST_PAK_PATH,
+               '--pak-info-file', _TEST_PAK_INFO_PATH]
+    _RunApp('archive', args, debug_measures=debug_measures)
 
   def _DoArchiveTest(self, use_output_directory=True, use_elf=True,
-                     debug_measures=False):
+                     use_pak=False, debug_measures=False):
     with tempfile.NamedTemporaryFile(suffix='.size') as temp_file:
-      args = [temp_file.name, '--map-file', _TEST_MAP_PATH]
-      if use_output_directory:
-        # Let autodetection find output_directory when --elf-file is used.
-        if not use_elf:
-          args += ['--output-directory', _TEST_OUTPUT_DIR]
-      else:
-        args += ['--no-source-paths']
-      if use_elf:
-        args += ['--elf-file', _TEST_ELF_PATH]
-      _RunApp('archive', args, debug_measures=debug_measures)
+      self._DoArchive(
+          temp_file.name, use_output_directory=use_output_directory,
+          use_elf=use_elf, use_pak=use_pak, debug_measures=debug_measures)
       size_info = archive.LoadAndPostProcessSizeInfo(temp_file.name)
-    # Check that saving & loading is the same as directly parsing the .map.
+    # Check that saving & loading is the same as directly parsing.
     expected_size_info = self._CloneSizeInfo(
-        use_output_directory=use_output_directory, use_elf=use_elf)
+        use_output_directory=use_output_directory, use_elf=use_elf,
+        use_pak=use_pak)
     self.assertEquals(expected_size_info.metadata, size_info.metadata)
     # Don't cluster.
     expected_size_info.symbols = expected_size_info.raw_symbols
     size_info.symbols = size_info.raw_symbols
-    expected = list(describe.GenerateLines(expected_size_info))
-    actual = list(describe.GenerateLines(size_info))
+    expected = list(describe.GenerateLines(expected_size_info, verbose=True))
+    actual = list(describe.GenerateLines(size_info, verbose=True))
     self.assertEquals(expected, actual)
 
     sym_strs = (repr(sym) for sym in size_info.symbols)
@@ -158,6 +197,10 @@ class IntegrationTest(unittest.TestCase):
   def test_Archive_Elf(self):
     return self._DoArchiveTest()
 
+  @_CompareWithGolden()
+  def test_Archive_Pak(self):
+    return self._DoArchiveTest(use_pak=True)
+
   @_CompareWithGolden(name='Archive_Elf')
   def test_Archive_Elf_DebugMeasures(self):
     return self._DoArchiveTest(debug_measures=True)
@@ -172,7 +215,10 @@ class IntegrationTest(unittest.TestCase):
           'ExpandRegex("_foo_")',
           'canned_queries.CategorizeGenerated()',
           'canned_queries.CategorizeByChromeComponent()',
+          'canned_queries.LargeFiles()',
           'canned_queries.TemplatesByName()',
+          'canned_queries.StaticInitializers()',
+          'canned_queries.PakByPath()',
           'Print(ReadStringLiterals(elf_path={}))'.format(repr(_TEST_ELF_PATH)),
           'Print(size_info, to_file=%r)' % output_file.name,
       ]
@@ -199,6 +245,16 @@ class IntegrationTest(unittest.TestCase):
     with tempfile.NamedTemporaryFile(suffix='.size') as temp_file:
       file_format.SaveSizeInfo(self._CloneSizeInfo(), temp_file.name)
       return _RunApp('diff', [temp_file.name, temp_file.name])
+
+  # Runs archive 3 times, and asserts the contents are the same each time.
+  def test_Idempotent(self):
+    prev_contents = None
+    for _ in xrange(3):
+      with tempfile.NamedTemporaryFile(suffix='.size') as temp_file:
+        self._DoArchive(temp_file.name)
+        contents = temp_file.read()
+        self.assertTrue(prev_contents is None or contents == prev_contents)
+        prev_contents = contents
 
   @_CompareWithGolden()
   def test_Diff_Basic(self):
@@ -276,7 +332,7 @@ class IntegrationTest(unittest.TestCase):
   def test_Diff_Clustering(self):
     size_info1 = self._CloneSizeInfo()
     size_info2 = self._CloneSizeInfo()
-    S = '.text'
+    S = models.SECTION_TEXT
     size_info1.symbols += [
         models.Symbol(S, 11, name='.L__unnamed_1193', object_path='a'), # 1
         models.Symbol(S, 22, name='.L__unnamed_1194', object_path='a'), # 2

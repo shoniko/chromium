@@ -90,8 +90,8 @@ ProvisioningResult ConvertArcSignInStatusToProvisioningResult(
 }
 
 mojom::ChromeAccountType GetAccountType() {
-  return IsArcKioskMode() ? mojom::ChromeAccountType::ROBOT_ACCOUNT
-                          : mojom::ChromeAccountType::USER_ACCOUNT;
+  return IsRobotAccountMode() ? mojom::ChromeAccountType::ROBOT_ACCOUNT
+                              : mojom::ChromeAccountType::USER_ACCOUNT;
 }
 
 mojom::AccountInfoPtr CreateAccountInfo(bool is_enforced,
@@ -129,25 +129,17 @@ ArcAuthService::ArcAuthService(content::BrowserContext* browser_context,
                                ArcBridgeService* arc_bridge_service)
     : profile_(Profile::FromBrowserContext(browser_context)),
       arc_bridge_service_(arc_bridge_service),
-      binding_(this),
       weak_ptr_factory_(this) {
+  arc_bridge_service_->auth()->SetHost(this);
   arc_bridge_service_->auth()->AddObserver(this);
 }
 
 ArcAuthService::~ArcAuthService() {
   arc_bridge_service_->auth()->RemoveObserver(this);
+  arc_bridge_service_->auth()->SetHost(nullptr);
 }
 
-void ArcAuthService::OnInstanceReady() {
-  auto* instance =
-      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->auth(), Init);
-  DCHECK(instance);
-  mojom::AuthHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  instance->Init(std::move(host_proxy));
-}
-
-void ArcAuthService::OnInstanceClosed() {
+void ArcAuthService::OnConnectionClosed() {
   fetcher_.reset();
 }
 
@@ -157,8 +149,7 @@ void ArcAuthService::OnAuthorizationComplete(mojom::ArcSignInStatus status,
     // Note, UMA for initial signin is updated from ArcSessionManager.
     DCHECK_NE(mojom::ArcSignInStatus::SUCCESS_ALREADY_PROVISIONED, status);
     UpdateReauthorizationResultUMA(
-        ConvertArcSignInStatusToProvisioningResult(status),
-        policy_util::IsAccountManaged(profile_));
+        ConvertArcSignInStatusToProvisioningResult(status), profile_);
     return;
   }
 
@@ -244,8 +235,8 @@ void ArcAuthService::RequestAccountInfo(bool initial_signin) {
   }
   // For non-AD enrolled devices an auth code is fetched.
   std::unique_ptr<ArcAuthCodeFetcher> auth_code_fetcher;
-  if (IsArcKioskMode()) {
-    // In Kiosk mode, use Robot auth code fetching.
+  if (IsRobotAccountMode()) {
+    // In Kiosk and public session mode, use Robot auth code fetching.
     auth_code_fetcher = std::make_unique<ArcRobotAuthCodeFetcher>();
   } else {
     // Optionally retrieve auth code in silent mode.

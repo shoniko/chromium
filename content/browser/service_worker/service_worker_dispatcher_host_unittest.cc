@@ -26,20 +26,20 @@
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/common/service_worker/embedded_worker_messages.h"
 #include "content/common/service_worker/service_worker_messages.h"
-#include "content/common/service_worker/service_worker_types.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_provider_type.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 
 using blink::MessagePortChannel;
 
 namespace content {
-
-namespace {
+namespace service_worker_dispatcher_host_unittest {
 
 static void SaveStatusCallback(bool* called,
                                ServiceWorkerStatusCode* out,
@@ -64,8 +64,9 @@ RemoteProviderInfo SetupProviderHostInfoPtrs(
   RemoteProviderInfo remote_info;
   mojom::ServiceWorkerContainerAssociatedPtr browser_side_client_ptr;
   remote_info.client_request =
-      mojo::MakeIsolatedRequest(&browser_side_client_ptr);
-  host_info->host_request = mojo::MakeIsolatedRequest(&remote_info.host_ptr);
+      mojo::MakeRequestAssociatedWithDedicatedPipe(&browser_side_client_ptr);
+  host_info->host_request =
+      mojo::MakeRequestAssociatedWithDedicatedPipe(&remote_info.host_ptr);
   host_info->client_ptr_info = browser_side_client_ptr.PassInterface();
   EXPECT_TRUE(host_info->host_request.is_pending());
   EXPECT_TRUE(host_info->client_ptr_info.is_valid());
@@ -81,7 +82,7 @@ std::unique_ptr<ServiceWorkerNavigationHandleCore> CreateNavigationHandleCore(
       BrowserThread::UI, FROM_HERE,
       base::Bind(
           [](ServiceWorkerContextWrapper* wrapper) {
-            return base::MakeUnique<ServiceWorkerNavigationHandleCore>(nullptr,
+            return std::make_unique<ServiceWorkerNavigationHandleCore>(nullptr,
                                                                        wrapper);
           },
           base::RetainedRef(context_wrapper)),
@@ -94,8 +95,6 @@ std::unique_ptr<ServiceWorkerNavigationHandleCore> CreateNavigationHandleCore(
   base::RunLoop().RunUntilIdle();
   return navigation_handle_core;
 }
-
-}  // namespace
 
 static const int kRenderFrameId = 1;
 
@@ -133,9 +132,10 @@ class FailToStartWorkerTestHelper : public EmbeddedWorkerTestHelper {
       bool pause_after_download,
       mojom::ServiceWorkerEventDispatcherRequest dispatcher_request,
       mojom::ControllerServiceWorkerRequest controller_request,
+      blink::mojom::ServiceWorkerHostAssociatedPtrInfo service_worker_host,
       mojom::EmbeddedWorkerInstanceHostAssociatedPtrInfo instance_host,
       mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info,
-      mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info)
+      blink::mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info)
       override {
     mojom::EmbeddedWorkerInstanceHostAssociatedPtr instance_host_ptr;
     instance_host_ptr.Bind(std::move(instance_host));
@@ -150,7 +150,7 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
       : browser_thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {}
 
   void SetUp() override {
-    Initialize(base::MakeUnique<EmbeddedWorkerTestHelper>(base::FilePath()));
+    Initialize(std::make_unique<EmbeddedWorkerTestHelper>(base::FilePath()));
   }
 
   void TearDown() override {
@@ -175,9 +175,10 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
   }
 
   void SetUpRegistration(const GURL& scope, const GURL& script_url) {
-    registration_ = new ServiceWorkerRegistration(
-        blink::mojom::ServiceWorkerRegistrationOptions(scope), 1L,
-        context()->AsWeakPtr());
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = scope;
+    registration_ =
+        new ServiceWorkerRegistration(options, 1L, context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(registration_.get(), script_url, 1L,
                                         context()->AsWeakPtr());
     std::vector<ServiceWorkerDatabase::ResourceRecord> records;
@@ -204,7 +205,7 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
     EXPECT_EQ(SERVICE_WORKER_OK, status);
   }
 
-  void SendProviderCreated(ServiceWorkerProviderType type,
+  void SendProviderCreated(blink::mojom::ServiceWorkerProviderType type,
                            const GURL& pattern) {
     const int64_t kProviderId = 99;
     ServiceWorkerProviderHostInfo info(kProviderId, MSG_ROUTING_NONE, type,
@@ -212,8 +213,6 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
     remote_endpoint_.BindWithProviderHostInfo(&info);
 
     dispatcher_host_->OnProviderCreated(std::move(info));
-    helper_->SimulateAddProcessToPattern(pattern,
-                                         helper_->mock_render_process_id());
     provider_host_ = context()->GetProviderHost(
         helper_->mock_render_process_id(), kProviderId);
   }
@@ -226,8 +225,6 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
             true /* is_parent_frame_secure */, version, context()->AsWeakPtr(),
             &remote_endpoint_);
     provider_host_ = host.get();
-    helper_->SimulateAddProcessToPattern(pattern,
-                                         helper_->mock_render_process_id());
     context()->AddProviderHost(std::move(host));
   }
 
@@ -237,10 +234,10 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
       const url::Origin& source_origin,
       const std::vector<MessagePortChannel>& sent_message_ports,
       ServiceWorkerProviderHost* sender_provider_host,
-      const ServiceWorkerDispatcherHost::StatusCallback& callback) {
+      ServiceWorkerDispatcherHost::StatusCallback callback) {
     dispatcher_host_->DispatchExtendableMessageEvent(
         std::move(worker), message, source_origin, sent_message_ports,
-        sender_provider_host, callback);
+        sender_provider_host, std::move(callback));
   }
 
   ServiceWorkerRemoteProviderEndpoint PrepareServiceWorkerProviderHost(
@@ -258,6 +255,7 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
   }
 
   TestBrowserThreadBundle browser_thread_bundle_;
+  base::SimpleTestTickClock tick_clock_;
   content::MockResourceContext resource_context_;
   std::unique_ptr<EmbeddedWorkerTestHelper> helper_;
   scoped_refptr<TestingServiceWorkerDispatcherHost> dispatcher_host_;
@@ -268,70 +266,65 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
 };
 
 TEST_F(ServiceWorkerDispatcherHostTest, ProviderCreatedAndDestroyed) {
-  // |kProviderId| must be -2 when PlzNavigate is enabled to match the
-  // pre-created provider host. Otherwise |kProviderId| is just a dummy value.
-  const int kProviderId = (IsBrowserSideNavigationEnabled() ? -2 : 1001);
   int process_id = helper_->mock_render_process_id();
 
-  // Setup ServiceWorkerProviderHostInfo.
-  ServiceWorkerProviderHostInfo host_info_1(kProviderId, 1 /* route_id */,
-                                            SERVICE_WORKER_PROVIDER_FOR_WINDOW,
-                                            true /* is_parent_frame_secure */);
-  ServiceWorkerProviderHostInfo host_info_2(kProviderId, 1 /* route_id */,
-                                            SERVICE_WORKER_PROVIDER_FOR_WINDOW,
-                                            true /* is_parent_frame_secure */);
-  ServiceWorkerProviderHostInfo host_info_3(kProviderId, 1 /* route_id */,
-                                            SERVICE_WORKER_PROVIDER_FOR_WINDOW,
-                                            true /* is_parent_frame_secure */);
-  RemoteProviderInfo remote_info_1 = SetupProviderHostInfoPtrs(&host_info_1);
-  RemoteProviderInfo remote_info_2 = SetupProviderHostInfoPtrs(&host_info_2);
-  RemoteProviderInfo remote_info_3 = SetupProviderHostInfoPtrs(&host_info_3);
-
-  // PlzNavigate
   std::unique_ptr<ServiceWorkerNavigationHandleCore> navigation_handle_core;
-  if (IsBrowserSideNavigationEnabled()) {
-    navigation_handle_core =
-        CreateNavigationHandleCore(helper_->context_wrapper());
-    ASSERT_TRUE(navigation_handle_core);
-    // ProviderHost should be created before OnProviderCreated.
-    navigation_handle_core->DidPreCreateProviderHost(
-        ServiceWorkerProviderHost::PreCreateNavigationHost(
-            context()->AsWeakPtr(), true /* are_ancestors_secure */,
-            base::Callback<WebContents*(void)>()));
-  }
+
+  // Prepare the first navigation handle to create provider host.
+  const int kProviderId1 = -2;
+  navigation_handle_core =
+      CreateNavigationHandleCore(helper_->context_wrapper());
+  ASSERT_TRUE(navigation_handle_core);
+  std::unique_ptr<ServiceWorkerProviderHost> host1 =
+      ServiceWorkerProviderHost::PreCreateNavigationHost(
+          context()->AsWeakPtr(), true /* are_ancestors_secure */,
+          base::RepeatingCallback<WebContents*(void)>());
+  EXPECT_EQ(kProviderId1, host1->provider_id());
+  ServiceWorkerProviderHostInfo host_info_1(
+      host1->provider_id(), 1 /* route_id */, host1->provider_type(),
+      host1->is_parent_frame_secure());
+  ServiceWorkerProviderHostInfo host_info_1_copy(
+      host1->provider_id(), 1 /* route_id */, host1->provider_type(),
+      host1->is_parent_frame_secure());
+  RemoteProviderInfo remote_info_1 = SetupProviderHostInfoPtrs(&host_info_1);
+  navigation_handle_core->DidPreCreateProviderHost(std::move(host1));
 
   dispatcher_host_->OnProviderCreated(std::move(host_info_1));
-  EXPECT_TRUE(context()->GetProviderHost(process_id, kProviderId));
+  EXPECT_TRUE(context()->GetProviderHost(process_id, kProviderId1));
 
   // Two with the same ID should be seen as a bad message.
-  dispatcher_host_->OnProviderCreated(std::move(host_info_2));
+  dispatcher_host_->OnProviderCreated(std::move(host_info_1_copy));
   EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
 
   // Releasing the interface pointer destroys the counterpart.
   remote_info_1.host_ptr.reset();
   base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(context()->GetProviderHost(process_id, kProviderId));
+  EXPECT_FALSE(context()->GetProviderHost(process_id, kProviderId1));
 
-  // PlzNavigate
   // Prepare another navigation handle to create another provider host.
-  if (IsBrowserSideNavigationEnabled()) {
-    navigation_handle_core =
-        CreateNavigationHandleCore(helper_->context_wrapper());
-    ASSERT_TRUE(navigation_handle_core);
-    // ProviderHost should be created before OnProviderCreated.
-    navigation_handle_core->DidPreCreateProviderHost(
-        ServiceWorkerProviderHost::PreCreateNavigationHost(
-            context()->AsWeakPtr(), true /* are_ancestors_secure */,
-            base::Callback<WebContents*(void)>()));
-  }
+  const int kProviderId2 = -3;
+  navigation_handle_core =
+      CreateNavigationHandleCore(helper_->context_wrapper());
+  ASSERT_TRUE(navigation_handle_core);
+  // ProviderHost should be created before OnProviderCreated.
+  std::unique_ptr<ServiceWorkerProviderHost> host2 =
+      ServiceWorkerProviderHost::PreCreateNavigationHost(
+          context()->AsWeakPtr(), true /* are_ancestors_secure */,
+          base::RepeatingCallback<WebContents*(void)>());
+  EXPECT_EQ(kProviderId2, host2->provider_id());
+  ServiceWorkerProviderHostInfo host_info_2(
+      host2->provider_id(), 2 /* route_id */, host2->provider_type(),
+      host2->is_parent_frame_secure());
+  RemoteProviderInfo remote_info_2 = SetupProviderHostInfoPtrs(&host_info_2);
+  navigation_handle_core->DidPreCreateProviderHost(std::move(host2));
 
   // Deletion of the dispatcher_host should cause providers for that
   // process to get deleted as well.
-  dispatcher_host_->OnProviderCreated(std::move(host_info_3));
-  EXPECT_TRUE(context()->GetProviderHost(process_id, kProviderId));
+  dispatcher_host_->OnProviderCreated(std::move(host_info_2));
+  EXPECT_TRUE(context()->GetProviderHost(process_id, kProviderId2));
   EXPECT_TRUE(dispatcher_host_->HasOneRef());
   dispatcher_host_ = nullptr;
-  EXPECT_FALSE(context()->GetProviderHost(process_id, kProviderId));
+  EXPECT_FALSE(context()->GetProviderHost(process_id, kProviderId2));
 }
 
 TEST_F(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash) {
@@ -339,7 +332,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash) {
   GURL script_url = GURL("http://www.example.com/service_worker.js");
   int process_id = helper_->mock_render_process_id();
 
-  SendProviderCreated(SERVICE_WORKER_PROVIDER_FOR_WINDOW, pattern);
+  SendProviderCreated(blink::mojom::ServiceWorkerProviderType::kForWindow,
+                      pattern);
   SetUpRegistration(pattern, script_url);
   int64_t provider_id = provider_host_->provider_id();
 
@@ -377,9 +371,10 @@ TEST_F(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash) {
   // To show the new dispatcher can operate, simulate provider creation. Since
   // the old dispatcher cleaned up the old provider host, the new one won't
   // complain.
-  ServiceWorkerProviderHostInfo host_info(provider_id, MSG_ROUTING_NONE,
-                                          SERVICE_WORKER_PROVIDER_FOR_WINDOW,
-                                          true /* is_parent_frame_secure */);
+  ServiceWorkerProviderHostInfo host_info(
+      provider_id, MSG_ROUTING_NONE,
+      blink::mojom::ServiceWorkerProviderType::kForWindow,
+      true /* is_parent_frame_secure */);
   ServiceWorkerRemoteProviderEndpoint remote_endpoint;
   remote_endpoint.BindWithProviderHostInfo(&host_info);
   new_dispatcher_host->OnProviderCreated(std::move(host_info));
@@ -405,9 +400,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, DispatchExtendableMessageEvent) {
   const int ref_count = sender_worker_handle->ref_count();
 
   // Set mock clock on version_ to check timeout behavior.
-  base::SimpleTestTickClock* tick_clock = new base::SimpleTestTickClock();
-  tick_clock->SetNowTicks(base::TimeTicks::Now());
-  version_->SetTickClockForTesting(base::WrapUnique(tick_clock));
+  tick_clock_.SetNowTicks(base::TimeTicks::Now());
+  version_->SetTickClockForTesting(&tick_clock_);
 
   // Make sure worker has a non-zero timeout.
   bool called = false;
@@ -423,7 +417,7 @@ TEST_F(ServiceWorkerDispatcherHostTest, DispatchExtendableMessageEvent) {
       base::TimeDelta::FromSeconds(10), ServiceWorkerVersion::KILL_ON_TIMEOUT);
 
   // Advance clock by a couple seconds.
-  tick_clock->Advance(base::TimeDelta::FromSeconds(4));
+  tick_clock_.Advance(base::TimeDelta::FromSeconds(4));
   base::TimeDelta remaining_time = version_->remaining_timeout();
   EXPECT_EQ(base::TimeDelta::FromSeconds(6), remaining_time);
 
@@ -435,7 +429,7 @@ TEST_F(ServiceWorkerDispatcherHostTest, DispatchExtendableMessageEvent) {
   DispatchExtendableMessageEvent(
       version_, base::string16(),
       url::Origin::Create(version_->scope().GetOrigin()), ports, provider_host_,
-      base::Bind(&SaveStatusCallback, &called, &status));
+      base::BindOnce(&SaveStatusCallback, &called, &status));
   EXPECT_EQ(ref_count + 1, sender_worker_handle->ref_count());
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
@@ -452,7 +446,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, DispatchExtendableMessageEvent_Fail) {
   GURL script_url = GURL("http://www.example.com/service_worker.js");
 
   Initialize(base::WrapUnique(new FailToStartWorkerTestHelper));
-  SendProviderCreated(SERVICE_WORKER_PROVIDER_FOR_WORKER, pattern);
+  SendProviderCreated(blink::mojom::ServiceWorkerProviderType::kForSharedWorker,
+                      pattern);
   SetUpRegistration(pattern, script_url);
 
   // Try to dispatch ExtendableMessageEvent. This should fail to start the
@@ -464,10 +459,11 @@ TEST_F(ServiceWorkerDispatcherHostTest, DispatchExtendableMessageEvent_Fail) {
   DispatchExtendableMessageEvent(
       version_, base::string16(),
       url::Origin::Create(version_->scope().GetOrigin()), ports, provider_host_,
-      base::Bind(&SaveStatusCallback, &called, &status));
+      base::BindOnce(&SaveStatusCallback, &called, &status));
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
   EXPECT_EQ(SERVICE_WORKER_ERROR_START_WORKER_FAILED, status);
 }
 
+}  // namespace service_worker_dispatcher_host_unittest
 }  // namespace content

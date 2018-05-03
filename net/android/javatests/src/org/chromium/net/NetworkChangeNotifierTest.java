@@ -21,6 +21,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.os.Build;
+import android.os.StrictMode;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.annotation.UiThreadTest;
 import android.support.test.filters.MediumTest;
@@ -40,6 +41,7 @@ import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.net.NetworkChangeNotifierAutoDetect.ConnectivityManagerDelegate;
 import org.chromium.net.NetworkChangeNotifierAutoDetect.NetworkState;
 import org.chromium.net.NetworkChangeNotifierAutoDetect.WifiManagerDelegate;
@@ -820,10 +822,8 @@ public class NetworkChangeNotifierTest {
     @Test
     @MediumTest
     @Feature({"Android-AppBase"})
+    @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP)
     public void testNetworkCallbacks() throws Exception {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            return;
-        }
         // Setup NetworkChangeNotifierAutoDetect
         final TestNetworkChangeNotifierAutoDetectObserver observer =
                 new TestNetworkChangeNotifierAutoDetectObserver();
@@ -952,5 +952,62 @@ public class NetworkChangeNotifierTest {
         mConnectivityDelegate.setActiveNetworkExists(false);
         mReceiver.onReceive(InstrumentationRegistry.getTargetContext(), intent);
         Assert.assertFalse(NetworkChangeNotifier.isOnline());
+    }
+
+    /**
+     * Tests NetworkChangeNotifier.isProcessBoundToNetwork().
+     */
+    @Test
+    @MediumTest
+    @Feature({"Android-AppBase"})
+    @MinAndroidSdkLevel(Build.VERSION_CODES.M)
+    public void testIsProcessBoundToNetwork() throws Exception {
+        ConnectivityManager connectivityManager =
+                (ConnectivityManager) InstrumentationRegistry.getTargetContext().getSystemService(
+                        Context.CONNECTIVITY_SERVICE);
+        Network network = connectivityManager.getActiveNetwork();
+        Assert.assertFalse(NetworkChangeNotifier.isProcessBoundToNetwork());
+        if (network != null) {
+            ConnectivityManager.setProcessDefaultNetwork(network);
+            Assert.assertTrue(NetworkChangeNotifier.isProcessBoundToNetwork());
+        }
+        ConnectivityManager.setProcessDefaultNetwork(null);
+        Assert.assertFalse(NetworkChangeNotifier.isProcessBoundToNetwork());
+    }
+
+    /**
+     * Regression test for crbug.com/805424 where ConnectivityManagerDelegate.vpnAccessible() was
+     * found to leak.
+     */
+    @Test
+    @MediumTest
+    @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP)
+    public void testVpnAccessibleDoesNotLeak() {
+        ConnectivityManagerDelegate connectivityManagerDelegate = new ConnectivityManagerDelegate(
+                InstrumentationRegistry.getInstrumentation().getTargetContext());
+        StrictMode.VmPolicy oldPolicy = StrictMode.getVmPolicy();
+        StrictMode.setVmPolicy(new StrictMode.VmPolicy.Builder()
+                                       .detectLeakedClosableObjects()
+                                       .penaltyDeath()
+                                       .penaltyLog()
+                                       .build());
+        try {
+            // Test non-existent Network (NetIds only go to 65535).
+            connectivityManagerDelegate.vpnAccessible(Helper.netIdToNetwork(65537));
+            // Test existing Networks.
+            for (Network network : connectivityManagerDelegate.getAllNetworksUnfiltered()) {
+                connectivityManagerDelegate.vpnAccessible(network);
+            }
+
+            // Run GC and finalizers a few times to pick up leaked closeables
+            for (int i = 0; i < 10; i++) {
+                System.gc();
+                System.runFinalization();
+            }
+            System.gc();
+            System.runFinalization();
+        } finally {
+            StrictMode.setVmPolicy(oldPolicy);
+        }
     }
 }

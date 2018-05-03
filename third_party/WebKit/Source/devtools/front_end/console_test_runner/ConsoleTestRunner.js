@@ -492,6 +492,14 @@ ConsoleTestRunner.waitForConsoleMessages = function(expectedCount, callback) {
 };
 
 /**
+ * @param {number} expectedCount
+ * @return {!Promise}
+ */
+ConsoleTestRunner.waitForConsoleMessagesPromise = function(expectedCount) {
+  return new Promise(fulfill => ConsoleTestRunner.waitForConsoleMessages(expectedCount, fulfill));
+};
+
+/**
  * @param {number} fromMessage
  * @param {number} fromTextOffset
  * @param {number} toMessage
@@ -549,4 +557,22 @@ ConsoleTestRunner.wrapListener = function(func) {
     func.apply(this, arguments);
   }
   return wrapper;
+};
+
+ConsoleTestRunner.dumpStackTraces = function() {
+  var viewMessages = Console.ConsoleView.instance()._visibleViewMessages;
+  for (var i = 0; i < viewMessages.length; ++i) {
+    var m = viewMessages[i].consoleMessage();
+    TestRunner.addResult(
+        'Message[' + i + ']: ' + Bindings.displayNameForURL(m.url || '') + ':' + m.line + ' ' + m.messageText);
+    var trace = m.stackTrace ? m.stackTrace.callFrames : null;
+    if (!trace) {
+      TestRunner.addResult('FAIL: no stack trace attached to message #' + i);
+    } else {
+      TestRunner.addResult('Stack Trace:\n');
+      TestRunner.addResult('  url: ' + trace[0].url);
+      TestRunner.addResult('  function: ' + trace[0].functionName);
+      TestRunner.addResult('  line: ' + trace[0].lineNumber);
+    }
+  }
 };

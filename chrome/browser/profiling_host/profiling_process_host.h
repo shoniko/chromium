@@ -5,6 +5,11 @@
 #ifndef CHROME_BROWSER_PROFILING_HOST_PROFILING_PROCESS_HOST_H_
 #define CHROME_BROWSER_PROFILING_HOST_PROFILING_PROCESS_HOST_H_
 
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/process/process.h"
@@ -23,9 +28,16 @@
 
 namespace base {
 class FilePath;
-}
+}  // namespace base
+
+namespace content {
+class RenderProcessHost;
+}  // namespace content
 
 namespace profiling {
+
+extern const base::Feature kOOPHeapProfilingFeature;
+extern const char kOOPHeapProfilingFeatureMode[];
 
 // Represents the browser side of the profiling process (//chrome/profiling).
 //
@@ -59,19 +71,43 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
 
     // Profile all processes.
     kAll = 2,
+
+    // Profile only the browser process.
+    kBrowser = 3,
+
+    // Profile only the gpu process.
+    kGpu = 4,
+
+    // Profile a sampled number of renderer processes.
+    kRendererSampling = 5,
+
+    // Profile all renderer processes.
+    kAllRenderers = 6,
+
+    // By default, profile no processes. User may choose to start profiling for
+    // processes via chrome://memory-internals.
+    kManual = 7,
+
     kCount
   };
 
   // Returns the mode.
-  Mode mode() const { return mode_; }
+  Mode GetMode() {
+    base::AutoLock l(mode_lock_);
+    return mode_;
+  }
 
-  // Returns the mode set on the current process' command line.
-  static Mode GetCurrentMode();
+  // Returns the mode specified by the command line or via about://flags.
+  static Mode GetModeForStartup();
+  static Mode ConvertStringToMode(const std::string& input);
+  static profiling::mojom::StackMode GetStackModeForStartup();
+  bool ShouldProfileNonRendererProcessType(int process_type);
 
   // Launches the profiling process and returns a pointer to it.
   static ProfilingProcessHost* Start(
       content::ServiceManagerConnection* connection,
-      Mode mode);
+      Mode mode,
+      profiling::mojom::StackMode stack_mode);
 
   // Returns true if Start() has been called.
   static bool has_started() { return has_started_; }
@@ -81,34 +117,63 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
 
   void ConfigureBackgroundProfilingTriggers();
 
-  // Sends a message to the profiling process that it dump the given process'
-  // memory data to the given file.
-  void RequestProcessDump(base::ProcessId pid,
-                          base::FilePath dest,
-                          base::OnceClosure done);
+  // Create a trace with a heap dump at the given path.
+  // This is equivalent to navigating to chrome://tracing, taking a trace with
+  // only the memory-infra category selected, waiting 10 seconds, and saving the
+  // result to |dest|.
+  // |done| will be called on the UI thread.
+  using SaveTraceFinishedCallback = base::OnceCallback<void(bool success)>;
+  void SaveTraceWithHeapDumpToFile(
+      base::FilePath dest,
+      SaveTraceFinishedCallback done,
+      bool stop_immediately_after_heap_dump_for_tests);
 
-  // Sends a message to the profiling process that it report the given process'
+  // Sends a message to the profiling process to report all profiled processes
   // memory data to the crash server (slow-report).
-  void RequestProcessReport(base::ProcessId pid, std::string trigger_name);
+  void RequestProcessReport(std::string trigger_name);
 
-  // For testing. Only one can be set at a time. Will be called after the
-  // profiling proecss dumps heaps into the trace log. No guarantees are made
-  // about the task queue on which the callback will be Run.
-  void SetDumpProcessForTracingCallback(base::OnceClosure callback);
+  using TraceFinishedCallback =
+      base::OnceCallback<void(bool success, std::string trace_json)>;
 
- protected:
+  // This method must be called from the UI thread. |callback| will be called
+  // asynchronously on the UI thread. If
+  // |stop_immediately_after_heap_dump_for_tests| is true, then |callback| will
+  // be called as soon as the heap dump is added to the trace. Otherwise,
+  // |callback| will be called after 10s. This gives time for the
+  // MemoryDumpProviders to dump to the trace, which is asynchronous and has no
+  // finish notification. This intentionally avoids waiting for the heap-dump
+  // finished signal, in case there's a problem with the profiling process and
+  // the heap-dump is never added to the trace.
+  // Public for testing.
+  void RequestTraceWithHeapDump(TraceFinishedCallback callback,
+                                bool stop_immediately_after_heap_dump_for_tests,
+                                bool anonymize);
+
+  // Returns the pids of all profiled processes. The callback is posted on the
+  // UI thread.
+  using GetProfiledPidsCallback =
+      base::OnceCallback<void(std::vector<base::ProcessId> pids)>;
+  void GetProfiledPids(GetProfiledPidsCallback callback);
+
+  // Starts profiling the process with the given id.
+  void StartManualProfiling(base::ProcessId pid);
+
+ private:
   friend struct base::DefaultSingletonTraits<ProfilingProcessHost>;
-  // Exposed for unittests.
+  friend class BackgroundProfilingTriggersTest;
+  friend class MemlogBrowserTest;
+  friend class ProfilingTestDriver;
+  FRIEND_TEST_ALL_PREFIXES(ProfilingProcessHost, ShouldProfileNewRenderer);
+
   ProfilingProcessHost();
   ~ProfilingProcessHost() override;
 
   void Register();
   void Unregister();
 
-  // Set the profiling mode. Exposed for unittests.
+  // Set/Get the profiling mode. Exposed for unittests.
   void SetMode(Mode mode);
 
- private:
   // Make and store a connector from |connection|.
   void MakeConnector(content::ServiceManagerConnection* connection);
 
@@ -126,6 +191,7 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
   // base::trace_event::MemoryDumpProvider
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd) override;
+  void OnMemoryDumpOnIOThread(uint64_t dump_guid);
 
   void OnDumpProcessesForTracingCallback(
       uint64_t guid,
@@ -134,34 +200,42 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
   // Starts the profiling process.
   void LaunchAsService();
 
+  // Called on the UI thread after the heap dump has been added to the trace.
+  void DumpProcessFinishedUIThread();
+
+  // Must be called on the UI thread.
+  // Called after the MDPs have been given time to emit memory dumps.
+  void OnMinimumTimeHasElapsed();
+
   // Sends the end of the data pipe to the profiling service.
   void AddClientToProfilingService(profiling::mojom::ProfilingClientPtr client,
                                    base::ProcessId pid,
                                    profiling::mojom::ProcessType process_type);
 
-  void GetOutputFileOnBlockingThread(base::ProcessId pid,
-                                     base::FilePath dest,
-                                     std::string trigger_name,
-                                     bool upload,
-                                     base::OnceClosure done);
-  void HandleDumpProcessOnIOThread(base::ProcessId pid,
-                                   base::FilePath file_path,
-                                   base::File file,
-                                   std::string trigger_name,
-                                   bool upload,
-                                   base::OnceClosure done);
-  void OnProcessDumpComplete(base::FilePath file_path,
-                             std::string trigger_name,
-                             bool upload,
-                             base::OnceClosure done,
-                             bool success);
-
-  // Returns the metadata for the trace. This is the minimum amount of metadata
-  // needed to symbolize the trace.
-  std::unique_ptr<base::DictionaryValue> GetMetadataJSONForTrace();
+  void SaveTraceToFileOnBlockingThread(base::FilePath dest,
+                                       std::string trace,
+                                       SaveTraceFinishedCallback done);
 
   // Reports the profiling mode.
   void ReportMetrics();
+
+  // Helpers for controlling process selection for the sampling modes.
+  bool ShouldProfileNewRenderer(content::RenderProcessHost* renderer);
+
+  // Sets up the profiling connection for the given child process.
+  void StartProfilingNonRendererChild(const content::ChildProcessData&);
+  void StartProfilingNonRendererChildOnIOThread(
+      int child_process_id,
+      base::ProcessId proc_id,
+      profiling::mojom::ProcessType process_type);
+
+  void StartProfilingRenderer(content::RenderProcessHost* host);
+
+  void GetProfiledPidsOnIOThread(GetProfiledPidsCallback callback);
+  void StartProfilingPidOnIOThread(base::ProcessId pid);
+
+  bool TakingTraceForUpload();
+  bool SetTakingTraceForUpload(bool new_state);
 
   content::NotificationRegistrar registrar_;
   std::unique_ptr<service_manager::Connector> connector_;
@@ -179,12 +253,47 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
 
   // The mode determines which processes should be profiled.
   Mode mode_;
+  base::Lock mode_lock_;
+
+  // The stack mode determines the type of information that is stored for each
+  // stack.
+  profiling::mojom::StackMode stack_mode_;
 
   // Whether or not the profiling host is started.
   static bool has_started_;
 
-  // For tests.
-  base::OnceClosure dump_process_for_tracing_callback_;
+  // This is used to identify the currently profiled renderers. Elements should
+  // only be accessed on the UI thread and their values should be considered
+  // opaque.
+  //
+  // Semantically, the elements must be something that identifies which
+  // specific RenderProcess is being profiled. When the underlying RenderProcess
+  // goes away, the element must be removed. The RenderProcessHost
+  // pointer and the NOTIFICATION_RENDERER_PROCESS_CREATED notification can be
+  // used to provide these semantics.
+  //
+  // This variable represents renderers that have been instructed to start
+  // profiling - it does not reflect whether a renderer is currently still being
+  // profiled. That information is only known by the profiling service, and for
+  // simplicity, it's easier to just track this variable in this process.
+  std::unordered_set<void*> profiled_renderers_;
+
+  // Must only ever be used from the UI thread. Will be called after the
+  // profiling process dumps heaps into the trace log and MDPs have been given
+  // time to do the same.
+  base::OnceClosure finish_tracing_callback_;
+
+  // True if the instance is attempting to take a trace to upload to the crash
+  // servers. Pruning of small allocations is always enabled for these traces.
+  bool taking_trace_for_upload_ = false;
+
+  // Guards |taking_trace_for_upload_|.
+  base::Lock taking_trace_for_upload_lock_;
+
+  // If the instance has started a trace, the trace should be stopped when both
+  // members become true. Both members must only be accessed on the UI thread.
+  bool minimum_time_has_elapsed_ = false;
+  bool heap_dump_has_been_added_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ProfilingProcessHost);
 };

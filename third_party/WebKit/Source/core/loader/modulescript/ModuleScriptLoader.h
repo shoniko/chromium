@@ -5,6 +5,7 @@
 #ifndef ModuleScriptLoader_h
 #define ModuleScriptLoader_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/loader/modulescript/ModuleScriptCreationParams.h"
 #include "core/loader/modulescript/ModuleScriptFetchRequest.h"
@@ -32,7 +33,6 @@ class CORE_EXPORT ModuleScriptLoader final
     : public GarbageCollectedFinalized<ModuleScriptLoader>,
       public ModuleScriptFetcher::Client {
   USING_GARBAGE_COLLECTED_MIXIN(ModuleScriptLoader);
-  WTF_MAKE_NONCOPYABLE(ModuleScriptLoader);
 
   enum class State {
     kInitial,
@@ -45,9 +45,10 @@ class CORE_EXPORT ModuleScriptLoader final
 
  public:
   static ModuleScriptLoader* Create(Modulator* modulator,
+                                    const ScriptFetchOptions& options,
                                     ModuleScriptLoaderRegistry* registry,
                                     ModuleScriptLoaderClient* client) {
-    return new ModuleScriptLoader(modulator, registry, client);
+    return new ModuleScriptLoader(modulator, options, registry, client);
   }
 
   ~ModuleScriptLoader();
@@ -56,8 +57,9 @@ class CORE_EXPORT ModuleScriptLoader final
              ModuleGraphLevel);
 
   // Implements ModuleScriptFetcher::Client.
-  void NotifyFetchFinished(const WTF::Optional<ModuleScriptCreationParams>&,
-                           ConsoleMessage* error_message) override;
+  void NotifyFetchFinished(
+      const WTF::Optional<ModuleScriptCreationParams>&,
+      const HeapVector<Member<ConsoleMessage>>& error_messages) override;
 
   bool IsInitialState() const { return state_ == State::kInitial; }
   bool HasFinished() const { return state_ == State::kFinished; }
@@ -66,6 +68,7 @@ class CORE_EXPORT ModuleScriptLoader final
 
  private:
   ModuleScriptLoader(Modulator*,
+                     const ScriptFetchOptions&,
                      ModuleScriptLoaderRegistry*,
                      ModuleScriptLoaderClient*);
 
@@ -76,7 +79,7 @@ class CORE_EXPORT ModuleScriptLoader final
 
   Member<Modulator> modulator_;
   State state_ = State::kInitial;
-  ScriptFetchOptions options_;
+  const ScriptFetchOptions options_;
   Member<ModuleScript> module_script_;
   Member<ModuleScriptLoaderRegistry> registry_;
   Member<ModuleScriptLoaderClient> client_;
@@ -84,6 +87,8 @@ class CORE_EXPORT ModuleScriptLoader final
 #if DCHECK_IS_ON()
   KURL url_;
 #endif
+
+  DISALLOW_COPY_AND_ASSIGN(ModuleScriptLoader);
 };
 
 }  // namespace blink

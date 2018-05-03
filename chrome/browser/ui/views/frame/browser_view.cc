@@ -81,8 +81,6 @@
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
-#include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
-#include "chrome/browser/ui/views/new_back_shortcut_bubble.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/browser/ui/views/profiles/profile_indicator_icon.h"
 #include "chrome/browser/ui/views/status_bubble_views.h"
@@ -110,7 +108,7 @@
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/prefs/pref_service.h"
 #include "components/sessions/core/tab_restore_service.h"
-#include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/translate/core/browser/language_state.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
@@ -617,7 +615,7 @@ void BrowserView::Show() {
 
   browser()->OnWindowDidShow();
 
-  chrome::MaybeShowInvertBubbleView(this);
+  MaybeShowInvertBubbleView(this);
 }
 
 void BrowserView::ShowInactive() {
@@ -794,7 +792,6 @@ void BrowserView::OnActiveTabChanged(content::WebContents* old_contents,
   UpdateTitleBar();
 
   TranslateBubbleView::CloseCurrentBubble();
-  ZoomBubbleView::CloseCurrentBubble();
 }
 
 void BrowserView::ZoomChangedForActiveTab(bool can_show_bubble) {
@@ -889,9 +886,6 @@ void BrowserView::UpdateExclusiveAccessExitBubbleContent(
     return;
   }
 
-  // Hide the backspace shortcut bubble, to avoid overlapping.
-  new_back_shortcut_bubble_.reset();
-
   exclusive_access_bubble_.reset(new ExclusiveAccessBubbleViews(
       this, url, bubble_type, std::move(bubble_first_hide_callback)));
 }
@@ -915,41 +909,6 @@ bool BrowserView::IsFullscreen() const {
 
 bool BrowserView::IsFullscreenBubbleVisible() const {
   return exclusive_access_bubble_ != nullptr;
-}
-
-void BrowserView::MaybeShowNewBackShortcutBubble(bool forward) {
-  if (!new_back_shortcut_bubble_ || !new_back_shortcut_bubble_->IsVisible()) {
-    // Show the bubble at most five times.
-    PrefService* prefs = browser_->profile()->GetPrefs();
-    int shown_count = prefs->GetInteger(prefs::kBackShortcutBubbleShownCount);
-    constexpr int kMaxShownCount = 5;
-    if (shown_count >= kMaxShownCount)
-      return;
-
-    // Only show the bubble when the user presses a shortcut twice within three
-    // seconds.
-    const base::TimeTicks now = base::TimeTicks::Now();
-    constexpr base::TimeDelta kRepeatWindow = base::TimeDelta::FromSeconds(3);
-    if (last_back_shortcut_press_time_.is_null() ||
-        ((now - last_back_shortcut_press_time_) > kRepeatWindow)) {
-      last_back_shortcut_press_time_ = now;
-      return;
-    }
-
-    // Hide the exclusive access bubble, to avoid overlapping.
-    exclusive_access_bubble_.reset();
-
-    new_back_shortcut_bubble_.reset(new NewBackShortcutBubble(this));
-    prefs->SetInteger(prefs::kBackShortcutBubbleShownCount, shown_count + 1);
-    last_back_shortcut_press_time_ = base::TimeTicks();
-  }
-
-  new_back_shortcut_bubble_->UpdateContent(forward);
-}
-
-void BrowserView::HideNewBackShortcutBubble() {
-  if (new_back_shortcut_bubble_)
-    new_back_shortcut_bubble_->Hide();
 }
 
 void BrowserView::RestoreFocus() {
@@ -1001,7 +960,7 @@ void BrowserView::SetFocusToLocationBar(bool select_all) {
 void BrowserView::UpdateReloadStopState(bool is_loading, bool force) {
   if (toolbar_->reload_button()) {
     toolbar_->reload_button()->ChangeMode(
-        is_loading ? ReloadButton::MODE_STOP : ReloadButton::MODE_RELOAD,
+        is_loading ? ReloadButton::Mode::kStop : ReloadButton::Mode::kReload,
         force);
   }
 }
@@ -1605,12 +1564,9 @@ base::string16 BrowserView::GetAccessibleTabLabel(bool include_app_name,
 
   base::string16 window_title =
       browser_->GetWindowTitleForTab(include_app_name, index);
-  const TabRendererData& data = tabstrip_->tab_at(index)->data();
-
   return chrome::AssembleTabAccessibilityLabel(
-      window_title, data.IsCrashed(),
-      data.network_state == TabRendererData::NETWORK_STATE_ERROR,
-      data.alert_state);
+      window_title, tabstrip_->IsTabCrashed(index),
+      tabstrip_->TabHasNetworkError(index), tabstrip_->GetTabAlertState(index));
 }
 
 void BrowserView::NativeThemeUpdated(const ui::NativeTheme* theme) {
@@ -1626,15 +1582,15 @@ void BrowserView::NativeThemeUpdated(const ui::NativeTheme* theme) {
   // Don't infinitely recurse.
   if (!handling_theme_changed_)
     UserChangedTheme();
-  chrome::MaybeShowInvertBubbleView(this);
+  MaybeShowInvertBubbleView(this);
 }
 
 FullscreenControlHost* BrowserView::GetFullscreenControlHost() {
   if (!fullscreen_control_host_) {
     // This is a do-nothing view that controls the z-order of the fullscreen
     // control host. See DropdownBarHost::SetHostViewNative() for more details.
-    auto fullscreen_exit_host_view = base::MakeUnique<views::View>();
-    fullscreen_control_host_ = base::MakeUnique<FullscreenControlHost>(
+    auto fullscreen_exit_host_view = std::make_unique<views::View>();
+    fullscreen_control_host_ = std::make_unique<FullscreenControlHost>(
         this, fullscreen_exit_host_view.get());
     AddChildView(fullscreen_exit_host_view.release());
   }
@@ -1684,6 +1640,13 @@ gfx::ImageSkia BrowserView::GetWindowIcon() {
 
   if (browser_->is_app() || browser_->is_type_popup())
     return browser_->GetCurrentPageIcon().AsImageSkia();
+
+#if defined(OS_CHROMEOS)
+  if (browser_->is_type_tabbed()) {
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    return rb.GetImageNamed(IDR_PRODUCT_LOGO_32).AsImageSkia();
+  }
+#endif
 
   return gfx::ImageSkia();
 }
@@ -2106,7 +2069,7 @@ void BrowserView::InitViews() {
       GetThemeProvider()->GetColor(ThemeProperties::COLOR_CONTROL_BACKGROUND)));
   contents_container_->AddChildView(devtools_web_view_);
   contents_container_->AddChildView(contents_web_view_);
-  contents_container_->SetLayoutManager(new ContentsLayoutManager(
+  contents_container_->SetLayoutManager(std::make_unique<ContentsLayoutManager>(
       devtools_web_view_, contents_web_view_));
   AddChildView(contents_container_);
   set_contents_view(contents_container_);
@@ -2121,7 +2084,7 @@ void BrowserView::InitViews() {
       new BrowserTabStripController(browser_->tab_strip_model(), this);
   tabstrip_ =
       new TabStrip(std::unique_ptr<TabStripController>(tabstrip_controller));
-  top_container_->AddChildView(tabstrip_);
+  top_container_->AddChildView(tabstrip_);  // Takes ownership.
   tabstrip_controller->InitFromModel(tabstrip_);
 
   toolbar_ = new ToolbarView(browser_.get());
@@ -2142,7 +2105,7 @@ void BrowserView::InitViews() {
 
   immersive_mode_controller_->Init(this);
 
-  BrowserViewLayout* browser_view_layout = new BrowserViewLayout;
+  auto browser_view_layout = std::make_unique<BrowserViewLayout>();
   browser_view_layout->Init(new BrowserViewLayoutDelegateImpl(this),
                             browser(),
                             this,
@@ -2153,7 +2116,7 @@ void BrowserView::InitViews() {
                             contents_container_,
                             GetContentsLayoutManager(),
                             immersive_mode_controller_.get());
-  SetLayoutManager(browser_view_layout);
+  SetLayoutManager(std::move(browser_view_layout));
 
 #if defined(OS_WIN)
   // Create a custom JumpList and add it to an observer of TabRestoreService
@@ -2214,7 +2177,7 @@ bool BrowserView::MaybeShowBookmarkBar(WebContents* contents) {
     bookmark_bar_view_.reset(new BookmarkBarView(browser_.get(), this));
     bookmark_bar_view_->set_owned_by_client();
     bookmark_bar_view_->SetBackground(
-        base::MakeUnique<BookmarkBarViewBackground>(this,
+        std::make_unique<BookmarkBarViewBackground>(this,
                                                     bookmark_bar_view_.get()));
     bookmark_bar_view_->SetBookmarkBarState(
         browser_->bookmark_bar_state(),
@@ -2540,14 +2503,14 @@ void BrowserView::ShowAvatarBubbleFromAvatarButton(
 
   profiles::BubbleViewMode bubble_view_mode;
   profiles::BubbleViewModeFromAvatarBubbleMode(mode, &bubble_view_mode);
-  if (SigninViewController::ShouldShowModalSigninForMode(bubble_view_mode)) {
-    browser_->signin_view_controller()->ShowModalSignin(
+  if (SigninViewController::ShouldShowSigninForMode(bubble_view_mode)) {
+    browser_->signin_view_controller()->ShowSignin(
         bubble_view_mode, browser_.get(), access_point);
   } else {
-    ProfileChooserView::ShowBubble(bubble_view_mode, manage_accounts_params,
-                                   access_point,
-                                   frame_->GetNewAvatarMenuButton(), browser(),
-                                   focus_first_profile_button);
+    ProfileChooserView::ShowBubble(
+        bubble_view_mode, manage_accounts_params, access_point,
+        frame_->GetNewAvatarMenuButton(), nullptr, gfx::Rect(), browser(),
+        focus_first_profile_button);
     ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::ICON_AVATAR_BUBBLE);
   }
 #else
@@ -2714,7 +2677,6 @@ gfx::Rect BrowserView::GetTopContainerBoundsInScreen() {
 
 void BrowserView::DestroyAnyExclusiveAccessBubble() {
   exclusive_access_bubble_.reset();
-  new_back_shortcut_bubble_.reset();
 }
 
 bool BrowserView::CanTriggerOnMouse() const {

@@ -9,7 +9,6 @@
 #include "ash/public/cpp/window_properties.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
-#include "ash/shell_port.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/window_grid.h"
 #include "ash/wm/overview/window_selector.h"
@@ -20,10 +19,12 @@
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
+#include "ui/wm/core/window_util.h"
 
 namespace ash {
 
-WindowSelectorController::WindowSelectorController() {}
+WindowSelectorController::WindowSelectorController() = default;
 
 WindowSelectorController::~WindowSelectorController() {
   // Destroy widgets that may be still animating if shell shuts down soon after
@@ -47,7 +48,7 @@ bool WindowSelectorController::CanSelect() {
   SessionController* session_controller = Shell::Get()->session_controller();
   return session_controller->GetSessionState() ==
              session_manager::SessionState::ACTIVE &&
-         !ShellPort::Get()->IsSystemModalWindowOpen() &&
+         !Shell::IsSystemModalWindowOpen() &&
          !Shell::Get()->screen_pinning_controller()->IsPinned() &&
          !session_controller->IsRunningInAppMode();
 }
@@ -134,9 +135,15 @@ bool WindowSelectorController::IsRestoringMinimizedWindows() const {
 
 void WindowSelectorController::OnOverviewButtonTrayLongPressed(
     const gfx::Point& event_location) {
+  // Do nothing if split view is not enabled.
+  if (!SplitViewController::ShouldAllowSplitView())
+    return;
+
   // Depending on the state of the windows and split view, a long press has many
   // different results.
-  // 1. Already in split view - exit split view.
+  // 1. Already in split view - exit split view. Activate the left window if it
+  // is snapped left or both sides. Activate the right window if it is snapped
+  // right.
   // 2. Not in overview mode - enter split view iff
   //     a) there is an active window
   //     b) there are at least two windows in the mru list
@@ -148,25 +155,50 @@ void WindowSelectorController::OnOverviewButtonTrayLongPressed(
   auto* split_view_controller = Shell::Get()->split_view_controller();
   // Exit split view mode if we are already in it.
   if (split_view_controller->IsSplitViewModeActive()) {
+    // In some cases the window returned by wm::GetActiveWindow will be an item
+    // in overview mode (maybe the overview mode text selection widget). The
+    // active window may also be a transient descendant of the left or right
+    // snapped window, in which we want to activate the transient window's
+    // ancestor (left or right snapped window). Manually set |active_window| as
+    // either the left or right window.
+    aura::Window* active_window = wm::GetActiveWindow();
+    while (::wm::GetTransientParent(active_window))
+      active_window = ::wm::GetTransientParent(active_window);
+    if (active_window != split_view_controller->left_window() &&
+        active_window != split_view_controller->right_window()) {
+      active_window = split_view_controller->GetDefaultSnappedWindow();
+    }
+    DCHECK(active_window);
     split_view_controller->EndSplitView();
+    if (IsSelecting())
+      ToggleOverview();
+    wm::ActivateWindow(active_window);
+    base::RecordAction(
+        base::UserMetricsAction("Tablet_LongPressOverviewButtonExitSplitView"));
     return;
   }
 
-  auto* active_window = wm::GetActiveWindow();
-  // Do nothing if there are no active windows, less than two windows to work
-  // with, or the active window is not snappable.
-  // TODO(sammiequon): Bounce the window if it is not snappable.
-  if (!active_window ||
-      Shell::Get()->mru_window_tracker()->BuildMruWindowList().size() < 2u ||
-      !split_view_controller->CanSnap(active_window)) {
-    return;
-  }
-
-  // If we are not in overview mode snap the window left and enter overview
-  // mode.
   if (!IsSelecting()) {
+    aura::Window* active_window = wm::GetActiveWindow();
+    // Do nothing if there are no active windows or less than two windows to
+    // work with.
+    if (!active_window ||
+        Shell::Get()->mru_window_tracker()->BuildMruWindowList().size() < 2u) {
+      return;
+    }
+
+    // Show a toast if the window cannot be snapped.
+    if (!split_view_controller->CanSnap(active_window)) {
+      split_view_controller->ShowAppCannotSnapToast();
+      return;
+    }
+
+    // If we are not in overview mode snap the window left and enter overview
+    // mode.
     split_view_controller->SnapWindow(active_window, SplitViewController::LEFT);
     ToggleOverview();
+    base::RecordAction(base::UserMetricsAction(
+        "Tablet_LongPressOverviewButtonEnterSplitView"));
     return;
   }
 
@@ -178,7 +210,7 @@ void WindowSelectorController::OnOverviewButtonTrayLongPressed(
       wm::GetRootWindowAt(event_location));
   if (current_grid) {
     const auto& windows = current_grid->window_list();
-    if (windows.size() > 0)
+    if (windows.size() > 1)
       item_to_snap = windows[0].get();
   }
 
@@ -199,6 +231,8 @@ void WindowSelectorController::OnOverviewButtonTrayLongPressed(
   window_selector_->SetBoundsForWindowGridsInScreen(
       split_view_controller->GetSnappedWindowBoundsInScreen(
           window, SplitViewController::RIGHT));
+  base::RecordAction(
+      base::UserMetricsAction("Tablet_LongPressOverviewButtonEnterSplitView"));
 }
 
 std::vector<aura::Window*>

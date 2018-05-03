@@ -22,7 +22,6 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_clock.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -38,6 +37,11 @@
 #include "components/search_provider_logos/google_logo_api.h"
 #include "components/search_provider_logos/logo_cache.h"
 #include "components/search_provider_logos/logo_tracker.h"
+#include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/fake_gaia_cookie_manager_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
+#include "components/signin/core/browser/test_signin_client.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
@@ -62,6 +66,8 @@ using ::testing::NotNull;
 using ::testing::Pointee;
 using ::testing::StrictMock;
 using ::testing::Return;
+
+using sync_preferences::TestingPrefServiceSyncable;
 
 namespace search_provider_logos {
 
@@ -117,10 +123,11 @@ Logo GetSampleLogo(const GURL& logo_url, base::Time response_time) {
   logo.metadata.expiration_time =
       response_time + base::TimeDelta::FromHours(19);
   logo.metadata.fingerprint = "8bc33a80";
-  logo.metadata.source_url = logo_url;
-  logo.metadata.on_click_url = GURL("http://www.google.com/search?q=potato");
+  logo.metadata.source_url =
+      AppendPreliminaryParamsToDoodleURL(false, logo_url);
+  logo.metadata.on_click_url = GURL("https://www.google.com/search?q=potato");
   logo.metadata.alt_text = "A logo about potatoes";
-  logo.metadata.animated_url = GURL("http://www.google.com/logos/doodle.png");
+  logo.metadata.animated_url = GURL("https://www.google.com/logos/doodle.png");
   logo.metadata.mime_type = "image/png";
   return logo;
 }
@@ -131,8 +138,9 @@ Logo GetSampleLogo2(const GURL& logo_url, base::Time response_time) {
   logo.metadata.can_show_after_expiration = true;
   logo.metadata.expiration_time = base::Time();
   logo.metadata.fingerprint = "71082741021409127";
-  logo.metadata.source_url = logo_url;
-  logo.metadata.on_click_url = GURL("http://example.com/page25");
+  logo.metadata.source_url =
+      AppendPreliminaryParamsToDoodleURL(false, logo_url);
+  logo.metadata.on_click_url = GURL("https://example.com/page25");
   logo.metadata.alt_text = "The logo for example.com";
   logo.metadata.mime_type = "image/jpeg";
   return logo;
@@ -269,15 +277,58 @@ class FakeImageDecoder : public image_fetcher::ImageDecoder {
   }
 };
 
+// A helper class that wraps around all the dependencies required to simulate
+// signing in/out.
+class SigninHelper {
+ public:
+  SigninHelper(base::test::ScopedTaskEnvironment* task_environment,
+               net::FakeURLFetcherFactory* fetcher_factory)
+      : task_environment_(task_environment),
+        signin_client_(&pref_service_),
+        cookie_service_(&token_service_, "test_source", &signin_client_) {
+    // GaiaCookieManagerService calls static methods of AccountTrackerService
+    // which access prefs.
+    AccountTrackerService::RegisterPrefs(pref_service_.registry());
+
+    cookie_service_.Init(fetcher_factory);
+  }
+
+  GaiaCookieManagerService* cookie_service() { return &cookie_service_; }
+
+  void SignIn() {
+    cookie_service_.SetListAccountsResponseOneAccount("user@gmail.com",
+                                                      "gaia_id");
+    cookie_service_.TriggerListAccounts("test_source");
+    task_environment_->RunUntilIdle();
+  }
+
+  void SignOut() {
+    cookie_service_.SetListAccountsResponseNoAccounts();
+    cookie_service_.TriggerListAccounts("test_source");
+    task_environment_->RunUntilIdle();
+  }
+
+ private:
+  base::test::ScopedTaskEnvironment* task_environment_;
+
+  TestingPrefServiceSyncable pref_service_;
+  TestSigninClient signin_client_;
+  FakeProfileOAuth2TokenService token_service_;
+  FakeGaiaCookieManagerService cookie_service_;
+};
+
 class LogoServiceImplTest : public ::testing::Test {
  protected:
   LogoServiceImplTest()
       : template_url_service_(nullptr, 0),
         test_clock_(new base::SimpleTestClock()),
         logo_cache_(new NiceMock<MockLogoCache>()),
-        fake_url_fetcher_factory_(nullptr) {
-    feature_list_.InitAndEnableFeature(features::kThirdPartyDoodles);
-
+        fake_url_fetcher_factory_(
+            nullptr,
+            base::Bind(&LogoServiceImplTest::CapturingFakeURLFetcherCreator,
+                       base::Unretained(this))),
+        signin_helper_(&task_environment_, &fake_url_fetcher_factory_),
+        use_gray_background_(false) {
     // Default search engine with logo. All 3P doodle_urls use ddljson API.
     AddSearchEngine("ex", "Logo Example",
                     "https://example.com/?q={searchTerms}",
@@ -286,11 +337,12 @@ class LogoServiceImplTest : public ::testing::Test {
 
     test_clock_->SetNow(base::Time::FromJsTime(INT64_C(1388686828000)));
     logo_service_ = std::make_unique<LogoServiceImpl>(
-        base::FilePath(), &template_url_service_,
-        std::make_unique<FakeImageDecoder>(),
+        base::FilePath(), signin_helper_.cookie_service(),
+        &template_url_service_, std::make_unique<FakeImageDecoder>(),
         new net::TestURLRequestContextGetter(
             base::ThreadTaskRunnerHandle::Get()),
-        /*use_gray_background=*/false);
+        base::BindRepeating(&LogoServiceImplTest::use_gray_background,
+                            base::Unretained(this)));
     logo_service_->SetClockForTests(base::WrapUnique(test_clock_));
     logo_service_->SetLogoCacheForTests(base::WrapUnique(logo_cache_));
   }
@@ -335,14 +387,38 @@ class LogoServiceImplTest : public ::testing::Test {
                        GURL doodle_url,
                        bool make_default);
 
-  base::test::ScopedFeatureList feature_list_;
+  std::unique_ptr<net::FakeURLFetcher> CapturingFakeURLFetcherCreator(
+      const GURL& url,
+      net::URLFetcherDelegate* delegate,
+      const std::string& response_data,
+      net::HttpStatusCode response_code,
+      net::URLRequestStatus::Status status);
+
+  bool use_gray_background() const { return use_gray_background_; }
+
   base::test::ScopedTaskEnvironment task_environment_;
   TemplateURLService template_url_service_;
   base::SimpleTestClock* test_clock_;
   NiceMock<MockLogoCache>* logo_cache_;
   net::FakeURLFetcherFactory fake_url_fetcher_factory_;
   std::unique_ptr<LogoServiceImpl> logo_service_;
+  SigninHelper signin_helper_;
+
+  GURL latest_url_;
+  bool use_gray_background_;
 };
+
+std::unique_ptr<net::FakeURLFetcher>
+LogoServiceImplTest::CapturingFakeURLFetcherCreator(
+    const GURL& url,
+    net::URLFetcherDelegate* delegate,
+    const std::string& response_data,
+    net::HttpStatusCode response_code,
+    net::URLRequestStatus::Status status) {
+  latest_url_ = url;
+  return std::make_unique<net::FakeURLFetcher>(url, delegate, response_data,
+                                               response_code, status);
+}
 
 std::string LogoServiceImplTest::ServerResponse(const Logo& logo) const {
   base::TimeDelta time_to_live;
@@ -364,8 +440,8 @@ void LogoServiceImplTest::SetServerResponseWhenFingerprint(
     const std::string& response_when_fingerprint,
     net::URLRequestStatus::Status request_status,
     net::HttpStatusCode response_code) {
-  GURL url_with_fp =
-      GoogleNewAppendQueryparamsToLogoURL(false, DoodleURL(), fingerprint);
+  GURL url_with_fp = AppendFingerprintParamToDoodleURL(
+      AppendPreliminaryParamsToDoodleURL(false, DoodleURL()), fingerprint);
   fake_url_fetcher_factory_.SetFakeResponse(
       url_with_fp, response_when_fingerprint, response_code, request_status);
 }
@@ -415,28 +491,43 @@ void LogoServiceImplTest::AddSearchEngine(base::StringPiece keyword,
 
 // Tests -----------------------------------------------------------------------
 
-TEST_F(LogoServiceImplTest, CTAURLHasComma) {
-  GURL url_with_fp = GoogleLegacyAppendQueryparamsToLogoURL(
-      false, GURL("http://logourl.com/path"), "abc123");
-  EXPECT_EQ("http://logourl.com/path?async=es_dfp:abc123,cta:1",
-            url_with_fp.spec());
+TEST_F(LogoServiceImplTest, CTARequestedBackgroundCanUpdate) {
+  std::string response =
+      ServerResponse(GetSampleLogo(DoodleURL(), test_clock_->Now()));
+  GURL query_with_gray_background = AppendFingerprintParamToDoodleURL(
+      AppendPreliminaryParamsToDoodleURL(true, DoodleURL()), std::string());
+  GURL query_without_gray_background = AppendFingerprintParamToDoodleURL(
+      AppendPreliminaryParamsToDoodleURL(false, DoodleURL()), std::string());
 
-  url_with_fp = GoogleLegacyAppendQueryparamsToLogoURL(
-      false, GURL("http://logourl.com/?a=b"), "");
-  EXPECT_EQ("http://logourl.com/?a=b&async=cta:1", url_with_fp.spec());
-}
+  use_gray_background_ = false;
+  fake_url_fetcher_factory_.ClearFakeResponses();
+  fake_url_fetcher_factory_.SetFakeResponse(query_without_gray_background,
+                                            response, net::HTTP_OK,
+                                            net::URLRequestStatus::SUCCESS);
+  {
+    StrictMock<MockLogoCallback> fresh;
+    EXPECT_CALL(fresh, Run(_, _));
+    LogoCallbacks callbacks;
+    callbacks.on_fresh_decoded_logo_available = fresh.Get();
+    logo_service_->GetLogo(std::move(callbacks));
+    task_environment_.RunUntilIdle();
+  }
+  EXPECT_EQ(latest_url_.query().find("graybg:1"), std::string::npos);
 
-TEST_F(LogoServiceImplTest, CTAGrayBackgroundHasCommas) {
-  GURL url_with_fp = GoogleLegacyAppendQueryparamsToLogoURL(
-      true, GURL("http://logourl.com/path"), "abc123");
-  EXPECT_EQ(
-      "http://logourl.com/path?async=es_dfp:abc123,cta:1,transp:1,graybg:1",
-      url_with_fp.spec());
-
-  url_with_fp = GoogleLegacyAppendQueryparamsToLogoURL(
-      true, GURL("http://logourl.com/?a=b"), "");
-  EXPECT_EQ("http://logourl.com/?a=b&async=cta:1,transp:1,graybg:1",
-            url_with_fp.spec());
+  use_gray_background_ = true;
+  fake_url_fetcher_factory_.ClearFakeResponses();
+  fake_url_fetcher_factory_.SetFakeResponse(query_with_gray_background,
+                                            response, net::HTTP_OK,
+                                            net::URLRequestStatus::SUCCESS);
+  {
+    StrictMock<MockLogoCallback> fresh;
+    EXPECT_CALL(fresh, Run(_, _));
+    LogoCallbacks callbacks;
+    callbacks.on_fresh_decoded_logo_available = fresh.Get();
+    logo_service_->GetLogo(std::move(callbacks));
+    task_environment_.RunUntilIdle();
+  }
+  EXPECT_NE(latest_url_.query().find("graybg:1"), std::string::npos);
 }
 
 TEST_F(LogoServiceImplTest, DownloadAndCacheLogo) {
@@ -520,7 +611,8 @@ TEST_F(LogoServiceImplTest, EmptyCacheAndFailedDownload) {
 TEST_F(LogoServiceImplTest, AcceptMinimalLogoResponse) {
   Logo logo;
   logo.image = MakeBitmap(1, 2);
-  logo.metadata.source_url = DoodleURL();
+  logo.metadata.source_url =
+      AppendPreliminaryParamsToDoodleURL(false, DoodleURL());
   logo.metadata.can_show_after_expiration = true;
   logo.metadata.mime_type = "image/png";
 
@@ -588,7 +680,7 @@ TEST_F(LogoServiceImplTest, ValidateCachedLogo) {
   {
     // Ensure that cached logo is still returned correctly on subsequent
     // requests. In particular, the metadata should stay valid.
-    // http://crbug.com/480090
+    // https://crbug.com/480090
     EXPECT_CALL(*logo_cache_, UpdateCachedLogoMetadata(_)).Times(1);
     EXPECT_CALL(*logo_cache_, SetCachedLogo(_)).Times(0);
     EXPECT_CALL(*logo_cache_, OnGetCachedLogo()).Times(AtMost(1));
@@ -608,9 +700,9 @@ TEST_F(LogoServiceImplTest, UpdateCachedLogoMetadata) {
   Logo fresh_logo = cached_logo;
   fresh_logo.image.reset();
   fresh_logo.metadata.mime_type.clear();
-  fresh_logo.metadata.on_click_url = GURL("http://new.onclick.url");
+  fresh_logo.metadata.on_click_url = GURL("https://new.onclick.url");
   fresh_logo.metadata.alt_text = "new alt text";
-  fresh_logo.metadata.animated_url = GURL("http://new.animated.url");
+  fresh_logo.metadata.animated_url = GURL("https://new.animated.url");
   fresh_logo.metadata.expiration_time =
       test_clock_->Now() + base::TimeDelta::FromDays(8);
   SetServerResponseWhenFingerprint(fresh_logo.metadata.fingerprint,
@@ -681,7 +773,7 @@ TEST_F(LogoServiceImplTest, InvalidateCachedLogo) {
 TEST_F(LogoServiceImplTest, DeleteCachedLogoFromOldUrl) {
   SetServerResponse("", net::URLRequestStatus::FAILED, net::HTTP_OK);
   Logo cached_logo =
-      GetSampleLogo(GURL("http://oldsearchprovider.com"), test_clock_->Now());
+      GetSampleLogo(GURL("https://oldsearchprovider.com"), test_clock_->Now());
   logo_cache_->EncodeAndSetCachedLogo(cached_logo);
 
   EXPECT_CALL(*logo_cache_, UpdateCachedLogoMetadata(_)).Times(0);
@@ -814,6 +906,25 @@ TEST_F(LogoServiceImplTest, DeleteExpiredCachedLogo) {
   GetDecodedLogo(cached.Get(), fresh.Get());
 }
 
+TEST_F(LogoServiceImplTest, ClearLogoOnSignOut) {
+  // Sign in and setup a logo response.
+  signin_helper_.SignIn();
+  Logo logo = GetSampleLogo(DoodleURL(), test_clock_->Now());
+  SetServerResponse(ServerResponse(logo));
+
+  // Request the logo so it gets fetched and cached.
+  logo_cache_->ExpectSetCachedLogo(&logo);
+  StrictMock<MockLogoCallback> cached;
+  StrictMock<MockLogoCallback> fresh;
+  EXPECT_CALL(cached, Run(LogoCallbackReason::DETERMINED, Eq(base::nullopt)));
+  EXPECT_CALL(fresh, Run(LogoCallbackReason::DETERMINED, Eq(logo)));
+  GetDecodedLogo(cached.Get(), fresh.Get());
+
+  // Signing out should clear the cached logo immediately.
+  logo_cache_->ExpectSetCachedLogo(nullptr);
+  signin_helper_.SignOut();
+}
+
 // Tests that deal with multiple listeners.
 
 void EnqueueCallbacks(LogoServiceImpl* logo_service,
@@ -835,14 +946,7 @@ void EnqueueCallbacks(LogoServiceImpl* logo_service,
                             fresh_callbacks, start_index + 1));
 }
 
-#if defined(THREAD_SANITIZER)
-// Flakes on Linux TSan: http://crbug/754599 (data race).
-#define MAYBE_SupportOverlappingLogoRequests \
-  DISABLED_SupportOverlappingLogoRequests
-#else
-#define MAYBE_SupportOverlappingLogoRequests SupportOverlappingLogoRequests
-#endif
-TEST_F(LogoServiceImplTest, MAYBE_SupportOverlappingLogoRequests) {
+TEST_F(LogoServiceImplTest, SupportOverlappingLogoRequests) {
   Logo cached_logo = GetSampleLogo(DoodleURL(), test_clock_->Now());
   logo_cache_->EncodeAndSetCachedLogo(cached_logo);
   ON_CALL(*logo_cache_, SetCachedLogo(_)).WillByDefault(Return());
@@ -867,10 +971,10 @@ TEST_F(LogoServiceImplTest, MAYBE_SupportOverlappingLogoRequests) {
                 Run(LogoCallbackReason::DETERMINED, Eq(fresh_logo)));
     fresh_callbacks.push_back(mocks.back()->Get());
   }
-  EnqueueCallbacks(logo_service_.get(), &cached_callbacks, &fresh_callbacks, 0);
-
   EXPECT_CALL(*logo_cache_, SetCachedLogo(_)).Times(AtMost(3));
   EXPECT_CALL(*logo_cache_, OnGetCachedLogo()).Times(AtMost(3));
+
+  EnqueueCallbacks(logo_service_.get(), &cached_callbacks, &fresh_callbacks, 0);
 
   task_environment_.RunUntilIdle();
 }

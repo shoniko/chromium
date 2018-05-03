@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">Punt</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 mes}other{# mesos}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>
+<translation id="1812519734428420144">Puntuació en estrelles: <ph name="RATING_SCORE" /></translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{1 hora i }other{# hores i }}</translation>
 <translation id="1842960171412779397">selecciona</translation>
 <translation id="1860796786778352021">Tanca la notificació</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">Obre la carpeta</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{Fa 1 any}other{Fa # anys}}</translation>
 <translation id="2931838996092594335">fer clic</translation>
-<translation id="2983818520079887040">Configuració...</translation>
 <translation id="3036649622769666520">Obre fitxers</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3087734570205094154">Part inferior</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">TOTES LES APLICACIONS</translation>
 <translation id="4320177379694898372">No hi ha connexió a Internet</translation>
 <translation id="4588090240171750605">Desplaçament a la dreta</translation>
+<translation id="4724120544754982507">Centre de notificacions, <ph name="UNREAD_NOTIFICATION_COUNT" /> notificacions no llegides</translation>
 <translation id="4730374152663651037">UTILITZADES FREQÜENTMENT</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{D'aquí a 1 mes}other{D'aquí a # mesos}}</translation>
 <translation id="4820616160060340806">Ordre+<ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">Minimitza</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 hora}other{# hores}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">Totes les aplicacions</translation>
 <translation id="6012623610530968780">Pàgina <ph name="SELECTED_PAGE" /> de <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">Esborra el text del quadre de cerca</translation>
 <translation id="6040143037577758943">Tanca</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">Coma</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{fa 1 s}other{fa # s}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{Fa 1 segon}other{Fa # segons}}</translation>
+<translation id="654149438358937226">Bloqueja totes les notificacions</translation>
 <translation id="6567071839949112727">fes clic a l'antecedent</translation>
 <translation id="6612467943526193239">Prem Esc per sortir del calibratge.</translation>
 <translation id="6620110761915583480">Desa el fitxer</translation>
@@ -122,7 +123,7 @@
 <translation id="7130207228079676353">LES MÉS PROBABLES</translation>
 <translation id="7222373446505536781">F11</translation>
 <translation id="7238427729722629793">{MINUTES,plural, =1{1 min restant}other{# min restants}}</translation>
-<translation id="7319740667687257810">Launcher, visualització parcial</translation>
+<translation id="7319740667687257810">Menú d'aplicacions, visualització parcial</translation>
 <translation id="7365057348334984696">{MINUTES,plural, =1{fa 1 min}other{fa # min}}</translation>
 <translation id="7389409599945284130">: <ph name="MESSAGE" /></translation>
 <translation id="7410957453383678442">{MINUTES,plural, =1{1 minut restant}other{# minuts restants}}</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">Cancel·la</translation>
 <translation id="7781829728241885113">Ahir</translation>
 <translation id="7814458197256864873">&amp;Copia</translation>
+<translation id="7879499977785298635">No bloquegis</translation>
 <translation id="7907591526440419938">Obre un fitxer</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{fa 1 hora}other{fa # hores}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{1 s restant}other{# s restants}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{1 any}other{# anys}}</translation>
 <translation id="8371695176452482769">Parla ara</translation>
 <translation id="838869780401515933">marca</translation>
+<translation id="8393700583063109961">Envia el missatge</translation>
 <translation id="8394908167088220973">Fitxer multimèdia: reprodueix/posa en pausa</translation>
 <translation id="8400147561352026160">Maj+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 a}other{# a}}</translation>
 <translation id="8602707065186045623">Fitxer <ph name="SAVEAS_EXTENSION_TYPE" /> (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s</translation>
 <translation id="8725488761726303204">i <ph name="NUMBER" /> més</translation>
+<translation id="8730621377337864115">Fet</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{1 h}other{# h}}</translation>
 <translation id="8806053966018712535">Carpeta <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">Afegeix una anotació a la imatge</translation>

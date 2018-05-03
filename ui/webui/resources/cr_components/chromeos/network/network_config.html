@@ -2,6 +2,7 @@
 
 <link rel="import" href="chrome://resources/cr_elements/chromeos/network/cr_onc_types.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-a11y-keys/iron-a11y-keys.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
 <link rel="import" href="network_shared_css.html">
@@ -10,29 +11,8 @@
 
 <dom-module id="network-config">
   <template>
-    <style include="network-shared">
-      paper-toggle-button {
-        -webkit-margin-end: calc(
-          var(--network-control-margin) - var(--cr-icon-ripple-padding));
-      }
-
-      #error {
-        color: red;
-        font-weight: 500;
-      }
+    <style include="network-shared iron-flex">
     </style>
-
-    <!-- Share (WiFi and WiMAX) -->
-    <template is="dom-if" if="[[shareIsVisible_(type)]]">
-      <div class="property-box hr">
-        <div id="shareLabel" class="start">[[i18n('networkConfigShare')]]</div>
-        <paper-toggle-button id="share" checked="{{shareNetwork_}}"
-            disabled="[[!shareIsEnabled_(guid, configProperties_.*,
-                security_, eapProperties_.*, shareAllowEnable)]]"
-            aria-label="[[i18n('networkConfigShare')]]">
-        </paper-toggle-button>
-      </div>
-    </template>
 
     <!-- SSID (WiFi) -->
     <template is="dom-if" if="[[isType_(NetworkType_.WI_FI, type)]]">
@@ -55,6 +35,8 @@
     <template is="dom-if" if="[[configRequiresPassphrase_(type, security_)]]">
       <network-config-input label="[[i18n('OncWiFi-Passphrase')]]"
           value="{{configProperties_.WiFi.Passphrase}}" password>
+        <iron-a11y-keys keys="enter" on-keys-pressed="connectIfConfigured_">
+        </iron-a11y-keys>
       </network-config-input>
     </template>
 
@@ -64,11 +46,11 @@
           value="{{configProperties_.VPN.Host}}">
       </network-config-input>
       <network-config-input label="[[i18n('OncName')]]"
-          value="{{configProperties_.Name}}">
+          value="{{configProperties_.Name}}" disabled="[[hasGuid_(guid)]]">
       </network-config-input>
       <network-config-select id="outer" label="[[i18n('OncVPN-Type')]]"
           value="{{vpnType_}}" items="[[vpnTypeItems_]]"
-          onc-prefix="VPN.Type">
+          onc-prefix="VPN.Type" disabled="[[hasGuid_(guid)]]">
       </network-config-select>
       <template is="dom-if" if="[[!showVpn_.OpenVPN]]">
         <network-config-input label="[[i18n('OncVPN-Username')]]"
@@ -109,7 +91,7 @@
             cert-list>
         </network-config-select>
       </template>
-      <div class="property-box hr">
+      <div class="property-box">
         <div id="vpnSaveCredentialsLabel" class="start">
           [[i18n('networkConfigSaveCredentials')]]
         </div>
@@ -153,7 +135,7 @@
           value="{{eapProperties_.AnonymousIdentity}}"
           hidden="[[!showEap_.AnonymousIdentity]]">
       </network-config-input>
-      <div class="property-box hr">
+      <div class="property-box">
         <div id="eapSaveCredentialsLabel" class="start">
           [[i18n('networkConfigSaveCredentials')]]
         </div>
@@ -163,11 +145,16 @@
       </div>
     </template>
 
-    <template is="dom-if" if="[[error_]]">
+    <!-- Share (WiFi and WiMAX) -->
+    <template is="dom-if"
+        if="[[shareIsVisible_(guid, type, networkProperties)]]">
       <div class="property-box">
-        <div id="error" class="start">
-          [[getError_(error_)]]
-        </div>
+        <div id="shareLabel" class="start">[[i18n('networkConfigShare')]]</div>
+        <paper-toggle-button id="share" checked="{{shareNetwork_}}"
+            disabled="[[!shareIsEnabled_(guid, configProperties_.*,
+                      security_, eapProperties_.*, shareAllowEnable)]]"
+            aria-label="[[i18n('networkConfigShare')]]">
+        </paper-toggle-button>
       </div>
     </template>
 

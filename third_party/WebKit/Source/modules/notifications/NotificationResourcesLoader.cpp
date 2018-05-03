@@ -7,8 +7,8 @@
 #include <cmath>
 #include "platform/Histogram.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/Threading.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/modules/notifications/WebNotificationData.h"
 #include "public/platform/modules/notifications/WebNotificationResources.h"
 
@@ -22,7 +22,7 @@ NotificationResourcesLoader::NotificationResourcesLoader(
   DCHECK(completion_callback_);
 }
 
-NotificationResourcesLoader::~NotificationResourcesLoader() {}
+NotificationResourcesLoader::~NotificationResourcesLoader() = default;
 
 void NotificationResourcesLoader::Start(
     ExecutionContext* execution_context,
@@ -123,8 +123,7 @@ void NotificationResourcesLoader::DidFinishRequest() {
   pending_request_count_--;
   if (!pending_request_count_) {
     Stop();
-    auto cb = std::move(completion_callback_);
-    cb(this);
+    std::move(completion_callback_).Run(this);
     // The |this| pointer may have been deleted now.
   }
 }

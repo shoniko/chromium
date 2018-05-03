@@ -100,9 +100,9 @@ void FileUploadControlPainter::PaintObject(const PaintInfo& paint_info,
 
     // Draw the filename.
     DrawingRecorder recorder(paint_info.context, layout_file_upload_control_,
-                             paint_info.phase, text_run_paint_info.bounds);
+                             paint_info.phase);
     paint_info.context.SetFillColor(
-        layout_file_upload_control_.ResolveColor(CSSPropertyColor));
+        layout_file_upload_control_.ResolveColor(GetCSSPropertyColor()));
     paint_info.context.DrawBidiText(
         font, text_run_paint_info,
         FloatPoint(RoundToInt(text_x), RoundToInt(text_y)));

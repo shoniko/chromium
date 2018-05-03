@@ -5,6 +5,7 @@
 #ifndef CSSPerspective_h
 #define CSSPerspective_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/cssom/CSSNumericValue.h"
 #include "core/css/cssom/CSSTransformComponent.h"
@@ -18,7 +19,6 @@ class ExceptionState;
 // like "transform".
 // See CSSPerspective.idl for more information about this class.
 class CORE_EXPORT CSSPerspective final : public CSSTransformComponent {
-  WTF_MAKE_NONCOPYABLE(CSSPerspective);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -48,10 +48,10 @@ class CORE_EXPORT CSSPerspective final : public CSSTransformComponent {
   }
 
  private:
-  CSSPerspective(CSSNumericValue* length)
-      : CSSTransformComponent(false /* is2D */), length_(length) {}
+  CSSPerspective(CSSNumericValue* length);
 
   Member<CSSNumericValue> length_;
+  DISALLOW_COPY_AND_ASSIGN(CSSPerspective);
 };
 
 }  // namespace blink

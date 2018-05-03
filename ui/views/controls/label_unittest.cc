@@ -23,6 +23,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/render_text.h"
 #include "ui/gfx/switches.h"
+#include "ui/gfx/text_elider.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/link.h"
@@ -224,19 +225,20 @@ class LabelSelectionTest : public LabelTest {
     SimulatePaint();
     gfx::RenderText* render_text =
         label()->GetRenderTextForSelectionController();
+    const gfx::Range range(index, index + 1);
     const std::vector<gfx::Rect> bounds =
-        render_text->GetSubstringBoundsForTesting(gfx::Range(index, index + 1));
+        render_text->GetSubstringBoundsForTesting(range);
     DCHECK_EQ(1u, bounds.size());
     const int mid_y = bounds[0].y() + bounds[0].height() / 2;
 
-    // For single-line text, use the glyph bounds since it's a better
+    // For single-line text, use the glyph bounds since it gives a better
     // representation of the midpoint between glyphs when considering selection.
-    // TODO(tapted): When GetGlyphBounds() supports returning a vertical range
+    // TODO(tapted): When GetCursorSpan() supports returning a vertical range
     // as well as a horizontal range, just use that here.
     if (!render_text->multiline())
-      return gfx::Point(render_text->GetGlyphBounds(index).start(), mid_y);
+      return gfx::Point(render_text->GetCursorSpan(range).start(), mid_y);
 
-    // Otherwise, GetGlyphBounds() will give incorrect results. Multiline
+    // Otherwise, GetCursorSpan() will give incorrect results. Multiline
     // editing is not supported (http://crbug.com/248597) so there hasn't been
     // a need to draw a cursor. Instead, derive a point from the selection
     // bounds, which always rounds up to an integer after the end of a glyph.
@@ -367,6 +369,41 @@ TEST_F(LabelTest, ElideBehavior) {
   EXPECT_GT(text.size(), label()->GetDisplayTextForTesting().size());
 
   label()->SetElideBehavior(gfx::NO_ELIDE);
+  EXPECT_EQ(text, label()->GetDisplayTextForTesting());
+}
+
+// Test the minimum width of a Label is correct depending on its ElideBehavior,
+// including |gfx::NO_ELIDE|.
+TEST_F(LabelTest, ElideBehaviorMinimumWidth) {
+  base::string16 text(ASCIIToUTF16("This is example text."));
+  label()->SetText(text);
+
+  // Default should be |gfx::ELIDE_TAIL|.
+  EXPECT_EQ(gfx::ELIDE_TAIL, label()->elide_behavior());
+  gfx::Size size = label()->GetMinimumSize();
+  // Elidable labels have a minimum width that fits |gfx::kEllipsisUTF16|.
+  EXPECT_EQ(gfx::Canvas::GetStringWidth(base::string16(gfx::kEllipsisUTF16),
+                                        label()->font_list()),
+            size.width());
+  label()->SetSize(label()->GetMinimumSize());
+  EXPECT_GT(text.length(), label()->GetDisplayTextForTesting().length());
+
+  // Truncated labels can take up the size they are given, but not exceed that
+  // if the text can't fit.
+  label()->SetElideBehavior(gfx::TRUNCATE);
+  label()->SetSize(gfx::Size(10, 10));
+  size = label()->GetMinimumSize();
+  EXPECT_LT(size.width(), label()->size().width());
+  EXPECT_GT(text.length(), label()->GetDisplayTextForTesting().length());
+
+  // Non-elidable single-line labels should take up their full text size, since
+  // this behavior implies the text should not be cut off.
+  EXPECT_FALSE(label()->multi_line());
+  label()->SetElideBehavior(gfx::NO_ELIDE);
+  size = label()->GetMinimumSize();
+  EXPECT_EQ(text.length(), label()->GetDisplayTextForTesting().length());
+
+  label()->SetSize(label()->GetMinimumSize());
   EXPECT_EQ(text, label()->GetDisplayTextForTesting());
 }
 
@@ -541,15 +578,15 @@ TEST_F(LabelTest, TextChangeWithoutLayout) {
 
   gfx::Canvas canvas(gfx::Size(200, 200), 1.0f, true);
   label()->OnPaint(&canvas);
-  EXPECT_EQ(1u, label()->lines_.size());
-  EXPECT_EQ(ASCIIToUTF16("Example"), label()->lines_[0]->GetDisplayText());
+  EXPECT_TRUE(label()->display_text_);
+  EXPECT_EQ(ASCIIToUTF16("Example"), label()->display_text_->GetDisplayText());
 
   label()->SetText(ASCIIToUTF16("Altered"));
   // The altered text should be painted even though Layout() or SetBounds() are
   // not called.
   label()->OnPaint(&canvas);
-  EXPECT_EQ(1u, label()->lines_.size());
-  EXPECT_EQ(ASCIIToUTF16("Altered"), label()->lines_[0]->GetDisplayText());
+  EXPECT_TRUE(label()->display_text_);
+  EXPECT_EQ(ASCIIToUTF16("Altered"), label()->display_text_->GetDisplayText());
 }
 
 TEST_F(LabelTest, EmptyLabelSizing) {
@@ -812,46 +849,42 @@ TEST_F(LabelTest, ResetRenderTextData) {
   gfx::Size preferred_size = label()->GetPreferredSize();
 
   EXPECT_NE(gfx::Size(), preferred_size);
-  EXPECT_EQ(0u, label()->lines_.size());
+  EXPECT_FALSE(label()->display_text_);
 
   gfx::Canvas canvas(preferred_size, 1.0f, true);
   label()->OnPaint(&canvas);
-  EXPECT_EQ(1u, label()->lines_.size());
+  EXPECT_TRUE(label()->display_text_);
 
   // Label should recreate its RenderText object when it's invisible, to release
   // the layout structures and data.
   label()->SetVisible(false);
-  EXPECT_EQ(0u, label()->lines_.size());
+  EXPECT_FALSE(label()->display_text_);
 
   // Querying fields or size information should not recompute the layout
   // unnecessarily.
   EXPECT_EQ(ASCIIToUTF16("Example"), label()->text());
-  EXPECT_EQ(0u, label()->lines_.size());
+  EXPECT_FALSE(label()->display_text_);
 
   EXPECT_EQ(preferred_size, label()->GetPreferredSize());
-  EXPECT_EQ(0u, label()->lines_.size());
+  EXPECT_FALSE(label()->display_text_);
 
   // RenderText data should be back when it's necessary.
   label()->SetVisible(true);
-  EXPECT_EQ(0u, label()->lines_.size());
+  EXPECT_FALSE(label()->display_text_);
 
   label()->OnPaint(&canvas);
-  EXPECT_EQ(1u, label()->lines_.size());
+  EXPECT_TRUE(label()->display_text_);
 
-  // Changing layout just resets |lines_|. It'll recover next time it's drawn.
+  // Changing layout just resets |display_text_|. It'll recover next time it's
+  // drawn.
   label()->SetBounds(0, 0, 10, 10);
-  EXPECT_EQ(0u, label()->lines_.size());
+  EXPECT_FALSE(label()->display_text_);
 
   label()->OnPaint(&canvas);
-  EXPECT_EQ(1u, label()->lines_.size());
+  EXPECT_TRUE(label()->display_text_);
 }
 
-#if !defined(OS_MACOSX)
 TEST_F(LabelTest, MultilineSupportedRenderText) {
-  std::unique_ptr<gfx::RenderText> render_text(
-      gfx::RenderText::CreateInstance());
-  ASSERT_TRUE(render_text->MultilineSupported());
-
   label()->SetText(ASCIIToUTF16("Example of\nmultilined label"));
   label()->SetMultiLine(true);
   label()->SizeToPreferredSize();
@@ -859,10 +892,10 @@ TEST_F(LabelTest, MultilineSupportedRenderText) {
   gfx::Canvas canvas(label()->GetPreferredSize(), 1.0f, true);
   label()->OnPaint(&canvas);
 
-  // There's only one 'line', RenderText itself supports multiple lines.
-  EXPECT_EQ(1u, label()->lines_.size());
+  // There's only RenderText instance, which should have multiple lines.
+  ASSERT_TRUE(label()->display_text_);
+  EXPECT_EQ(2u, label()->display_text_->GetNumLines());
 }
-#endif
 
 // Ensures SchedulePaint() calls are not made in OnPaint().
 TEST_F(LabelTest, NoSchedulePaintInOnPaint) {

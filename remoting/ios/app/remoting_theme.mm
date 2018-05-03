@@ -8,10 +8,19 @@
 
 #import "remoting/ios/app/remoting_theme.h"
 
+#import "ios/third_party/material_components_ios/src/components/Dialogs/src/ColorThemer/MDCAlertColorThemer.h"
+#import "ios/third_party/material_components_ios/src/components/Themes/src/MDCColorScheme.h"
+
 #include "remoting/base/string_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 @implementation RemotingTheme
+
++ (void)applyColorSchemes {
+  MDCBasicColorScheme* colorScheme = [[MDCBasicColorScheme alloc]
+      initWithPrimaryColor:RemotingTheme.flatButtonTextColor];
+  [MDCAlertColorThemer applyColorScheme:colorScheme];
+}
 
 #pragma mark - Colors
 
@@ -53,10 +62,7 @@
   static UIColor* color;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    color = [UIColor colorWithRed:52.f / 255.f
-                            green:174.f / 255.f
-                             blue:249.f / 255.f
-                            alpha:1.f];
+    color = [UIColor colorWithRed:0.29 green:0.58 blue:0.96 alpha:1.0];
   });
   return color;
 }
@@ -65,20 +71,24 @@
   return UIColor.whiteColor;
 }
 
-+ (UIColor*)pinEntryPairingColor {
++ (UIColor*)menuSeparatorColor {
   static UIColor* color;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    color = [UIColor colorWithWhite:1.f alpha:0.5f];
+    color = [UIColor colorWithWhite:1.f alpha:0.4f];
   });
   return color;
+}
+
++ (UIColor*)pinEntryPairingColor {
+  return UIColor.whiteColor;
 }
 
 + (UIColor*)pinEntryPlaceholderColor {
   static UIColor* color;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    color = [UIColor colorWithWhite:1.f alpha:0.26f];
+    color = [UIColor colorWithWhite:1.f alpha:0.5f];
   });
   return color;
 }
@@ -167,12 +177,7 @@
 }
 
 + (UIColor*)hostCellStatusTextColor {
-  static UIColor* color;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    color = [UIColor colorWithWhite:0 alpha:0.60f];
-  });
-  return color;
+  return UIColor.blackColor;
 }
 
 + (UIColor*)setupListBackgroundColor {
@@ -185,7 +190,12 @@
 }
 
 + (UIColor*)setupListTextColor {
-  return UIColor.grayColor;
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithWhite:0.38f alpha:1.f];
+  });
+  return color;
 }
 
 + (UIColor*)setupListNumberColor {

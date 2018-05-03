@@ -42,8 +42,7 @@ SDK.TargetManager = class extends Common.Object {
       var childTargetManager = this._childTargetManagers.get(target);
       if (childTargetManager)
         promises.push(childTargetManager.suspend());
-      for (var model of target.models().values())
-        promises.push(model.suspendModel());
+      promises.push(target.suspend());
     }
     return Promise.all(promises);
   }
@@ -62,8 +61,7 @@ SDK.TargetManager = class extends Common.Object {
       var childTargetManager = this._childTargetManagers.get(target);
       if (childTargetManager)
         promises.push(childTargetManager.resume());
-      for (var model of target.models().values())
-        promises.push(model.resumeModel());
+      promises.push(target.resume());
     }
     return Promise.all(promises);
   }
@@ -220,7 +218,7 @@ SDK.TargetManager = class extends Common.Object {
    * @return {!SDK.Target}
    */
   createTarget(id, name, capabilitiesMask, connectionFactory, parentTarget) {
-    var target = new SDK.Target(this, id, name, capabilitiesMask, connectionFactory, parentTarget);
+    var target = new SDK.Target(this, id, name, capabilitiesMask, connectionFactory, parentTarget, this._isSuspended);
     target.createModels(new Set(this._modelObservers.keys()));
     if (target.hasTargetCapability())
       this._childTargetManagers.set(target, new SDK.ChildTargetManager(this, target));
@@ -329,7 +327,7 @@ SDK.TargetManager = class extends Common.Object {
     if (Runtime.queryParam('nodeFrontend')) {
       var target = new SDK.Target(
           this, 'main', Common.UIString('Node.js'), SDK.Target.Capability.Target, this._createMainConnection.bind(this),
-          null);
+          null, this._isSuspended);
       target.setInspectedURL('Node.js');
       this._childTargetManagers.set(target, new SDK.ChildTargetManager(this, target));
       Host.userMetrics.actionTaken(Host.UserMetrics.Action.ConnectToNodeJSFromFrontend);
@@ -407,8 +405,8 @@ SDK.ChildTargetManager = class {
 
     parentTarget.registerTargetDispatcher(this);
     this._targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true});
-    if (Runtime.experiments.isEnabled('autoAttachToCrossProcessSubframes'))
-      this._targetAgent.setAttachToFrames(true);
+    // TODO(dgozman): remove the protocol method and make it default.
+    this._targetAgent.setAttachToFrames(true);
 
     if (!parentTarget.parentTarget()) {
       this._targetAgent.setDiscoverTargets(true);

@@ -35,9 +35,9 @@
 #include "build/build_config.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/ImageData.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
+#include "core/html/canvas/ImageData.h"
 #include "core/html/media/HTMLVideoElement.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "platform/graphics/ColorCorrectionTestUtils.h"
@@ -223,8 +223,6 @@ TEST_F(ImageBitmapTest, ImageBitmapSourceChanged) {
   }
 }
 
-constexpr float kWideGamutColorCorrectionTolerance = 0.01;
-
 enum class ColorSpaceConversion : uint8_t {
   NONE = 0,
   DEFAULT_COLOR_CORRECTED = 1,
@@ -236,18 +234,14 @@ enum class ColorSpaceConversion : uint8_t {
   LAST = REC2020
 };
 
-static ImageBitmapOptions PrepareBitmapOptionsAndSetRuntimeFlags(
+static ImageBitmapOptions PrepareBitmapOptions(
     const ColorSpaceConversion& color_space_conversion) {
   // Set the color space conversion in ImageBitmapOptions
   ImageBitmapOptions options;
   static const Vector<String> kConversions = {
-      "none", "default", "default", "srgb", "linear-rgb", "p3", "rec2020"};
+      "none", "default", "srgb", "linear-rgb", "p3", "rec2020"};
   options.setColorSpaceConversion(
       kConversions[static_cast<uint8_t>(color_space_conversion)]);
-
-  // Set the runtime flags
-  RuntimeEnabledFeatures::SetExperimentalCanvasFeaturesEnabled(true);
-
   return options;
 }
 
@@ -262,6 +256,9 @@ static ImageBitmapOptions PrepareBitmapOptionsAndSetRuntimeFlags(
 #endif
 
 TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionHTMLImageElement) {
+  // Enable experimental canvas features for this test.
+  ScopedExperimentalCanvasFeaturesForTest experimental_canvas_features(true);
+
   HTMLImageElement* image_element =
       HTMLImageElement::Create(*Document::CreateForTest());
 
@@ -277,8 +274,9 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionHTMLImageElement) {
 
   std::unique_ptr<uint8_t[]> src_pixel(
       new uint8_t[raster_image_info.bytesPerPixel()]());
-  image->readPixels(raster_image_info.makeWH(1, 1), src_pixel.get(),
-                    image->width() * raster_image_info.bytesPerPixel(), 5, 5);
+  SkImageInfo src_pixel_image_info = raster_image_info.makeWH(1, 1);
+  EXPECT_TRUE(image->readPixels(src_pixel_image_info, src_pixel.get(),
+                                src_pixel_image_info.minRowBytes(), 5, 5));
 
   ImageResourceContent* original_image_resource =
       ImageResourceContent::CreateLoaded(
@@ -306,7 +304,7 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionHTMLImageElement) {
     ColorSpaceConversion color_space_conversion =
         static_cast<ColorSpaceConversion>(i);
     ImageBitmapOptions options =
-        PrepareBitmapOptionsAndSetRuntimeFlags(color_space_conversion);
+        PrepareBitmapOptions(color_space_conversion);
     ImageBitmap* image_bitmap = ImageBitmap::Create(
         image_element, crop_rect, &(image_element->GetDocument()), options);
 
@@ -351,9 +349,8 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionHTMLImageElement) {
         1, 1, color_type, SkAlphaType::kPremul_SkAlphaType, color_space);
     std::unique_ptr<uint8_t[]> converted_pixel(
         new uint8_t[image_info.bytesPerPixel()]());
-    converted_image->readPixels(
-        image_info, converted_pixel.get(),
-        converted_image->width() * image_info.bytesPerPixel(), 5, 5);
+    EXPECT_TRUE(converted_image->readPixels(image_info, converted_pixel.get(),
+                                            image_info.minRowBytes(), 5, 5));
 
     // Transform the source pixel and check if the image bitmap color conversion
     // is done correctly.
@@ -361,13 +358,15 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionHTMLImageElement) {
         SkColorSpaceXform::New(src_rgb_color_space.get(), color_space.get());
     std::unique_ptr<uint8_t[]> transformed_pixel(
         new uint8_t[image_info.bytesPerPixel()]());
-    color_space_xform->apply(color_format, transformed_pixel.get(),
-                             color_format32, src_pixel.get(), 1,
-                             SkAlphaType::kPremul_SkAlphaType);
+    EXPECT_TRUE(color_space_xform->apply(color_format, transformed_pixel.get(),
+                                         color_format32, src_pixel.get(), 1,
+                                         SkAlphaType::kPremul_SkAlphaType));
 
     ColorCorrectionTestUtils::CompareColorCorrectedPixels(
-        converted_pixel, transformed_pixel, image_info.bytesPerPixel(),
-        kWideGamutColorCorrectionTolerance);
+        converted_pixel.get(), transformed_pixel.get(), 1,
+        (color_type == kN32_SkColorType) ? kUint8ClampedArrayStorageFormat
+                                         : kUint16ArrayStorageFormat,
+        kAlphaMultiplied, kUnpremulRoundTripTolerance);
   }
 }
 
@@ -382,6 +381,9 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionHTMLImageElement) {
 #endif
 
 TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionImageBitmap) {
+  // Enable experimental canvas features for this test.
+  ScopedExperimentalCanvasFeaturesForTest experimental_canvas_features(true);
+
   HTMLImageElement* image_element =
       HTMLImageElement::Create(*Document::CreateForTest());
 
@@ -397,8 +399,8 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionImageBitmap) {
 
   std::unique_ptr<uint8_t[]> src_pixel(
       new uint8_t[raster_image_info.bytesPerPixel()]());
-  image->readPixels(raster_image_info.makeWH(1, 1), src_pixel.get(),
-                    image->width() * raster_image_info.bytesPerPixel(), 5, 5);
+  EXPECT_TRUE(image->readPixels(raster_image_info.makeWH(1, 1), src_pixel.get(),
+                                raster_image_info.minRowBytes(), 5, 5));
 
   ImageResourceContent* source_image_resource =
       ImageResourceContent::CreateLoaded(
@@ -407,7 +409,7 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionImageBitmap) {
 
   Optional<IntRect> crop_rect = IntRect(0, 0, image->width(), image->height());
   ImageBitmapOptions options =
-      PrepareBitmapOptionsAndSetRuntimeFlags(ColorSpaceConversion::SRGB);
+      PrepareBitmapOptions(ColorSpaceConversion::SRGB);
   ImageBitmap* source_image_bitmap = ImageBitmap::Create(
       image_element, crop_rect, &(image_element->GetDocument()), options);
 
@@ -424,7 +426,7 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionImageBitmap) {
        i <= static_cast<uint8_t>(ColorSpaceConversion::LAST); i++) {
     ColorSpaceConversion color_space_conversion =
         static_cast<ColorSpaceConversion>(i);
-    options = PrepareBitmapOptionsAndSetRuntimeFlags(color_space_conversion);
+    options = PrepareBitmapOptions(color_space_conversion);
     ImageBitmap* image_bitmap =
         ImageBitmap::Create(source_image_bitmap, crop_rect, options);
     SkImage* converted_image = image_bitmap->BitmapImage()
@@ -478,13 +480,15 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionImageBitmap) {
         SkColorSpaceXform::New(src_rgb_color_space.get(), color_space.get());
     std::unique_ptr<uint8_t[]> transformed_pixel(
         new uint8_t[image_info.bytesPerPixel()]());
-    color_space_xform->apply(color_format, transformed_pixel.get(),
-                             color_format32, src_pixel.get(), 1,
-                             SkAlphaType::kPremul_SkAlphaType);
+    EXPECT_TRUE(color_space_xform->apply(color_format, transformed_pixel.get(),
+                                         color_format32, src_pixel.get(), 1,
+                                         SkAlphaType::kPremul_SkAlphaType));
 
     ColorCorrectionTestUtils::CompareColorCorrectedPixels(
-        converted_pixel, transformed_pixel, image_info.bytesPerPixel(),
-        kWideGamutColorCorrectionTolerance);
+        converted_pixel.get(), transformed_pixel.get(), 1,
+        (color_type == kN32_SkColorType) ? kUint8ClampedArrayStorageFormat
+                                         : kUint16ArrayStorageFormat,
+        kAlphaMultiplied, kUnpremulRoundTripTolerance);
   }
 }
 
@@ -500,6 +504,9 @@ TEST_F(ImageBitmapTest, MAYBE_ImageBitmapColorSpaceConversionImageBitmap) {
 
 TEST_F(ImageBitmapTest,
        MAYBE_ImageBitmapColorSpaceConversionStaticBitmapImage) {
+  // Enable experimental canvas features for this test.
+  ScopedExperimentalCanvasFeaturesForTest experimental_canvas_features(true);
+
   SkPaint p;
   p.setColor(SK_ColorRED);
   sk_sp<SkColorSpace> src_rgb_color_space = SkColorSpace::MakeSRGB();
@@ -531,7 +538,7 @@ TEST_F(ImageBitmapTest,
     ColorSpaceConversion color_space_conversion =
         static_cast<ColorSpaceConversion>(i);
     ImageBitmapOptions options =
-        PrepareBitmapOptionsAndSetRuntimeFlags(color_space_conversion);
+        PrepareBitmapOptions(color_space_conversion);
     ImageBitmap* image_bitmap = ImageBitmap::Create(
         StaticBitmapImage::Create(image), crop_rect, options);
 
@@ -540,6 +547,8 @@ TEST_F(ImageBitmapTest,
                                    .GetSkImage()
                                    .get();
 
+    UnpremulRoundTripTolerance unpremul_round_trip_tolerance =
+        kUnpremulRoundTripTolerance;
     switch (color_space_conversion) {
       case ColorSpaceConversion::NONE:
         NOTREACHED();
@@ -548,6 +557,7 @@ TEST_F(ImageBitmapTest,
       case ColorSpaceConversion::SRGB:
         color_space = SkColorSpace::MakeSRGB();
         color_format = color_format32;
+        unpremul_round_trip_tolerance = kUnpremulRoundTripTolerance;
         break;
       case ColorSpaceConversion::LINEAR_RGB:
         color_space = SkColorSpace::MakeSRGBLinear();
@@ -586,22 +596,26 @@ TEST_F(ImageBitmapTest,
         SkColorSpaceXform::New(src_rgb_color_space.get(), color_space.get());
     std::unique_ptr<uint8_t[]> transformed_pixel(
         new uint8_t[image_info.bytesPerPixel()]());
-    color_space_xform->apply(color_format, transformed_pixel.get(),
-                             color_format32, src_pixel.get(), 1,
-                             SkAlphaType::kPremul_SkAlphaType);
+    EXPECT_TRUE(color_space_xform->apply(color_format, transformed_pixel.get(),
+                                         color_format32, src_pixel.get(), 1,
+                                         SkAlphaType::kPremul_SkAlphaType));
 
     ColorCorrectionTestUtils::CompareColorCorrectedPixels(
-        converted_pixel, transformed_pixel, image_info.bytesPerPixel(),
-        kWideGamutColorCorrectionTolerance);
+        converted_pixel.get(), transformed_pixel.get(), 1,
+        (color_type == kN32_SkColorType) ? kUint8ClampedArrayStorageFormat
+                                         : kUint16ArrayStorageFormat,
+        kAlphaMultiplied, unpremul_round_trip_tolerance);
   }
 }
 
 TEST_F(ImageBitmapTest, ImageBitmapColorSpaceConversionImageData) {
+  // Enable experimental canvas features for this test.
+  ScopedExperimentalCanvasFeaturesForTest experimental_canvas_features(true);
+
   sk_sp<SkColorSpace> src_rgb_color_space = SkColorSpace::MakeSRGB();
-  unsigned char data_buffer[4] = {32, 96, 160, 255};
+  unsigned char data_buffer[4] = {32, 96, 160, 128};
   DOMUint8ClampedArray* data = DOMUint8ClampedArray::Create(data_buffer, 4);
   ImageDataColorSettings color_settings;
-  color_settings.setColorSpace("srgb");
   ImageData* image_data = ImageData::Create(
       IntSize(1, 1), NotShared<DOMUint8ClampedArray>(data), &color_settings);
   std::unique_ptr<uint8_t[]> src_pixel(new uint8_t[4]());
@@ -610,10 +624,11 @@ TEST_F(ImageBitmapTest, ImageBitmapColorSpaceConversionImageData) {
   Optional<IntRect> crop_rect = IntRect(0, 0, 1, 1);
   sk_sp<SkColorSpace> color_space = nullptr;
   SkColorType color_type = SkColorType::kN32_SkColorType;
-  SkColorSpaceXform::ColorFormat color_format =
-      kN32_SkColorType == kRGBA_8888_SkColorType
-          ? SkColorSpaceXform::ColorFormat::kRGBA_8888_ColorFormat
-          : SkColorSpaceXform::ColorFormat::kBGRA_8888_ColorFormat;
+  SkColorSpaceXform::ColorFormat color_format32 =
+      (color_type == kBGRA_8888_SkColorType)
+          ? SkColorSpaceXform::ColorFormat::kBGRA_8888_ColorFormat
+          : SkColorSpaceXform::ColorFormat::kRGBA_8888_ColorFormat;
+  SkColorSpaceXform::ColorFormat color_format = color_format32;
 
   for (uint8_t i =
            static_cast<uint8_t>(ColorSpaceConversion::DEFAULT_COLOR_CORRECTED);
@@ -621,7 +636,7 @@ TEST_F(ImageBitmapTest, ImageBitmapColorSpaceConversionImageData) {
     ColorSpaceConversion color_space_conversion =
         static_cast<ColorSpaceConversion>(i);
     ImageBitmapOptions options =
-        PrepareBitmapOptionsAndSetRuntimeFlags(color_space_conversion);
+        PrepareBitmapOptions(color_space_conversion);
     ImageBitmap* image_bitmap =
         ImageBitmap::Create(image_data, crop_rect, options);
 
@@ -637,6 +652,7 @@ TEST_F(ImageBitmapTest, ImageBitmapColorSpaceConversionImageData) {
       case ColorSpaceConversion::DEFAULT_COLOR_CORRECTED:
       case ColorSpaceConversion::SRGB:
         color_space = SkColorSpace::MakeSRGB();
+        color_format = color_format32;
         break;
       case ColorSpaceConversion::LINEAR_RGB:
         color_space = SkColorSpace::MakeSRGBLinear();
@@ -661,8 +677,8 @@ TEST_F(ImageBitmapTest, ImageBitmapColorSpaceConversionImageData) {
         NOTREACHED();
     }
 
-    SkImageInfo image_info = SkImageInfo::Make(
-        1, 1, color_type, SkAlphaType::kPremul_SkAlphaType, color_space);
+    SkImageInfo image_info =
+        SkImageInfo::Make(1, 1, color_type, SkAlphaType::kUnpremul_SkAlphaType);
     std::unique_ptr<uint8_t[]> converted_pixel(
         new uint8_t[image_info.bytesPerPixel()]());
     converted_image->readPixels(
@@ -675,15 +691,44 @@ TEST_F(ImageBitmapTest, ImageBitmapColorSpaceConversionImageData) {
         SkColorSpaceXform::New(src_rgb_color_space.get(), color_space.get());
     std::unique_ptr<uint8_t[]> transformed_pixel(
         new uint8_t[image_info.bytesPerPixel()]());
-    color_space_xform->apply(
+    EXPECT_TRUE(color_space_xform->apply(
         color_format, transformed_pixel.get(),
         SkColorSpaceXform::ColorFormat::kRGBA_8888_ColorFormat, src_pixel.get(),
-        1, SkAlphaType::kPremul_SkAlphaType);
+        1, kUnpremul_SkAlphaType));
 
     ColorCorrectionTestUtils::CompareColorCorrectedPixels(
-        converted_pixel, transformed_pixel, image_info.bytesPerPixel(),
-        kWideGamutColorCorrectionTolerance);
+        converted_pixel.get(), transformed_pixel.get(), 1,
+        (color_type == kN32_SkColorType) ? kUint8ClampedArrayStorageFormat
+                                         : kUint16ArrayStorageFormat,
+        kAlphaUnmultiplied, kUnpremulRoundTripTolerance);
   }
+}
+
+// This test is failing on asan-clang-phone because memory allocation is
+// declined. See <http://crbug.com/782286>.
+#if defined(OS_ANDROID)
+#define MAYBE_CreateImageBitmapFromTooBigImageDataDoesNotCrash \
+  DISABLED_CreateImageBitmapFromTooBigImageDataDoesNotCrash
+#else
+#define MAYBE_CreateImageBitmapFromTooBigImageDataDoesNotCrash \
+  CreateImageBitmapFromTooBigImageDataDoesNotCrash
+#endif
+
+// This test verifies if requesting a large ImageData and creating an
+// ImageBitmap from that does not crash. crbug.com/780358
+TEST_F(ImageBitmapTest,
+       MAYBE_CreateImageBitmapFromTooBigImageDataDoesNotCrash) {
+  // Enable experimental canvas features for this test.
+  ScopedExperimentalCanvasFeaturesForTest experimental_canvas_features(true);
+
+  ImageData* image_data =
+      ImageData::CreateForTest(IntSize(v8::TypedArray::kMaxLength / 16, 1));
+  DCHECK(image_data);
+  ImageBitmapOptions options =
+      PrepareBitmapOptions(ColorSpaceConversion::DEFAULT_COLOR_CORRECTED);
+  ImageBitmap* image_bitmap = ImageBitmap::Create(
+      image_data, IntRect(IntPoint(0, 0), image_data->Size()), options);
+  DCHECK(image_bitmap);
 }
 
 #undef MAYBE_ImageBitmapColorSpaceConversionHTMLImageElement

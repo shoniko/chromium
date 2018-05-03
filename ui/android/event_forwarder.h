@@ -15,6 +15,10 @@ class EventForwarder {
  public:
   ~EventForwarder();
 
+  base::android::ScopedJavaLocalRef<jobject> GetJavaWindowAndroid(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
   jboolean OnTouchEvent(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -79,6 +83,12 @@ class EventForwarder {
                    jint screen_y,
                    const base::android::JavaParamRef<jobjectArray>& j_mimeTypes,
                    const base::android::JavaParamRef<jstring>& j_content);
+
+  bool OnGestureEvent(JNIEnv* env,
+                      const base::android::JavaParamRef<jobject>& jobj,
+                      jint type,
+                      jlong time_ms,
+                      jfloat delta);
 
  private:
   friend class ViewAndroid;

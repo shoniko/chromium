@@ -504,7 +504,6 @@ class TryServerMasterTest(unittest.TestCase):
             'android_clang_dbg_recipe',
             'android_compile_dbg',
             'android_compile_mips_dbg',
-            'android_compile_rel',
             'android_compile_x64_dbg',
             'android_compile_x86_dbg',
             'android_coverage',
@@ -1287,6 +1286,25 @@ class MojoManifestOwnerTest(unittest.TestCase):
     errors = PRESUBMIT._CheckIpcOwners(
         mock_input_api, mock_output_api)
     self.assertEqual([], errors)
+
+
+class CrbugUrlFormatTest(unittest.TestCase):
+
+  def testCheckCrbugLinksHaveHttps(self):
+    input_api = MockInputApi()
+    input_api.files = [
+      MockFile('somewhere/file.cc',
+               ['// TODO(developer): crbug.com should be linkified',
+                '// TODO(developer): (crbug.com) should be linkified',
+                '// TODO(developer): crbug/123 should be well formed',
+                '// TODO(developer): http://crbug.com it\'s OK',
+                '// TODO(developer): https://crbug.com is just great',
+                '// TODO(crbug.com/123456): this pattern it\'s also OK']),
+    ]
+
+    warnings = PRESUBMIT._CheckCrbugLinksHaveHttps(input_api, MockOutputApi())
+    self.assertEqual(1, len(warnings))
+    self.assertEqual(3, warnings[0].message.count('\n'));
 
 
 if __name__ == '__main__':

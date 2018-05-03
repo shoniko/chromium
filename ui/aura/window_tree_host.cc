@@ -5,9 +5,10 @@
 #include "ui/aura/window_tree_host.h"
 
 #include "base/command_line.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
-#include "components/viz/common/switches.h"
+#include "components/viz/common/features.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/env.h"
@@ -221,6 +222,10 @@ ui::EventDispatchDetails WindowTreeHost::DispatchKeyEventPostIME(
   return dispatch_details;
 }
 
+int64_t WindowTreeHost::GetDisplayId() {
+  return display::Screen::GetScreen()->GetDisplayNearestWindow(window()).id();
+}
+
 void WindowTreeHost::Show() {
   // Ensure that compositor has been properly initialized, see InitCompositor()
   // and InitHost().
@@ -283,8 +288,7 @@ void WindowTreeHost::CreateCompositor(const viz::FrameSinkId& frame_sink_id,
       Env::GetInstance()->context_factory_private();
   bool enable_surface_synchronization =
       aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS ||
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableSurfaceSynchronization);
+      features::IsSurfaceSynchronizationEnabled();
   compositor_.reset(new ui::Compositor(
       (!context_factory_private || frame_sink_id.is_valid())
           ? frame_sink_id
@@ -293,7 +297,9 @@ void WindowTreeHost::CreateCompositor(const viz::FrameSinkId& frame_sink_id,
       base::ThreadTaskRunnerHandle::Get(), enable_surface_synchronization,
       ui::IsPixelCanvasRecordingEnabled(), external_begin_frames_enabled,
       force_software_compositor));
+#if defined(OS_CHROMEOS)
   compositor_->AddObserver(this);
+#endif
   if (!dispatcher()) {
     window()->Init(ui::LAYER_NOT_DRAWN);
     window()->set_host(this);
@@ -416,29 +422,31 @@ void WindowTreeHost::MoveCursorToInternal(const gfx::Point& root_location,
   dispatcher()->OnCursorMovedToRootLocation(root_location);
 }
 
-void WindowTreeHost::OnCompositingDidCommit(ui::Compositor* compositor) {}
-
-void WindowTreeHost::OnCompositingStarted(ui::Compositor* compositor,
-                                          base::TimeTicks start_time) {
-  if (!synchronizing_with_child_on_next_frame_)
-    return;
-  synchronizing_with_child_on_next_frame_ = false;
-  dispatcher_->HoldPointerMoves();
-  holding_pointer_moves_ = true;
-}
-
-void WindowTreeHost::OnCompositingEnded(ui::Compositor* compositor) {
+void WindowTreeHost::OnCompositingDidCommit(ui::Compositor* compositor) {
   if (!holding_pointer_moves_)
     return;
+
   dispatcher_->ReleasePointerMoves();
   holding_pointer_moves_ = false;
+  DCHECK(!synchronization_start_time_.is_null());
+  UMA_HISTOGRAM_TIMES("UI.WindowTreeHost.SurfaceSynchronizationDuration",
+                      base::TimeTicks::Now() - synchronization_start_time_);
 }
+
+void WindowTreeHost::OnCompositingStarted(ui::Compositor* compositor,
+                                          base::TimeTicks start_time) {}
+
+void WindowTreeHost::OnCompositingEnded(ui::Compositor* compositor) {}
 
 void WindowTreeHost::OnCompositingLockStateChanged(ui::Compositor* compositor) {
 }
 
 void WindowTreeHost::OnCompositingChildResizing(ui::Compositor* compositor) {
-  synchronizing_with_child_on_next_frame_ = true;
+  if (!Env::GetInstance()->throttle_input_on_resize() || holding_pointer_moves_)
+    return;
+  synchronization_start_time_ = base::TimeTicks::Now();
+  dispatcher_->HoldPointerMoves();
+  holding_pointer_moves_ = true;
 }
 
 void WindowTreeHost::OnCompositingShuttingDown(ui::Compositor* compositor) {

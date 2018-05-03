@@ -22,6 +22,7 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties.h"
 #include "net/http/transport_security_state.h"
+#include "net/net_features.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request.h"
@@ -44,13 +45,16 @@ class HttpTransactionFactory;
 class HttpUserAgentSettings;
 class NetLog;
 class NetworkDelegate;
-class NetworkErrorLoggingDelegate;
 class NetworkQualityEstimator;
-class ReportingService;
 class ProxyService;
 class URLRequest;
 class URLRequestJobFactory;
 class URLRequestThrottlerManager;
+
+#if BUILDFLAG(ENABLE_REPORTING)
+class NetworkErrorLoggingDelegate;
+class ReportingService;
+#endif  // BUILDFLAG(ENABLE_REPORTING)
 
 // Subclass to provide application-specific context for URLRequest
 // instances. URLRequestContext does not own these member variables, since they
@@ -211,13 +215,9 @@ class NET_EXPORT URLRequestContext
 
   // Gets the URLRequest objects that hold a reference to this
   // URLRequestContext.
-  const std::set<const URLRequest*>& url_requests() const {
-    return url_requests_;
+  std::set<const URLRequest*>* url_requests() const {
+    return url_requests_.get();
   }
-
-  void InsertURLRequest(const URLRequest* request) const;
-
-  void RemoveURLRequest(const URLRequest* request) const;
 
   // CHECKs that no URLRequests using this context remain. Subclasses should
   // additionally call AssertNoURLRequests() within their own destructor,
@@ -244,6 +244,7 @@ class NET_EXPORT URLRequestContext
     network_quality_estimator_ = network_quality_estimator;
   }
 
+#if BUILDFLAG(ENABLE_REPORTING)
   ReportingService* reporting_service() const { return reporting_service_; }
   void set_reporting_service(ReportingService* reporting_service) {
     reporting_service_ = reporting_service;
@@ -256,6 +257,7 @@ class NET_EXPORT URLRequestContext
       NetworkErrorLoggingDelegate* network_error_logging_delegate) {
     network_error_logging_delegate_ = network_error_logging_delegate;
   }
+#endif  // BUILDFLAG(ENABLE_REPORTING)
 
   void set_enable_brotli(bool enable_brotli) { enable_brotli_ = enable_brotli; }
 
@@ -312,15 +314,17 @@ class NET_EXPORT URLRequestContext
   const URLRequestJobFactory* job_factory_;
   URLRequestThrottlerManager* throttler_manager_;
   NetworkQualityEstimator* network_quality_estimator_;
+#if BUILDFLAG(ENABLE_REPORTING)
   ReportingService* reporting_service_;
   NetworkErrorLoggingDelegate* network_error_logging_delegate_;
+#endif  // BUILDFLAG(ENABLE_REPORTING)
 
   // ---------------------------------------------------------------------------
   // Important: When adding any new members below, consider whether they need to
   // be added to CopyFrom.
   // ---------------------------------------------------------------------------
 
-  mutable std::set<const URLRequest*> url_requests_;
+  std::unique_ptr<std::set<const URLRequest*>> url_requests_;
 
   // Enables Brotli Content-Encoding support.
   bool enable_brotli_;
@@ -332,10 +336,6 @@ class NET_EXPORT URLRequestContext
   // Used in MemoryDumpProvier to annotate memory usage. The name does not need
   // to be unique.
   std::string name_;
-
-  // The largest number of outstanding URLRequests that have been created by
-  // |this| and are not yet destroyed. This doesn't need to be in CopyFrom.
-  mutable size_t largest_outstanding_requests_count_seen_;
 
   THREAD_CHECKER(thread_checker_);
 

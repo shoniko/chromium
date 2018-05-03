@@ -53,7 +53,7 @@ class ModalWindow : public views::WidgetDelegateView,
     ++g_color_index %= arraysize(g_colors);
     AddChildView(open_button_);
   }
-  ~ModalWindow() override {}
+  ~ModalWindow() override = default;
 
   static void OpenModalWindow(aura::Window* parent, ui::ModalType modal_type) {
     views::Widget* widget = views::Widget::CreateWindowWithParent(
@@ -102,7 +102,7 @@ class NonModalTransient : public views::WidgetDelegateView {
   NonModalTransient() : color_(g_colors[g_color_index]) {
     ++g_color_index %= arraysize(g_colors);
   }
-  ~NonModalTransient() override {}
+  ~NonModalTransient() override = default;
 
   static void OpenNonModalTransient(aura::Window* parent) {
     views::Widget* widget =
@@ -210,7 +210,8 @@ WindowTypeLauncher::WindowTypeLauncher(
           this,
           base::ASCIIToUTF16("Show a web/app notification"))),
       show_views_examples_callback_(show_views_examples_callback) {
-  views::GridLayout* layout = views::GridLayout::CreateAndInstall(this);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
   SetBorder(views::CreateEmptyBorder(gfx::Insets(5)));
   views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
@@ -231,7 +232,7 @@ WindowTypeLauncher::WindowTypeLauncher(
   set_context_menu_controller(this);
 }
 
-WindowTypeLauncher::~WindowTypeLauncher() {}
+WindowTypeLauncher::~WindowTypeLauncher() = default;
 
 void WindowTypeLauncher::OnPaint(gfx::Canvas* canvas) {
   canvas->FillRect(GetLocalBounds(), SK_ColorWHITE);

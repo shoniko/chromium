@@ -29,11 +29,8 @@ interface BackgroundFetchRegistration : EventTarget
     attribute @@toStringTag
     getter downloadTotal
     getter downloaded
-    getter icons
     getter id
     getter onprogress
-    getter title
-    getter totalDownloadSize
     getter uploadTotal
     getter uploaded
     method abort
@@ -136,6 +133,14 @@ interface CloseEvent : Event
     getter reason
     getter wasClean
     method constructor
+interface CookieStore
+    attribute @@toStringTag
+    method constructor
+    method delete
+    method get
+    method getAll
+    method has
+    method set
 interface CountQueuingStrategy
     method constructor
     method size
@@ -510,12 +515,6 @@ interface FontFace
     setter unicodeRange
     setter variant
     setter weight
-interface ForeignFetchEvent : ExtendableEvent
-    attribute @@toStringTag
-    getter origin
-    getter request
-    method constructor
-    method respondWith
 interface FormData
     attribute @@toStringTag
     method @@iterator
@@ -703,7 +702,16 @@ interface ImageData
 interface InstallEvent : ExtendableEvent
     attribute @@toStringTag
     method constructor
-    method registerForeignFetch
+interface Lock
+    attribute @@toStringTag
+    getter mode
+    getter name
+    method constructor
+interface LockManager
+    attribute @@toStringTag
+    method acquire
+    method constructor
+    method query
 interface MessageChannel
     attribute @@toStringTag
     getter port1
@@ -797,6 +805,7 @@ interface NetworkInformation : EventTarget
     getter onchange
     getter ontypechange
     getter rtt
+    getter saveData
     getter type
     method constructor
     setter onchange
@@ -975,6 +984,7 @@ interface PerformanceObserver
     method constructor
     method disconnect
     method observe
+    method takeRecords
 interface PerformanceObserverEntryList
     attribute @@toStringTag
     method constructor
@@ -1002,6 +1012,7 @@ interface PerformanceResourceTiming : PerformanceEntry
     getter transferSize
     getter workerStart
     method constructor
+    method toJSON
 interface PerformanceServerTiming
     attribute @@toStringTag
     getter description
@@ -1072,8 +1083,10 @@ interface Request
     getter bodyUsed
     getter cache
     getter credentials
+    getter destination
     getter headers
     getter integrity
+    getter keepalive
     getter method
     getter mode
     getter redirect
@@ -1121,6 +1134,7 @@ interface ServiceWorkerRegistration : EventTarget
     getter pushManager
     getter scope
     getter sync
+    getter updateViaCache
     getter waiting
     method constructor
     method getNotifications
@@ -1128,11 +1142,6 @@ interface ServiceWorkerRegistration : EventTarget
     method unregister
     method update
     setter onupdatefound
-interface SharedArrayBuffer
-    attribute @@toStringTag
-    getter byteLength
-    method constructor
-    method slice
 interface StorageManager
     attribute @@toStringTag
     method constructor
@@ -1179,6 +1188,10 @@ interface TextEncoder
     getter encoding
     method constructor
     method encode
+interface TransformStream
+    getter readable
+    getter writable
+    method constructor
 interface TrustedHTML
     static method escape
     static method unsafelyCreate
@@ -2502,6 +2515,7 @@ interface WorkerGlobalScope : EventTarget
     attribute @@toStringTag
     getter caches
     getter crypto
+    getter fonts
     getter indexedDB
     getter isSecureContext
     getter location
@@ -2546,7 +2560,9 @@ interface WorkerNavigator
     getter appVersion
     getter budget
     getter connection
+    getter deviceMemory
     getter hardwareConcurrency
+    getter locks
     getter onLine
     getter permissions
     getter platform
@@ -2560,10 +2576,10 @@ interface WritableStream
     method constructor
     method getWriter
 [GLOBAL OBJECT]
-    attribute Atomics
     attribute console
     attribute internals
     getter clients
+    getter cookieStore
     getter onabortpayment
     getter onactivate
     getter onbackgroundfetchabort
@@ -2572,7 +2588,6 @@ interface WritableStream
     getter onbackgroundfetchfail
     getter oncanmakepayment
     getter onfetch
-    getter onforeignfetch
     getter oninstall
     getter onmessage
     getter onnotificationclick
@@ -2584,6 +2599,7 @@ interface WritableStream
     method fetch
     method gc
     method skipWaiting
+    setter cookieStore
     setter onabortpayment
     setter onactivate
     setter onbackgroundfetchabort
@@ -2592,7 +2608,6 @@ interface WritableStream
     setter onbackgroundfetchfail
     setter oncanmakepayment
     setter onfetch
-    setter onforeignfetch
     setter oninstall
     setter onmessage
     setter onnotificationclick

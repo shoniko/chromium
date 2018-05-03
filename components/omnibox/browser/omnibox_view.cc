@@ -16,7 +16,6 @@
 #include "build/build_config.h"
 #include "components/grit/components_scaled_resources.h"
 #include "components/omnibox/browser/autocomplete_match.h"
-#include "components/omnibox/browser/omnibox_client.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/toolbar/toolbar_model.h"
@@ -88,6 +87,11 @@ void OmniboxView::OpenMatch(const AutocompleteMatch& match,
   // Invalid URLs such as chrome://history can end up here.
   if (!match.destination_url.is_valid() || !model_)
     return;
+  // Unless user requests navigation, change disposition for this match type
+  // so downstream will switch tabs.
+  if (match.type == AutocompleteMatchType::TAB_SEARCH && !shift_key_down_ &&
+      disposition == WindowOpenDisposition::CURRENT_TAB)
+    disposition = WindowOpenDisposition::SWITCH_TO_TAB;
   model_->OpenMatch(
       match, disposition, alternate_nav_url, pasted_text, selected_line);
 }
@@ -188,7 +192,7 @@ OmniboxView::StateChanges OmniboxView::GetStateChanges(const State& before,
 
 OmniboxView::OmniboxView(OmniboxEditController* controller,
                          std::unique_ptr<OmniboxClient> client)
-    : controller_(controller) {
+    : controller_(controller), shift_key_down_(false) {
   // |client| can be null in tests.
   if (client) {
     model_.reset(new OmniboxEditModel(this, controller, std::move(client)));

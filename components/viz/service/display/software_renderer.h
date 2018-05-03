@@ -40,9 +40,19 @@ class VIZ_SERVICE_EXPORT SoftwareRenderer : public DirectRenderer {
 
  protected:
   bool CanPartialSwap() override;
-  ResourceFormat BackbufferFormat() const override;
+  void UpdateRenderPassTextures(
+      const RenderPassList& render_passes_in_draw_order,
+      const base::flat_map<RenderPassId, RenderPassRequirements>&
+          render_passes_in_frame) override;
+  void AllocateRenderPassResourceIfNeeded(
+      const RenderPassId& render_pass_id,
+      const RenderPassRequirements& requirements) override;
+  bool IsRenderPassResourceAllocated(
+      const RenderPassId& render_pass_id) const override;
+  gfx::Size GetRenderPassTextureSize(
+      const RenderPassId& render_pass_id) override;
   void BindFramebufferToOutputSurface() override;
-  bool BindFramebufferToTexture(const cc::ScopedResource* texture) override;
+  void BindFramebufferToTexture(const RenderPassId render_pass_id) override;
   void SetScissorTestRect(const gfx::Rect& scissor_rect) override;
   void PrepareSurfaceForPass(SurfaceInitializationMode initialization_mode,
                              const gfx::Rect& render_pass_scissor) override;
@@ -87,6 +97,9 @@ class VIZ_SERVICE_EXPORT SoftwareRenderer : public DirectRenderer {
       const RenderPassDrawQuad* quad,
       SkShader::TileMode content_tile_mode) const;
 
+  // A map from RenderPass id to the bitmap used to draw the RenderPass from.
+  base::flat_map<RenderPassId, SkBitmap> render_pass_bitmaps_;
+
   bool disable_picture_quad_image_filtering_ = false;
 
   bool is_scissor_enabled_ = false;
@@ -96,8 +109,6 @@ class VIZ_SERVICE_EXPORT SoftwareRenderer : public DirectRenderer {
   SkCanvas* root_canvas_ = nullptr;
   SkCanvas* current_canvas_ = nullptr;
   SkPaint current_paint_;
-  std::unique_ptr<cc::ResourceProvider::ScopedWriteLockSoftware>
-      current_framebuffer_lock_;
   std::unique_ptr<SkCanvas> current_framebuffer_canvas_;
 
   DISALLOW_COPY_AND_ASSIGN(SoftwareRenderer);

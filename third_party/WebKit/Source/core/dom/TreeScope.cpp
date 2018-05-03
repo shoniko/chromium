@@ -46,7 +46,7 @@
 #include "core/html/HTMLMapElement.h"
 #include "core/html_names.h"
 #include "core/layout/HitTestResult.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/svg/SVGTreeScopeResources.h"
@@ -74,7 +74,7 @@ TreeScope::TreeScope(Document& document)
   root_node_->SetTreeScope(this);
 }
 
-TreeScope::~TreeScope() {}
+TreeScope::~TreeScope() = default;
 
 void TreeScope::ResetTreeScope() {
   selection_ = nullptr;
@@ -197,8 +197,8 @@ HTMLMapElement* TreeScope::GetImageMap(const String& url) const {
 
 // If the point is not in the viewport, returns false. Otherwise, adjusts the
 // point to account for the frame's zoom and scroll.
-static bool PointWithScrollAndZoomIfPossible(Document& document,
-                                             IntPoint& point) {
+static bool PointInFrameContentIfVisible(Document& document,
+                                         DoublePoint& point_in_frame) {
   LocalFrame* frame = document.GetFrame();
   if (!frame)
     return false;
@@ -206,44 +206,48 @@ static bool PointWithScrollAndZoomIfPossible(Document& document,
   if (!frame_view)
     return false;
 
-  // The visibleContentRect check below requires that scrollbars are up-to-date.
+  // The VisibleContentRect check below requires that scrollbars are up-to-date.
   document.UpdateStyleAndLayoutIgnorePendingStylesheets();
 
-  FloatPoint point_in_document(point);
-  point_in_document.Scale(frame->PageZoomFactor(), frame->PageZoomFactor());
-  point_in_document.Move(frame_view->GetScrollOffset());
-  IntPoint rounded_point_in_document = RoundedIntPoint(point_in_document);
-
-  if (!frame_view->VisibleContentRect().Contains(rounded_point_in_document))
+  auto* scrollable_area = frame_view->LayoutViewportScrollableArea();
+  IntRect visible_frame_rect(IntPoint(),
+                             scrollable_area->VisibleContentRect().Size());
+  visible_frame_rect.Scale(1 / frame->PageZoomFactor());
+  if (!visible_frame_rect.Contains(RoundedIntPoint(point_in_frame)))
     return false;
 
-  point = rounded_point_in_document;
+  point_in_frame.Scale(frame->PageZoomFactor(), frame->PageZoomFactor());
+  // For non RLS case, the point needs to be adjusted by the frame's scroll
+  // offset.
+  if (!RuntimeEnabledFeatures::RootLayerScrollingEnabled())
+    point_in_frame.Move(scrollable_area->GetScrollOffset());
+
   return true;
 }
 
 HitTestResult HitTestInDocument(Document* document,
-                                int x,
-                                int y,
+                                double x,
+                                double y,
                                 const HitTestRequest& request) {
   if (!document->IsActive())
     return HitTestResult();
 
-  IntPoint hit_point(x, y);
-  if (!PointWithScrollAndZoomIfPossible(*document, hit_point))
+  DoublePoint hit_point(x, y);
+  if (!PointInFrameContentIfVisible(*document, hit_point))
     return HitTestResult();
 
-  HitTestResult result(request, hit_point);
-  document->GetLayoutViewItem().HitTest(result);
+  HitTestResult result(request, LayoutPoint(hit_point));
+  document->GetLayoutView()->HitTest(result);
   return result;
 }
 
-Element* TreeScope::ElementFromPoint(int x, int y) const {
+Element* TreeScope::ElementFromPoint(double x, double y) const {
   return HitTestPoint(x, y,
                       HitTestRequest::kReadOnly | HitTestRequest::kActive);
 }
 
-Element* TreeScope::HitTestPoint(int x,
-                                 int y,
+Element* TreeScope::HitTestPoint(double x,
+                                 double y,
                                  const HitTestRequest& request) const {
   HitTestResult result =
       HitTestInDocument(&RootNode().GetDocument(), x, y, request);
@@ -294,17 +298,18 @@ HeapVector<Member<Element>> TreeScope::ElementsFromHitTestResult(
   return elements;
 }
 
-HeapVector<Member<Element>> TreeScope::ElementsFromPoint(int x, int y) const {
+HeapVector<Member<Element>> TreeScope::ElementsFromPoint(double x,
+                                                         double y) const {
   Document& document = RootNode().GetDocument();
-  IntPoint hit_point(x, y);
-  if (!PointWithScrollAndZoomIfPossible(document, hit_point))
+  DoublePoint hit_point(x, y);
+  if (!PointInFrameContentIfVisible(document, hit_point))
     return HeapVector<Member<Element>>();
 
   HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive |
                          HitTestRequest::kListBased |
                          HitTestRequest::kPenetratingList);
-  HitTestResult result(request, hit_point);
-  document.GetLayoutViewItem().HitTest(result);
+  HitTestResult result(request, LayoutPoint(hit_point));
+  document.GetLayoutView()->HitTest(result);
 
   return ElementsFromHitTestResult(result);
 }

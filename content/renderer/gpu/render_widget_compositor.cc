@@ -43,12 +43,13 @@
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_mutator.h"
 #include "cc/trees/swap_promise.h"
+#include "cc/trees/ukm_manager.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "components/viz/common/resources/single_release_callback.h"
-#include "components/viz/common/switches.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/layer_tree_settings_factory.h"
 #include "content/public/common/content_client.h"
@@ -90,7 +91,7 @@ using blink::WebSelection;
 using blink::WebSize;
 using blink::WebBrowserControlsState;
 using blink::WebLayerTreeView;
-using blink::WebScrollBoundaryBehavior;
+using blink::WebOverscrollBehavior;
 
 namespace content {
 namespace {
@@ -111,7 +112,8 @@ class ReportTimeSwapPromise : public cc::SwapPromise {
   ~ReportTimeSwapPromise() override;
 
   void DidActivate() override {}
-  void WillSwap(viz::CompositorFrameMetadata* metadata) override {}
+  void WillSwap(viz::CompositorFrameMetadata* compositor_frame_metadata,
+                cc::RenderFrameMetadata* render_frame_metadata) override {}
   void DidSwap() override;
   DidNotSwapAction DidNotSwap(DidNotSwapReason reason) override;
 
@@ -320,12 +322,13 @@ std::unique_ptr<cc::LayerTreeHost> RenderWidgetCompositor::CreateLayerTreeHost(
   params.task_graph_runner = deps->GetTaskGraphRunner();
   params.main_task_runner = deps->GetCompositorMainThreadTaskRunner();
   params.mutator_host = mutator_host;
+  params.ukm_recorder_factory = deps->CreateUkmRecorderFactory();
   if (base::TaskScheduler::GetInstance()) {
     // The image worker thread needs to allow waiting since it makes discardable
     // shared memory allocations which need to make synchronous calls to the
     // IO thread.
     params.image_worker_task_runner = base::CreateSequencedTaskRunnerWithTraits(
-        {base::WithBaseSyncPrimitives(), base::TaskPriority::BACKGROUND,
+        {base::WithBaseSyncPrimitives(), base::TaskPriority::USER_VISIBLE,
          base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
   }
   if (!is_threaded) {
@@ -412,8 +415,6 @@ cc::LayerTreeSettings RenderWidgetCompositor::GenerateLayerTreeSettings(
       compositor_deps->GetGpuRasterizationMSAASampleCount();
   settings.gpu_rasterization_forced =
       compositor_deps->IsGpuRasterizationForced();
-  settings.async_worker_context_enabled =
-      compositor_deps->IsAsyncWorkerContextEnabled();
 
   settings.can_use_lcd_text = compositor_deps->IsLcdTextEnabled();
   settings.use_distance_field_text =
@@ -424,8 +425,6 @@ cc::LayerTreeSettings RenderWidgetCompositor::GenerateLayerTreeSettings(
       compositor_deps->IsElasticOverscrollEnabled();
   settings.resource_settings.use_gpu_memory_buffer_resources =
       compositor_deps->IsGpuMemoryBufferCompositorResourcesEnabled();
-  settings.resource_settings.buffer_to_texture_target_map =
-      compositor_deps->GetBufferToTextureTargetMap();
   settings.enable_oop_rasterization =
       cmd.HasSwitch(switches::kEnableOOPRasterization);
 
@@ -458,7 +457,7 @@ cc::LayerTreeSettings RenderWidgetCompositor::GenerateLayerTreeSettings(
   settings.initial_debug_state.SetRecordRenderingStats(
       cmd.HasSwitch(cc::switches::kEnableGpuBenchmarking));
   settings.enable_surface_synchronization =
-      cmd.HasSwitch(switches::kEnableSurfaceSynchronization);
+      features::IsSurfaceSynchronizationEnabled();
 
   if (cmd.HasSwitch(cc::switches::kSlowDownRasterScaleFactor)) {
     const int kMinSlowDownScaleFactor = 0;
@@ -510,8 +509,6 @@ cc::LayerTreeSettings RenderWidgetCompositor::GenerateLayerTreeSettings(
   // TODO(danakj): Only do this on low end devices.
   settings.create_low_res_tiling = true;
 
-  if (base::SysInfo::AmountOfPhysicalMemoryMB() <= 512)
-    settings.use_half_width_tiles_for_gpu_rasterization = true;
 #else  // defined(OS_ANDROID)
   bool using_synchronous_compositor = false;  // Only for Android WebView.
   // On desktop, we never use the low memory policy unless we are simulating
@@ -581,9 +578,16 @@ cc::LayerTreeSettings RenderWidgetCompositor::GenerateLayerTreeSettings(
 
   settings.disallow_non_exact_resource_reuse =
       cmd.HasSwitch(switches::kDisallowNonExactResourceReuse);
+#if defined(OS_ANDROID)
+  // TODO(crbug.com/746931): This feature appears to be causing visual
+  // corruption on certain android devices. Will investigate and re-enable.
+  settings.disallow_non_exact_resource_reuse = true;
+#endif
 
-  settings.wait_for_all_pipeline_stages_before_draw =
-      cmd.HasSwitch(cc::switches::kRunAllCompositorStagesBeforeDraw);
+  if (cmd.HasSwitch(cc::switches::kRunAllCompositorStagesBeforeDraw)) {
+    settings.wait_for_all_pipeline_stages_before_draw = true;
+    settings.enable_latency_recovery = false;
+  }
 
   settings.enable_image_animations =
       cmd.HasSwitch(switches::kEnableCompositorImageAnimations);
@@ -725,7 +729,7 @@ void RenderWidgetCompositor::SetNeedsForcedRedraw() {
 std::unique_ptr<cc::SwapPromiseMonitor>
 RenderWidgetCompositor::CreateLatencyInfoSwapPromiseMonitor(
     ui::LatencyInfo* latency) {
-  return base::MakeUnique<cc::LatencyInfoSwapPromiseMonitor>(
+  return std::make_unique<cc::LatencyInfoSwapPromiseMonitor>(
       latency, layer_tree_host_->GetSwapPromiseManager(), nullptr);
 }
 
@@ -805,6 +809,9 @@ void RenderWidgetCompositor::SetVisible(bool visible) {
     return;
 
   layer_tree_host_->SetVisible(visible);
+
+  if (visible && layer_tree_frame_sink_request_failed_while_invisible_)
+    DidFailToInitializeLayerTreeFrameSink();
 }
 
 void RenderWidgetCompositor::SetPageScaleFactorAndLimits(
@@ -965,12 +972,6 @@ void RenderWidgetCompositor::UpdateEventRectsForSubframeIfNecessary() {
       touch_end_cancel_properties ==
           WebEventListenerProperties::kBlockingAndPassive;
 
-  WebEventListenerProperties wheel_event_properties =
-      EventListenerProperties(WebEventListenerClass::kMouseWheel);
-  bool has_wheel_handlers =
-      wheel_event_properties == WebEventListenerProperties::kBlocking ||
-      wheel_event_properties == WebEventListenerProperties::kBlockingAndPassive;
-
   cc::Layer* root_layer = layer_tree_host_->root_layer();
 
   cc::TouchActionRegion touch_event_handler;
@@ -979,11 +980,6 @@ void RenderWidgetCompositor::UpdateEventRectsForSubframeIfNecessary() {
                               gfx::Rect(gfx::Point(), root_layer->bounds()));
   }
   root_layer->SetTouchActionRegion(std::move(touch_event_handler));
-
-  cc::Region wheel_handler_region;
-  if (has_wheel_handlers)
-    wheel_handler_region = gfx::Rect(gfx::Point(), root_layer->bounds());
-  root_layer->SetNonFastScrollableRegion(wheel_handler_region);
 }
 
 blink::WebEventListenerProperties
@@ -1016,7 +1012,7 @@ void RenderWidgetCompositor::LayoutAndPaintAsync(
   layout_and_paint_async_callback_ = callback;
 
   if (CompositeIsSynchronous()) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    layer_tree_host_->GetTaskRunnerProvider()->MainThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&RenderWidgetCompositor::LayoutAndUpdateLayers,
                        weak_factory_.GetWeakPtr()));
@@ -1077,7 +1073,7 @@ void RenderWidgetCompositor::CompositeAndReadbackAsync(
   // be installed after layout which will happen as a part of the commit, for
   // widgets that delay the creation of their output surface.
   if (CompositeIsSynchronous()) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    layer_tree_host_->GetTaskRunnerProvider()->MainThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&RenderWidgetCompositor::SynchronouslyComposite,
                        weak_factory_.GetWeakPtr()));
@@ -1149,8 +1145,8 @@ void RenderWidgetCompositor::SetBrowserControlsShownRatio(float ratio) {
 
 void RenderWidgetCompositor::RequestDecode(
     const PaintImage& image,
-    const base::Callback<void(bool)>& callback) {
-  layer_tree_host_->QueueImageDecode(image, callback);
+    base::OnceCallback<void(bool)> callback) {
+  layer_tree_host_->QueueImageDecode(image, std::move(callback));
 
   // If we're compositing synchronously, the SetNeedsCommit call which will be
   // issued by |layer_tree_host_| is not going to cause a commit, due to the
@@ -1158,16 +1154,16 @@ void RenderWidgetCompositor::RequestDecode(
   // in this case we actually need a commit to transfer the decode requests to
   // the impl side. So, force a commit to happen.
   if (CompositeIsSynchronous()) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    layer_tree_host_->GetTaskRunnerProvider()->MainThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&RenderWidgetCompositor::SynchronouslyComposite,
                        weak_factory_.GetWeakPtr()));
   }
 }
 
-void RenderWidgetCompositor::SetScrollBoundaryBehavior(
-    const WebScrollBoundaryBehavior& behavior) {
-  layer_tree_host_->SetScrollBoundaryBehavior(behavior);
+void RenderWidgetCompositor::SetOverscrollBehavior(
+    const WebOverscrollBehavior& behavior) {
+  layer_tree_host_->SetOverscrollBehavior(behavior);
 }
 
 void RenderWidgetCompositor::WillBeginMainFrame() {
@@ -1192,8 +1188,9 @@ void RenderWidgetCompositor::BeginMainFrameNotExpectedUntil(
       time);
 }
 
-void RenderWidgetCompositor::UpdateLayerTreeHost() {
-  delegate_->UpdateVisualState();
+void RenderWidgetCompositor::UpdateLayerTreeHost(
+    VisualStateUpdate requested_update) {
+  delegate_->UpdateVisualState(requested_update);
 }
 
 void RenderWidgetCompositor::ApplyViewportDeltas(
@@ -1220,28 +1217,21 @@ void RenderWidgetCompositor::RequestNewLayerTreeFrameSink() {
   // the CreateLayerTreeFrameSink task.
   if (delegate_->IsClosing())
     return;
-
-#ifdef OS_ANDROID
-  LOG_IF(FATAL, attempt_software_fallback_)
-      << "Android does not support fallback frame sinks.";
-#endif
-
   delegate_->RequestNewLayerTreeFrameSink(
-      attempt_software_fallback_,
       base::Bind(&RenderWidgetCompositor::SetLayerTreeFrameSink,
                  weak_factory_.GetWeakPtr()));
 }
 
 void RenderWidgetCompositor::DidInitializeLayerTreeFrameSink() {
-  attempt_software_fallback_ = false;
 }
 
 void RenderWidgetCompositor::DidFailToInitializeLayerTreeFrameSink() {
-  LOG_IF(FATAL, attempt_software_fallback_)
-      << "Failed to create a fallback LayerTreeFrameSink.";
-
-  attempt_software_fallback_ = true;
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
+  if (!layer_tree_host_->IsVisible()) {
+    layer_tree_frame_sink_request_failed_while_invisible_ = true;
+    return;
+  }
+  layer_tree_frame_sink_request_failed_while_invisible_ = false;
+  layer_tree_host_->GetTaskRunnerProvider()->MainThreadTaskRunner()->PostTask(
       FROM_HERE,
       base::BindOnce(&RenderWidgetCompositor::RequestNewLayerTreeFrameSink,
                      weak_factory_.GetWeakPtr()));
@@ -1304,12 +1294,17 @@ void RenderWidgetCompositor::SetContentSourceId(uint32_t id) {
 }
 
 void RenderWidgetCompositor::NotifySwapTime(ReportTimeCallback callback) {
-  QueueSwapPromise(base::MakeUnique<ReportTimeSwapPromise>(
-      std::move(callback), base::ThreadTaskRunnerHandle::Get()));
+  QueueSwapPromise(std::make_unique<ReportTimeSwapPromise>(
+      std::move(callback),
+      layer_tree_host_->GetTaskRunnerProvider()->MainThreadTaskRunner()));
 }
 
 void RenderWidgetCompositor::RequestBeginMainFrameNotExpected(bool new_state) {
   layer_tree_host_->RequestBeginMainFrameNotExpected(new_state);
+}
+
+void RenderWidgetCompositor::SetURLForUkm(const GURL& url) {
+  layer_tree_host_->SetURLForUkm(url);
 }
 
 }  // namespace content

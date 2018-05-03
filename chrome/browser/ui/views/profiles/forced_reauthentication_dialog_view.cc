@@ -123,7 +123,7 @@ bool ForcedReauthenticationDialogView::Accept() {
   if (GetTimeRemaining() < base::TimeDelta::FromSeconds(kCloseDirectlyTimer)) {
     Signout(signin_manager_);
   } else {
-    browser_->signin_view_controller()->ShowModalSignin(
+    browser_->signin_view_controller()->ShowSignin(
         profiles::BubbleViewMode::BUBBLE_VIEW_MODE_GAIA_REAUTH, browser_,
         signin_metrics::AccessPoint::ACCESS_POINT_FORCE_SIGNIN_WARNING);
   }
@@ -209,8 +209,8 @@ void ForcedReauthenticationDialogView::AddedToWidget() {
       provider->GetDialogInsetsForContentType(views::TEXT, views::TEXT);
   SetBorder(views::CreateEmptyBorder(dialog_insets.top(), 0,
                                      dialog_insets.bottom(), 0));
-  views::GridLayout* dialog_layout = views::GridLayout::CreateAndInstall(this);
-  SetLayoutManager(dialog_layout);
+  views::GridLayout* dialog_layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   // Use a column set with no padding.
   dialog_layout->AddColumnSet(0)->AddColumn(views::GridLayout::FILL,
@@ -280,5 +280,5 @@ void ForcedReauthenticationDialogImpl::ShowDialog(
 // static
 std::unique_ptr<ForcedReauthenticationDialog>
 ForcedReauthenticationDialog::Create() {
-  return base::MakeUnique<ForcedReauthenticationDialogImpl>();
+  return std::make_unique<ForcedReauthenticationDialogImpl>();
 }

@@ -102,6 +102,7 @@ Informácie o ochrane osobných údajov nájdete v Pravidlách ochrany osobných
 <translation id="3106379468611574572">Vzdialený počítač nereaguje na žiadosti o pripojenie. Skontrolujte, či je online a skúste to znova.</translation>
 <translation id="310979712355504754">Odstrániť všetko</translation>
 <translation id="3150823315463303127">Hostiteľovi sa nepodarilo prečítať pravidlá</translation>
+<translation id="3171922709365450819">Klient toto zariadenie nepodporuje, pretože vyžaduje overenie prostredníctvom tretej strany.</translation>
 <translation id="3194245623920924351">Vzdialená plocha Chrome</translation>
 <translation id="3197730452537982411">Vzdialená plocha</translation>
 <translation id="324272851072175193">Odoslať tieto pokyny e-mailom</translation>
@@ -337,6 +338,7 @@ PC</translation>
 <translation id="8998327464021325874">Ovládač hostiteľa Vzdialenej plochy Chrome</translation>
 <translation id="9016232822027372900">Pripojiť</translation>
 <translation id="906458777597946297">Maximalizovať okno</translation>
+<translation id="9111855907838866522">Pripojili ste sa k vzdialenému zariadeniu. Ak chcete otvoriť ponuku, klepnite na obrazovku štyrmi prstami.</translation>
 <translation id="9126115402994542723">Pri pripojení k tomuto hostiteľovi z tohto zariadenia nepožadovať znova kód PIN.</translation>
 <translation id="9149580767411232853">Ponechať celú vzdialenú plochu viditeľnú</translation>
 <translation id="9149992051684092333">Ak chcete začať zdieľať svoju pracovnú plochu, poskytnite nižšie uvedený prístupový kód osobe, ktorá vám bude pomáhať.</translation>

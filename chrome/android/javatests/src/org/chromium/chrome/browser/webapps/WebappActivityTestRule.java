@@ -8,6 +8,7 @@ import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import android.content.Intent;
 import android.net.Uri;
+import android.support.customtabs.TrustedWebUtils;
 import android.support.test.InstrumentationRegistry;
 import android.view.ViewGroup;
 
@@ -16,12 +17,15 @@ import org.junit.Rule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.EmbeddedTestServerRule;
 
 /**
@@ -74,8 +78,8 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
         super(WebappActivity0.class);
     }
 
-    public String getUrlFromTestServer(String relativeUrl) {
-        return mTestServerRule.getServer().getURL(relativeUrl);
+    public EmbeddedTestServer getTestServer() {
+        return mTestServerRule.getServer();
     }
 
     /**
@@ -95,19 +99,52 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
         return intent;
     }
 
+    /** Adds a mock Custom Tab session token to the intent. */
+    public void addTwaExtrasToIntent(Intent intent) {
+        Intent cctIntent = CustomTabsTestUtils.createMinimalCustomTabIntent(
+                InstrumentationRegistry.getTargetContext(), "about:blank");
+        intent.putExtras(cctIntent.getExtras());
+        intent.putExtra(TrustedWebUtils.EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY, true);
+    }
+
     @Override
     public Statement apply(final Statement base, Description description) {
         Statement webappTestRuleStatement = new Statement() {
             @Override
             public void evaluate() throws Throwable {
-                // Register the webapp so when the data storage is opened, the test doesn't crash.
-                WebappRegistry.refreshSharedPrefsForTesting();
-                TestFetchStorageCallback callback = new TestFetchStorageCallback();
-                WebappRegistry.getInstance().register(WEBAPP_ID, callback);
+                // We run the WebappRegistry calls on the UI thread to prevent
+                // ConcurrentModificationExceptions caused by multiple threads iterating and
+                // modifying its hashmap at the same time.
+                final TestFetchStorageCallback callback = new TestFetchStorageCallback();
+                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+                    @Override
+                    public void run() {
+                        // Register the webapp so when the data storage is opened, the test doesn't
+                        // crash.
+                        WebappRegistry.refreshSharedPrefsForTesting();
+                        WebappRegistry.getInstance().register(WEBAPP_ID, callback);
+                    }
+                });
+
+                // Running this on the UI thread causes issues, so can't group everything into one
+                // runnable.
                 callback.waitForCallback(0);
-                callback.getStorage().updateFromShortcutIntent(createIntent());
+
+                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+                    @Override
+                    public void run() {
+                        callback.getStorage().updateFromShortcutIntent(createIntent());
+                    }
+                });
+
                 base.evaluate();
-                WebappRegistry.getInstance().clearForTesting();
+
+                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+                    @Override
+                    public void run() {
+                        WebappRegistry.getInstance().clearForTesting();
+                    }
+                });
             }
         };
 
@@ -169,7 +206,7 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
             throws Exception {
         // Reset the url to one that takes more time to load.
         // This is to make sure splash screen won't disappear during test.
-        intent.putExtra(ShortcutHelper.EXTRA_URL, getUrlFromTestServer("/slow?2"));
+        intent.putExtra(ShortcutHelper.EXTRA_URL, getTestServer().getURL("/slow?2"));
         launchActivity(intent);
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         CriteriaHelper.pollInstrumentationThread(new Criteria() {

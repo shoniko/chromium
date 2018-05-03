@@ -34,8 +34,9 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "device/geolocation/geoposition.h"
 #include "device/geolocation/network_location_request.h"
+#include "device/geolocation/public/cpp/scoped_geolocation_overrider.h"
+#include "device/geolocation/public/interfaces/geoposition.mojom.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -44,7 +45,8 @@
 namespace {
 
 std::string GetErrorCodePermissionDenied() {
-  return base::IntToString(device::Geoposition::ERROR_CODE_PERMISSION_DENIED);
+  return base::IntToString(static_cast<int>(
+      device::mojom::Geoposition::ErrorCode::PERMISSION_DENIED));
 }
 
 std::string RunScript(content::RenderFrameHost* render_frame_host,
@@ -231,10 +233,9 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   };
 
   GeolocationBrowserTest();
-  ~GeolocationBrowserTest() override;
+  ~GeolocationBrowserTest() override = default;
 
   // InProcessBrowserTest:
-  void SetUpOnMainThread() override;
   void TearDownInProcessBrowserTestFixture() override;
 
   Browser* current_browser() { return current_browser_; }
@@ -292,8 +293,11 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   // Convenience method to look up the number of queued permission requests.
   int GetRequestQueueSize(PermissionRequestManager* manager);
 
-  // Toggle whether the prompt decision should be persisted.
-  void TogglePersist(bool persist);
+ protected:
+  // The values used for the position override.
+  double fake_latitude_ = 1.23;
+  double fake_longitude_ = 4.56;
+  std::unique_ptr<device::ScopedGeolocationOverrider> geolocation_overrider_;
 
  private:
   // Calls watchPosition() in JavaScript and accepts or denies the resulting
@@ -316,22 +320,40 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   // The urls for the iframes loaded by LoadIFrames.
   std::vector<GURL> iframe_urls_;
 
-  // The values used for the position override.
-  double fake_latitude_ = 1.23;
-  double fake_longitude_ = 4.56;
 
   DISALLOW_COPY_AND_ASSIGN(GeolocationBrowserTest);
 };
 
-GeolocationBrowserTest::GeolocationBrowserTest() {
+// This class is only used by test case of UrlWithApiKey which connects the
+// real geolocation implementation instead of the FakeGeolocation.
+// TODO(ke.he@intel.com): crbug.com/788298. Remove this class and rewrite the
+// test case of UrlWithApiKey as a services_unittest. Also remove the
+// ui_test_utils::OverrideGeolocation() then.
+class GeolocationBrowserTestWithoutOverrider : public GeolocationBrowserTest {
+ public:
+  GeolocationBrowserTestWithoutOverrider();
+  ~GeolocationBrowserTestWithoutOverrider() override = default;
+  void SetUpOnMainThread() override;
+
+  DISALLOW_COPY_AND_ASSIGN(GeolocationBrowserTestWithoutOverrider);
+};
+
+GeolocationBrowserTestWithoutOverrider::
+    GeolocationBrowserTestWithoutOverrider() {
+  geolocation_overrider_.reset();
 }
 
-GeolocationBrowserTest::~GeolocationBrowserTest() {
-}
-
-void GeolocationBrowserTest::SetUpOnMainThread() {
+void GeolocationBrowserTestWithoutOverrider::SetUpOnMainThread() {
   ui_test_utils::OverrideGeolocation(fake_latitude_, fake_longitude_);
 }
+
+// WebContentImpl tries to connect Device Service earlier than
+// of SetUpOnMainThread(), so create the |geolocation_overrider_| here.
+GeolocationBrowserTest::GeolocationBrowserTest()
+    : geolocation_overrider_(
+          std::make_unique<device::ScopedGeolocationOverrider>(
+              fake_latitude_,
+              fake_longitude_)) {}
 
 void GeolocationBrowserTest::TearDownInProcessBrowserTestFixture() {
   LOG(WARNING) << "TearDownInProcessBrowserTestFixture. Test Finished.";
@@ -427,9 +449,9 @@ void GeolocationBrowserTest::WatchPositionAndObservePermissionRequest(
 void GeolocationBrowserTest::ExpectPosition(double latitude, double longitude) {
   // Checks we have no error.
   ExpectValueFromScript("0", "geoGetLastError()");
-  ExpectValueFromScript(base::DoubleToString(latitude),
+  ExpectValueFromScript(base::NumberToString(latitude),
                         "geoGetLastPositionLatitude()");
-  ExpectValueFromScript(base::DoubleToString(longitude),
+  ExpectValueFromScript(base::NumberToString(longitude),
                         "geoGetLastPositionLongitude()");
 }
 
@@ -454,7 +476,8 @@ bool GeolocationBrowserTest::SetPositionAndWaitUntilUpdated(double latitude,
 
   fake_latitude_ = latitude;
   fake_longitude_ = longitude;
-  ui_test_utils::OverrideGeolocation(latitude, longitude);
+
+  geolocation_overrider_->UpdateLocation(fake_latitude_, fake_longitude_);
 
   std::string result;
   if (!dom_message_queue.WaitForMessage(&result))
@@ -465,13 +488,6 @@ bool GeolocationBrowserTest::SetPositionAndWaitUntilUpdated(double latitude,
 int GeolocationBrowserTest::GetRequestQueueSize(
     PermissionRequestManager* manager) {
   return static_cast<int>(manager->requests_.size());
-}
-
-void GeolocationBrowserTest::TogglePersist(bool persist) {
-  content::WebContents* web_contents =
-      current_browser()->tab_strip_model()->GetActiveWebContents();
-  PermissionRequestManager::FromWebContents(web_contents)
-      ->TogglePersist(persist);
 }
 
 // Tests ----------------------------------------------------------------------
@@ -504,7 +520,8 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, Geoposition) {
 #endif
 // Tests that Chrome makes a network geolocation request to the correct URL
 // including Google API key query param.
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_UrlWithApiKey) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTestWithoutOverrider,
+                       MAYBE_UrlWithApiKey) {
   ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
 
   // Unique ID (derived from Gerrit CL number):
@@ -605,46 +622,6 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoLeakFromOffTheRecord) {
   ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
   ASSERT_TRUE(WatchPositionAndGrantPermission());
   ExpectPosition(fake_latitude(), fake_longitude());
-}
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, TogglePersistGranted) {
-  // Initialize and turn persistence off.
-  ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
-  TogglePersist(false);
-
-  ASSERT_TRUE(WatchPositionAndGrantPermission());
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            GetHostContentSettingsMap()->GetContentSetting(
-                current_url(), current_url(), CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                std::string()));
-
-  // Expect the grant to be remembered at the blink layer, so a second request
-  // on this page doesn't create a request.
-  WatchPositionAndObservePermissionRequest(false);
-
-  // Navigate and ensure that a prompt is shown when we request again.
-  ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
-  WatchPositionAndObservePermissionRequest(true);
-}
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, TogglePersistBlocked) {
-  // Initialize and turn persistence off.
-  ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
-  TogglePersist(false);
-
-  ASSERT_TRUE(WatchPositionAndDenyPermission());
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            GetHostContentSettingsMap()->GetContentSetting(
-                current_url(), current_url(), CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                std::string()));
-
-  // Expect the page to make another request since we have not persisted the
-  // user's response.
-  WatchPositionAndObservePermissionRequest(true);
-
-  // Navigate and ensure that a prompt is shown when we request again.
-  ASSERT_NO_FATAL_FAILURE(Initialize(INITIALIZATION_DEFAULT));
-  WatchPositionAndObservePermissionRequest(true);
 }
 
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithFreshPosition) {

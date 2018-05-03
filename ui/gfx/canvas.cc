@@ -9,7 +9,6 @@
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "build/config/linux/pangocairo/features.h"
 #include "cc/paint/paint_flags.h"
 #include "cc/paint/paint_shader.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -35,13 +34,6 @@ Canvas::Canvas(const Size& size, float image_scale, bool is_opaque)
     : image_scale_(image_scale) {
   Size pixel_size = ScaleToCeiledSize(size, image_scale);
   canvas_ = CreateOwnedCanvas(pixel_size, is_opaque);
-
-#if !BUILDFLAG(USE_PANGOCAIRO)
-  // skia::PlatformCanvas instances are initialized to 0 by Cairo, but
-  // uninitialized on other platforms.
-  if (!is_opaque)
-    canvas_->clear(SkColorSetARGB(0, 0, 0, 0));
-#endif
 
   SkScalar scale_scalar = SkFloatToScalar(image_scale);
   canvas_->scale(scale_scalar, scale_scalar);
@@ -75,28 +67,31 @@ void Canvas::SizeStringInt(const base::string16& text,
                            int* width,
                            int* height,
                            int line_height,
-                           int flags) {
+                           int flags,
+                           Typesetter typesetter) {
   float fractional_width = static_cast<float>(*width);
   float factional_height = static_cast<float>(*height);
-  SizeStringFloat(text, font_list, &fractional_width,
-                  &factional_height, line_height, flags);
+  SizeStringFloat(text, font_list, &fractional_width, &factional_height,
+                  line_height, flags, typesetter);
   *width = ToCeiledInt(fractional_width);
   *height = ToCeiledInt(factional_height);
 }
 
 // static
 int Canvas::GetStringWidth(const base::string16& text,
-                           const FontList& font_list) {
+                           const FontList& font_list,
+                           Typesetter typesetter) {
   int width = 0, height = 0;
-  SizeStringInt(text, font_list, &width, &height, 0, NO_ELLIPSIS);
+  SizeStringInt(text, font_list, &width, &height, 0, NO_ELLIPSIS, typesetter);
   return width;
 }
 
 // static
 float Canvas::GetStringWidthF(const base::string16& text,
-                              const FontList& font_list) {
+                              const FontList& font_list,
+                              Typesetter typesetter) {
   float width = 0, height = 0;
-  SizeStringFloat(text, font_list, &width, &height, 0, NO_ELLIPSIS);
+  SizeStringFloat(text, font_list, &width, &height, 0, NO_ELLIPSIS, typesetter);
   return width;
 }
 

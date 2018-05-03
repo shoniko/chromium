@@ -1,10 +1,11 @@
+include_rules = [
+  "+services/network/public/cpp",
+]
+
 specific_include_rules = {
   ".*\.cc": [
     "+content/common",
     "+third_party/WebKit/common",
-  ],
-  "resource_request_body.h": [
-    "+third_party/WebKit/common/blob/size_getter.mojom.h",
   ],
   "simple_url_loader\.cc": [
     "-content/",

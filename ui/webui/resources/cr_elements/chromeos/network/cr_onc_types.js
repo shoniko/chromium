@@ -124,6 +124,12 @@ CrOnc.ProxySettingsType = chrome.networkingPrivate.ProxySettingsType;
 CrOnc.Type = chrome.networkingPrivate.NetworkType;
 
 /** @enum {string} */
+CrOnc.Authentication = {
+  NONE: 'None',
+  WEP_8021X: '8021X',
+};
+
+/** @enum {string} */
 CrOnc.IPsecAuthenticationType = {
   CERT: 'Cert',
   PSK: 'PSK',
@@ -301,16 +307,19 @@ CrOnc.getSimpleActiveProperties = function(properties) {
 CrOnc.getIPConfigForType = function(properties, type) {
   'use strict';
   /** @type {!CrOnc.IPConfigProperties|undefined} */ var ipConfig = undefined;
+  /** @type {!CrOnc.IPType|undefined} */ var ipType = undefined;
   var ipConfigs = properties.IPConfigs;
   if (ipConfigs) {
     for (var i = 0; i < ipConfigs.length; ++i) {
       ipConfig = ipConfigs[i];
-      if (ipConfig.Type == type)
+      ipType = ipConfig.Type ? /** @type {CrOnc.IPType} */ (ipConfig.Type) :
+                               undefined;
+      if (ipType == type)
         break;
     }
   }
   if (type != CrOnc.IPType.IPV4)
-    return ipConfig;
+    return type == ipType ? ipConfig : undefined;
 
   var staticIpConfig =
       /** @type {!CrOnc.IPConfigProperties|undefined} */ (
@@ -411,6 +420,15 @@ CrOnc.getNetworkName = function(properties) {
     }
   }
   return name;
+};
+
+/**
+ * @param {!CrOnc.NetworkProperties|!CrOnc.NetworkStateProperties|undefined}
+ *     properties The ONC network properties or state properties.
+ * @return {string} The name to display for |network|.
+ */
+CrOnc.getEscapedNetworkName = function(properties) {
+  return HTMLEscape(CrOnc.getNetworkName(properties));
 };
 
 /**

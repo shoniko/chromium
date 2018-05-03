@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/android/config.gni")
+if (is_android) {
+  import("//build/config/android/abi.gni")
+}
 import("//build/config/arm.gni")
 import("//build/config/chrome_build.gni")
 import("//build/config/chromecast_build.gni")
@@ -89,7 +91,7 @@ optimize_for_size = is_android || is_ios
 
 # Determine whether to enable or disable frame pointers, based on the platform
 # and build arguments.
-if (is_mac || is_ios) {
+if (is_mac || is_ios || is_linux) {
   enable_frame_pointers = true
 } else if (is_win) {
   # 64-bit Windows ABI doesn't support frame pointers.
@@ -106,6 +108,7 @@ if (is_mac || is_ios) {
   enable_frame_pointers = current_cpu != "arm"
 } else if (is_android) {
   enable_frame_pointers =
+      enable_profiling ||
       # Ensure that stacks from arm64 crash dumps are usable (crbug.com/391706).
       current_cpu == "arm64" ||
       # For x86 Android, unwind tables are huge without frame pointers
@@ -188,8 +191,8 @@ if (symbol_level == -1) {
     # by visual studio (repeated in every .obj file) makes linker
     # memory consumption and link times unsustainable (crbug.com/630074).
     # Clang on windows does not have this issue.
-    # If you use is_win_fastlink = true then you can set symbol_level = 2 when
-    # using goma.
+    # If you use is_win_fastlink = true or lld or clang then you can set
+    # symbol_level = 2 when using goma.
     symbol_level = 1
   } else if ((!is_nacl && !is_linux && !is_fuchsia) || is_debug ||
              is_official_build || is_chromecast) {
@@ -206,8 +209,9 @@ if (symbol_level == -1) {
 } else if (symbol_level == 2) {
   if (is_win) {
     # See crbug.com/630074
-    assert(is_win_fastlink || !use_goma,
-           "Goma builds that use symbol_level 2 must use is_win_fastlink.")
+    assert(is_win_fastlink || use_lld || !use_goma || is_clang,
+           "VC++ goma builds that use symbol_level 2 must use " +
+               "is_win_fastlink or use_lld.")
   }
 }
 

@@ -5,16 +5,17 @@
 #ifndef Sensor_h
 #define Sensor_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
+#include "common/feature_policy/feature_policy.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMHighResTimeStamp.h"
 #include "core/dom/DOMTimeStamp.h"
-#include "core/dom/SuspendableObject.h"
+#include "core/dom/PausableObject.h"
 #include "core/frame/PlatformEventController.h"
 #include "modules/EventTargetModules.h"
 #include "modules/sensor/SensorOptions.h"
 #include "modules/sensor/SensorProxy.h"
 #include "platform/WebTaskRunner.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
@@ -65,7 +66,8 @@ class Sensor : public EventTargetWithInlineData,
   Sensor(ExecutionContext*,
          const SensorOptions&,
          ExceptionState&,
-         device::mojom::blink::SensorType);
+         device::mojom::blink::SensorType,
+         const Vector<FeaturePolicyFeature>&);
 
   using SensorConfigurationPtr = device::mojom::blink::SensorConfigurationPtr;
   using SensorConfiguration = device::mojom::blink::SensorConfiguration;

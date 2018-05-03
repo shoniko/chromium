@@ -29,7 +29,6 @@
 #include "core/CoreInitializer.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/Document.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/events/Event.h"
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/UseCounter.h"
@@ -41,6 +40,7 @@
 #include "core/loader/NetworkHintsInterface.h"
 #include "core/origin_trials/origin_trials.h"
 #include "platform/weborigin/SecurityPolicy.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebIconSizesParser.h"
 #include "public/platform/WebSize.h"
 
@@ -62,7 +62,7 @@ HTMLLinkElement* HTMLLinkElement::Create(Document& document,
   return new HTMLLinkElement(document, created_by_parser);
 }
 
-HTMLLinkElement::~HTMLLinkElement() {}
+HTMLLinkElement::~HTMLLinkElement() = default;
 
 void HTMLLinkElement::ParseAttribute(
     const AttributeModificationParams& params) {
@@ -103,6 +103,8 @@ void HTMLLinkElement::ParseAttribute(
   } else if (name == scopeAttr) {
     scope_ = value;
     Process();
+  } else if (name == integrityAttr) {
+    integrity_ = value;
   } else if (name == disabledAttr) {
     UseCounter::Count(GetDocument(), WebFeature::kHTMLLinkElementDisabled);
     if (LinkStyle* link = GetLinkStyle())
@@ -128,13 +130,15 @@ bool HTMLLinkElement::LoadLink(const String& type,
                                const String& as,
                                const String& media,
                                const String& nonce,
+                               const String& integrity,
                                ReferrerPolicy referrer_policy,
                                const KURL& url) {
-  return link_loader_->LoadLink(rel_attribute_,
-                                GetCrossOriginAttributeValue(FastGetAttribute(
-                                    HTMLNames::crossoriginAttr)),
-                                type, as, media, nonce, referrer_policy, url,
-                                GetDocument(), NetworkHintsInterfaceImpl());
+  return link_loader_->LoadLink(
+      rel_attribute_,
+      GetCrossOriginAttributeValue(
+          FastGetAttribute(HTMLNames::crossoriginAttr)),
+      type, as, media, nonce, integrity, referrer_policy, url, GetDocument(),
+      NetworkHintsInterfaceImpl());
 }
 
 LinkResource* HTMLLinkElement::LinkResourceToProcess() {
@@ -149,12 +153,6 @@ LinkResource* HTMLLinkElement::LinkResourceToProcess() {
       link_ = LinkImport::Create(this);
     } else if (rel_attribute_.IsManifest()) {
       link_ = LinkManifest::Create(this);
-    } else if (rel_attribute_.IsServiceWorker() &&
-               OriginTrials::linkServiceWorkerEnabled(GetExecutionContext())) {
-      if (GetDocument().GetFrame()) {
-        link_ = CoreInitializer::GetInstance().CreateServiceWorkerLinkResource(
-            this);
-      }
     } else {
       LinkStyle* link = LinkStyle::Create(this);
       if (FastHasAttribute(disabledAttr)) {
@@ -274,7 +272,7 @@ void HTMLLinkElement::DidSendDOMContentLoadedForLinkPrerender() {
 }
 
 scoped_refptr<WebTaskRunner> HTMLLinkElement::GetLoadingTaskRunner() {
-  return TaskRunnerHelper::Get(TaskType::kNetworking, &GetDocument());
+  return GetDocument().GetTaskRunner(TaskType::kNetworking);
 }
 
 bool HTMLLinkElement::SheetLoaded() {
@@ -302,8 +300,9 @@ void HTMLLinkElement::DispatchPendingEvent(
 }
 
 void HTMLLinkElement::ScheduleEvent() {
-  TaskRunnerHelper::Get(TaskType::kDOMManipulation, &GetDocument())
-      ->PostTask(BLINK_FROM_HERE,
+  GetDocument()
+      .GetTaskRunner(TaskType::kDOMManipulation)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&HTMLLinkElement::DispatchPendingEvent,
                            WrapPersistent(this),
                            WTF::Passed(IncrementLoadEventDelayCount::Create(

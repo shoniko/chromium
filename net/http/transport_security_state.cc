@@ -12,8 +12,8 @@
 #include "base/build_time.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -30,6 +30,7 @@
 #include "net/cert/x509_certificate.h"
 #include "net/dns/dns_util.h"
 #include "net/http/http_security_headers.h"
+#include "net/net_features.h"
 #include "net/ssl/ssl_info.h"
 
 #if !defined(OS_NACL)
@@ -71,8 +72,7 @@ bool IsDynamicExpectCTEnabled() {
 void RecordUMAForHPKPReportFailure(const GURL& report_uri,
                                    int net_error,
                                    int http_response_code) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.PublicKeyPinReportSendingFailure2",
-                              -net_error);
+  base::UmaHistogramSparse("Net.PublicKeyPinReportSendingFailure2", -net_error);
 }
 
 std::string TimeToISO8601(const base::Time& t) {
@@ -142,7 +142,7 @@ bool GetHPKPReport(const HostPortPair& host_port_pair,
   for (const auto& hash_value : pkp_state.spki_hashes) {
     std::string known_pin;
 
-    switch (hash_value.tag) {
+    switch (hash_value.tag()) {
       case HASH_VALUE_SHA256:
         known_pin += "pin-sha256=";
         break;
@@ -882,22 +882,28 @@ TransportSecurityState::CheckCTRequirements(
     const SignedCertificateTimestampAndStatusList&
         signed_certificate_timestamps,
     const ExpectCTReportStatus report_status,
-    ct::CertPolicyCompliance cert_policy_compliance) {
+    ct::CTPolicyCompliance policy_compliance) {
   using CTRequirementLevel = RequireCTDelegate::CTRequirementLevel;
   std::string hostname = host_port_pair.host();
 
+  // A connection is considered compliant if it has sufficient SCTs or if the
+  // build is outdated. Other statuses are not considered compliant; this
+  // includes COMPLIANCE_DETAILS_NOT_AVAILABLE because compliance must have been
+  // evaluated in order to determine that the connection is compliant.
   bool complies =
-      (cert_policy_compliance ==
-           ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS ||
-       cert_policy_compliance ==
-           ct::CertPolicyCompliance::CERT_POLICY_BUILD_NOT_TIMELY);
+      (policy_compliance ==
+           ct::CTPolicyCompliance::CT_POLICY_COMPLIES_VIA_SCTS ||
+       policy_compliance == ct::CTPolicyCompliance::CT_POLICY_BUILD_NOT_TIMELY);
 
   // Check Expect-CT first so that other CT requirements do not prevent
   // Expect-CT reports from being sent.
   ExpectCTState state;
   if (is_issued_by_known_root && IsDynamicExpectCTEnabled() &&
       GetDynamicExpectCTState(hostname, &state)) {
-    if (expect_ct_reporter_ && !state.report_uri.is_empty() &&
+    UMA_HISTOGRAM_ENUMERATION(
+        "Net.ExpectCTHeader.PolicyComplianceOnConnectionSetup",
+        policy_compliance, ct::CTPolicyCompliance::CT_POLICY_MAX);
+    if (!complies && expect_ct_reporter_ && !state.report_uri.is_empty() &&
         report_status == ENABLE_EXPECT_CT_REPORTS) {
       MaybeNotifyExpectCTFailed(host_port_pair, state.report_uri, state.expiry,
                                 validated_certificate_chain,
@@ -943,9 +949,12 @@ TransportSecurityState::CheckCTRequirements(
 
   const base::Time epoch = base::Time::UnixEpoch();
   const CTRequiredPolicies& ct_required_policies = GetCTRequiredPolicies();
+
+  bool found = false;
   for (const auto& restricted_ca : ct_required_policies) {
-    if (epoch + restricted_ca.effective_date >
-        validated_certificate_chain->valid_start()) {
+    if (!restricted_ca.effective_date.is_zero() &&
+        (epoch + restricted_ca.effective_date >
+         validated_certificate_chain->valid_start())) {
       // The candidate cert is not subject to the CT policy, because it
       // was issued before the effective CT date.
       continue;
@@ -960,15 +969,21 @@ TransportSecurityState::CheckCTRequirements(
     // Found a match, indicating this certificate is potentially
     // restricted. Determine if any of the hashes are on the exclusion
     // list as exempt from the CT requirement.
-    if (IsAnySHA256HashInSortedArray(public_key_hashes,
+    if (restricted_ca.exceptions &&
+        IsAnySHA256HashInSortedArray(public_key_hashes,
                                      restricted_ca.exceptions,
                                      restricted_ca.exceptions_length)) {
       // Found an excluded sub-CA; CT is not required.
-      return default_response;
+      continue;
     }
-    // No exception found. This certificate must conform to the CT policy.
-    return complies ? CT_REQUIREMENTS_MET : CT_REQUIREMENTS_NOT_MET;
+
+    // No exception found. This certificate must conform to the CT policy. The
+    // compliance state is treated as additive - it must comply with all
+    // stated policies.
+    found = true;
   }
+  if (found)
+    return complies ? CT_REQUIREMENTS_MET : CT_REQUIREMENTS_NOT_MET;
 
   return default_response;
 }
@@ -1466,15 +1481,17 @@ void TransportSecurityState::ProcessExpectCTHeader(
   if (value == "preload") {
     if (!expect_ct_reporter_)
       return;
-    if (!IsBuildTimely())
-      return;
     if (!ssl_info.is_issued_by_known_root)
       return;
-    if (!ssl_info.ct_compliance_details_available)
+    if (ssl_info.ct_policy_compliance ==
+            ct::CTPolicyCompliance::
+                CT_POLICY_COMPLIANCE_DETAILS_NOT_AVAILABLE ||
+        ssl_info.ct_policy_compliance ==
+            ct::CTPolicyCompliance::CT_POLICY_COMPLIES_VIA_SCTS ||
+        ssl_info.ct_policy_compliance ==
+            ct::CTPolicyCompliance::CT_POLICY_BUILD_NOT_TIMELY) {
       return;
-    if (ssl_info.ct_cert_policy_compliance ==
-        ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS)
-      return;
+    }
     ExpectCTState state;
     if (GetStaticExpectCTState(host_port_pair.host(), &state)) {
       MaybeNotifyExpectCTFailed(host_port_pair, state.report_uri, base::Time(),
@@ -1501,11 +1518,11 @@ void TransportSecurityState::ProcessExpectCTHeader(
   // public root or did not comply with CT policy.
   if (!ssl_info.is_issued_by_known_root)
     return;
-  if (!ssl_info.ct_compliance_details_available)
-    return;
-  if (ssl_info.ct_cert_policy_compliance !=
-      ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS) {
-    ExpectCTState state;
+  UMA_HISTOGRAM_ENUMERATION(
+      "Net.ExpectCTHeader.PolicyComplianceOnHeaderProcessing",
+      ssl_info.ct_policy_compliance, ct::CTPolicyCompliance::CT_POLICY_MAX);
+  if (ssl_info.ct_policy_compliance !=
+      ct::CTPolicyCompliance::CT_POLICY_COMPLIES_VIA_SCTS) {
     // If an Expect-CT header is observed over a non-compliant connection, the
     // site owner should be notified about the misconfiguration. If the site was
     // already opted in to Expect-CT, this report would have been sent at
@@ -1513,6 +1530,16 @@ void TransportSecurityState::ProcessExpectCTHeader(
     // however, the lack of CT compliance would not have been evaluated/reported
     // at connection setup time, so it needs to be reported here while
     // processing the header.
+    if (ssl_info.ct_policy_compliance ==
+            ct::CTPolicyCompliance::CT_POLICY_BUILD_NOT_TIMELY ||
+        ssl_info.ct_policy_compliance ==
+            ct::CTPolicyCompliance::
+                CT_POLICY_COMPLIANCE_DETAILS_NOT_AVAILABLE) {
+      // Only send reports for truly non-compliant connections, not those for
+      // which compliance wasn't checked.
+      return;
+    }
+    ExpectCTState state;
     if (expect_ct_reporter_ && !report_uri.is_empty() &&
         !GetDynamicExpectCTState(host_port_pair.host(), &state)) {
       MaybeNotifyExpectCTFailed(host_port_pair, report_uri, base::Time(),
@@ -1762,8 +1789,7 @@ TransportSecurityState::STSState::STSState()
     : upgrade_mode(MODE_DEFAULT), include_subdomains(false) {
 }
 
-TransportSecurityState::STSState::~STSState() {
-}
+TransportSecurityState::STSState::~STSState() = default;
 
 bool TransportSecurityState::STSState::ShouldUpgradeToSSL() const {
   return upgrade_mode == MODE_FORCE_HTTPS;
@@ -1775,20 +1801,18 @@ TransportSecurityState::STSStateIterator::STSStateIterator(
       end_(state.enabled_sts_hosts_.end()) {
 }
 
-TransportSecurityState::STSStateIterator::~STSStateIterator() {
-}
+TransportSecurityState::STSStateIterator::~STSStateIterator() = default;
 
 TransportSecurityState::PKPState::PKPState() : include_subdomains(false) {
 }
 
 TransportSecurityState::PKPState::PKPState(const PKPState& other) = default;
 
-TransportSecurityState::PKPState::~PKPState() {
-}
+TransportSecurityState::PKPState::~PKPState() = default;
 
 TransportSecurityState::ExpectCTState::ExpectCTState() : enforce(false) {}
 
-TransportSecurityState::ExpectCTState::~ExpectCTState() {}
+TransportSecurityState::ExpectCTState::~ExpectCTState() = default;
 
 TransportSecurityState::ExpectCTStateIterator::ExpectCTStateIterator(
     const TransportSecurityState& state)
@@ -1797,12 +1821,13 @@ TransportSecurityState::ExpectCTStateIterator::ExpectCTStateIterator(
   state.AssertCalledOnValidThread();
 }
 
-TransportSecurityState::ExpectCTStateIterator::~ExpectCTStateIterator() {}
+TransportSecurityState::ExpectCTStateIterator::~ExpectCTStateIterator() =
+    default;
 
 TransportSecurityState::ExpectStapleState::ExpectStapleState()
     : include_subdomains(false) {}
 
-TransportSecurityState::ExpectStapleState::~ExpectStapleState() {}
+TransportSecurityState::ExpectStapleState::~ExpectStapleState() = default;
 
 bool TransportSecurityState::PKPState::CheckPublicKeyPins(
     const HashValueVector& hashes,
@@ -1849,7 +1874,6 @@ TransportSecurityState::PKPStateIterator::PKPStateIterator(
       end_(state.enabled_pkp_hosts_.end()) {
 }
 
-TransportSecurityState::PKPStateIterator::~PKPStateIterator() {
-}
+TransportSecurityState::PKPStateIterator::~PKPStateIterator() = default;
 
 }  // namespace net

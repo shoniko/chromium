@@ -144,7 +144,6 @@ void DomainReliabilityScheduler::OnUploadComplete(
   backoff->InformOfRequest(result.is_success());
   if (result.is_retry_after())
     backoff->SetCustomReleaseTime(time_->NowTicks() + result.retry_after);
-  last_collector_retry_delay_ = backoff->GetTimeUntilRelease();
 
   if (!result.is_success()) {
     // Restore upload_pending_ and first_beacon_time_ to pre-upload state,
@@ -231,9 +230,9 @@ void DomainReliabilityScheduler::MaybeScheduleUpload() {
   callback_.Run(min_delay, max_delay);
 }
 
-// TODO(ttuttle): Add min and max interval to config, use that instead.
+// TODO(juliatuttle): Add min and max interval to config, use that instead.
 
-// TODO(ttuttle): Cap min and max intervals received from config.
+// TODO(juliatuttle): Cap min and max intervals received from config.
 
 void DomainReliabilityScheduler::GetNextUploadTimeAndCollector(
     base::TimeTicks now,

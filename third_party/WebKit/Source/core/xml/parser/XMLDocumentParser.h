@@ -30,9 +30,9 @@
 #include <memory>
 #include "core/dom/ParserContentPolicy.h"
 #include "core/dom/ScriptableDocumentParser.h"
+#include "core/script/XMLParserScriptRunner.h"
+#include "core/script/XMLParserScriptRunnerHost.h"
 #include "core/xml/parser/XMLErrors.h"
-#include "core/xml/parser/XMLParserScriptRunner.h"
-#include "core/xml/parser/XMLParserScriptRunnerHost.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/ResourceClient.h"
 #include "platform/text/SegmentedString.h"
@@ -109,7 +109,7 @@ class XMLDocumentParser final : public ScriptableDocumentParser,
     USING_FAST_MALLOC(PendingCallback);
 
    public:
-    virtual ~PendingCallback() {}
+    virtual ~PendingCallback() = default;
     virtual void Call(XMLDocumentParser*) = 0;
   };
 
@@ -120,7 +120,7 @@ class XMLDocumentParser final : public ScriptableDocumentParser,
   XMLDocumentParser(DocumentFragment*, Element*, ParserContentPolicy);
 
   // From DocumentParser
-  void insert(const SegmentedString&) override;
+  void insert(const String&) override { NOTREACHED(); }
   void Append(const String&) override;
   void Finish() override;
   bool IsWaitingForScripts() const override;
@@ -182,7 +182,7 @@ class XMLDocumentParser final : public ScriptableDocumentParser,
   SegmentedString original_source_for_transform_;
 
   xmlParserCtxtPtr Context() const {
-    return context_ ? context_->Context() : 0;
+    return context_ ? context_->Context() : nullptr;
   }
   scoped_refptr<XMLParserContext> context_;
   Deque<std::unique_ptr<PendingCallback>> pending_callbacks_;

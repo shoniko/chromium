@@ -155,7 +155,24 @@ public:
     T* operator->() { return 0; }
 };
 
+template <typename T, typename... Args>
+unique_ptr<T> make_unique(Args&&... args) {
+  return unique_ptr<T>();
 }
+
+}  // namespace std
+
+namespace base {
+
+template <typename T>
+std::unique_ptr<T> WrapUnique(T* ptr) {
+  return std::unique_ptr<T>();
+}
+
+template <typename T>
+class Optional {};
+
+}  // namespace base
 
 namespace blink {
 
@@ -290,6 +307,17 @@ struct TraceIfNeeded {
     static void Trace(Visitor*, T*);
 };
 
+class ScriptWrappableVisitor {};
+
+class TraceWrapperBase {
+ public:
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const = 0;
+};
+
+class ScriptWrappable : public TraceWrapperBase {
+ public:
+  void TraceWrappers(const ScriptWrappableVisitor*) const override {}
+};
 }
 
 namespace WTF {

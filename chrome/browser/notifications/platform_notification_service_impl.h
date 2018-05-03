@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
@@ -55,7 +56,8 @@ class PlatformNotificationServiceImpl
       const std::string& notification_id,
       const GURL& origin,
       const base::Optional<int>& action_index,
-      const base::Optional<base::string16>& reply);
+      const base::Optional<base::string16>& reply,
+      base::OnceClosure completed_closure);
 
   // To be called when a persistent notification has been closed. The data
   // associated with the notification has to be pruned from the database in this
@@ -64,7 +66,8 @@ class PlatformNotificationServiceImpl
   void OnPersistentNotificationClose(content::BrowserContext* browser_context,
                                      const std::string& notification_id,
                                      const GURL& origin,
-                                     bool by_user);
+                                     bool by_user,
+                                     base::OnceClosure completed_closure);
 
   // content::PlatformNotificationService implementation.
   blink::mojom::PermissionStatus CheckPermissionOnUIThread(
@@ -80,8 +83,7 @@ class PlatformNotificationServiceImpl
       const std::string& notification_id,
       const GURL& origin,
       const content::PlatformNotificationData& notification_data,
-      const content::NotificationResources& notification_resources,
-      base::Closure* cancel_callback) override;
+      const content::NotificationResources& notification_resources) override;
   void DisplayPersistentNotification(
       content::BrowserContext* browser_context,
       const std::string& notification_id,
@@ -89,6 +91,8 @@ class PlatformNotificationServiceImpl
       const GURL& origin,
       const content::PlatformNotificationData& notification_data,
       const content::NotificationResources& notification_resources) override;
+  void CloseNotification(content::BrowserContext* browser_context,
+                         const std::string& notification_id) override;
   void ClosePersistentNotification(content::BrowserContext* browser_context,
                                    const std::string& notification_id) override;
   void GetDisplayedNotifications(
@@ -108,11 +112,11 @@ class PlatformNotificationServiceImpl
   PlatformNotificationServiceImpl();
   ~PlatformNotificationServiceImpl() override;
 
-  // Persistent notifications fired through the delegate do not care about the
-  // lifetime of the Service Worker responsible for executing the event.
   void OnClickEventDispatchComplete(
+      base::OnceClosure completed_closure,
       content::PersistentNotificationStatus status);
   void OnCloseEventDispatchComplete(
+      base::OnceClosure completed_closure,
       content::PersistentNotificationStatus status);
 
   // Creates a new Web Notification-based Notification object. Should only be
@@ -134,7 +138,7 @@ class PlatformNotificationServiceImpl
   void RecordSiteEngagement(content::BrowserContext* browser_context,
                             const GURL& origin);
 
-#if BUILDFLAG(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
   // Makes sure we keep the browser alive while the event in being processed.
   // As we have no control on the click handling, the notification could be
   // closed before a browser is brought up, thus terminating Chrome if it was

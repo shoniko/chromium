@@ -27,7 +27,7 @@ struct MimeRegistryPtrHolder {
     Platform::Current()->GetInterfaceProvider()->GetInterface(
         mojo::MakeRequest(&mime_registry));
   }
-  ~MimeRegistryPtrHolder() {}
+  ~MimeRegistryPtrHolder() = default;
 
   mojom::blink::MimeRegistryPtr mime_registry;
 };
@@ -65,8 +65,10 @@ String MIMETypeRegistry::GetMIMETypeForExtension(const String& ext) {
   // these calls over to the browser process.
   DEFINE_STATIC_LOCAL(MimeRegistryPtrHolder, registry_holder, ());
   String mime_type;
-  if (!registry_holder.mime_registry->GetMimeTypeFromExtension(ext, &mime_type))
+  if (!registry_holder.mime_registry->GetMimeTypeFromExtension(
+          ext.IsNull() ? "" : ext, &mime_type)) {
     return String();
+  }
   return mime_type;
 }
 

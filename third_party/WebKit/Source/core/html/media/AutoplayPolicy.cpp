@@ -6,16 +6,17 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/ElementVisibilityObserver.h"
-#include "core/dom/UserGestureIndicator.h"
 #include "core/frame/ContentSettingsClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/html/media/AutoplayUmaHelper.h"
 #include "core/html/media/HTMLMediaElement.h"
+#include "platform/network/NetworkStateNotifier.h"
 #include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Assertions.h"
 #include "public/platform/WebMediaPlayer.h"
 #include "public/web/WebSettings.h"
+#include "third_party/WebKit/common/feature_policy/feature_policy_feature.h"
 
 namespace blink {
 
@@ -61,6 +62,29 @@ bool ComputeLockPendingUserGestureRequired(const Document& document) {
   return true;
 }
 
+// Return true if any frame between |frame| and the root has been activated in
+// either the current or previous navigation. If the
+// FeaturePolicyAutoplayFeature flag is disabled then it will stop at the
+// current frame.
+bool HasBeenActivated(const Frame& frame) {
+  // Check if the current frame has received a user activation.
+  if (frame.HasBeenActivated() ||
+      frame.HasReceivedUserGestureBeforeNavigation()) {
+    return true;
+  }
+
+  // Check feature policy before traversing the tree.
+  if (!RuntimeEnabledFeatures::FeaturePolicyAutoplayFeatureEnabled() ||
+      !frame.IsFeatureEnabled(FeaturePolicyFeature::kAutoplay)) {
+    return false;
+  }
+
+  // If there is a parent check if the parent has received a
+  // user gesture.
+  const Frame* parent = frame.Tree().Parent();
+  return parent && HasBeenActivated(*parent);
+}
+
 }  // anonymous namespace
 
 // static
@@ -84,8 +108,8 @@ AutoplayPolicy::Type AutoplayPolicy::GetAutoplayPolicyForDocument(
 bool AutoplayPolicy::IsDocumentAllowedToPlay(const Document& document) {
   if (!document.GetFrame())
     return false;
-  return document.GetFrame()->HasBeenActivated() ||
-         document.GetFrame()->HasReceivedUserGestureBeforeNavigation();
+
+  return HasBeenActivated(*document.GetFrame());
 }
 
 AutoplayPolicy::AutoplayPolicy(HTMLMediaElement* element)
@@ -134,8 +158,9 @@ void AutoplayPolicy::StartAutoplayMutedWhenVisible() {
     return;
 
   autoplay_visibility_observer_ = new ElementVisibilityObserver(
-      element_, WTF::Bind(&AutoplayPolicy::OnVisibilityChangedForAutoplay,
-                          WrapWeakPersistent(this)));
+      element_,
+      WTF::BindRepeating(&AutoplayPolicy::OnVisibilityChangedForAutoplay,
+                         WrapWeakPersistent(this)));
   autoplay_visibility_observer_->Start();
 }
 
@@ -197,7 +222,7 @@ bool AutoplayPolicy::RequestAutoplayByAttribute() {
 }
 
 Nullable<ExceptionCode> AutoplayPolicy::RequestPlay() {
-  if (!UserGestureIndicator::ProcessingUserGesture()) {
+  if (!Frame::HasTransientUserActivation(element_->GetDocument().GetFrame())) {
     autoplay_uma_helper_->OnAutoplayInitiated(AutoplaySource::kMethod);
     if (IsGestureNeededForPlayback()) {
       autoplay_uma_helper_->RecordCrossOriginAutoplayResult(
@@ -253,7 +278,7 @@ bool AutoplayPolicy::IsLockedPendingUserGesture() const {
 
 void AutoplayPolicy::TryUnlockingUserGesture() {
   if (IsLockedPendingUserGesture() &&
-      UserGestureIndicator::ProcessingUserGesture()) {
+      Frame::HasTransientUserActivation(element_->GetDocument().GetFrame())) {
     UnlockUserGesture();
   }
 }
@@ -283,7 +308,7 @@ bool AutoplayPolicy::IsGestureNeededForPlaybackIfPendingUserGestureIsLocked()
   if (element_->IsHTMLVideoElement() && element_->muted() &&
       RuntimeEnabledFeatures::AutoplayMutedVideosEnabled() &&
       !(element_->GetDocument().GetSettings() &&
-        element_->GetDocument().GetSettings()->GetDataSaverEnabled()) &&
+        GetNetworkStateNotifier().SaveDataEnabled()) &&
       !(element_->GetDocument().GetSettings() &&
         element_->GetDocument()
             .GetSettings()

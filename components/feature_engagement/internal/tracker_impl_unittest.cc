@@ -5,10 +5,10 @@
 #include "components/feature_engagement/internal/tracker_impl.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/feature_list.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
@@ -17,6 +17,7 @@
 #include "base/test/user_action_tester.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/feature_engagement/internal/availability_model_impl.h"
+#include "components/feature_engagement/internal/display_lock_controller.h"
 #include "components/feature_engagement/internal/editable_configuration.h"
 #include "components/feature_engagement/internal/event_model_impl.h"
 #include "components/feature_engagement/internal/in_memory_event_store.h"
@@ -158,13 +159,38 @@ class TestAvailabilityModel : public AvailabilityModel {
   DISALLOW_COPY_AND_ASSIGN(TestAvailabilityModel);
 };
 
+class TestDisplayLockController : public DisplayLockController {
+ public:
+  TestDisplayLockController() = default;
+  ~TestDisplayLockController() override = default;
+
+  std::unique_ptr<DisplayLockHandle> AcquireDisplayLock() override {
+    return std::move(next_display_lock_handle_);
+  }
+
+  bool IsDisplayLocked() const override { return false; }
+
+  void SetNextDisplayLockHandle(
+      std::unique_ptr<DisplayLockHandle> display_lock_handle) {
+    next_display_lock_handle_ = std::move(display_lock_handle);
+  }
+
+  void NoopCallback() {}
+
+ private:
+  // The next DisplayLockHandle to return.
+  std::unique_ptr<DisplayLockHandle> next_display_lock_handle_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestDisplayLockController);
+};
+
 class TrackerImplTest : public ::testing::Test {
  public:
   TrackerImplTest() = default;
 
   void SetUp() override {
     std::unique_ptr<EditableConfiguration> configuration =
-        base::MakeUnique<EditableConfiguration>();
+        std::make_unique<EditableConfiguration>();
     configuration_ = configuration.get();
 
     RegisterFeatureConfig(configuration.get(), kTestFeatureFoo,
@@ -179,18 +205,23 @@ class TrackerImplTest : public ::testing::Test {
     std::unique_ptr<TestInMemoryEventStore> event_store = CreateEventStore();
     event_store_ = event_store.get();
 
-    auto event_model = base::MakeUnique<EventModelImpl>(
+    auto event_model = std::make_unique<EventModelImpl>(
         std::move(event_store),
-        base::MakeUnique<StoreEverythingEventStorageValidator>());
+        std::make_unique<StoreEverythingEventStorageValidator>());
 
-    auto availability_model = base::MakeUnique<TestAvailabilityModel>();
+    auto availability_model = std::make_unique<TestAvailabilityModel>();
     availability_model_ = availability_model.get();
     availability_model_->SetIsReady(ShouldAvailabilityStoreBeReady());
 
+    auto display_lock_controller =
+        std::make_unique<TestDisplayLockController>();
+    display_lock_controller_ = display_lock_controller.get();
+
     tracker_.reset(new TrackerImpl(
         std::move(event_model), std::move(availability_model),
-        std::move(configuration), base::MakeUnique<OnceConditionValidator>(),
-        base::MakeUnique<TestTimeProvider>()));
+        std::move(configuration), std::move(display_lock_controller),
+        std::make_unique<OnceConditionValidator>(),
+        std::make_unique<TestTimeProvider>()));
   }
 
   void VerifyEventTriggerEvents(const base::Feature& feature, uint32_t count) {
@@ -273,9 +304,11 @@ class TrackerImplTest : public ::testing::Test {
         expected_bar_success_tracking_only_count +
         expected_baz_success_tracking_only_count +
         expected_qux_success_tracking_only_count;
-    VerifyHistogramsForFeature(
-        "InProductHelp.ShouldTriggerHelpUI", true, expected_total_successes,
-        expected_total_failures, expected_total_success_tracking_onlys);
+    bool should_check = check_foo || check_bar || check_baz || check_qux;
+    VerifyHistogramsForFeature("InProductHelp.ShouldTriggerHelpUI",
+                               should_check, expected_total_successes,
+                               expected_total_failures,
+                               expected_total_success_tracking_onlys);
   }
 
   void VerifyUserActionsTriggerChecks(
@@ -376,7 +409,7 @@ class TrackerImplTest : public ::testing::Test {
  protected:
   virtual std::unique_ptr<TestInMemoryEventStore> CreateEventStore() {
     // Returns a EventStore that will successfully initialize.
-    return base::MakeUnique<TestInMemoryEventStore>(true);
+    return std::make_unique<TestInMemoryEventStore>(true);
   }
 
   virtual bool ShouldAvailabilityStoreBeReady() { return true; }
@@ -385,6 +418,7 @@ class TrackerImplTest : public ::testing::Test {
   std::unique_ptr<TrackerImpl> tracker_;
   TestInMemoryEventStore* event_store_;
   TestAvailabilityModel* availability_model_;
+  TestDisplayLockController* display_lock_controller_;
   Configuration* configuration_;
   base::HistogramTester histogram_tester_;
 
@@ -400,7 +434,7 @@ class FailingStoreInitTrackerImplTest : public TrackerImplTest {
  protected:
   std::unique_ptr<TestInMemoryEventStore> CreateEventStore() override {
     // Returns a EventStore that will fail to initialize.
-    return base::MakeUnique<TestInMemoryEventStore>(false);
+    return std::make_unique<TestInMemoryEventStore>(false);
   }
 
  private:
@@ -684,6 +718,62 @@ TEST_F(TrackerImplTest, TestTrackingOnlyTriggering) {
                    0);
 }
 
+TEST_F(TrackerImplTest, TestWouldTriggerInspection) {
+  // Ensure all initialization is finished.
+  StoringInitializedCallback callback;
+  tracker_->AddOnInitializedCallback(base::Bind(
+      &StoringInitializedCallback::OnInitialized, base::Unretained(&callback)));
+  base::RunLoop().RunUntilIdle();
+  base::UserActionTester user_action_tester;
+
+  // Initially, both foo and bar would have been shown.
+  EXPECT_TRUE(tracker_->WouldTriggerHelpUI(kTestFeatureFoo));
+  EXPECT_TRUE(tracker_->WouldTriggerHelpUI(kTestFeatureBar));
+  EXPECT_FALSE(tracker_->WouldTriggerHelpUI(kTestFeatureQux));
+  VerifyEventTriggerEvents(kTestFeatureFoo, 0u);
+  VerifyEventTriggerEvents(kTestFeatureBar, 0u);
+  VerifyEventTriggerEvents(kTestFeatureQux, 0u);
+  VerifyUserActionsTriggerChecks(user_action_tester, 0, 0, 0, 0);
+  VerifyUserActionsTriggered(user_action_tester, 0, 0, 0, 0);
+  VerifyUserActionsNotTriggered(user_action_tester, 0, 0, 0, 0);
+  VerifyUserActionsWouldHaveTriggered(user_action_tester, 0, 0, 0, 0);
+  VerifyUserActionsDismissed(user_action_tester, 0);
+  VerifyHistograms(false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0,
+                   0);
+
+  // While foo shows, nothing else would have been shown.
+  EXPECT_TRUE(tracker_->ShouldTriggerHelpUI(kTestFeatureFoo));
+  EXPECT_FALSE(tracker_->WouldTriggerHelpUI(kTestFeatureFoo));
+  EXPECT_FALSE(tracker_->WouldTriggerHelpUI(kTestFeatureBar));
+  EXPECT_FALSE(tracker_->WouldTriggerHelpUI(kTestFeatureQux));
+  VerifyEventTriggerEvents(kTestFeatureFoo, 1);
+  VerifyUserActionsTriggerChecks(user_action_tester, 1, 0, 0, 0);
+  VerifyUserActionsTriggered(user_action_tester, 1, 0, 0, 0);
+  VerifyUserActionsNotTriggered(user_action_tester, 0, 0, 0, 0);
+  VerifyUserActionsWouldHaveTriggered(user_action_tester, 0, 0, 0, 0);
+  VerifyUserActionsDismissed(user_action_tester, 0);
+  VerifyHistograms(true, 1, 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0,
+                   0);
+
+  // After foo has been dismissed, it would not have triggered again, but bar
+  // would have.
+  tracker_->Dismissed(kTestFeatureFoo);
+  EXPECT_FALSE(tracker_->WouldTriggerHelpUI(kTestFeatureFoo));
+  EXPECT_FALSE(tracker_->ShouldTriggerHelpUI(kTestFeatureFoo));
+  EXPECT_TRUE(tracker_->WouldTriggerHelpUI(kTestFeatureBar));
+  EXPECT_TRUE(tracker_->ShouldTriggerHelpUI(kTestFeatureBar));
+  EXPECT_FALSE(tracker_->WouldTriggerHelpUI(kTestFeatureQux));
+  VerifyEventTriggerEvents(kTestFeatureFoo, 1);
+  VerifyEventTriggerEvents(kTestFeatureBar, 1);
+  VerifyUserActionsTriggerChecks(user_action_tester, 2, 1, 0, 0);
+  VerifyUserActionsTriggered(user_action_tester, 1, 1, 0, 0);
+  VerifyUserActionsNotTriggered(user_action_tester, 1, 0, 0, 0);
+  VerifyUserActionsWouldHaveTriggered(user_action_tester, 0, 0, 0, 0);
+  VerifyUserActionsDismissed(user_action_tester, 1);
+  VerifyHistograms(true, 1, 1, 0, true, 1, 0, 0, false, 0, 0, 0, false, 0, 0,
+                   0);
+}
+
 TEST_F(TrackerImplTest, TestTriggerStateInspection) {
   // Before initialization has finished, NOT_READY should always be returned.
   EXPECT_EQ(Tracker::TriggerState::NOT_READY,
@@ -765,6 +855,15 @@ TEST_F(TrackerImplTest, TestNotifyEvent) {
   ASSERT_EQ(1, bar_event.events_size());
   EXPECT_EQ(1u, bar_event.events(0).day());
   EXPECT_EQ(1u, bar_event.events(0).count());
+}
+
+TEST_F(TrackerImplTest, ShouldPassThroughAcquireDisplayLock) {
+  auto lock_handle = std::make_unique<DisplayLockHandle>(
+      base::Bind(&TestDisplayLockController::NoopCallback,
+                 base::Unretained(display_lock_controller_)));
+  DisplayLockHandle* lock_handle_ptr = lock_handle.get();
+  display_lock_controller_->SetNextDisplayLockHandle(std::move(lock_handle));
+  EXPECT_EQ(lock_handle_ptr, tracker_->AcquireDisplayLock().get());
 }
 
 }  // namespace feature_engagement

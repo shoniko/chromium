@@ -5,9 +5,9 @@
 #ifndef UI_APP_LIST_VIEWS_APP_LIST_PAGE_H_
 #define UI_APP_LIST_VIEWS_APP_LIST_PAGE_H_
 
+#include "ash/app_list/model/app_list_model.h"
 #include "base/macros.h"
 #include "ui/app_list/app_list_export.h"
-#include "ui/app_list/app_list_model.h"
 #include "ui/views/view.h"
 
 namespace app_list {
@@ -47,9 +47,6 @@ class APP_LIST_EXPORT AppListPage : public views::View {
   virtual gfx::Rect GetPageBoundsDuringDragging(
       AppListModel::State state) const;
 
-  // Returns the z height of the search box for this page.
-  virtual int GetSearchBoxZHeight() const;
-
   const ContentsView* contents_view() const { return contents_view_; }
   void set_contents_view(ContentsView* contents_view) {
     contents_view_ = contents_view;
@@ -78,8 +75,6 @@ class APP_LIST_EXPORT AppListPage : public views::View {
   // contents view's coordinate space. This is the area of the contents view
   // below the search box.
   gfx::Rect GetDefaultContentsBounds() const;
-
-  bool IsCustomLauncherPageActive() const;
 
  private:
   ContentsView* contents_view_;

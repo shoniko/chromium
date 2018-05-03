@@ -57,7 +57,7 @@ bool GetReadingValueForProperty(REFPROPERTYKEY key,
 
 // Ambient light sensor reader initialization parameters.
 std::unique_ptr<ReaderInitParams> CreateAmbientLightReaderInitParams() {
-  auto params = base::MakeUnique<ReaderInitParams>();
+  auto params = std::make_unique<ReaderInitParams>();
   params->sensor_type_id = SENSOR_TYPE_AMBIENT_LIGHT;
   params->reader_func = [](ISensorDataReport* report, SensorReading* reading) {
     double lux = 0.0;
@@ -73,7 +73,7 @@ std::unique_ptr<ReaderInitParams> CreateAmbientLightReaderInitParams() {
 
 // Accelerometer sensor reader initialization parameters.
 std::unique_ptr<ReaderInitParams> CreateAccelerometerReaderInitParams() {
-  auto params = base::MakeUnique<ReaderInitParams>();
+  auto params = std::make_unique<ReaderInitParams>();
   params->sensor_type_id = SENSOR_TYPE_ACCELEROMETER_3D;
   params->reader_func = [](ISensorDataReport* report, SensorReading* reading) {
     double x = 0.0;
@@ -88,9 +88,15 @@ std::unique_ptr<ReaderInitParams> CreateAccelerometerReaderInitParams() {
       return E_FAIL;
     }
 
-    // Windows uses coordinate system where Z axis points down from device
-    // screen, therefore, using right hand notation, we have to reverse
-    // sign for each axis. Values are converted from G/s^2 to m/s^2.
+    // Windows HW sensor integration requirements specify accelerometer
+    // measurements conventions such as, the accelerometer sensor must expose
+    // values that are proportional and in the same direction as the force of
+    // gravity. Therefore, sensor hosted by the device at rest on a leveled
+    // surface while the screen is facing towards the sky, must report -1G along
+    // the Z axis.
+    // https://msdn.microsoft.com/en-us/library/windows/hardware/dn642102(v=vs.85).aspx
+    // Change sign of values, to report 'reaction force', and convert values
+    // from G/s^2 to m/s^2 units.
     reading->accel.x = -x * kMeanGravity;
     reading->accel.y = -y * kMeanGravity;
     reading->accel.z = -z * kMeanGravity;
@@ -101,7 +107,7 @@ std::unique_ptr<ReaderInitParams> CreateAccelerometerReaderInitParams() {
 
 // Gyroscope sensor reader initialization parameters.
 std::unique_ptr<ReaderInitParams> CreateGyroscopeReaderInitParams() {
-  auto params = base::MakeUnique<ReaderInitParams>();
+  auto params = std::make_unique<ReaderInitParams>();
   params->sensor_type_id = SENSOR_TYPE_GYROMETER_3D;
   params->reader_func = [](ISensorDataReport* report, SensorReading* reading) {
     double x = 0.0;
@@ -119,12 +125,10 @@ std::unique_ptr<ReaderInitParams> CreateGyroscopeReaderInitParams() {
       return E_FAIL;
     }
 
-    // Windows uses coordinate system where Z axis points down from device
-    // screen, therefore, using right hand notation, we have to reverse
-    // sign for each axis. Values are converted from deg to rad.
-    reading->gyro.x = gfx::DegToRad(-x);
-    reading->gyro.y = gfx::DegToRad(-y);
-    reading->gyro.z = gfx::DegToRad(-z);
+    // Values are converted from degrees to radians.
+    reading->gyro.x = gfx::DegToRad(x);
+    reading->gyro.y = gfx::DegToRad(y);
+    reading->gyro.z = gfx::DegToRad(z);
     return S_OK;
   };
   return params;
@@ -132,7 +136,7 @@ std::unique_ptr<ReaderInitParams> CreateGyroscopeReaderInitParams() {
 
 // Magnetometer sensor reader initialization parameters.
 std::unique_ptr<ReaderInitParams> CreateMagnetometerReaderInitParams() {
-  auto params = base::MakeUnique<ReaderInitParams>();
+  auto params = std::make_unique<ReaderInitParams>();
   params->sensor_type_id = SENSOR_TYPE_COMPASS_3D;
   params->reader_func = [](ISensorDataReport* report, SensorReading* reading) {
     double x = 0.0;
@@ -150,13 +154,10 @@ std::unique_ptr<ReaderInitParams> CreateMagnetometerReaderInitParams() {
       return E_FAIL;
     }
 
-    // Windows uses coordinate system where Z axis points down from device
-    // screen, therefore, using right hand notation, we have to reverse
-    // sign for each axis. Values are converted from Milligaus to
-    // Microtesla.
-    reading->magn.x = -x * kMicroteslaInMilligauss;
-    reading->magn.y = -y * kMicroteslaInMilligauss;
-    reading->magn.z = -z * kMicroteslaInMilligauss;
+    // Values are converted from Milligaus to Microtesla.
+    reading->magn.x = x * kMicroteslaInMilligauss;
+    reading->magn.y = y * kMicroteslaInMilligauss;
+    reading->magn.z = z * kMicroteslaInMilligauss;
     return S_OK;
   };
   return params;
@@ -165,7 +166,7 @@ std::unique_ptr<ReaderInitParams> CreateMagnetometerReaderInitParams() {
 // AbsoluteOrientationEulerAngles sensor reader initialization parameters.
 std::unique_ptr<ReaderInitParams>
 CreateAbsoluteOrientationEulerAnglesReaderInitParams() {
-  auto params = base::MakeUnique<ReaderInitParams>();
+  auto params = std::make_unique<ReaderInitParams>();
   params->sensor_type_id = SENSOR_TYPE_INCLINOMETER_3D;
   params->reader_func = [](ISensorDataReport* report, SensorReading* reading) {
     double x = 0.0;
@@ -191,7 +192,7 @@ CreateAbsoluteOrientationEulerAnglesReaderInitParams() {
 // AbsoluteOrientationQuaternion sensor reader initialization parameters.
 std::unique_ptr<ReaderInitParams>
 CreateAbsoluteOrientationQuaternionReaderInitParams() {
-  auto params = base::MakeUnique<ReaderInitParams>();
+  auto params = std::make_unique<ReaderInitParams>();
   params->sensor_type_id = SENSOR_TYPE_AGGREGATED_DEVICE_ORIENTATION;
   params->reader_func = [](ISensorDataReport* report, SensorReading* reading) {
     base::win::ScopedPropVariant quat_variant;
@@ -204,13 +205,10 @@ CreateAbsoluteOrientationQuaternionReaderInitParams() {
 
     float* quat = reinterpret_cast<float*>(quat_variant.get().caub.pElems);
 
-    // Windows uses coordinate system where Z axis points down from device
-    // screen, therefore, using right hand notation, we have to reverse
-    // sign for each quaternion component.
-    reading->orientation_quat.x = -quat[0];  // x*sin(Theta/2)
-    reading->orientation_quat.y = -quat[1];  // y*sin(Theta/2)
-    reading->orientation_quat.z = -quat[2];  // z*sin(Theta/2)
-    reading->orientation_quat.w = quat[3];   // cos(Theta/2)
+    reading->orientation_quat.x = quat[0];  // x*sin(Theta/2)
+    reading->orientation_quat.y = quat[1];  // y*sin(Theta/2)
+    reading->orientation_quat.z = quat[2];  // z*sin(Theta/2)
+    reading->orientation_quat.w = quat[3];  // cos(Theta/2)
     return S_OK;
   };
   return params;

@@ -31,10 +31,12 @@
 #ifndef WebFrameWidgetImpl_h
 #define WebFrameWidgetImpl_h
 
-#include "core/animation/CompositorMutatorImpl.h"
+#include <memory>
+
 #include "core/frame/WebFrameWidgetBase.h"
 #include "core/frame/WebLocalFrameImpl.h"
 #include "core/page/PageWidgetDelegate.h"
+#include "platform/graphics/CompositorMutatorImpl.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/heap/SelfKeepAlive.h"
 #include "platform/scroll/ScrollTypes.h"
@@ -78,15 +80,16 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
   void DidExitFullscreen() override;
   void SetSuppressFrameRequestsWorkaroundFor704763Only(bool) final;
   void BeginFrame(double last_frame_time_monotonic) override;
-  void UpdateAllLifecyclePhases() override;
+  void UpdateLifecycle(LifecycleUpdate requested_update) override;
   void Paint(WebCanvas*, const WebRect&) override;
   void LayoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) override;
   void CompositeAndReadbackAsync(
       WebCompositeAndReadbackAsyncCallback*) override;
   void ThemeChanged() override;
+  WebHitTestResult HitTestResultAt(const WebPoint&) override;
+  WebInputEventResult DispatchBufferedTouchEvents() override;
   WebInputEventResult HandleInputEvent(const WebCoalescedInputEvent&) override;
   void SetCursorVisibilityState(bool is_visible) override;
-  bool HasTouchEventHandlersAt(const WebPoint&) override;
 
   void ApplyViewportDeltas(const WebFloatSize& visual_viewport_delta,
                            const WebFloatSize& main_frame_delta,
@@ -95,22 +98,19 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
                            float browser_controls_delta) override;
   void MouseCaptureLost() override;
   void SetFocus(bool enable) override;
-  WebRange CompositionRange() override;
   WebColor BackgroundColor() const override;
   bool SelectionBounds(WebRect& anchor, WebRect& focus) const override;
-  bool SelectionTextDirection(WebTextDirection& start,
-                              WebTextDirection& end) const override;
-  bool IsSelectionAnchorFirst() const override;
-  void SetTextDirection(WebTextDirection) override;
   bool IsAcceleratedCompositingActive() const override;
   void WillCloseLayerTreeView() override;
   bool GetCompositionCharacterBounds(WebVector<WebRect>& bounds) override;
   void SetRemoteViewportIntersection(const WebRect&) override;
   void SetIsInert(bool) override;
+  void UpdateRenderThrottlingStatus(bool is_throttled,
+                                    bool subtree_throttled) override;
 
   // WebFrameWidget implementation.
   WebLocalFrameImpl* LocalRoot() const override { return local_root_; }
-  void SetVisibilityState(WebPageVisibilityState) override;
+  void SetVisibilityState(mojom::PageVisibilityState) override;
   void SetBackgroundColorOverride(WebColor) override;
   void ClearBackgroundColorOverride() override;
   void SetBaseBackgroundColorOverride(WebColor) override;
@@ -158,6 +158,9 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
 
   explicit WebFrameWidgetImpl(WebWidgetClient*, WebLocalFrame*);
 
+  WebInputEventResult HandleInputEventInternal(
+      const WebCoalescedInputEvent&) override;
+
   // Perform a hit test for a point relative to the root frame of the page.
   HitTestResult HitTestResultForRootFramePos(
       const LayoutPoint& pos_in_root_frame);
@@ -181,12 +184,6 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
   WebInputEventResult HandleCharEvent(const WebKeyboardEvent&) override;
 
   PageWidgetEventHandler* GetPageWidgetEventHandler() override;
-
-  // This method returns the focused frame belonging to this WebWidget, that
-  // is, a focused frame with the same local root as the one corresponding
-  // to this widget. It will return nullptr if no frame is focused or, the
-  // focused frame has a different local root.
-  LocalFrame* FocusedLocalFrameInWidget() const;
 
   LocalFrame* FocusedLocalFrameAvailableForIme() const;
 
@@ -228,8 +225,6 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
   // when there is no page focus?
   // Represents whether or not this object should process incoming IME events.
   bool ime_accept_events_;
-
-  static const WebInputEvent* current_input_event_;
 
   WebColor base_background_color_;
 

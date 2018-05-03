@@ -5,6 +5,7 @@
 // Contains holistic tests of the bindings infrastructure
 
 #include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -13,10 +14,11 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
-#include "extensions/common/switches.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "net/dns/mock_host_resolver.h"
@@ -31,10 +33,17 @@ class ExtensionBindingsApiTest
     : public ExtensionApiTest,
       public ::testing::WithParamInterface<BindingsType> {
  public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(switches::kNativeCrxBindings,
-                                    GetParam() == NATIVE_BINDINGS ? "1" : "0");
+  ExtensionBindingsApiTest() {}
+  ~ExtensionBindingsApiTest() override {}
+
+  void SetUp() override {
+    if (GetParam() == NATIVE_BINDINGS) {
+      scoped_feature_list_.InitAndEnableFeature(features::kNativeCrxBindings);
+    } else {
+      DCHECK_EQ(JAVASCRIPT_BINDINGS, GetParam());
+      scoped_feature_list_.InitAndDisableFeature(features::kNativeCrxBindings);
+    }
+    ExtensionApiTest::SetUp();
   }
 
   void SetUpOnMainThread() override {
@@ -42,6 +51,11 @@ class ExtensionBindingsApiTest
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(StartEmbeddedTestServer());
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionBindingsApiTest);
 };
 
 IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
@@ -355,6 +369,62 @@ IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
   ResultCatcher catcher;
   content::NavigateIframeToURL(web_contents, "test", extension_url);
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
+                       ExtensionListenersRemoveContext) {
+  const Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("bindings/listeners_destroy_context"));
+  ASSERT_TRUE(extension);
+
+  ExtensionTestMessageListener listener("ready", true);
+
+  // Navigate to a web page with an iframe (the iframe is title1.html).
+  GURL main_frame_url = embedded_test_server()->GetURL("a.com", "/iframe.html");
+  ui_test_utils::NavigateToURL(browser(), main_frame_url);
+
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  content::RenderFrameHost* main_frame = tab->GetMainFrame();
+  content::RenderFrameHost* subframe = ChildFrameAt(main_frame, 0);
+  content::RenderFrameDeletedObserver subframe_deleted(subframe);
+
+  // Wait for the extension's content script to be ready.
+  ASSERT_TRUE(listener.WaitUntilSatisfied());
+
+  // It's actually critical to the test that these frames are in the same
+  // process, because otherwise a crash in the iframe wouldn't be detectable
+  // (since we rely on JS execution in the main frame to tell if the renderer
+  // crashed - see comment below).
+  content::RenderProcessHost* main_frame_process = main_frame->GetProcess();
+  EXPECT_EQ(main_frame_process, subframe->GetProcess());
+
+  ExtensionTestMessageListener failure_listener("failed", false);
+
+  // Tell the extension to register listeners that will remove the iframe, and
+  // trigger them.
+  listener.Reply("go!");
+
+  // The frame will be deleted.
+  subframe_deleted.WaitUntilDeleted();
+
+  // Unfortunately, we don't have a good way of checking if something crashed
+  // after the frame was removed. WebContents::IsCrashed() seems like it should
+  // work, but is insufficient. Instead, use JS execution as the source of
+  // true.
+  EXPECT_FALSE(tab->IsCrashed());
+  EXPECT_EQ(main_frame_url, main_frame->GetLastCommittedURL());
+  EXPECT_EQ(main_frame_process, main_frame->GetProcess());
+  bool renderer_valid = false;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+      main_frame, "domAutomationController.send(true);", &renderer_valid));
+  EXPECT_TRUE(renderer_valid);
+  EXPECT_FALSE(failure_listener.was_satisfied());
+}
+
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, UseAPIsAfterContextRemoval) {
+  EXPECT_TRUE(RunExtensionTest("bindings/invalidate_context")) << message_;
 }
 
 // Run core bindings API tests with both native and JS-based bindings. This

@@ -71,7 +71,7 @@ StaticNodeTypeList<NodeType>* StaticNodeTypeList<NodeType>::Adopt(
 }
 
 template <typename NodeType>
-StaticNodeTypeList<NodeType>::~StaticNodeTypeList() {}
+StaticNodeTypeList<NodeType>::~StaticNodeTypeList() = default;
 
 template <typename NodeType>
 unsigned StaticNodeTypeList<NodeType>::length() const {
@@ -82,7 +82,7 @@ template <typename NodeType>
 NodeType* StaticNodeTypeList<NodeType>::item(unsigned index) const {
   if (index < nodes_.size())
     return nodes_[index].Get();
-  return 0;
+  return nullptr;
 }
 
 template <typename NodeType>

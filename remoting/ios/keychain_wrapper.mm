@@ -9,6 +9,7 @@
 #import "remoting/ios/keychain_wrapper.h"
 
 #include "base/logging.h"
+#include "base/mac/scoped_cftyperef.h"
 
 #import "remoting/ios/domain/host_info.h"
 
@@ -53,25 +54,23 @@ NSString* const kKeychainPairingSecret = @"kKeychainPairingSecret";
     [_userInfoQuery setObject:(__bridge id)kCFBooleanTrue
                        forKey:(__bridge id)kSecReturnAttributes];
 
-    // TODO(crbug.com/773503): Use ScopedCFTypeRef.
-    CFMutableDictionaryRef outDictionary = nil;
-    keychainErr = SecItemCopyMatching((__bridge CFDictionaryRef)_userInfoQuery,
-                                      (CFTypeRef*)&outDictionary);
+    base::ScopedCFTypeRef<CFMutableDictionaryRef> outDictionary;
+    keychainErr =
+        SecItemCopyMatching((__bridge CFDictionaryRef)_userInfoQuery,
+                            (CFTypeRef*)outDictionary.InitializeInto());
     if (keychainErr == noErr) {
       _keychainData = [self
           secItemFormatToDictionary:(__bridge_transfer NSMutableDictionary*)
-                                        outDictionary];
+                                        outDictionary.release()];
     } else if (keychainErr == errSecItemNotFound) {
       [self resetKeychainItem];
 
       if (outDictionary) {
-        CFRelease(outDictionary);
         _keychainData = nil;
       }
     } else {
       LOG(FATAL) << "Serious error: " << keychainErr;
       if (outDictionary) {
-        CFRelease(outDictionary);
         _keychainData = nil;
       }
     }
@@ -126,13 +125,12 @@ NSString* const kKeychainPairingSecret = @"kKeychainPairingSecret";
   if (mapString &&
       [mapString respondsToSelector:@selector(dataUsingEncoding:)]) {
     NSData* data = [mapString dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary* pairingMap;
-    if (data) {
-      pairingMap = (NSDictionary*)[NSJSONSerialization
-          JSONObjectWithData:data
-                     options:NSJSONReadingMutableContainers
-                       error:&err];
-    }
+    NSDictionary* pairingMap =
+        data ? (NSDictionary*)[NSJSONSerialization
+                   JSONObjectWithData:data
+                              options:NSJSONReadingMutableContainers
+                                error:&err]
+             : @{};
     if (!err) {
       return [NSMutableDictionary dictionaryWithDictionary:pairingMap];
     }
@@ -230,42 +228,36 @@ NSString* const kKeychainPairingSecret = @"kKeychainPairingSecret";
   [returnDictionary setObject:(__bridge id)kSecClassGenericPassword
                        forKey:(__bridge id)kSecClass];
 
-  CFDataRef passwordData = NULL;
+  base::ScopedCFTypeRef<CFDataRef> passwordData;
   OSStatus keychainError = noErr;
-  keychainError = SecItemCopyMatching(
-      (__bridge CFDictionaryRef)returnDictionary, (CFTypeRef*)&passwordData);
+  keychainError =
+      SecItemCopyMatching((__bridge CFDictionaryRef)returnDictionary,
+                          (CFTypeRef*)passwordData.InitializeInto());
   if (keychainError == noErr) {
     [returnDictionary removeObjectForKey:(__bridge id)kSecReturnData];
 
-    NSString* password = [[NSString alloc]
-        initWithBytes:[(__bridge_transfer NSData*)passwordData bytes]
-               length:[(__bridge NSData*)passwordData length]
-             encoding:NSUTF8StringEncoding];
+    NSString* password =
+        [[NSString alloc] initWithBytes:CFDataGetBytePtr(passwordData)
+                                 length:CFDataGetLength(passwordData)
+                               encoding:NSUTF8StringEncoding];
     [returnDictionary setObject:password forKey:(__bridge id)kSecValueData];
   } else if (keychainError == errSecItemNotFound) {
     LOG(WARNING) << "Nothing was found in the keychain.";
-    if (passwordData) {
-      CFRelease(passwordData);
-      passwordData = nil;
-    }
   } else {
     LOG(FATAL) << "Serious error: " << keychainError;
-    if (passwordData) {
-      CFRelease(passwordData);
-      passwordData = nil;
-    }
   }
   return returnDictionary;
 }
 
 - (void)writeToKeychain {
-  CFDictionaryRef attributes = nil;
+  base::ScopedCFTypeRef<CFDictionaryRef> attributes;
   NSMutableDictionary* updateItem = nil;
 
   if (SecItemCopyMatching((__bridge CFDictionaryRef)_userInfoQuery,
-                          (CFTypeRef*)&attributes) == noErr) {
+                          (CFTypeRef*)attributes.InitializeInto()) == noErr) {
     updateItem = [NSMutableDictionary
-        dictionaryWithDictionary:(__bridge_transfer NSDictionary*)attributes];
+        dictionaryWithDictionary:(__bridge_transfer NSDictionary*)
+                                     attributes.release()];
 
     [updateItem setObject:[_userInfoQuery objectForKey:(__bridge id)kSecClass]
                    forKey:(__bridge id)kSecClass];
@@ -287,10 +279,6 @@ NSString* const kKeychainPairingSecret = @"kKeychainPairingSecret";
                    NULL);
     if (errorcode != noErr) {
       LOG(FATAL) << "Couldn't add the Keychain Item. errorcode: " << errorcode;
-    }
-    if (attributes) {
-      CFRelease(attributes);
-      attributes = nil;
     }
   }
 }

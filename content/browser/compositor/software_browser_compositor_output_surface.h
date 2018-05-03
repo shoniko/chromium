@@ -11,6 +11,7 @@
 #include "build/build_config.h"
 #include "content/browser/compositor/browser_compositor_output_surface.h"
 #include "content/common/content_export.h"
+#include "gpu/vulkan/features.h"
 
 namespace cc {
 class SoftwareOutputDevice;
@@ -45,6 +46,9 @@ class CONTENT_EXPORT SoftwareBrowserCompositorOutputSurface
   gfx::BufferFormat GetOverlayBufferFormat() const override;
   bool SurfaceIsSuspendForRecycle() const override;
   uint32_t GetFramebufferCopyTextureFormat() override;
+#if BUILDFLAG(ENABLE_VULKAN)
+  gpu::VulkanSurface* GetVulkanSurface() override;
+#endif
 
  private:
   // BrowserCompositorOutputSurface implementation.
@@ -52,10 +56,14 @@ class CONTENT_EXPORT SoftwareBrowserCompositorOutputSurface
   void SetSurfaceSuspendedForRecycle(bool suspended) override;
 #endif
 
-  void SwapBuffersCallback();
+  void SwapBuffersCallback(uint64_t swap_id);
+  void UpdateVSyncCallback(const base::TimeTicks timebase,
+                           const base::TimeDelta interval);
 
   viz::OutputSurfaceClient* client_ = nullptr;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  uint64_t swap_id_ = 0;
+  base::TimeDelta refresh_interval_;
   base::WeakPtrFactory<SoftwareBrowserCompositorOutputSurface> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SoftwareBrowserCompositorOutputSurface);

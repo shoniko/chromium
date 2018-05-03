@@ -14,6 +14,7 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/ssl_status.h"
+#include "content/public/common/resource_type.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
 #include "url/gurl.h"
@@ -43,7 +44,8 @@ class CONTENT_EXPORT SSLManager {
   // will adjust the security UI and either call |CancelSSLRequest| or
   // |ContinueSSLRequest| of |delegate|.
   //
-  // Called on the IO thread.
+  // This can be called on the UI or IO thread. It will call |delegate| on the
+  // same thread.
   static void OnSSLCertificateError(
       const base::WeakPtr<SSLErrorHandler::Delegate>& delegate,
       ResourceType resource_type,
@@ -72,9 +74,7 @@ class CONTENT_EXPORT SSLManager {
   NavigationControllerImpl* controller() { return controller_; }
 
   void DidCommitProvisionalLoad(const LoadCommittedDetails& details);
-  void DidStartResourceResponse(const GURL& url,
-                                bool has_certificate,
-                                net::CertStatus ssl_cert_status);
+  void DidStartResourceResponse(const GURL& url, bool has_certificate_errors);
 
   // The following methods are called when a page includes insecure
   // content. These methods update the SSLStatus on the NavigationEntry

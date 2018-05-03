@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_VR_DATABINDING_BINDING_BASE_H_
 #define CHROME_BROWSER_VR_DATABINDING_BINDING_BASE_H_
 
-#include "base/memory/weak_ptr.h"
+#include <string>
 
 namespace vr {
 
@@ -14,18 +14,18 @@ namespace vr {
 // application is exhibiting the error condition.
 class BindingBase {
  public:
-  BindingBase();
-  virtual ~BindingBase();
+  BindingBase() = default;
+  virtual ~BindingBase() = default;
 
   // This function updates the binding. The exact behavior depends on the
   // subclass. Please see comments on the overridden functions for details.
   // Returns true if the binding was updated.
   virtual bool Update() = 0;
 
-  base::WeakPtr<BindingBase> GetWeakPtr();
+  virtual std::string ToString() = 0;
 
  private:
-  base::WeakPtrFactory<BindingBase> weak_ptr_factory_;
+  DISALLOW_COPY_AND_ASSIGN(BindingBase);
 };
 
 }  // namespace vr

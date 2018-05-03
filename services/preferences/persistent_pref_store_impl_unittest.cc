@@ -15,20 +15,12 @@
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/preferences/public/cpp/persistent_pref_store_client.h"
 #include "services/preferences/public/interfaces/preferences.mojom.h"
+#include "services/preferences/unittest_common.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using testing::Invoke;
-using testing::WithoutArgs;
-
 namespace prefs {
 namespace {
-
-class PrefStoreObserverMock : public PrefStore::Observer {
- public:
-  MOCK_METHOD1(OnPrefValueChanged, void(const std::string&));
-  MOCK_METHOD1(OnInitializationCompleted, void(bool));
-};
 
 class PersistentPrefStoreMock : public InMemoryPrefStore {
  public:
@@ -45,19 +37,6 @@ class PersistentPrefStoreMock : public InMemoryPrefStore {
   ~PersistentPrefStoreMock() override = default;
 };
 
-void ExpectPrefChange(PrefStore* pref_store, base::StringPiece key) {
-  PrefStoreObserverMock observer;
-  pref_store->AddObserver(&observer);
-  base::RunLoop run_loop;
-  EXPECT_CALL(observer, OnPrefValueChanged(key.as_string()))
-      .WillOnce(WithoutArgs(Invoke([&run_loop]() { run_loop.Quit(); })));
-  run_loop.Run();
-  pref_store->RemoveObserver(&observer);
-}
-
-constexpr char kKey[] = "path.to.key";
-constexpr char kOtherKey[] = "path.to.other_key";
-
 class PersistentPrefStoreImplTest : public testing::Test {
  public:
   PersistentPrefStoreImplTest() = default;
@@ -73,7 +52,7 @@ class PersistentPrefStoreImplTest : public testing::Test {
   void CreateImpl(scoped_refptr<PersistentPrefStore> backing_pref_store) {
     base::RunLoop run_loop;
     bool initialized = backing_pref_store->IsInitializationComplete();
-    impl_ = base::MakeUnique<PersistentPrefStoreImpl>(
+    impl_ = std::make_unique<PersistentPrefStoreImpl>(
         std::move(backing_pref_store), run_loop.QuitClosure());
     if (!initialized)
       run_loop.Run();
@@ -84,7 +63,7 @@ class PersistentPrefStoreImplTest : public testing::Test {
       PersistentPrefStoreImpl::ObservedPrefs observed_prefs =
           PersistentPrefStoreImpl::ObservedPrefs()) {
     if (observed_prefs.empty())
-      observed_prefs.insert({kKey, kOtherKey});
+      observed_prefs.insert({kKey, kOtherDictionaryKey});
     return base::MakeRefCounted<PersistentPrefStoreClient>(
         impl_->CreateConnection(std::move(observed_prefs)));
   }
@@ -164,11 +143,12 @@ TEST_F(PersistentPrefStoreImplTest, UnregisteredPrefNotObservedByOtherClient) {
   auto other_pref_store = CreateConnection(std::move(observed_prefs));
   EXPECT_TRUE(other_pref_store->IsInitializationComplete());
 
-  pref_store()->SetValue(kOtherKey, base::MakeUnique<base::Value>(123), 0);
-  pref_store()->SetValue(kKey, base::MakeUnique<base::Value>("value"), 0);
+  pref_store()->SetValue(kOtherDictionaryKey,
+                         std::make_unique<base::Value>(123), 0);
+  pref_store()->SetValue(kKey, std::make_unique<base::Value>("value"), 0);
 
   ExpectPrefChange(other_pref_store.get(), kKey);
-  EXPECT_FALSE(other_pref_store->GetValue(kOtherKey, nullptr));
+  EXPECT_FALSE(other_pref_store->GetValue(kOtherDictionaryKey, nullptr));
 }
 
 TEST_F(PersistentPrefStoreImplTest,
@@ -258,7 +238,8 @@ TEST_F(PersistentPrefStoreImplTest, SchedulePendingLossyWrites) {
   CreateImpl(backing_store);
   base::RunLoop run_loop;
   EXPECT_CALL(*backing_store, SchedulePendingLossyWrites())
-      .WillOnce(WithoutArgs(Invoke([&run_loop]() { run_loop.Quit(); })));
+      .WillOnce(testing::WithoutArgs(
+          testing::Invoke([&run_loop]() { run_loop.Quit(); })));
   EXPECT_CALL(*backing_store, CommitPendingWriteMock()).Times(1);
   pref_store()->SchedulePendingLossyWrites();
   run_loop.Run();
@@ -269,7 +250,8 @@ TEST_F(PersistentPrefStoreImplTest, ClearMutableValues) {
   CreateImpl(backing_store);
   base::RunLoop run_loop;
   EXPECT_CALL(*backing_store, ClearMutableValues())
-      .WillOnce(WithoutArgs(Invoke([&run_loop]() { run_loop.Quit(); })));
+      .WillOnce(testing::WithoutArgs(
+          testing::Invoke([&run_loop]() { run_loop.Quit(); })));
   EXPECT_CALL(*backing_store, CommitPendingWriteMock()).Times(1);
   pref_store()->ClearMutableValues();
   run_loop.Run();

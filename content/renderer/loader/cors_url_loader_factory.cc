@@ -4,16 +4,16 @@
 
 #include "content/renderer/loader/cors_url_loader_factory.h"
 
-#include "content/public/common/url_loader_factory.mojom.h"
 #include "content/renderer/loader/cors_url_loader.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/interfaces/url_loader_factory.mojom.h"
 
 namespace content {
 
 void CORSURLLoaderFactory::CreateAndBind(
-    PossiblyAssociatedInterfacePtrInfo<mojom::URLLoaderFactory>
+    PossiblyAssociatedInterfacePtrInfo<network::mojom::URLLoaderFactory>
         network_loader_factory,
-    mojom::URLLoaderFactoryRequest request) {
+    network::mojom::URLLoaderFactoryRequest request) {
   DCHECK(network_loader_factory);
 
   // This object will be destroyed when all pipes bound to it are closed.
@@ -23,7 +23,7 @@ void CORSURLLoaderFactory::CreateAndBind(
 }
 
 CORSURLLoaderFactory::CORSURLLoaderFactory(
-    PossiblyAssociatedInterfacePtrInfo<mojom::URLLoaderFactory>
+    PossiblyAssociatedInterfacePtrInfo<network::mojom::URLLoaderFactory>
         network_loader_factory) {
   // Binding |this| as an unretained pointer is safe because |bindings_| shares
   // this object's lifetime.
@@ -38,23 +38,24 @@ CORSURLLoaderFactory::CORSURLLoaderFactory(
 CORSURLLoaderFactory::~CORSURLLoaderFactory() {}
 
 void CORSURLLoaderFactory::CreateLoaderAndStart(
-    mojom::URLLoaderRequest request,
+    network::mojom::URLLoaderRequest request,
     int32_t routing_id,
     int32_t request_id,
     uint32_t options,
-    const ResourceRequest& resource_request,
-    mojom::URLLoaderClientPtr client,
+    const network::ResourceRequest& resource_request,
+    network::mojom::URLLoaderClientPtr client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
   // Instances of CORSURLLoader are owned by this class and their pipe so that
   // they can share |network_loader_factory_|.
   loader_bindings_.AddBinding(
-      base::MakeUnique<CORSURLLoader>(
+      std::make_unique<CORSURLLoader>(
           routing_id, request_id, options, resource_request, std::move(client),
           traffic_annotation, network_loader_factory_.get()),
       std::move(request));
 }
 
-void CORSURLLoaderFactory::Clone(mojom::URLLoaderFactoryRequest request) {
+void CORSURLLoaderFactory::Clone(
+    network::mojom::URLLoaderFactoryRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }
 

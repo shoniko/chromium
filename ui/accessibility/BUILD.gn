@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/linux/gtk/gtk.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
@@ -55,10 +56,10 @@ component("accessibility") {
     "platform/ax_android_constants.h",
     "platform/ax_platform_node.cc",
     "platform/ax_platform_node.h",
-    "platform/ax_platform_unique_id.cc",
-    "platform/ax_platform_unique_id.h",
     "platform/ax_snapshot_node_android_platform.cc",
     "platform/ax_snapshot_node_android_platform.h",
+    "platform/ax_unique_id.cc",
+    "platform/ax_unique_id.h",
   ]
 
   if (has_native_accessibility) {
@@ -70,6 +71,8 @@ component("accessibility") {
       "platform/ax_platform_node_mac.mm",
       "platform/ax_platform_node_win.cc",
       "platform/ax_platform_node_win.h",
+      "platform/ax_platform_relation_win.cc",
+      "platform/ax_platform_relation_win.h",
       "platform/ax_system_caret_win.cc",
       "platform/ax_system_caret_win.h",
     ]
@@ -103,6 +106,8 @@ component("accessibility") {
     sources += [
       "platform/atk_util_auralinux.cc",
       "platform/atk_util_auralinux.h",
+      "platform/ax_platform_atk_hyperlink.cc",
+      "platform/ax_platform_atk_hyperlink.h",
       "platform/ax_platform_node_auralinux.cc",
       "platform/ax_platform_node_auralinux.h",
     ]
@@ -111,6 +116,11 @@ component("accessibility") {
 
     if (use_glib) {
       configs += [ "//build/config/linux:glib" ]
+    }
+    if (use_gtk3) {
+      sources += [ "platform/atk_util_auralinux_gtk3.cc" ]
+    } else {
+      sources += [ "platform/atk_util_auralinux_gtk2.cc" ]
     }
   }
 
@@ -146,7 +156,7 @@ static_library("test_support") {
     "tree_generator.h",
   ]
 
-  if (is_win) {
+  if (is_win || use_atk) {
     sources += [
       "platform/test_ax_node_wrapper.cc",
       "platform/test_ax_node_wrapper.h",
@@ -168,7 +178,10 @@ test("accessibility_unittests") {
     "ax_tree_combiner_unittest.cc",
     "ax_tree_serializer_unittest.cc",
     "ax_tree_unittest.cc",
+    "platform/ax_platform_node_unittest.cc",
+    "platform/ax_platform_node_unittest.h",
     "platform/ax_platform_node_win_unittest.cc",
+    "platform/ax_unique_id_unittest.cc",
   ]
 
   deps = [
@@ -187,6 +200,10 @@ test("accessibility_unittests") {
   if (is_win) {
     deps += [ "//third_party/iaccessible2" ]
     libs = [ "oleacc.lib" ]
+  }
+  if (use_atk) {
+    sources += [ "platform/ax_platform_node_auralinux_unittest.cc" ]
+    configs += [ "//build/config/linux/atk" ]
   }
 }
 

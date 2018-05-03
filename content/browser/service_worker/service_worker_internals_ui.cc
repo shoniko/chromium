@@ -33,7 +33,7 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/url_constants.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_object.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_object.mojom.h"
 
 using base::DictionaryValue;
 using base::ListValue;
@@ -155,27 +155,32 @@ void UpdateVersionInfo(const ServiceWorkerVersionInfo& version,
 
 std::unique_ptr<ListValue> GetRegistrationListValue(
     const std::vector<ServiceWorkerRegistrationInfo>& registrations) {
-  auto result = base::MakeUnique<ListValue>();
+  auto result = std::make_unique<ListValue>();
   for (std::vector<ServiceWorkerRegistrationInfo>::const_iterator it =
            registrations.begin();
        it != registrations.end();
        ++it) {
     const ServiceWorkerRegistrationInfo& registration = *it;
-    auto registration_info = base::MakeUnique<DictionaryValue>();
+    auto registration_info = std::make_unique<DictionaryValue>();
     registration_info->SetString("scope", registration.pattern.spec());
     registration_info->SetString(
         "registration_id", base::Int64ToString(registration.registration_id));
+    registration_info->SetBoolean("navigation_preload_enabled",
+                                  registration.navigation_preload_enabled);
+    registration_info->SetInteger(
+        "navigation_preload_header_length",
+        registration.navigation_preload_header_length);
 
     if (registration.active_version.version_id !=
         blink::mojom::kInvalidServiceWorkerVersionId) {
-      auto active_info = base::MakeUnique<DictionaryValue>();
+      auto active_info = std::make_unique<DictionaryValue>();
       UpdateVersionInfo(registration.active_version, active_info.get());
       registration_info->Set("active", std::move(active_info));
     }
 
     if (registration.waiting_version.version_id !=
         blink::mojom::kInvalidServiceWorkerVersionId) {
-      auto waiting_info = base::MakeUnique<DictionaryValue>();
+      auto waiting_info = std::make_unique<DictionaryValue>();
       UpdateVersionInfo(registration.waiting_version, waiting_info.get());
       registration_info->Set("waiting", std::move(waiting_info));
     }
@@ -187,12 +192,12 @@ std::unique_ptr<ListValue> GetRegistrationListValue(
 
 std::unique_ptr<ListValue> GetVersionListValue(
     const std::vector<ServiceWorkerVersionInfo>& versions) {
-  auto result = base::MakeUnique<ListValue>();
+  auto result = std::make_unique<ListValue>();
   for (std::vector<ServiceWorkerVersionInfo>::const_iterator it =
            versions.begin();
        it != versions.end();
        ++it) {
-    auto info = base::MakeUnique<DictionaryValue>();
+    auto info = std::make_unique<DictionaryValue>();
     UpdateVersionInfo(*it, info.get());
     result->Append(std::move(info));
   }
@@ -234,8 +239,8 @@ void DidGetRegistrations(
   args.push_back(GetRegistrationListValue(live_registrations));
   args.push_back(GetVersionListValue(live_versions));
   args.push_back(GetRegistrationListValue(stored_registrations));
-  args.push_back(base::MakeUnique<Value>(partition_id));
-  args.push_back(base::MakeUnique<Value>(context_path.value()));
+  args.push_back(std::make_unique<Value>(partition_id));
+  args.push_back(std::make_unique<Value>(context_path.value()));
   internals->web_ui()->CallJavascriptFunctionUnsafe(
       "serviceworker.onPartitionData", ConvertToRawPtrVector(args));
 }
@@ -269,11 +274,11 @@ class ServiceWorkerInternalsUI::PartitionObserver
                        const ErrorInfo& info) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     std::vector<std::unique_ptr<const Value>> args;
-    args.push_back(base::MakeUnique<Value>(partition_id_));
-    args.push_back(base::MakeUnique<Value>(base::Int64ToString(version_id)));
-    args.push_back(base::MakeUnique<Value>(process_id));
-    args.push_back(base::MakeUnique<Value>(thread_id));
-    auto value = base::MakeUnique<DictionaryValue>();
+    args.push_back(std::make_unique<Value>(partition_id_));
+    args.push_back(std::make_unique<Value>(base::Int64ToString(version_id)));
+    args.push_back(std::make_unique<Value>(process_id));
+    args.push_back(std::make_unique<Value>(thread_id));
+    auto value = std::make_unique<DictionaryValue>();
     value->SetString("message", info.error_message);
     value->SetInteger("lineNumber", info.line_number);
     value->SetInteger("columnNumber", info.column_number);
@@ -288,11 +293,11 @@ class ServiceWorkerInternalsUI::PartitionObserver
                               const ConsoleMessage& message) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     std::vector<std::unique_ptr<const Value>> args;
-    args.push_back(base::MakeUnique<Value>(partition_id_));
-    args.push_back(base::MakeUnique<Value>(base::Int64ToString(version_id)));
-    args.push_back(base::MakeUnique<Value>(process_id));
-    args.push_back(base::MakeUnique<Value>(thread_id));
-    auto value = base::MakeUnique<DictionaryValue>();
+    args.push_back(std::make_unique<Value>(partition_id_));
+    args.push_back(std::make_unique<Value>(base::Int64ToString(version_id)));
+    args.push_back(std::make_unique<Value>(process_id));
+    args.push_back(std::make_unique<Value>(thread_id));
+    auto value = std::make_unique<DictionaryValue>();
     value->SetInteger("sourceIdentifier", message.source_identifier);
     value->SetInteger("message_level", message.message_level);
     value->SetString("message", message.message);
@@ -419,7 +424,7 @@ void ServiceWorkerInternalsUI::AddContextFromStoragePartition(
   } else {
     partition_id = next_partition_id_++;
     auto new_observer =
-        base::MakeUnique<PartitionObserver>(partition_id, web_ui());
+        std::make_unique<PartitionObserver>(partition_id, web_ui());
     context->AddObserver(new_observer.get());
     observers_[reinterpret_cast<uintptr_t>(partition)] =
         std::move(new_observer);
@@ -462,7 +467,7 @@ bool ServiceWorkerInternalsUI::GetServiceWorkerContext(
     scoped_refptr<ServiceWorkerContextWrapper>* context) const {
   BrowserContext* browser_context =
       web_ui()->GetWebContents()->GetBrowserContext();
-  StoragePartition* result_partition(NULL);
+  StoragePartition* result_partition(nullptr);
   BrowserContext::StoragePartitionCallback find_context_cb =
       base::Bind(&ServiceWorkerInternalsUI::FindContext,
                  base::Unretained(this),
@@ -479,7 +484,7 @@ bool ServiceWorkerInternalsUI::GetServiceWorkerContext(
 void ServiceWorkerInternalsUI::StopWorker(const ListValue* args) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   int callback_id;
-  const DictionaryValue* cmd_args = NULL;
+  const DictionaryValue* cmd_args = nullptr;
   int partition_id;
   scoped_refptr<ServiceWorkerContextWrapper> context;
   std::string version_id_string;
@@ -501,7 +506,7 @@ void ServiceWorkerInternalsUI::StopWorker(const ListValue* args) {
 void ServiceWorkerInternalsUI::InspectWorker(const ListValue* args) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   int callback_id;
-  const DictionaryValue* cmd_args = NULL;
+  const DictionaryValue* cmd_args = nullptr;
   int process_host_id = 0;
   int devtools_agent_route_id = 0;
   if (!args->GetInteger(0, &callback_id) ||
@@ -530,7 +535,7 @@ void ServiceWorkerInternalsUI::Unregister(const ListValue* args) {
   int callback_id;
   int partition_id;
   std::string scope_string;
-  const DictionaryValue* cmd_args = NULL;
+  const DictionaryValue* cmd_args = nullptr;
   scoped_refptr<ServiceWorkerContextWrapper> context;
   if (!args->GetInteger(0, &callback_id) ||
       !args->GetDictionary(1, &cmd_args) ||
@@ -550,7 +555,7 @@ void ServiceWorkerInternalsUI::StartWorker(const ListValue* args) {
   int callback_id;
   int partition_id;
   std::string scope_string;
-  const DictionaryValue* cmd_args = NULL;
+  const DictionaryValue* cmd_args = nullptr;
   scoped_refptr<ServiceWorkerContextWrapper> context;
   if (!args->GetInteger(0, &callback_id) ||
       !args->GetDictionary(1, &cmd_args) ||

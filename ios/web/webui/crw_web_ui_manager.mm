@@ -9,8 +9,6 @@
 
 #include "base/json/string_escape.h"
 #import "base/mac/bind_objc_block.h"
-#import "base/mac/scoped_nsobject.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/stringprintf.h"
 #import "base/strings/sys_string_conversions.h"
@@ -37,9 +35,6 @@ const char kScriptCommandPrefix[] = "webui";
 
 @interface CRWWebUIManager () <CRWWebUIPageBuilderDelegate>
 
-// Current web state.
-@property(nonatomic, readonly) web::WebStateImpl* webState;
-
 // Composes WebUI page for webUIURL and invokes completionHandler with the
 // result.
 - (void)loadWebUIPageForURL:(const GURL&)webUIURL
@@ -65,7 +60,8 @@ const char kScriptCommandPrefix[] = "webui";
   std::vector<std::unique_ptr<web::URLFetcherBlockAdapter>> _fetchers;
   // Bridge to observe the web state from Objective-C.
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserverBridge;
-  // Weak WebStateImpl this CRWWebUIManager is associated with.
+  // The WebState this instance is observing. Will be null after
+  // -webStateDestroyed: has been called.
   web::WebStateImpl* _webState;
 }
 
@@ -76,9 +72,12 @@ const char kScriptCommandPrefix[] = "webui";
 
 - (instancetype)initWithWebState:(web::WebStateImpl*)webState {
   if (self = [super init]) {
+    DCHECK(webState);
     _webState = webState;
-    _webStateObserverBridge.reset(
-        new web::WebStateObserverBridge(webState, self));
+    _webStateObserverBridge =
+        std::make_unique<web::WebStateObserverBridge>(self);
+    _webState->AddObserver(_webStateObserverBridge.get());
+
     __weak CRWWebUIManager* weakSelf = self;
     _webState->AddScriptCommandCallback(
         base::BindBlockArc(
@@ -101,12 +100,14 @@ const char kScriptCommandPrefix[] = "webui";
     return;
 
   __weak CRWWebUIManager* weakSelf = self;
-  [self loadWebUIPageForURL:URLCopy completionHandler:^(NSString* HTML) {
-    web::WebStateImpl* webState = [weakSelf webState];
-    if (webState) {
-      webState->LoadWebUIHtml(base::SysNSStringToUTF16(HTML), URLCopy);
-    }
-  }];
+  [self loadWebUIPageForURL:URLCopy
+          completionHandler:^(NSString* HTML) {
+            CRWWebUIManager* strongSelf = weakSelf;
+            if (strongSelf && strongSelf->_webState) {
+              strongSelf->_webState->LoadWebUIHtml(
+                  base::SysNSStringToUTF16(HTML), URLCopy);
+            }
+          }];
 }
 
 #pragma mark - CRWWebStateObserver Methods
@@ -118,6 +119,7 @@ const char kScriptCommandPrefix[] = "webui";
 }
 
 - (void)webStateDestroyed:(web::WebState*)webState {
+  DCHECK_EQ(webState, _webState);
   [self resetWebState];
 }
 
@@ -129,9 +131,9 @@ const char kScriptCommandPrefix[] = "webui";
   GURL URL(resourceURL);
   [self fetchResourceWithURL:URL
            completionHandler:^(NSData* data) {
-             base::scoped_nsobject<NSString> resource(
+             NSString* resource =
                  [[NSString alloc] initWithData:data
-                                       encoding:NSUTF8StringEncoding]);
+                                       encoding:NSUTF8StringEncoding];
              completionHandler(resource, URL);
            }];
 }
@@ -140,8 +142,8 @@ const char kScriptCommandPrefix[] = "webui";
 
 - (void)loadWebUIPageForURL:(const GURL&)webUIURL
           completionHandler:(void (^)(NSString*))handler {
-  base::scoped_nsobject<CRWWebUIPageBuilder> pageBuilder(
-      [[CRWWebUIPageBuilder alloc] initWithDelegate:self]);
+  CRWWebUIPageBuilder* pageBuilder =
+      [[CRWWebUIPageBuilder alloc] initWithDelegate:self];
   [pageBuilder buildWebUIPageForURL:webUIURL completionHandler:handler];
 }
 
@@ -183,12 +185,9 @@ const char kScriptCommandPrefix[] = "webui";
 - (void)resetWebState {
   if (_webState) {
     _webState->RemoveScriptCommandCallback(kScriptCommandPrefix);
+    _webState->RemoveObserver(_webStateObserverBridge.get());
+    _webState = nullptr;
   }
-  _webState = nullptr;
-}
-
-- (web::WebStateImpl*)webState {
-  return _webState;
 }
 
 - (void)removeFetcher:(web::URLFetcherBlockAdapter*)fetcher {
@@ -204,7 +203,7 @@ const char kScriptCommandPrefix[] = "webui";
 - (std::unique_ptr<web::URLFetcherBlockAdapter>)
     fetcherForURL:(const GURL&)URL
 completionHandler:(web::URLFetcherBlockAdapterCompletion)handler {
-  return base::MakeUnique<web::URLFetcherBlockAdapter>(
+  return std::make_unique<web::URLFetcherBlockAdapter>(
       URL, _webState->GetBrowserState()->GetRequestContext(), handler);
 }
 

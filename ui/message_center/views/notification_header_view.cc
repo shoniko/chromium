@@ -91,7 +91,7 @@ class ExpandButton : public views::ImageView {
 
 ExpandButton::ExpandButton() {
   focus_painter_ = views::Painter::CreateSolidFocusPainter(
-      kFocusBorderColor, gfx::Insets(1, 2, 2, 2));
+      kFocusBorderColor, gfx::Insets(0, 0, 1, 1));
   SetFocusBehavior(FocusBehavior::ALWAYS);
 }
 
@@ -99,7 +99,9 @@ ExpandButton::~ExpandButton() = default;
 
 void ExpandButton::OnPaint(gfx::Canvas* canvas) {
   views::ImageView::OnPaint(canvas);
-  views::Painter::PaintFocusPainter(this, canvas, focus_painter_.get());
+  if (HasFocus())
+    views::Painter::PaintPainterAt(canvas, focus_painter_.get(),
+                                   GetContentsBounds());
 }
 
 void ExpandButton::OnFocus() {
@@ -163,19 +165,18 @@ NotificationHeaderView::NotificationHeaderView(
     : views::Button(listener) {
   const int kInnerHeaderHeight = kHeaderHeight - kHeaderOuterPadding.height();
 
-  views::BoxLayout* layout =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, kHeaderOuterPadding,
-                           kHeaderHorizontalSpacing);
+  auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal, kHeaderOuterPadding,
+      kHeaderHorizontalSpacing));
   layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_START);
-  SetLayoutManager(layout);
 
   views::View* app_info_container = new views::View();
-  views::BoxLayout* app_info_layout = new views::BoxLayout(
+  auto app_info_layout = std::make_unique<views::BoxLayout>(
       views::BoxLayout::kHorizontal, kHeaderPadding, kHeaderHorizontalSpacing);
   app_info_layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_START);
-  app_info_container->SetLayoutManager(app_info_layout);
+  app_info_container->SetLayoutManager(std::move(app_info_layout));
   AddChildView(app_info_container);
 
   // App icon view
@@ -187,14 +188,16 @@ NotificationHeaderView::NotificationHeaderView(
   DCHECK_EQ(kInnerHeaderHeight, app_icon_view_->GetPreferredSize().height());
   app_info_container->AddChildView(app_icon_view_);
 
-  // Font list for text views.
-  const gfx::FontList& font_list = GetHeaderTextFontList();
-  // The height must be 15px to match with the mock.
+  // Font list for text views. The height must be 15px to match with the mock.
+  gfx::FontList font_list = GetHeaderTextFontList();
   DCHECK_EQ(15, font_list.GetHeight());
+
+  const int font_list_height = font_list.GetHeight();
 
   // App name view
   app_name_view_ = new views::Label(base::string16());
   app_name_view_->SetFontList(font_list);
+  app_name_view_->SetLineHeight(font_list_height);
   app_name_view_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   app_name_view_->SetEnabledColor(accent_color_);
   app_name_view_->SetBorder(views::CreateEmptyBorder(kTextViewPadding));
@@ -205,6 +208,7 @@ NotificationHeaderView::NotificationHeaderView(
   summary_text_divider_ =
       new views::Label(base::WideToUTF16(kNotificationHeaderDivider));
   summary_text_divider_->SetFontList(font_list);
+  summary_text_divider_->SetLineHeight(font_list_height);
   summary_text_divider_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   summary_text_divider_->SetBorder(views::CreateEmptyBorder(kTextViewPadding));
   summary_text_divider_->SetVisible(false);
@@ -215,6 +219,7 @@ NotificationHeaderView::NotificationHeaderView(
   // Summary text view
   summary_text_view_ = new views::Label(base::string16());
   summary_text_view_->SetFontList(font_list);
+  summary_text_view_->SetLineHeight(font_list_height);
   summary_text_view_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   summary_text_view_->SetBorder(views::CreateEmptyBorder(kTextViewPadding));
   summary_text_view_->SetVisible(false);
@@ -226,6 +231,7 @@ NotificationHeaderView::NotificationHeaderView(
   timestamp_divider_ =
       new views::Label(base::WideToUTF16(kNotificationHeaderDivider));
   timestamp_divider_->SetFontList(font_list);
+  timestamp_divider_->SetLineHeight(font_list_height);
   timestamp_divider_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   timestamp_divider_->SetBorder(views::CreateEmptyBorder(kTextViewPadding));
   timestamp_divider_->SetVisible(false);
@@ -236,6 +242,7 @@ NotificationHeaderView::NotificationHeaderView(
   // Timestamp view
   timestamp_view_ = new views::Label(base::string16());
   timestamp_view_->SetFontList(font_list);
+  timestamp_view_->SetLineHeight(font_list_height);
   timestamp_view_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   timestamp_view_->SetBorder(views::CreateEmptyBorder(kTextViewPadding));
   timestamp_view_->SetVisible(false);

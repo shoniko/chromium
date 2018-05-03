@@ -23,6 +23,9 @@
   var consoleView = Console.ConsoleView.instance();
   var sidebar = consoleView._sidebar;
   var messages = Console.ConsoleView.instance()._visibleViewMessages;
+  consoleView._setImmediatelyFilterMessagesForTest();
+  if (!consoleView._isSidebarOpen)
+    consoleView._splitWidget._showHideSidebarButton.element.click();
 
   function dumpSidebar() {
     var treeElement = sidebar._tree.firstChild();
@@ -53,13 +56,22 @@
       dumpSidebar();
       next();
     },
-    async function selectingGroup(next) {
-      sidebar._tree.selectNext();
+    async function selectingErrorGroup(next) {
+      sidebar._treeElements[2].select();
       TestRunner.addResult('Selecting item: ' + sidebar._selectedTreeElement.title);
       TestRunner.addResult('MESSAGES:');
       ConsoleTestRunner.dumpConsoleMessages();
       TestRunner.addResult('');
       dumpSidebar();
+      next();
+    },
+    async function selectingFileGroup(next) {
+      sidebar._treeElements[0].expand();
+      sidebar._treeElements[0].select();
+      sidebar._tree.selectNext();
+      TestRunner.addResult('Selecting item: ' + sidebar._selectedTreeElement.title);
+      TestRunner.addResult('MESSAGES:');
+      ConsoleTestRunner.dumpConsoleMessages();
       next();
     },
     async function clearConsole(next) {

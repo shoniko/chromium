@@ -30,13 +30,13 @@
 #define AudioParam_h
 
 #include <sys/types.h>
+#include "base/memory/scoped_refptr.h"
 #include "core/typed_arrays/ArrayBufferViewHelpers.h"
 #include "core/typed_arrays/DOMTypedArray.h"
 #include "modules/webaudio/AudioParamTimeline.h"
 #include "modules/webaudio/AudioSummingJunction.h"
 #include "modules/webaudio/BaseAudioContext.h"
 #include "platform/bindings/ScriptWrappable.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -108,7 +108,7 @@ class AudioParamHandler final : public ThreadSafeRefCounted<AudioParamHandler>,
                                                  double default_value,
                                                  float min_value,
                                                  float max_value) {
-    return WTF::AdoptRef(new AudioParamHandler(
+    return base::AdoptRef(new AudioParamHandler(
         context, param_type, param_name, default_value, min_value, max_value));
   }
 
@@ -147,7 +147,11 @@ class AudioParamHandler final : public ThreadSafeRefCounted<AudioParamHandler>,
   void ResetSmoothedValue() { timeline_.SetSmoothedValue(IntrinsicValue()); }
 
   bool HasSampleAccurateValues() {
-    return timeline_.HasValues() || NumberOfRenderingConnections();
+    bool has_values =
+        timeline_.HasValues(destination_handler_->CurrentSampleFrame(),
+                            destination_handler_->SampleRate());
+
+    return has_values || NumberOfRenderingConnections();
   }
 
   // Calculates numberOfValues parameter values starting at the context's
@@ -160,6 +164,9 @@ class AudioParamHandler final : public ThreadSafeRefCounted<AudioParamHandler>,
   void Disconnect(AudioNodeOutput&);
 
   float IntrinsicValue() const { return NoBarrierLoad(&intrinsic_value_); }
+
+  // TODO(crbug.com/764396): remove this when fixed.
+  void WarnSetterOverlapsEvent(int event_index, BaseAudioContext&) const;
 
  private:
   AudioParamHandler(BaseAudioContext&,
@@ -270,6 +277,10 @@ class AudioParam final : public ScriptWrappable {
 
   scoped_refptr<AudioParamHandler> handler_;
   Member<BaseAudioContext> context_;
+
+  // TODO(crbug.com/764396): Remove this method and attribute when fixed.
+  void WarnIfSetterOverlapsEvent();
+  static bool s_value_setter_warning_done_;
 };
 
 }  // namespace blink

@@ -32,13 +32,17 @@
 #define DedicatedWorkerObjectProxy_h
 
 #include <memory>
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
-#include "core/dom/MessagePort.h"
+#include "core/messaging/MessagePort.h"
 #include "core/workers/ThreadedObjectProxyBase.h"
 #include "core/workers/WorkerReportingProxy.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
-#include "platform/wtf/WeakPtr.h"
+
+namespace v8_inspector {
+struct V8StackTraceId;
+}  // namespace v8_inspector
 
 namespace blink {
 
@@ -54,7 +58,6 @@ class WorkerThread;
 // ThreadedObjectProxyBase.h for the lifetime and thread affinity.
 class CORE_EXPORT DedicatedWorkerObjectProxy : public ThreadedObjectProxyBase {
   USING_FAST_MALLOC(DedicatedWorkerObjectProxy);
-  WTF_MAKE_NONCOPYABLE(DedicatedWorkerObjectProxy);
 
  public:
   static std::unique_ptr<DedicatedWorkerObjectProxy> Create(
@@ -63,11 +66,13 @@ class CORE_EXPORT DedicatedWorkerObjectProxy : public ThreadedObjectProxyBase {
   ~DedicatedWorkerObjectProxy() override;
 
   void PostMessageToWorkerObject(scoped_refptr<SerializedScriptValue>,
-                                 Vector<MessagePortChannel>);
+                                 Vector<MessagePortChannel>,
+                                 const v8_inspector::V8StackTraceId&);
   void ProcessUnhandledException(int exception_id, WorkerThread*);
   void ProcessMessageFromWorkerObject(scoped_refptr<SerializedScriptValue>,
                                       Vector<MessagePortChannel>,
-                                      WorkerThread*);
+                                      WorkerThread*,
+                                      const v8_inspector::V8StackTraceId&);
 
   // ThreadedObjectProxyBase overrides.
   void ReportException(const String& error_message,
@@ -93,6 +98,7 @@ class CORE_EXPORT DedicatedWorkerObjectProxy : public ThreadedObjectProxyBase {
       messaging_proxy_weak_ptr_;
 
   CrossThreadPersistent<WorkerGlobalScope> worker_global_scope_;
+  DISALLOW_COPY_AND_ASSIGN(DedicatedWorkerObjectProxy);
 };
 
 }  // namespace blink

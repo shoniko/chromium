@@ -48,7 +48,7 @@ CSSImageSetValue::CSSImageSetValue(CSSParserMode parser_mode)
       cached_scale_factor_(1),
       parser_mode_(parser_mode) {}
 
-CSSImageSetValue::~CSSImageSetValue() {}
+CSSImageSetValue::~CSSImageSetValue() = default;
 
 void CSSImageSetValue::FillImageSet() {
   size_t length = this->length();
@@ -117,7 +117,9 @@ StyleImage* CSSImageSetValue::CacheImage(
     ResourceRequest resource_request(document.CompleteURL(image.image_url));
     resource_request.SetHTTPReferrer(image.referrer);
     ResourceLoaderOptions options;
-    options.initiator_info.name = FetchInitiatorTypeNames::css;
+    options.initiator_info.name = parser_mode_ == kUASheetMode
+                                      ? FetchInitiatorTypeNames::uacss
+                                      : FetchInitiatorTypeNames::css;
     FetchParameters params(resource_request, options);
 
     if (cross_origin != kCrossOriginAttributeNotSet) {
@@ -137,9 +139,6 @@ StyleImage* CSSImageSetValue::CacheImage(
       cached_image_ = StyleInvalidImage::Create(image.image_url);
     }
     cached_scale_factor_ = device_scale_factor;
-
-    if (parser_mode_ == kUASheetMode)
-      cached_image_->FlagAsUserAgentResource();
   }
 
   return cached_image_.Get();

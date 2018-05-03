@@ -14,7 +14,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "components/viz/common/surfaces/local_surface_id_allocator.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "services/ui/common/types.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "services/ui/public/interfaces/window_tree_host.mojom.h"
@@ -68,6 +68,9 @@ class Display : public PlatformDisplayDelegate,
   // DisplayManager as a pending display, until accelerated widget is available.
   void Init(const display::ViewportMetrics& metrics,
             std::unique_ptr<DisplayBinding> binding);
+
+  // Initialize the display's root window to host window manager content.
+  void InitWindowManagerDisplayRoots();
 
   // Returns the ID for this display. In internal mode this is the
   // display::Display ID. In external mode this hasn't been defined yet.
@@ -168,9 +171,6 @@ class Display : public PlatformDisplayDelegate,
 
   class CursorState;
 
-  // Inits the necessary state once the display is ready.
-  void InitWindowManagerDisplayRoots();
-
   // Creates the set of WindowManagerDisplayRoots from the
   // WindowManagerWindowTreeFactorySet.
   void CreateWindowManagerDisplayRootsFromFactories();
@@ -191,6 +191,7 @@ class Display : public PlatformDisplayDelegate,
   void OnAcceleratedWidgetAvailable() override;
   void OnNativeCaptureLost() override;
   OzonePlatform* GetOzonePlatform() override;
+  bool IsHostingViz() const override;
 
   // FocusControllerObserver:
   void OnActivationChanged(ServerWindow* old_active_window,
@@ -219,7 +220,7 @@ class Display : public PlatformDisplayDelegate,
   // external window mode this will be invalid.
   display::Display display_;
 
-  viz::LocalSurfaceIdAllocator allocator_;
+  viz::ParentLocalSurfaceIdAllocator allocator_;
 
   WindowManagerDisplayRootMap window_manager_display_root_map_;
 

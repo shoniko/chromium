@@ -32,7 +32,6 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/frame/WebFeature.h"
 #include "core/html/forms/HTMLInputElement.h"
@@ -41,6 +40,7 @@
 #include "core/html_names.h"
 #include "core/input_type_names.h"
 #include "core/layout/LayoutSearchField.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -48,10 +48,10 @@ using namespace HTMLNames;
 
 inline SearchInputType::SearchInputType(HTMLInputElement& element)
     : BaseTextInputType(element),
-      search_event_timer_(TaskRunnerHelper::Get(TaskType::kUserInteraction,
-                                                &element.GetDocument()),
-                          this,
-                          &SearchInputType::SearchEventTimerFired) {}
+      search_event_timer_(
+          element.GetDocument().GetTaskRunner(TaskType::kUserInteraction),
+          this,
+          &SearchInputType::SearchEventTimerFired) {}
 
 InputType* SearchInputType::Create(HTMLInputElement& element) {
   return new SearchInputType(element);
@@ -107,17 +107,17 @@ void SearchInputType::StartSearchEventTimer() {
 
   if (!length) {
     search_event_timer_.Stop();
-    TaskRunnerHelper::Get(TaskType::kUserInteraction,
-                          &GetElement().GetDocument())
-        ->PostTask(BLINK_FROM_HERE, WTF::Bind(&HTMLInputElement::OnSearch,
-                                              WrapPersistent(&GetElement())));
+    GetElement()
+        .GetDocument()
+        .GetTaskRunner(TaskType::kUserInteraction)
+        ->PostTask(FROM_HERE, WTF::Bind(&HTMLInputElement::OnSearch,
+                                        WrapPersistent(&GetElement())));
     return;
   }
 
   // After typing the first key, we wait 0.5 seconds.
   // After the second key, 0.4 seconds, then 0.3, then 0.2 from then on.
-  search_event_timer_.StartOneShot(max(0.2, 0.6 - 0.1 * length),
-                                   BLINK_FROM_HERE);
+  search_event_timer_.StartOneShot(max(0.2, 0.6 - 0.1 * length), FROM_HERE);
 }
 
 void SearchInputType::DispatchSearchEvent() {

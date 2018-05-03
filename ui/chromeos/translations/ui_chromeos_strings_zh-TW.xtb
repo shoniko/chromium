@@ -115,6 +115,7 @@
 <translation id="4694604912444486114">猴子</translation>
 <translation id="4711094779914110278">土耳其文</translation>
 <translation id="4725511304875193254">柯基犬</translation>
+<translation id="4737050008115666127">降落跑道</translation>
 <translation id="4747271164117300400">馬其頓文</translation>
 <translation id="4749157430980974800">喬治亞文鍵盤</translation>
 <translation id="4755240240651974342">芬蘭文鍵盤</translation>
@@ -148,6 +149,7 @@
 <translation id="5465122519792752163">尼泊爾文鍵盤 (InScript)</translation>
 <translation id="5469868506864199649">義大利文</translation>
 <translation id="5500122897333236901">冰島文</translation>
+<translation id="5508696409934741614">圓點</translation>
 <translation id="5533555070048896610">音譯 (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">Dvorak 美式配置</translation>
 <translation id="5640179856859982418">瑞士文鍵盤</translation>
@@ -161,6 +163,7 @@
 <translation id="5892290200158927959">法文 BÉPO 鍵盤</translation>
 <translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">拉丁美洲文鍵盤</translation>
+<translation id="6012987430370760224">馬拉地文鍵盤 (拼音)</translation>
 <translation id="60357267506638014">捷克 QWERTY</translation>
 <translation id="6054173164583630569">法文鍵盤</translation>
 <translation id="6111770213269631447">音譯 (namaskar → নমস্কার)</translation>
@@ -199,6 +202,7 @@
 <translation id="7222624196722476520">保加利亞文拼音鍵盤</translation>
 <translation id="7348749398828259943">美式 Workman 國際鍵盤</translation>
 <translation id="7389722738210761877">泰文鍵盤 (TIS 820-2531)</translation>
+<translation id="7396038720194014279">北印度文鍵盤 (拼音)</translation>
 <translation id="7417453074306512035">衣索比亞文鍵盤</translation>
 <translation id="7419631653042041064">卡達隆尼亞文鍵盤</translation>
 <translation id="7434823369735508263">英式 Dvorak 鍵盤</translation>
@@ -206,12 +210,14 @@
 <translation id="7474889694310679759">加拿大英文鍵盤</translation>
 <translation id="751507702149411736">白俄羅斯語</translation>
 <translation id="7547811415869834682">荷蘭文</translation>
+<translation id="7603724359189955920">網格</translation>
 <translation id="770015031906360009">希臘文</translation>
 <translation id="7706319470528945664">葡萄牙文鍵盤</translation>
 <translation id="7774365994322694683">鳥</translation>
 <translation id="7825423931463735974">坦米爾文鍵盤 (Tamil99)</translation>
 <translation id="7853966320808728790">法文 BÉPO</translation>
 <translation id="7896906914454843592">美式改良鍵盤</translation>
+<translation id="7898607018410277265">古吉拉特文鍵盤 (新拼音)</translation>
 <translation id="7917972308273378936">立陶宛文鍵盤</translation>
 <translation id="7943385054491506837">Colemak 美式配置</translation>
 <translation id="7969525169268594403">斯洛維尼亞文</translation>
@@ -235,6 +241,7 @@
 <translation id="8432745813735585631">美式 Colemak 鍵盤</translation>
 <translation id="8437209419043462667">美式配置</translation>
 <translation id="8467473010914675605">韓文輸入法</translation>
+<translation id="8477649328507734757">同心圓</translation>
 <translation id="8521441079177373948">英式配置</translation>
 <translation id="8551494947769799688">拉脫維亞文</translation>
 <translation id="8561206103590473338">大象</translation>
@@ -253,4 +260,5 @@
 <translation id="913758436357682283">緬甸文 Myansan 鍵盤</translation>
 <translation id="9153744823707037316">行列輸入法</translation>
 <translation id="9206487995878691001">倉頡輸入法</translation>
+<translation id="9219908252191632183">月球表面</translation>
 </translationbundle>

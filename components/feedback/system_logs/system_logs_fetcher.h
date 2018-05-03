@@ -15,6 +15,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequenced_task_runner.h"
 #include "components/feedback/anonymizer_tool.h"
 #include "components/feedback/feedback_common.h"
 #include "components/feedback/system_logs/system_logs_source.h"
@@ -23,7 +24,7 @@ namespace system_logs {
 
 // Callback that the SystemLogsFetcher uses to return data.
 using SysLogsFetcherCallback =
-    base::Callback<void(std::unique_ptr<SystemLogsResponse>)>;
+    base::OnceCallback<void(std::unique_ptr<SystemLogsResponse>)>;
 
 // The SystemLogsFetcher fetches key-value data from a list of log sources.
 //
@@ -43,8 +44,6 @@ using SysLogsFetcherCallback =
 class SystemLogsFetcher {
  public:
   // If scrub_data is true, logs will be anonymized.
-  // TODO(battre): This class needs to be expanded to provide better scrubbing
-  // of system logs.
   explicit SystemLogsFetcher(bool scrub_data);
   ~SystemLogsFetcher();
 
@@ -53,18 +52,19 @@ class SystemLogsFetcher {
 
   // Starts the fetch process. After the fetch completes, this instance calls
   // |callback|, then schedules itself to be deleted.
-  void Fetch(const SysLogsFetcherCallback& callback);
+  void Fetch(SysLogsFetcherCallback callback);
 
  private:
   // Callback passed to all the data sources. May call Scrub(), then calls
   // AddResponse().
-  void OnFetched(const std::string& source_name, SystemLogsResponse* response);
+  void OnFetched(const std::string& source_name,
+                 std::unique_ptr<SystemLogsResponse> response);
 
   // Merges the |response| it receives into response_. When all the data sources
   // have responded, it deletes their objects and returns the response to the
   // callback_. After this it deletes this instance of the object.
   void AddResponse(const std::string& source_name,
-                   SystemLogsResponse* response);
+                   std::unique_ptr<SystemLogsResponse> response);
 
   std::vector<std::unique_ptr<SystemLogsSource>> data_sources_;
   SysLogsFetcherCallback callback_;
@@ -73,6 +73,7 @@ class SystemLogsFetcher {
   size_t num_pending_requests_;  // The number of callbacks it should get.
 
   std::unique_ptr<feedback::AnonymizerTool> anonymizer_;
+  scoped_refptr<base::SequencedTaskRunner> task_runner_for_anonymizer_;
 
   base::WeakPtrFactory<SystemLogsFetcher> weak_ptr_factory_;
 

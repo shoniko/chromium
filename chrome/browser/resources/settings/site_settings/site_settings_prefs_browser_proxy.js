@@ -13,7 +13,7 @@
  * should be treated as 'default'.
  * @enum {string}
  */
-var ContentSettingProvider = {
+const ContentSettingProvider = {
   EXTENSION: 'extension',
   PREFERENCE: 'preference',
 };
@@ -28,7 +28,7 @@ var ContentSettingProvider = {
  *            setting: !settings.ContentSetting,
  *            source: !settings.SiteSettingSource}}
  */
-var RawSiteException;
+let RawSiteException;
 
 /**
  * The site exception after it has been converted/filtered for UI use.
@@ -42,25 +42,25 @@ var RawSiteException;
  *            enforcement: ?chrome.settingsPrivate.Enforcement,
  *            controlledBy: !chrome.settingsPrivate.ControlledBy}}
  */
-var SiteException;
+let SiteException;
 
 /**
  * @typedef {{setting: !settings.ContentSetting,
  *            source: !ContentSettingProvider}}
  */
-var DefaultContentSetting;
+let DefaultContentSetting;
 
 /**
  * @typedef {{name: string,
  *            id: string}}
  */
-var MediaPickerEntry;
+let MediaPickerEntry;
 
 /**
  * @typedef {{protocol: string,
  *            spec: string}}
  */
-var ProtocolHandlerEntry;
+let ProtocolHandlerEntry;
 
 /**
  * @typedef {{name: string,
@@ -68,7 +68,7 @@ var ProtocolHandlerEntry;
  *            serial-number: string,
  *            vendor-id: Number}}
  */
-var UsbDeviceDetails;
+let UsbDeviceDetails;
 
 /**
  * @typedef {{embeddingOrigin: string,
@@ -78,7 +78,7 @@ var UsbDeviceDetails;
  *            setting: string,
  *            source: string}}
  */
-var UsbDeviceEntry;
+let UsbDeviceEntry;
 
 /**
  * @typedef {{origin: string,
@@ -86,7 +86,7 @@ var UsbDeviceEntry;
  *            source: string,
  *            zoom: string}}
  */
-var ZoomLevelEntry;
+let ZoomLevelEntry;
 
 cr.define('settings', function() {
   /** @interface */
@@ -266,6 +266,14 @@ cr.define('settings', function() {
      * @param {string} host The host to remove zoom levels for.
      */
     removeZoomLevel(host) {}
+
+    // <if expr="chromeos">
+    /**
+     * Links to com.android.settings.Settings$ManageDomainUrlsActivity on ARC
+     * side, this is to manage app preferences.
+     */
+    showAndroidManageAppLinks() {}
+    // </if>
   }
 
   /**
@@ -386,6 +394,13 @@ cr.define('settings', function() {
     removeZoomLevel(host) {
       chrome.send('removeZoomLevel', [host]);
     }
+
+    // <if expr="chromeos">
+    /** @override */
+    showAndroidManageAppLinks() {
+      chrome.send('showAndroidManageAppLinks');
+    }
+    // </if>
   }
 
   // The singleton instance_ is replaced with a test version of this wrapper

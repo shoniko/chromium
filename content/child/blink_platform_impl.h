@@ -52,7 +52,8 @@ class CONTENT_EXPORT BlinkPlatformImpl : public blink::Platform {
  public:
   BlinkPlatformImpl();
   explicit BlinkPlatformImpl(
-      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner);
+      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner);
   ~BlinkPlatformImpl() override;
 
   // Platform methods (partial implementation):
@@ -95,6 +96,7 @@ class CONTENT_EXPORT BlinkPlatformImpl : public blink::Platform {
       const blink::WebString& value1,
       const blink::WebString& value2) override;
   void SuddenTerminationChanged(bool enabled) override {}
+  bool IsRendererSideResourceSchedulerEnabled() const final;
   std::unique_ptr<blink::WebGestureCurve> CreateFlingAnimationCurve(
       blink::WebGestureDevice device_source,
       const blink::WebFloatPoint& velocity,
@@ -111,16 +113,11 @@ class CONTENT_EXPORT BlinkPlatformImpl : public blink::Platform {
   int DomKeyEnumFromString(const blink::WebString& key_string) override;
   bool IsDomKeyForModifier(int dom_key) override;
 
-  std::unique_ptr<blink::WebFeaturePolicy> CreateFeaturePolicy(
-      const blink::WebFeaturePolicy* parentPolicy,
-      const blink::WebParsedFeaturePolicy& containerPolicy,
-      const blink::WebParsedFeaturePolicy& policyHeader,
-      const blink::WebSecurityOrigin& origin) override;
-  std::unique_ptr<blink::WebFeaturePolicy> DuplicateFeaturePolicyWithOrigin(
-      const blink::WebFeaturePolicy& policy,
-      const blink::WebSecurityOrigin& new_origin) override;
-
   void WaitUntilWebThreadTLSUpdate(blink::scheduler::WebThreadBase* thread);
+
+  scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() const override;
+  std::unique_ptr<NestedMessageLoopRunner> CreateNestedMessageLoopRunner()
+      const override;
 
  private:
   void UpdateWebThreadTLS(blink::WebThread* thread, base::WaitableEvent* event);
@@ -128,6 +125,7 @@ class CONTENT_EXPORT BlinkPlatformImpl : public blink::Platform {
   bool IsMainThread() const;
 
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;
   WebThemeEngineImpl native_theme_engine_;
   WebFallbackThemeEngineImpl fallback_theme_engine_;
   base::ThreadLocalStorage::Slot current_thread_slot_;

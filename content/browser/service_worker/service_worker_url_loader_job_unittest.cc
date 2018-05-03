@@ -13,8 +13,8 @@
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/common/service_worker/service_worker_event_dispatcher.mojom.h"
+#include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/resource_response.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_url_loader_client.h"
 #include "mojo/common/data_pipe_utils.h"
@@ -23,18 +23,18 @@
 #include "net/ssl/ssl_info.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
+#include "services/network/public/cpp/resource_response.h"
 #include "services/network/public/interfaces/fetch_api.mojom.h"
 #include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "storage/browser/blob/blob_impl.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_event_status.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
-
-namespace {
+namespace service_worker_url_loader_job_unittest {
 
 void ReceiveStartLoaderCallback(StartLoaderCallback* out_callback,
                                 StartLoaderCallback callback) {
@@ -62,7 +62,8 @@ void ReceiveStartLoaderCallback(StartLoaderCallback* out_callback,
 // 6. Like all FetchEvent responses, the response is sent to
 //    ServiceWorkerURLLoaderJob::DidDispatchFetchEvent, and the
 //    StartLoaderCallback is returned.
-class NavigationPreloadLoaderClient final : public mojom::URLLoaderClient {
+class NavigationPreloadLoaderClient final
+    : public network::mojom::URLLoaderClient {
  public:
   NavigationPreloadLoaderClient(
       mojom::FetchEventPreloadHandlePtr preload_handle,
@@ -79,11 +80,11 @@ class NavigationPreloadLoaderClient final : public mojom::URLLoaderClient {
   }
   ~NavigationPreloadLoaderClient() override = default;
 
-  // mojom::URLLoaderClient implementation
+  // network::mojom::URLLoaderClient implementation
   void OnReceiveResponse(
-      const ResourceResponseHead& response_head,
+      const network::ResourceResponseHead& response_head,
       const base::Optional<net::SSLInfo>& ssl_info,
-      mojom::DownloadedTempFilePtr downloaded_file) override {
+      network::mojom::DownloadedTempFilePtr downloaded_file) override {
     response_head_ = response_head;
   }
   void OnStartLoadingResponseBody(
@@ -92,7 +93,7 @@ class NavigationPreloadLoaderClient final : public mojom::URLLoaderClient {
     // We could call OnResponseStream() here, but for simplicity, don't do
     // anything until OnComplete().
   }
-  void OnComplete(const ResourceRequestCompletionStatus& status) override {
+  void OnComplete(const network::URLLoaderCompletionStatus& status) override {
     blink::mojom::ServiceWorkerStreamCallbackPtr stream_callback;
     auto stream_handle = blink::mojom::ServiceWorkerStreamHandle::New();
     stream_handle->callback_request = mojo::MakeRequest(&stream_callback);
@@ -102,17 +103,17 @@ class NavigationPreloadLoaderClient final : public mojom::URLLoaderClient {
     // FetchEvent#respondWith.
     response_callback_->OnResponseStream(
         ServiceWorkerResponse(
-            base::MakeUnique<std::vector<GURL>>(
+            std::make_unique<std::vector<GURL>>(
                 response_head_.url_list_via_service_worker),
             response_head_.headers->response_code(),
             response_head_.headers->GetStatusText(),
             response_head_.response_type_via_service_worker,
-            base::MakeUnique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
+            std::make_unique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
             0 /* blob_size */, nullptr /* blob */,
-            blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
+            blink::mojom::ServiceWorkerResponseError::kUnknown, base::Time(),
             false /* response_is_in_cache_storage */,
             std::string() /* response_cache_storage_cache_name */,
-            base::MakeUnique<
+            std::make_unique<
                 ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
         std::move(stream_handle), base::Time::Now());
     std::move(finish_callback_)
@@ -121,8 +122,9 @@ class NavigationPreloadLoaderClient final : public mojom::URLLoaderClient {
     stream_callback->OnCompleted();
     delete this;
   }
-  void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
-                         const ResourceResponseHead& response_head) override {}
+  void OnReceiveRedirect(
+      const net::RedirectInfo& redirect_info,
+      const network::ResourceResponseHead& response_head) override {}
   void OnDataDownloaded(int64_t data_length,
                         int64_t encoded_data_length) override {}
   void OnUploadProgress(int64_t current_position,
@@ -134,10 +136,10 @@ class NavigationPreloadLoaderClient final : public mojom::URLLoaderClient {
   void OnConnectionError() { delete this; }
 
  private:
-  mojom::URLLoaderPtr url_loader_;
-  mojo::Binding<mojom::URLLoaderClient> binding_;
+  network::mojom::URLLoaderPtr url_loader_;
+  mojo::Binding<network::mojom::URLLoaderClient> binding_;
 
-  ResourceResponseHead response_head_;
+  network::ResourceResponseHead response_head_;
   mojo::ScopedDataPipeConsumerHandle body_;
 
   // Callbacks that complete Helper::OnFetchEvent().
@@ -153,24 +155,25 @@ class NavigationPreloadLoaderClient final : public mojom::URLLoaderClient {
 // ServiceWorkerURLLoaderJobTest sets the network factory for
 // ServiceWorkerContextCore to MockNetworkURLLoaderFactory. So far, it's only
 // used for navigation preload in these tests.
-class MockNetworkURLLoaderFactory final : public mojom::URLLoaderFactory {
+class MockNetworkURLLoaderFactory final
+    : public network::mojom::URLLoaderFactory {
  public:
   MockNetworkURLLoaderFactory() = default;
 
-  // mojom::URLLoaderFactory implementation.
-  void CreateLoaderAndStart(mojom::URLLoaderRequest request,
+  // network::mojom::URLLoaderFactory implementation.
+  void CreateLoaderAndStart(network::mojom::URLLoaderRequest request,
                             int32_t routing_id,
                             int32_t request_id,
                             uint32_t options,
-                            const ResourceRequest& url_request,
-                            mojom::URLLoaderClientPtr client,
+                            const network::ResourceRequest& url_request,
+                            network::mojom::URLLoaderClientPtr client,
                             const net::MutableNetworkTrafficAnnotationTag&
                                 traffic_annotation) override {
     std::string headers = "HTTP/1.1 200 OK\n\n";
     net::HttpResponseInfo info;
     info.headers = new net::HttpResponseHeaders(
         net::HttpUtil::AssembleRawHeaders(headers.c_str(), headers.length()));
-    ResourceResponseHead response;
+    network::ResourceResponseHead response;
     response.headers = info.headers;
     response.headers->GetMimeType(&response.mime_type);
     client->OnReceiveResponse(response, base::nullopt, nullptr);
@@ -182,12 +185,14 @@ class MockNetworkURLLoaderFactory final : public mojom::URLLoaderFactory {
                                          MOJO_WRITE_DATA_FLAG_ALL_OR_NONE);
     client->OnStartLoadingResponseBody(std::move(data_pipe.consumer_handle));
 
-    ResourceRequestCompletionStatus status;
+    network::URLLoaderCompletionStatus status;
     status.error_code = net::OK;
     client->OnComplete(status);
   }
 
-  void Clone(mojom::URLLoaderFactoryRequest factory) override { NOTREACHED(); }
+  void Clone(network::mojom::URLLoaderFactoryRequest factory) override {
+    NOTREACHED();
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockNetworkURLLoaderFactory);
@@ -201,19 +206,15 @@ class Helper : public EmbeddedWorkerTestHelper {
       : EmbeddedWorkerTestHelper(
             base::FilePath(),
             base::MakeRefCounted<URLLoaderFactoryGetter>()) {
-    mojom::URLLoaderFactoryPtr mock_loader_factory;
-    mojo::MakeStrongBinding(base::MakeUnique<MockNetworkURLLoaderFactory>(),
-                            MakeRequest(&mock_loader_factory));
     url_loader_factory_getter()->SetNetworkFactoryForTesting(
-        std::move(mock_loader_factory));
+        &mock_url_loader_factory_);
   }
   ~Helper() override = default;
 
   // Tells this helper to respond to fetch events with the specified blob.
-  void RespondWithBlob(const std::string blob_uuid, uint64_t blob_size) {
+  void RespondWithBlob(blink::mojom::BlobPtr blob) {
     response_mode_ = ResponseMode::kBlob;
-    blob_uuid_ = blob_uuid;
-    blob_size_ = blob_size;
+    blob_body_ = std::move(blob);
   }
 
   // Tells this helper to respond to fetch events with the specified stream.
@@ -270,25 +271,30 @@ class Helper : public EmbeddedWorkerTestHelper {
   }
 
   void ReadRequestBody(std::string* out_string) {
-    ASSERT_TRUE(request_body_blob_);
-
-    mojo::DataPipe pipe;
-    (*request_body_blob_)->ReadAll(std::move(pipe.producer_handle), nullptr);
-    base::RunLoop().RunUntilIdle();
-
-    EXPECT_TRUE(mojo::common::BlockingCopyToString(
-        std::move(pipe.consumer_handle), out_string));
+    ASSERT_TRUE(request_body_);
+    const std::vector<network::DataElement>* elements =
+        request_body_->elements();
+    // So far this test expects a single bytes element.
+    ASSERT_EQ(1u, elements->size());
+    const network::DataElement& element = elements->front();
+    ASSERT_EQ(network::DataElement::TYPE_BYTES, element.type());
+    *out_string = std::string(element.bytes(), element.length());
   }
 
  protected:
   void OnFetchEvent(
       int embedded_worker_id,
-      const ServiceWorkerFetchRequest& request,
+      const network::ResourceRequest& request,
       mojom::FetchEventPreloadHandlePtr preload_handle,
       mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
       mojom::ServiceWorkerEventDispatcher::DispatchFetchEventCallback
           finish_callback) override {
-    request_body_blob_ = request.blob;
+    // Basic checks on DispatchFetchEvent parameters.
+    EXPECT_TRUE(ServiceWorkerUtils::IsMainResourceType(
+        static_cast<ResourceType>(request.resource_type)));
+
+    request_body_ = request.request_body;
+
     switch (response_mode_) {
       case ResponseMode::kDefault:
         EmbeddedWorkerTestHelper::OnFetchEvent(
@@ -296,18 +302,18 @@ class Helper : public EmbeddedWorkerTestHelper {
             std::move(response_callback), std::move(finish_callback));
         return;
       case ResponseMode::kBlob:
-        response_callback->OnResponse(
+        response_callback->OnResponseBlob(
             ServiceWorkerResponse(
-                base::MakeUnique<std::vector<GURL>>(), 200, "OK",
+                std::make_unique<std::vector<GURL>>(), 200, "OK",
                 network::mojom::FetchResponseType::kDefault,
-                base::MakeUnique<ServiceWorkerHeaderMap>(), blob_uuid_,
-                blob_size_, nullptr /* blob */,
-                blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
-                false /* response_is_in_cache_storage */,
+                std::make_unique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
+                0 /* blob_size */, nullptr /* blob */,
+                blink::mojom::ServiceWorkerResponseError::kUnknown,
+                base::Time(), false /* response_is_in_cache_storage */,
                 std::string() /* response_cache_storage_cache_name */,
-                base::MakeUnique<
+                std::make_unique<
                     ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
-            base::Time::Now());
+            std::move(blob_body_), base::Time::Now());
         std::move(finish_callback)
             .Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED,
                  base::Time::Now());
@@ -315,14 +321,14 @@ class Helper : public EmbeddedWorkerTestHelper {
       case ResponseMode::kStream:
         response_callback->OnResponseStream(
             ServiceWorkerResponse(
-                base::MakeUnique<std::vector<GURL>>(), 200, "OK",
+                std::make_unique<std::vector<GURL>>(), 200, "OK",
                 network::mojom::FetchResponseType::kDefault,
-                base::MakeUnique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
+                std::make_unique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
                 0 /* blob_size */, nullptr /* blob */,
-                blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
-                false /* response_is_in_cache_storage */,
+                blink::mojom::ServiceWorkerResponseError::kUnknown,
+                base::Time(), false /* response_is_in_cache_storage */,
                 std::string() /* response_cache_storage_cache_name */,
-                base::MakeUnique<
+                std::make_unique<
                     ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
             std::move(stream_handle_), base::Time::Now());
         std::move(finish_callback)
@@ -338,15 +344,15 @@ class Helper : public EmbeddedWorkerTestHelper {
       case ResponseMode::kErrorResponse:
         response_callback->OnResponse(
             ServiceWorkerResponse(
-                base::MakeUnique<std::vector<GURL>>(), 0 /* status_code */,
+                std::make_unique<std::vector<GURL>>(), 0 /* status_code */,
                 "" /* status_text */,
                 network::mojom::FetchResponseType::kDefault,
-                base::MakeUnique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
+                std::make_unique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
                 0 /* blob_size */, nullptr /* blob */,
-                blink::kWebServiceWorkerResponseErrorPromiseRejected,
+                blink::mojom::ServiceWorkerResponseError::kPromiseRejected,
                 base::Time(), false /* response_is_in_cache_storage */,
                 std::string() /* response_cache_storage_cache_name */,
-                base::MakeUnique<
+                std::make_unique<
                     ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
             base::Time::Now());
         std::move(finish_callback)
@@ -379,30 +385,30 @@ class Helper : public EmbeddedWorkerTestHelper {
         finish_callback_ = std::move(finish_callback);
         response_callback->OnResponse(
             ServiceWorkerResponse(
-                base::MakeUnique<std::vector<GURL>>(), 200, "OK",
+                std::make_unique<std::vector<GURL>>(), 200, "OK",
                 network::mojom::FetchResponseType::kDefault,
-                base::MakeUnique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
+                std::make_unique<ServiceWorkerHeaderMap>(), "" /* blob_uuid */,
                 0 /* blob_size */, nullptr /* blob */,
-                blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
-                false /* response_is_in_cache_storage */,
+                blink::mojom::ServiceWorkerResponseError::kUnknown,
+                base::Time(), false /* response_is_in_cache_storage */,
                 std::string() /* response_cache_storage_cache_name */,
-                base::MakeUnique<
+                std::make_unique<
                     ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
             base::Time::Now());
         // Now the caller must call FinishWaitUntil() to finish the event.
         return;
       case ResponseMode::kRedirect:
-        auto headers = base::MakeUnique<ServiceWorkerHeaderMap>();
+        auto headers = std::make_unique<ServiceWorkerHeaderMap>();
         (*headers)["location"] = redirected_url_.spec();
         response_callback->OnResponse(
             ServiceWorkerResponse(
-                base::MakeUnique<std::vector<GURL>>(), 301, "Moved Permanently",
+                std::make_unique<std::vector<GURL>>(), 301, "Moved Permanently",
                 network::mojom::FetchResponseType::kDefault, std::move(headers),
                 "" /* blob_uuid */, 0 /* blob_size */, nullptr /* blob */,
-                blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
-                false /* response_is_in_cache_storage */,
+                blink::mojom::ServiceWorkerResponseError::kUnknown,
+                base::Time(), false /* response_is_in_cache_storage */,
                 std::string() /* response_cache_storage_cache_name */,
-                base::MakeUnique<
+                std::make_unique<
                     ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
             base::Time::Now());
         std::move(finish_callback)
@@ -427,11 +433,10 @@ class Helper : public EmbeddedWorkerTestHelper {
   };
 
   ResponseMode response_mode_ = ResponseMode::kDefault;
-  scoped_refptr<storage::BlobHandle> request_body_blob_;
+  scoped_refptr<network::ResourceRequestBody> request_body_;
 
   // For ResponseMode::kBlob.
-  std::string blob_uuid_;
-  uint64_t blob_size_ = 0;
+  blink::mojom::BlobPtr blob_body_;
 
   // For ResponseMode::kStream.
   blink::mojom::ServiceWorkerStreamHandlePtr stream_handle_;
@@ -443,13 +448,16 @@ class Helper : public EmbeddedWorkerTestHelper {
   // For ResponseMode::kRedirect.
   GURL redirected_url_;
 
+  MockNetworkURLLoaderFactory mock_url_loader_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(Helper);
 };
 
 // Returns typical response info for a resource load that went through a service
 // worker.
-std::unique_ptr<ResourceResponseHead> CreateResponseInfoFromServiceWorker() {
-  auto head = std::make_unique<ResourceResponseHead>();
+std::unique_ptr<network::ResourceResponseHead>
+CreateResponseInfoFromServiceWorker() {
+  auto head = std::make_unique<network::ResourceResponseHead>();
   head->was_fetched_via_service_worker = true;
   head->was_fallback_required_by_service_worker = false;
   head->url_list_via_service_worker = std::vector<GURL>();
@@ -461,8 +469,6 @@ std::unique_ptr<ResourceResponseHead> CreateResponseInfoFromServiceWorker() {
   return head;
 }
 
-}  // namespace
-
 // ServiceWorkerURLLoaderJobTest is for testing the handling of requests
 // by a service worker via ServiceWorkerURLLoaderJob.
 //
@@ -471,16 +477,16 @@ std::unique_ptr<ResourceResponseHead> CreateResponseInfoFromServiceWorker() {
 // responding as if a service worker is running in the renderer.
 //
 // ServiceWorkerURLLoaderJobTest is also a ServiceWorkerURLLoaderJob::Delegate.
-// In production code, ServiceWorkerControlleeRequestHandler is the Delegate
-// (for non-"foreign fetch" request interceptions). So this class also basically
-// mocks that part of ServiceWorkerControlleeRequestHandler.
+// In production code, ServiceWorkerControlleeRequestHandler is the Delegate. So
+// this class also basically mocks that part of
+// ServiceWorkerControlleeRequestHandler.
 class ServiceWorkerURLLoaderJobTest
     : public testing::Test,
       public ServiceWorkerURLLoaderJob::Delegate {
  public:
   ServiceWorkerURLLoaderJobTest()
       : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
-        helper_(base::MakeUnique<Helper>()) {}
+        helper_(std::make_unique<Helper>()) {}
   ~ServiceWorkerURLLoaderJobTest() override = default;
 
   void SetUp() override {
@@ -489,10 +495,11 @@ class ServiceWorkerURLLoaderJobTest
     // Create an active service worker.
     storage()->LazyInitializeForTest(base::BindOnce(&base::DoNothing));
     base::RunLoop().RunUntilIdle();
-    registration_ = new ServiceWorkerRegistration(
-        blink::mojom::ServiceWorkerRegistrationOptions(
-            GURL("https://example.com/")),
-        storage()->NewRegistrationId(), helper_->context()->AsWeakPtr());
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = GURL("https://example.com/");
+    registration_ =
+        new ServiceWorkerRegistration(options, storage()->NewRegistrationId(),
+                                      helper_->context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(
         registration_.get(), GURL("https://example.com/service_worker.js"),
         storage()->NewVersionId(), helper_->context()->AsWeakPtr());
@@ -517,10 +524,6 @@ class ServiceWorkerURLLoaderJobTest
 
   ServiceWorkerStorage* storage() { return helper_->context()->storage(); }
 
-  base::WeakPtr<storage::BlobStorageContext> GetBlobStorageContext() {
-    return blob_context_.AsWeakPtr();
-  }
-
   // Indicates whether ServiceWorkerURLLoaderJob decided to handle a request,
   // i.e., it returned a non-null StartLoaderCallback for the request.
   enum class JobResult {
@@ -531,15 +534,14 @@ class ServiceWorkerURLLoaderJobTest
   // Returns whether ServiceWorkerURLLoaderJob handled the request. If
   // kHandledRequest was returned, the request is ongoing and the caller can use
   // functions like client_.RunUntilComplete() to wait for completion.
-  JobResult StartRequest(std::unique_ptr<ResourceRequest> request) {
+  JobResult StartRequest(std::unique_ptr<network::ResourceRequest> request) {
     // Start a ServiceWorkerURLLoaderJob. It should return a
     // StartLoaderCallback.
     StartLoaderCallback callback;
-    job_ = base::MakeUnique<ServiceWorkerURLLoaderJob>(
+    job_ = std::make_unique<ServiceWorkerURLLoaderJob>(
         base::BindOnce(&ReceiveStartLoaderCallback, &callback), this, *request,
         base::WrapRefCounted<URLLoaderFactoryGetter>(
-            helper_->context()->loader_factory_getter()),
-        GetBlobStorageContext());
+            helper_->context()->loader_factory_getter()));
     job_->ForwardToServiceWorker();
     base::RunLoop().RunUntilIdle();
     if (!callback)
@@ -552,8 +554,8 @@ class ServiceWorkerURLLoaderJobTest
     return JobResult::kHandledRequest;
   }
 
-  void ExpectResponseInfo(const ResourceResponseHead& info,
-                          const ResourceResponseHead& expected_info) {
+  void ExpectResponseInfo(const network::ResourceResponseHead& info,
+                          const network::ResourceResponseHead& expected_info) {
     EXPECT_EQ(expected_info.was_fetched_via_service_worker,
               info.was_fetched_via_service_worker);
     EXPECT_EQ(expected_info.was_fallback_required_by_service_worker,
@@ -572,14 +574,15 @@ class ServiceWorkerURLLoaderJobTest
               info.did_service_worker_navigation_preload);
   }
 
-  std::unique_ptr<ResourceRequest> CreateRequest() {
-    std::unique_ptr<ResourceRequest> request =
-        base::MakeUnique<ResourceRequest>();
+  std::unique_ptr<network::ResourceRequest> CreateRequest() {
+    std::unique_ptr<network::ResourceRequest> request =
+        std::make_unique<network::ResourceRequest>();
     request->url = GURL("https://www.example.com/");
     request->method = "GET";
-    request->fetch_request_mode = FETCH_REQUEST_MODE_NAVIGATE;
-    request->fetch_credentials_mode = FETCH_CREDENTIALS_MODE_INCLUDE;
-    request->fetch_redirect_mode = FetchRedirectMode::MANUAL_MODE;
+    request->fetch_request_mode = network::mojom::FetchRequestMode::kNavigate;
+    request->fetch_credentials_mode =
+        network::mojom::FetchCredentialsMode::kInclude;
+    request->fetch_redirect_mode = network::mojom::FetchRedirectMode::kManual;
     return request;
   }
 
@@ -610,7 +613,7 @@ class ServiceWorkerURLLoaderJobTest
   TestURLLoaderClient client_;
   bool was_main_resource_load_failed_called_ = false;
   std::unique_ptr<ServiceWorkerURLLoaderJob> job_;
-  mojom::URLLoaderPtr loader_;
+  network::mojom::URLLoaderPtr loader_;
   base::test::ScopedFeatureList feature_list_;
 };
 
@@ -621,7 +624,7 @@ TEST_F(ServiceWorkerURLLoaderJobTest, Basic) {
   client_.RunUntilComplete();
 
   EXPECT_EQ(net::OK, client_.completion_status().error_code);
-  const ResourceResponseHead& info = client_.response_head();
+  const network::ResourceResponseHead& info = client_.response_head();
   EXPECT_EQ(200, info.headers->response_code());
   ExpectResponseInfo(info, *CreateResponseInfoFromServiceWorker());
 }
@@ -640,12 +643,13 @@ TEST_F(ServiceWorkerURLLoaderJobTest, NoActiveWorker) {
 
 // Test that the request body is passed to the fetch event.
 TEST_F(ServiceWorkerURLLoaderJobTest, RequestBody) {
-  const std::string kData = "BlobRequest";
+  const std::string kData = "hi this is the request body";
 
   // Create a request with a body.
-  auto request_body = base::MakeRefCounted<ResourceRequestBody>();
+  auto request_body = base::MakeRefCounted<network::ResourceRequestBody>();
   request_body->AppendBytes(kData.c_str(), kData.length());
-  std::unique_ptr<ResourceRequest> request = CreateRequest();
+  std::unique_ptr<network::ResourceRequest> request = CreateRequest();
+  request->method = "POST";
   request->request_body = request_body;
 
   // This test doesn't use the response to the fetch event, so just have the
@@ -663,18 +667,21 @@ TEST_F(ServiceWorkerURLLoaderJobTest, RequestBody) {
 TEST_F(ServiceWorkerURLLoaderJobTest, BlobResponse) {
   // Construct the blob to respond with.
   const std::string kResponseBody = "Here is sample text for the blob.";
-  auto blob_data = base::MakeUnique<storage::BlobDataBuilder>("blob-id:myblob");
+  auto blob_data = std::make_unique<storage::BlobDataBuilder>("blob-id:myblob");
   blob_data->AppendData(kResponseBody);
   std::unique_ptr<storage::BlobDataHandle> blob_handle =
       blob_context_.AddFinishedBlob(blob_data.get());
-  helper_->RespondWithBlob(blob_handle->uuid(), blob_handle->size());
+  blink::mojom::BlobPtr blob_ptr;
+  blink::mojom::BlobRequest request = mojo::MakeRequest(&blob_ptr);
+  storage::BlobImpl::Create(std::move(blob_handle), std::move(request));
+  helper_->RespondWithBlob(std::move(blob_ptr));
 
   // Perform the request.
   JobResult result = StartRequest(CreateRequest());
   EXPECT_EQ(JobResult::kHandledRequest, result);
   client_.RunUntilComplete();
 
-  const ResourceResponseHead& info = client_.response_head();
+  const network::ResourceResponseHead& info = client_.response_head();
   EXPECT_EQ(200, info.headers->response_code());
   ExpectResponseInfo(info, *CreateResponseInfoFromServiceWorker());
 
@@ -684,23 +691,36 @@ TEST_F(ServiceWorkerURLLoaderJobTest, BlobResponse) {
   EXPECT_TRUE(mojo::common::BlockingCopyToString(
       client_.response_body_release(), &body));
   EXPECT_EQ(kResponseBody, body);
+  EXPECT_EQ(net::OK, client_.completion_status().error_code);
 }
 
 // Tell the helper to respond with a non-existent Blob.
-TEST_F(ServiceWorkerURLLoaderJobTest, NonExistentBlobUUIDResponse) {
-  helper_->RespondWithBlob("blob-id:nothing-is-here", 0);
+TEST_F(ServiceWorkerURLLoaderJobTest, BrokenBlobResponse) {
+  const std::string kBrokenUUID = "broken_uuid";
+
+  // Create the broken blob.
+  std::unique_ptr<storage::BlobDataHandle> blob_handle =
+      blob_context_.AddBrokenBlob(kBrokenUUID, "", "",
+                                  storage::BlobStatus::ERR_OUT_OF_MEMORY);
+  blink::mojom::BlobPtr blob_ptr;
+  blink::mojom::BlobRequest request = mojo::MakeRequest(&blob_ptr);
+  storage::BlobImpl::Create(std::move(blob_handle), std::move(request));
+  helper_->RespondWithBlob(std::move(blob_ptr));
 
   // Perform the request.
   JobResult result = StartRequest(CreateRequest());
   EXPECT_EQ(JobResult::kHandledRequest, result);
-  client_.RunUntilComplete();
 
-  const ResourceResponseHead& info = client_.response_head();
-  // TODO(falken): Currently our code returns 404 not found (with net::OK), but
-  // the spec seems to say this should act as if a network error has occurred.
-  // See https://crbug.com/732750
-  EXPECT_EQ(404, info.headers->response_code());
+  // We should get a valid response once the headers arrive.
+  client_.RunUntilResponseReceived();
+  const network::ResourceResponseHead& info = client_.response_head();
+  EXPECT_EQ(200, info.headers->response_code());
   ExpectResponseInfo(info, *CreateResponseInfoFromServiceWorker());
+
+  // However, since the blob is broken we should get an error while transferring
+  // the body.
+  client_.RunUntilComplete();
+  EXPECT_EQ(net::ERR_OUT_OF_MEMORY, client_.completion_status().error_code);
 }
 
 TEST_F(ServiceWorkerURLLoaderJobTest, StreamResponse) {
@@ -716,11 +736,11 @@ TEST_F(ServiceWorkerURLLoaderJobTest, StreamResponse) {
   EXPECT_EQ(JobResult::kHandledRequest, result);
   client_.RunUntilResponseReceived();
 
-  const ResourceResponseHead& info = client_.response_head();
+  const network::ResourceResponseHead& info = client_.response_head();
   EXPECT_EQ(200, info.headers->response_code());
   ExpectResponseInfo(info, *CreateResponseInfoFromServiceWorker());
 
-  EXPECT_TRUE(version_->HasWork());
+  EXPECT_TRUE(version_->HasWorkInBrowser());
 
   // Write the body stream.
   uint32_t written_bytes = sizeof(kResponseBody) - 1;
@@ -756,7 +776,7 @@ TEST_F(ServiceWorkerURLLoaderJobTest, StreamResponse_Abort) {
   EXPECT_EQ(JobResult::kHandledRequest, result);
   client_.RunUntilResponseReceived();
 
-  const ResourceResponseHead& info = client_.response_head();
+  const network::ResourceResponseHead& info = client_.response_head();
   EXPECT_EQ(200, info.headers->response_code());
   ExpectResponseInfo(info, *CreateResponseInfoFromServiceWorker());
 
@@ -794,7 +814,7 @@ TEST_F(ServiceWorkerURLLoaderJobTest, StreamResponseAndCancel) {
   EXPECT_EQ(JobResult::kHandledRequest, result);
   client_.RunUntilResponseReceived();
 
-  const ResourceResponseHead& info = client_.response_head();
+  const network::ResourceResponseHead& info = client_.response_head();
   EXPECT_EQ(200, info.headers->response_code());
   ExpectResponseInfo(info, *CreateResponseInfoFromServiceWorker());
 
@@ -806,10 +826,10 @@ TEST_F(ServiceWorkerURLLoaderJobTest, StreamResponseAndCancel) {
   EXPECT_EQ(sizeof(kResponseBody) - 1, written_bytes);
   EXPECT_TRUE(data_pipe.producer_handle.is_valid());
   EXPECT_FALSE(job_->WasCanceled());
-  EXPECT_TRUE(version_->HasWork());
+  EXPECT_TRUE(version_->HasWorkInBrowser());
   job_->Cancel();
   EXPECT_TRUE(job_->WasCanceled());
-  EXPECT_FALSE(version_->HasWork());
+  EXPECT_FALSE(version_->HasWorkInBrowser());
 
   // Although ServiceworkerURLLoaderJob resets its URLLoaderClient pointer in
   // Cancel(), the URLLoaderClient still exists. In this test, it is |client_|
@@ -870,34 +890,34 @@ TEST_F(ServiceWorkerURLLoaderJobTest, EarlyResponse) {
   EXPECT_EQ(JobResult::kHandledRequest, result);
   client_.RunUntilComplete();
 
-  const ResourceResponseHead& info = client_.response_head();
+  const network::ResourceResponseHead& info = client_.response_head();
   EXPECT_EQ(200, info.headers->response_code());
   ExpectResponseInfo(info, *CreateResponseInfoFromServiceWorker());
 
   // Although the response was already received, the event remains outstanding
   // until waitUntil() resolves.
-  EXPECT_TRUE(version_->HasWork());
+  EXPECT_TRUE(version_->HasWorkInBrowser());
   helper_->FinishWaitUntil();
-  EXPECT_FALSE(version_->HasWork());
+  EXPECT_FALSE(version_->HasWorkInBrowser());
 }
 
 // Test asking the job to fallback to network. In production code, this happens
 // when there is no active service worker for the URL, or it must be skipped,
 // etc.
 TEST_F(ServiceWorkerURLLoaderJobTest, FallbackToNetwork) {
-  ResourceRequest request;
+  network::ResourceRequest request;
   request.url = GURL("https://www.example.com/");
   request.method = "GET";
-  request.fetch_request_mode = FETCH_REQUEST_MODE_NAVIGATE;
-  request.fetch_credentials_mode = FETCH_CREDENTIALS_MODE_INCLUDE;
-  request.fetch_redirect_mode = FetchRedirectMode::MANUAL_MODE;
+  request.fetch_request_mode = network::mojom::FetchRequestMode::kNavigate;
+  request.fetch_credentials_mode =
+      network::mojom::FetchCredentialsMode::kInclude;
+  request.fetch_redirect_mode = network::mojom::FetchRedirectMode::kManual;
 
   StartLoaderCallback callback;
-  auto job = base::MakeUnique<ServiceWorkerURLLoaderJob>(
+  auto job = std::make_unique<ServiceWorkerURLLoaderJob>(
       base::BindOnce(&ReceiveStartLoaderCallback, &callback), this, request,
       base::WrapRefCounted<URLLoaderFactoryGetter>(
-          helper_->context()->loader_factory_getter()),
-      GetBlobStorageContext());
+          helper_->context()->loader_factory_getter()));
   // Ask the job to fallback to network. In production code,
   // ServiceWorkerControlleeRequestHandler calls FallbackToNetwork() to do this.
   job->FallbackToNetwork();
@@ -916,10 +936,10 @@ TEST_F(ServiceWorkerURLLoaderJobTest, NavigationPreload) {
   client_.RunUntilComplete();
 
   EXPECT_EQ(net::OK, client_.completion_status().error_code);
-  const ResourceResponseHead& info = client_.response_head();
+  const network::ResourceResponseHead& info = client_.response_head();
   EXPECT_EQ(200, info.headers->response_code());
 
-  std::unique_ptr<ResourceResponseHead> expected_info =
+  std::unique_ptr<network::ResourceResponseHead> expected_info =
       CreateResponseInfoFromServiceWorker();
   expected_info->did_service_worker_navigation_preload = true;
   ExpectResponseInfo(info, *expected_info);
@@ -941,7 +961,7 @@ TEST_F(ServiceWorkerURLLoaderJobTest, Redirect) {
   EXPECT_EQ(JobResult::kHandledRequest, result);
   client_.RunUntilRedirectReceived();
 
-  const ResourceResponseHead& info = client_.response_head();
+  const network::ResourceResponseHead& info = client_.response_head();
   EXPECT_EQ(301, info.headers->response_code());
   ExpectResponseInfo(info, *CreateResponseInfoFromServiceWorker());
 
@@ -951,4 +971,5 @@ TEST_F(ServiceWorkerURLLoaderJobTest, Redirect) {
   EXPECT_EQ(new_url, redirect_info.new_url);
 }
 
+}  // namespace service_worker_url_loader_job_unittest
 }  // namespace content

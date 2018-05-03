@@ -6,6 +6,7 @@
 
 #include "ui/aura/window.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/keyboard/container_type.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/wm/core/window_animations.h"
 
@@ -14,13 +15,15 @@ namespace keyboard {
 // The virtual keyboard show/hide animation duration.
 constexpr int kFullWidthKeyboardAnimationDurationMs = 100;
 
-// The opacity of virtual keyboard container when show animation starts or
-// hide animation finishes. This cannot be zero because we call Show() on the
-// keyboard window before setting the opacity back to 1.0. Since windows are not
-// allowed to be shown with zero opacity, we always animate to 0.01 instead.
-constexpr float kAnimationStartOrAfterHideOpacity = 0.01f;
-
+ContainerFullWidthBehavior::ContainerFullWidthBehavior(
+    KeyboardController* controller) {
+  controller_ = controller;
+}
 ContainerFullWidthBehavior::~ContainerFullWidthBehavior() {}
+
+ContainerType ContainerFullWidthBehavior::GetType() const {
+  return ContainerType::FULL_WIDTH;
+}
 
 void ContainerFullWidthBehavior::DoHidingAnimation(
     aura::Window* container,
@@ -45,6 +48,8 @@ void ContainerFullWidthBehavior::DoShowingAnimation(
 
 void ContainerFullWidthBehavior::InitializeShowAnimationStartingState(
     aura::Window* container) {
+  SetCanonicalBounds(container, container->GetRootWindow()->bounds());
+
   gfx::Transform transform;
   transform.Translate(0, kFullWidthKeyboardAnimationDistance);
   container->SetTransform(transform);
@@ -74,8 +79,46 @@ const gfx::Rect ContainerFullWidthBehavior::AdjustSetBoundsRequest(
 bool ContainerFullWidthBehavior::IsOverscrollAllowed() const {
   // TODO(blakeo): The locked keyboard is essentially its own behavior type and
   // should be refactored as such. Then this will simply return 'true'.
-  return KeyboardController::GetInstance() &&
-         !KeyboardController::GetInstance()->keyboard_locked();
+  return controller_ && !controller_->keyboard_locked();
+}
+
+void ContainerFullWidthBehavior::SavePosition(const gfx::Point& position) {
+  // No-op. Nothing to save.
+}
+
+bool ContainerFullWidthBehavior::IsDragHandle(
+    const gfx::Vector2d& offset,
+    const gfx::Size& keyboard_size) const {
+  return false;
+}
+
+void ContainerFullWidthBehavior::HandlePointerEvent(
+    const ui::LocatedEvent& event) {
+  // No-op. Nothing special to do for pointer events.
+}
+
+void ContainerFullWidthBehavior::SetCanonicalBounds(
+    aura::Window* container,
+    const gfx::Rect& display_bounds) {
+  const gfx::Rect new_keyboard_bounds =
+      AdjustSetBoundsRequest(display_bounds, container->bounds());
+  container->SetBounds(new_keyboard_bounds);
+}
+
+bool ContainerFullWidthBehavior::TextBlurHidesKeyboard() const {
+  return !controller_->keyboard_locked();
+}
+
+bool ContainerFullWidthBehavior::BoundsObscureUsableRegion() const {
+  return true;
+}
+
+bool ContainerFullWidthBehavior::BoundsAffectWorkspaceLayout() const {
+  return controller_->keyboard_locked();
+}
+
+bool ContainerFullWidthBehavior::SetDraggableArea(const gfx::Rect& rect) {
+  return false;
 }
 
 }  //  namespace keyboard

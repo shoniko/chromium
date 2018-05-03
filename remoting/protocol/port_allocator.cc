@@ -55,7 +55,8 @@ PortAllocator::PortAllocator(
   // fragment is shared between all candidates.
   int flags = cricket::PORTALLOCATOR_DISABLE_TCP |
               cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
-              cricket::PORTALLOCATOR_ENABLE_IPV6;
+              cricket::PORTALLOCATOR_ENABLE_IPV6 |
+              cricket::PORTALLOCATOR_ENABLE_IPV6_ON_WIFI;
 
   NetworkSettings network_settings = transport_context_->network_settings();
 
@@ -70,7 +71,7 @@ PortAllocator::PortAllocator(
                network_settings.port_range.max_port);
 }
 
-PortAllocator::~PortAllocator() {}
+PortAllocator::~PortAllocator() = default;
 
 cricket::PortAllocatorSession* PortAllocator::CreateSessionInternal(
     const std::string& content_name,
@@ -94,7 +95,7 @@ PortAllocatorSession::PortAllocatorSession(PortAllocator* allocator,
       transport_context_(allocator->transport_context()),
       weak_factory_(this) {}
 
-PortAllocatorSession::~PortAllocatorSession() {}
+PortAllocatorSession::~PortAllocatorSession() = default;
 
 void PortAllocatorSession::GetPortConfigurations() {
   transport_context_->GetIceConfig(base::Bind(

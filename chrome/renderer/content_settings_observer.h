@@ -5,21 +5,20 @@
 #ifndef CHROME_RENDERER_CONTENT_SETTINGS_OBSERVER_H_
 #define CHROME_RENDERER_CONTENT_SETTINGS_OBSERVER_H_
 
-#include <map>
-#include <set>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
+#include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
-#include "chrome/common/insecure_content_renderer.mojom.h"
+#include "chrome/common/content_settings_renderer.mojom.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
 #include "extensions/features/features.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/associated_binding_set.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/WebKit/public/platform/WebContentSettingsClient.h"
 #include "url/gurl.h"
@@ -41,7 +40,7 @@ class ContentSettingsObserver
     : public content::RenderFrameObserver,
       public content::RenderFrameObserverTracker<ContentSettingsObserver>,
       public blink::WebContentSettingsClient,
-      public chrome::mojom::InsecureContentRenderer {
+      public chrome::mojom::ContentSettingsRenderer {
  public:
   // Set |should_whitelist| to true if |render_frame()| contains content that
   // should be whitelisted for content settings.
@@ -67,7 +66,7 @@ class ContentSettingsObserver
   void DidBlockContentType(ContentSettingsType settings_type,
                            const base::string16& details);
 
-  // blink::WebContentSettingsClient implementation.
+  // blink::WebContentSettingsClient:
   bool AllowDatabase(const blink::WebString& name,
                      const blink::WebString& display_name,
                      unsigned estimated_size) override;
@@ -105,9 +104,10 @@ class ContentSettingsObserver
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ContentSettingsObserverTest, WhitelistedSchemes);
-  FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest,
+  FRIEND_TEST_ALL_PREFIXES(ContentSettingsObserverBrowserTest,
                            ContentSettingsInterstitialPages);
-  FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest, PluginsTemporarilyAllowed);
+  FRIEND_TEST_ALL_PREFIXES(ContentSettingsObserverBrowserTest,
+                           PluginsTemporarilyAllowed);
 
   // RenderFrameObserver implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -115,15 +115,15 @@ class ContentSettingsObserver
                                 bool is_same_document_navigation) override;
   void OnDestruct() override;
 
-  // chrome::mojom::InsecureContentRenderer:
+  // chrome::mojom::ContentSettingsRenderer:
   void SetAllowRunningInsecureContent() override;
+  void SetAsInterstitial() override;
 
-  void OnInsecureContentRendererRequest(
-      chrome::mojom::InsecureContentRendererRequest request);
+  void OnContentSettingsRendererRequest(
+      chrome::mojom::ContentSettingsRendererAssociatedRequest request);
 
   // Message handlers.
   void OnLoadBlockedPlugins(const std::string& identifier);
-  void OnSetAsInterstitial();
   void OnRequestFileSystemAccessAsyncResponse(int request_id, bool allowed);
 
   // Resets the |content_blocked_| array.
@@ -143,6 +143,8 @@ class ContentSettingsObserver
   // True if |render_frame()| contains content that is white-listed for content
   // settings.
   bool IsWhitelistedForContentSettings() const;
+
+  // Exposed for unit tests.
   static bool IsWhitelistedForContentSettings(
       const blink::WebSecurityOrigin& origin,
       const blink::WebURL& document_url);
@@ -162,28 +164,25 @@ class ContentSettingsObserver
   const RendererContentSettingRules* content_setting_rules_;
 
   // Stores if images, scripts, and plugins have actually been blocked.
-  std::map<ContentSettingsType, bool> content_blocked_;
+  base::flat_set<ContentSettingsType> content_blocked_;
 
   // Caches the result of AllowStorage.
   using StoragePermissionsKey = std::pair<GURL, bool>;
-  std::map<StoragePermissionsKey, bool> cached_storage_permissions_;
+  base::flat_map<StoragePermissionsKey, bool> cached_storage_permissions_;
 
   // Caches the result of AllowScript.
-  std::unordered_map<blink::WebFrame*, bool> cached_script_permissions_;
+  base::flat_map<blink::WebFrame*, bool> cached_script_permissions_;
 
-  std::set<std::string> temporarily_allowed_plugins_;
+  base::flat_set<std::string> temporarily_allowed_plugins_;
   bool is_interstitial_page_;
 
   int current_request_id_;
-  using PermissionRequestMap =
-      std::unordered_map<int, blink::WebContentSettingCallbacks>;
-  PermissionRequestMap permission_requests_;
+  base::flat_map<int, blink::WebContentSettingCallbacks> permission_requests_;
 
   // If true, IsWhitelistedForContentSettings will always return true.
   const bool should_whitelist_;
 
-  mojo::BindingSet<chrome::mojom::InsecureContentRenderer>
-      insecure_content_renderer_bindings_;
+  mojo::AssociatedBindingSet<chrome::mojom::ContentSettingsRenderer> bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingsObserver);
 };

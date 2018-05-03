@@ -73,7 +73,7 @@ class SpeedometerMeasurement(legacy_page_test.LegacyPageTest):
         tab.EvaluateJavaScript('benchmarkClient._timeValues'),
         important=True))
     results.AddValue(list_of_scalar_values.ListOfScalarValues(
-        page, 'Runs/Minute', 'score',
+        page, 'RunsPerMinute', 'score',
         tab.EvaluateJavaScript(
             '[parseFloat(document.getElementById("result-number").innerText)];'
         ),
@@ -113,12 +113,6 @@ class Speedometer(perf_benchmark.PerfBenchmark):
         make_javascript_deterministic=False,
         name='http://browserbench.org/Speedometer/'))
     return ps
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass # http://browserbench.org/Speedometer/ not disabled.
-    return StoryExpectations()
 
 
 @benchmark.Owner(emails=['hablich@chromium.org'])

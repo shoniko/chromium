@@ -101,11 +101,6 @@ class COMPOSITOR_EXPORT LayerAnimator : public base::RefCounted<LayerAnimator>,
   virtual void SetColor(SkColor color);
   SkColor GetTargetColor() const;
 
-  // Sets the color temperature on the delegate. May cause an implicit
-  // animation.
-  virtual void SetTemperature(float temperature);
-  float GetTargetTemperature() const;
-
   // Returns the default length of animations, including adjustment for slow
   // animation mode if set.
   base::TimeDelta GetTransitionDuration() const;
@@ -176,7 +171,15 @@ class COMPOSITOR_EXPORT LayerAnimator : public base::RefCounted<LayerAnimator>,
   // property (animations remain in the queue until they complete, so this
   // includes running animations).
   bool IsAnimatingProperty(
-      LayerAnimationElement::AnimatableProperty property) const;
+      LayerAnimationElement::AnimatableProperty property) const {
+    return IsAnimatingOnePropertyOf(property);
+  }
+
+  // Returns true if there is an animation in the queue that animates at least
+  // one of the given property (animations remain in the queue until they
+  // complete, so this includes running animations).
+  bool IsAnimatingOnePropertyOf(
+      LayerAnimationElement::AnimatableProperties properties) const;
 
   // Stops animating the given property. No effect if there is no running
   // animation for the given property. Skips to the final state of the
@@ -192,8 +195,10 @@ class COMPOSITOR_EXPORT LayerAnimator : public base::RefCounted<LayerAnimator>,
   // animations and notifies all observers.
   void AbortAllAnimations() { StopAnimatingInternal(true); }
 
-  // These functions are used for adding or removing observers from the observer
-  // list. The observers are notified when animations end.
+  // Adds/remove |observer| from the observer list. Observers are notified when
+  // animations are scheduled, start, end or are aborted. They may also be
+  // notified when they're attached/detached from a LayerAnimationSequence (see
+  // LayerAnimationObserver).
   void AddObserver(LayerAnimationObserver* observer);
   void RemoveObserver(LayerAnimationObserver* observer);
 

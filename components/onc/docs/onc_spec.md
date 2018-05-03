@@ -881,6 +881,10 @@ L2TP over IPsec with pre-shared key:
     * If set, only allow connections to server hosts with X509 name or common
       name equal to this string.
 
+* **TLSVersionMin**
+    * (optional) - **string**
+    * If set, specifies the minimum TLS protocol version used by OpenVPN.
+
 * **UserAuthenticationType**
     * (optional, defaults to *None*) - **string**
     * Allowed values are:
@@ -1206,6 +1210,16 @@ type exists to configure the authentication.
     * (optional) - **string**
     * WiFi only. A substring which a remote RADIUS service certificate subject
       name must contain in order to connect.
+
+* **TLSVersionMax**
+    * (optional) - **string**
+    * Sets the maximum TLS protocol version used by the OS for EAP.
+      This is only needed when connecting to an AP with a buggy TLS
+      implementation, as the protocol will normally auto-negotiate.
+    * Allowed values are:
+        * *1.0*
+        * *1.1*
+        * *1.2*
 
 * **UseSystemCAs**
     * (optional, defaults to *true*) - **boolean**

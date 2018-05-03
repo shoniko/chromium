@@ -27,10 +27,10 @@
 
 #include <memory>
 #include <type_traits>
+#include "base/memory/scoped_refptr.h"
 #include "platform/wtf/LinkedHashSet.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/WTFTestHelper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -372,6 +372,18 @@ TYPED_TEST(ListOrLinkedHashSetTest, Swap) {
   EXPECT_EQ(it2, set1.end());
 }
 
+TYPED_TEST(ListOrLinkedHashSetTest, IteratorsConvertToConstVersions) {
+  using Set = TypeParam;
+  Set set;
+  set.insert(42);
+  typename Set::iterator it = set.begin();
+  typename Set::const_iterator cit = it;
+  typename Set::reverse_iterator rit = set.rbegin();
+  typename Set::const_reverse_iterator crit = rit;
+  // Use the variables to make the compiler happy.
+  ASSERT_EQ(*cit, *crit);
+}
+
 class DummyRefCounted : public RefCounted<DummyRefCounted> {
  public:
   DummyRefCounted(bool& is_deleted) : is_deleted_(is_deleted) {
@@ -405,7 +417,7 @@ TYPED_TEST(ListOrLinkedHashSetRefPtrTest, WithRefPtr) {
   bool is_deleted = false;
   DummyRefCounted::ref_invokes_count_ = 0;
   scoped_refptr<DummyRefCounted> ptr =
-      WTF::AdoptRef(new DummyRefCounted(is_deleted));
+      base::AdoptRef(new DummyRefCounted(is_deleted));
   EXPECT_EQ(0, DummyRefCounted::ref_invokes_count_);
 
   Set set;
@@ -438,9 +450,9 @@ TYPED_TEST(ListOrLinkedHashSetRefPtrTest, ExerciseValuePeekInType) {
   bool is_deleted2 = false;
 
   scoped_refptr<DummyRefCounted> ptr =
-      WTF::AdoptRef(new DummyRefCounted(is_deleted));
+      base::AdoptRef(new DummyRefCounted(is_deleted));
   scoped_refptr<DummyRefCounted> ptr2 =
-      WTF::AdoptRef(new DummyRefCounted(is_deleted2));
+      base::AdoptRef(new DummyRefCounted(is_deleted2));
 
   typename Set::AddResult add_result = set.insert(ptr);
   EXPECT_TRUE(add_result.is_new_entry);
@@ -485,7 +497,7 @@ struct Complicated {
   static int objects_constructed_;
 
  private:
-  Complicated();
+  Complicated() = delete;
 };
 
 int Complicated::objects_constructed_ = 0;

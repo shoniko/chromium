@@ -119,14 +119,10 @@ struct AXTreeUpdateState {
   std::set<int> removed_node_ids;
 };
 
-AXTreeDelegate::AXTreeDelegate() {
-}
+AXTreeDelegate::AXTreeDelegate() = default;
+AXTreeDelegate::~AXTreeDelegate() = default;
 
-AXTreeDelegate::~AXTreeDelegate() {
-}
-
-AXTree::AXTree()
-    : delegate_(NULL), root_(NULL) {
+AXTree::AXTree() {
   AXNodeData root;
   root.id = -1;
 
@@ -136,8 +132,7 @@ AXTree::AXTree()
   CHECK(Unserialize(initial_state)) << error();
 }
 
-AXTree::AXTree(const AXTreeUpdate& initial_state)
-    : delegate_(NULL), root_(NULL) {
+AXTree::AXTree(const AXTreeUpdate& initial_state) {
   CHECK(Unserialize(initial_state)) << error();
 }
 
@@ -151,8 +146,8 @@ void AXTree::SetDelegate(AXTreeDelegate* delegate) {
 }
 
 AXNode* AXTree::GetFromId(int32_t id) const {
-  base::hash_map<int32_t, AXNode*>::const_iterator iter = id_map_.find(id);
-  return iter != id_map_.end() ? iter->second : NULL;
+  auto iter = id_map_.find(id);
+  return iter != id_map_.end() ? iter->second : nullptr;
 }
 
 void AXTree::UpdateData(const AXTreeData& new_data) {
@@ -167,7 +162,8 @@ void AXTree::UpdateData(const AXTreeData& new_data) {
 
 gfx::RectF AXTree::RelativeToTreeBounds(const AXNode* node,
                                         gfx::RectF bounds,
-                                        bool* offscreen) const {
+                                        bool* offscreen,
+                                        bool clip_bounds) const {
   // If |bounds| is uninitialized, which is not the same as empty,
   // start with the node bounds.
   if (bounds.width() == 0 && bounds.height() == 0) {
@@ -176,19 +172,11 @@ gfx::RectF AXTree::RelativeToTreeBounds(const AXNode* node,
     // If the node bounds is empty (either width or height is zero),
     // try to compute good bounds from the children.
     if (bounds.IsEmpty()) {
-      bool all_children_offscreen = true;
       for (size_t i = 0; i < node->children().size(); i++) {
         ui::AXNode* child = node->children()[i];
-        bool temp_offscreen = false;
-        bounds.Union(GetTreeBounds(child, &temp_offscreen));
-        if (!temp_offscreen)
-          // At least one child is on screen.
-          all_children_offscreen = false;
+        bounds.Union(GetTreeBounds(child));
       }
       if (bounds.width() > 0 && bounds.height() > 0) {
-        // If all the children are offscreen, the node itself is offscreen.
-        if (offscreen != nullptr && all_children_offscreen)
-          *offscreen = true;
         return bounds;
       }
     }
@@ -226,7 +214,7 @@ gfx::RectF AXTree::RelativeToTreeBounds(const AXNode* node,
     if (bounds.width() == 0 && bounds.height() == 0) {
       bounds.set_size(container_bounds.size());
       if (offscreen != nullptr)
-        *offscreen = true;
+        *offscreen |= true;
     }
 
     int scroll_x = 0;
@@ -236,35 +224,51 @@ gfx::RectF AXTree::RelativeToTreeBounds(const AXNode* node,
       bounds.Offset(-scroll_x, -scroll_y);
     }
 
+    // Get the intersection between the bounds and the container.
+    gfx::RectF intersection = bounds;
+    intersection.Intersect(container_bounds);
+
+    // Calculate the clipped bounds to determine offscreen state.
+    gfx::RectF clipped = bounds;
     // If this is the root web area, make sure we clip the node to fit.
-    if (container->data().role == ui::AX_ROLE_ROOT_WEB_AREA) {
-      gfx::RectF clipped = bounds;
-      clipped.Intersect(container_bounds);
-      if (!clipped.IsEmpty()) {
+    if (container->data().GetBoolAttribute(ui::AX_ATTR_CLIPS_CHILDREN)) {
+      if (!intersection.IsEmpty()) {
         // We can simply clip it to the container.
-        bounds = clipped;
-        // No need to update |offscreen| if it is set, because it should be
-        // false by default.
+        clipped = intersection;
       } else {
         // Totally offscreen. Find the nearest edge or corner.
         // Make the minimum dimension 1 instead of 0.
-        if (bounds.x() >= container_bounds.width()) {
-          bounds.set_x(container_bounds.width() - 1);
-          bounds.set_width(1);
-        } else if (bounds.x() + bounds.width() <= 0) {
-          bounds.set_x(0);
-          bounds.set_width(1);
+        if (clipped.x() >= container_bounds.width()) {
+          clipped.set_x(container_bounds.width() - 1);
+          clipped.set_width(1);
+        } else if (clipped.x() + clipped.width() <= 0) {
+          clipped.set_x(0);
+          clipped.set_width(1);
         }
-        if (bounds.y() >= container_bounds.height()) {
-          bounds.set_y(container_bounds.height() - 1);
-          bounds.set_height(1);
-        } else if (bounds.y() + bounds.height() <= 0) {
-          bounds.set_y(0);
-          bounds.set_height(1);
+        if (clipped.y() >= container_bounds.height()) {
+          clipped.set_y(container_bounds.height() - 1);
+          clipped.set_height(1);
+        } else if (clipped.y() + clipped.height() <= 0) {
+          clipped.set_y(0);
+          clipped.set_height(1);
         }
-        if (offscreen != nullptr)
-          *offscreen |= true;
       }
+    }
+
+    if (clip_bounds)
+      bounds = clipped;
+
+    if (container->data().GetBoolAttribute(ui::AX_ATTR_CLIPS_CHILDREN) &&
+        intersection.IsEmpty() && !clipped.IsEmpty()) {
+      // If it is offscreen with respect to its parent, and the node itself is
+      // not empty, label it offscreen.
+      // Here we are extending the definition of offscreen to include elements
+      // that are clipped by their parents in addition to those clipped by
+      // the rootWebArea.
+      // No need to update |offscreen| if |clipped| is not empty, because it
+      // should be false by default.
+      if (offscreen != nullptr)
+        *offscreen |= true;
     }
 
     node = container;
@@ -273,20 +277,40 @@ gfx::RectF AXTree::RelativeToTreeBounds(const AXNode* node,
   return bounds;
 }
 
-gfx::RectF AXTree::GetTreeBounds(const AXNode* node, bool* offscreen) const {
-  return RelativeToTreeBounds(node, gfx::RectF(), offscreen);
+gfx::RectF AXTree::GetTreeBounds(const AXNode* node,
+                                 bool* offscreen,
+                                 bool clip_bounds) const {
+  return RelativeToTreeBounds(node, gfx::RectF(), offscreen, clip_bounds);
 }
 
 std::set<int32_t> AXTree::GetReverseRelations(AXIntAttribute attr,
-                                              int32_t dst_id) {
+                                              int32_t dst_id) const {
   DCHECK(IsNodeIdIntAttribute(attr));
-  return int_reverse_relations_[attr][dst_id];
+
+  // Conceptually, this is the "const" version of:
+  //   return int_reverse_relations_[attr][dst_id];
+  const auto& attr_relations = int_reverse_relations_.find(attr);
+  if (attr_relations != int_reverse_relations_.end()) {
+    const auto& result = attr_relations->second.find(dst_id);
+    if (result != attr_relations->second.end())
+      return result->second;
+  }
+  return std::set<int32_t>();
 }
 
 std::set<int32_t> AXTree::GetReverseRelations(AXIntListAttribute attr,
-                                              int32_t dst_id) {
+                                              int32_t dst_id) const {
   DCHECK(IsNodeIdIntListAttribute(attr));
-  return intlist_reverse_relations_[attr][dst_id];
+
+  // Conceptually, this is the "const" version of:
+  //   return intlist_reverse_relations_[attr][dst_id];
+  const auto& attr_relations = intlist_reverse_relations_.find(attr);
+  if (attr_relations != intlist_reverse_relations_.end()) {
+    const auto& result = attr_relations->second.find(dst_id);
+    if (result != attr_relations->second.end())
+      return result->second;
+  }
+  return std::set<int32_t>();
 }
 
 bool AXTree::Unserialize(const AXTreeUpdate& update) {
@@ -300,6 +324,9 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
   if (update.has_tree_data)
     UpdateData(update.tree_data);
 
+  // We distinguish between updating the root, e.g. changing its children or
+  // some of its attributes, or replacing the root completely.
+  bool root_updated = false;
   if (update.node_id_to_clear != 0) {
     AXNode* node = GetFromId(update.node_id_to_clear);
     if (!node) {
@@ -307,13 +334,25 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
                                   update.node_id_to_clear);
       return false;
     }
+
+    // Only destroy the root if the root was replaced and not if it's simply
+    // updated. To figure out if  the root was simply updated, we compare the ID
+    // of the new root with the existing root ID.
     if (node == root_) {
-      // Clear root_ before calling DestroySubtree so that root_ doesn't
-      // ever point to an invalid node.
-      AXNode* old_root = root_;
-      root_ = nullptr;
-      DestroySubtree(old_root, &update_state);
-    } else {
+      if (update.root_id != old_root_id) {
+        // Clear root_ before calling DestroySubtree so that root_ doesn't ever
+        // point to an invalid node.
+        AXNode* old_root = root_;
+        root_ = nullptr;
+        DestroySubtree(old_root, &update_state);
+      } else {
+        root_updated = true;
+      }
+    }
+
+    // If the root has simply been updated, we treat it like an update to any
+    // other node.
+    if (root_ && (node != root_ || root_updated)) {
       for (int i = 0; i < node->child_count(); ++i)
         DestroySubtree(node->ChildAtIndex(i), &update_state);
       std::vector<AXNode*> children;
@@ -336,10 +375,8 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
 
   if (!update_state.pending_nodes.empty()) {
     error_ = "Nodes left pending by the update:";
-    for (std::set<AXNode*>::iterator iter = update_state.pending_nodes.begin();
-         iter != update_state.pending_nodes.end(); ++iter) {
-      error_ += base::StringPrintf(" %d", (*iter)->id());
-    }
+    for (const AXNode* pending : update_state.pending_nodes)
+      error_ += base::StringPrintf(" %d", pending->id());
     return false;
   }
 
@@ -360,17 +397,23 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
       if (is_new_node) {
         if (is_reparented_node) {
           // A reparented subtree is any new node whose parent either doesn't
-          // exist, or is not new.
+          // exist, or whose parent is not new.
+          // Note that we also need to check for the special case when we update
+          // the root without replacing it.
           bool is_subtree = !node->parent() ||
-                            new_nodes.find(node->parent()) == new_nodes.end();
+                            new_nodes.find(node->parent()) == new_nodes.end() ||
+                            (node->parent() == root_ && root_updated);
           change = is_subtree ? AXTreeDelegate::SUBTREE_REPARENTED
                               : AXTreeDelegate::NODE_REPARENTED;
         } else {
           // A new subtree is any new node whose parent is either not new, or
           // whose parent happens to be new only because it has been reparented.
+          // Note that we also need to check for the special case when we update
+          // the root without replacing it.
           bool is_subtree = !node->parent() ||
                             new_nodes.find(node->parent()) == new_nodes.end() ||
-                            update_state.HasRemovedNode(node->parent());
+                            update_state.HasRemovedNode(node->parent()) ||
+                            (node->parent() == root_ && root_updated);
           change = is_subtree ? AXTreeDelegate::SUBTREE_CREATED
                               : AXTreeDelegate::NODE_CREATED;
         }
@@ -428,7 +471,7 @@ bool AXTree::UpdateNode(const AXNodeData& src,
       return false;
     }
 
-    update_state->new_root = CreateNode(NULL, src.id, 0, update_state);
+    update_state->new_root = CreateNode(nullptr, src.id, 0, update_state);
     node = update_state->new_root;
     update_state->new_nodes.insert(node);
     UpdateReverseRelations(node, src);

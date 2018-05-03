@@ -58,12 +58,12 @@ struct EnvVarValues {
 #undef TRUE
 #undef FALSE
 
-// So as to distinguish between an unset gconf boolean variable and
+// So as to distinguish between an unset boolean variable and
 // one that is false.
 enum BoolSettingValue { UNSET = 0, TRUE, FALSE };
 
-// Set of values for all gconf settings that we might query.
-struct GConfValues {
+// Set of values for all gsettings settings that we might query.
+struct GSettingsValues {
   // strings
   const char* mode;
   const char* autoconfig_url;
@@ -85,7 +85,7 @@ struct GConfValues {
 };
 
 // Mapping from a setting name to the location of the corresponding
-// value (inside a EnvVarValues or GConfValues struct).
+// value (inside a EnvVarValues or GSettingsValues struct).
 template <typename key_type, typename value_type>
 struct SettingsTable {
   typedef std::map<key_type, value_type*> map_type;
@@ -192,7 +192,7 @@ class MockSettingGetter : public ProxyConfigServiceLinux::SettingGetter {
 
   // Zeros all environment values.
   void Reset() {
-    GConfValues zero_values = {0};
+    GSettingsValues zero_values = {0};
     values = zero_values;
   }
 
@@ -259,7 +259,7 @@ class MockSettingGetter : public ProxyConfigServiceLinux::SettingGetter {
   bool MatchHostsUsingSuffixMatching() override { return false; }
 
   // Intentionally public, for convenience when setting up a test.
-  GConfValues values;
+  GSettingsValues values;
 
  private:
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
@@ -270,7 +270,7 @@ class MockSettingGetter : public ProxyConfigServiceLinux::SettingGetter {
 };
 
 // This helper class runs ProxyConfigServiceLinux::GetLatestProxyConfig() on
-// the IO thread and synchronously waits for the result.
+// the main TaskRunner and synchronously waits for the result.
 // Some code duplicated from proxy_script_fetcher_unittest.cc.
 class SyncConfigGetter : public ProxyConfigService::Observer {
  public:
@@ -278,41 +278,41 @@ class SyncConfigGetter : public ProxyConfigService::Observer {
   explicit SyncConfigGetter(ProxyConfigServiceLinux* config_service)
       : event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                base::WaitableEvent::InitialState::NOT_SIGNALED),
-        io_thread_("IO_Thread"),
+        main_thread_("Main_Thread"),
         config_service_(config_service),
         matches_pac_url_event_(
             base::WaitableEvent::ResetPolicy::AUTOMATIC,
             base::WaitableEvent::InitialState::NOT_SIGNALED) {
-    // Start an IO thread.
+    // Start the main IO thread.
     base::Thread::Options options;
     options.message_loop_type = base::MessageLoop::TYPE_IO;
-    io_thread_.StartWithOptions(options);
+    main_thread_.StartWithOptions(options);
 
     // Make sure the thread started.
-    io_thread_.task_runner()->PostTask(
+    main_thread_.task_runner()->PostTask(
         FROM_HERE, base::Bind(&SyncConfigGetter::Init, base::Unretained(this)));
     Wait();
   }
 
   ~SyncConfigGetter() override {
-    // Clean up the IO thread.
-    io_thread_.task_runner()->PostTask(
+    // Clean up the main thread.
+    main_thread_.task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&SyncConfigGetter::CleanUp, base::Unretained(this)));
     Wait();
   }
 
-  // Does gconf setup and initial fetch of the proxy config,
+  // Does gsettings setup and initial fetch of the proxy config,
   // all on the calling thread (meant to be the thread with the
-  // default glib main loop, which is the UI thread).
+  // default glib main loop, which is the glib thread).
   void SetupAndInitialFetch() {
     config_service_->SetupAndFetchInitialConfig(
-        base::ThreadTaskRunnerHandle::Get(), io_thread_.task_runner());
+        base::ThreadTaskRunnerHandle::Get(), main_thread_.task_runner());
   }
   // Synchronously gets the proxy config.
   ProxyConfigService::ConfigAvailability SyncGetLatestProxyConfig(
       ProxyConfig* config) {
-    io_thread_.task_runner()->PostTask(
+    main_thread_.task_runner()->PostTask(
         FROM_HERE, base::Bind(&SyncConfigGetter::GetLatestConfigOnIOThread,
                               base::Unretained(this)));
     Wait();
@@ -354,13 +354,13 @@ class SyncConfigGetter : public ProxyConfigService::Observer {
     }
   }
 
-  // [Runs on |io_thread_|]
+  // [Runs on |main_thread_|]
   void Init() {
     config_service_->AddObserver(this);
     event_.Signal();
   }
 
-  // Calls GetLatestProxyConfig, running on |io_thread_| Signals |event_|
+  // Calls GetLatestProxyConfig, running on |main_thread_| Signals |event_|
   // on completion.
   void GetLatestConfigOnIOThread() {
     get_latest_config_result_ =
@@ -368,7 +368,7 @@ class SyncConfigGetter : public ProxyConfigService::Observer {
     event_.Signal();
   }
 
-  // [Runs on |io_thread_|] Signals |event_| on cleanup completion.
+  // [Runs on |main_thread_|] Signals |event_| on cleanup completion.
   void CleanUp() {
     config_service_->RemoveObserver(this);
     delete config_service_;
@@ -382,11 +382,11 @@ class SyncConfigGetter : public ProxyConfigService::Observer {
   }
 
   base::WaitableEvent event_;
-  base::Thread io_thread_;
+  base::Thread main_thread_;
 
   ProxyConfigServiceLinux* config_service_;
 
-  // The config obtained by |io_thread_| and read back by the main
+  // The config obtained by |main_thread_| and read back by the main
   // thread.
   ProxyConfig proxy_config_;
 
@@ -449,7 +449,7 @@ class ProxyConfigServiceLinuxTest : public PlatformTest {
 // Builds an identifier for each test in an array.
 #define TEST_DESC(desc) base::StringPrintf("at line %d <%s>", __LINE__, desc)
 
-TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
+TEST_F(ProxyConfigServiceLinuxTest, BasicGSettingsTest) {
   std::vector<std::string> empty_ignores;
 
   std::vector<std::string> google_ignores;
@@ -462,7 +462,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
     std::string description;
 
     // Input.
-    GConfValues values;
+    GSettingsValues values;
 
     // Expected outputs (availability and fields of ProxyConfig).
     ProxyConfigService::ConfigAvailability availability;
@@ -1099,7 +1099,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
   }
 }
 
-TEST_F(ProxyConfigServiceLinuxTest, GconfNotification) {
+TEST_F(ProxyConfigServiceLinuxTest, GSettingsNotification) {
   std::unique_ptr<MockEnvironment> env(new MockEnvironment);
   MockSettingGetter* setting_getter = new MockSettingGetter;
   ProxyConfigServiceLinux* service =

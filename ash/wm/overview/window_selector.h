@@ -103,6 +103,10 @@ class ASH_EXPORT WindowSelector : public display::DisplayObserver,
   // nullptr if the window grid is not found.
   WindowGrid* GetGridWithRootWindow(aura::Window* root_window);
 
+  // Add |window| to the grid in |grid_list_| with the same root window. Does
+  // nothing if the grid already contains |window|.
+  void AddItem(aura::Window* window);
+
   // Removes the window selector item from the overview window grid.
   void RemoveWindowSelectorItem(WindowSelectorItem* item);
 
@@ -111,6 +115,8 @@ class ASH_EXPORT WindowSelector : public display::DisplayObserver,
   void Drag(WindowSelectorItem* item, const gfx::Point& location_in_screen);
   void CompleteDrag(WindowSelectorItem* item,
                     const gfx::Point& location_in_screen);
+  void ActivateDraggedWindow();
+  void ResetDraggedWindowGesture();
 
   // Positions all of the windows in the overview.
   void PositionWindows(bool animate);
@@ -134,8 +140,8 @@ class ASH_EXPORT WindowSelector : public display::DisplayObserver,
     return split_view_overview_overlay_.get();
   }
 
-  void set_restore_focus_window(aura::Window* window) {
-    restore_focus_window_ = window;
+  OverviewWindowDragController* window_drag_controller() {
+    return window_drag_controller_.get();
   }
 
   // display::DisplayObserver:

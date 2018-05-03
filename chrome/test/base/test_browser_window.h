@@ -72,8 +72,6 @@ class TestBrowserWindow : public BrowserWindow {
   bool ShouldHideUIForFullscreen() const override;
   bool IsFullscreen() const override;
   bool IsFullscreenBubbleVisible() const override;
-  void MaybeShowNewBackShortcutBubble(bool forward) override {}
-  void HideNewBackShortcutBubble() override {}
   LocationBar* GetLocationBar() const override;
   void SetFocusToLocationBar(bool select_all) override {}
   void UpdateReloadStopState(bool is_loading, bool force) override {}
@@ -167,6 +165,7 @@ class TestBrowserWindow : public BrowserWindow {
     void UpdateContentSettingsIcons() override {}
     void UpdateManagePasswordsIconAndBubble() override {}
     void UpdateSaveCreditCardIcon() override {}
+    void UpdateFindBarIconVisibility() override {}
     void UpdateBookmarkStarVisibility() override {}
     void UpdateZoomViewVisibility() override {}
     void UpdateLocationBarVisibility(bool visible, bool animate) override {}
@@ -188,7 +187,7 @@ class TestBrowserWindow : public BrowserWindow {
 
 // Handles destroying a TestBrowserWindow when the Browser it is attached to is
 // destroyed.
-class TestBrowserWindowOwner : public chrome::BrowserListObserver {
+class TestBrowserWindowOwner : public BrowserListObserver {
  public:
   explicit TestBrowserWindowOwner(TestBrowserWindow* window);
   ~TestBrowserWindowOwner() override;
@@ -201,12 +200,8 @@ class TestBrowserWindowOwner : public chrome::BrowserListObserver {
   DISALLOW_COPY_AND_ASSIGN(TestBrowserWindowOwner);
 };
 
-namespace chrome {
-
 // Helper that handle the lifetime of TestBrowserWindow instances.
 std::unique_ptr<Browser> CreateBrowserWithTestWindowForParams(
     Browser::CreateParams* params);
-
-}  // namespace chrome
 
 #endif  // CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_

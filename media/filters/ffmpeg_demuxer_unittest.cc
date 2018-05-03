@@ -21,6 +21,7 @@
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/media_log.h"
 #include "media/base/media_tracks.h"
@@ -139,7 +140,7 @@ static void EosOnReadDone(bool* got_eos_buffer,
 // FFmpeg, pipeline and filter host mocks.
 class FFmpegDemuxerTest : public testing::Test {
  protected:
-  FFmpegDemuxerTest() {}
+  FFmpegDemuxerTest() = default;
 
   virtual ~FFmpegDemuxerTest() { Shutdown(); }
 
@@ -404,7 +405,7 @@ TEST_F(FFmpegDemuxerTest, Initialize_Successful) {
 
   const VideoDecoderConfig& video_config = stream->video_decoder_config();
   EXPECT_EQ(kCodecVP8, video_config.codec());
-  EXPECT_EQ(PIXEL_FORMAT_YV12, video_config.format());
+  EXPECT_EQ(PIXEL_FORMAT_I420, video_config.format());
   EXPECT_EQ(320, video_config.coded_size().width());
   EXPECT_EQ(240, video_config.coded_size().height());
   EXPECT_EQ(0, video_config.visible_rect().x());
@@ -432,6 +433,8 @@ TEST_F(FFmpegDemuxerTest, Initialize_Successful) {
   EXPECT_EQ(2u, demuxer_->GetAllStreams().size());
 }
 
+// Android has no Theora support, so this test doesn't work.
+#if !defined(OS_ANDROID)
 TEST_F(FFmpegDemuxerTest, Initialize_Multitrack) {
   // Open a file containing the following streams:
   //   Stream #0: Video (VP8)
@@ -470,6 +473,7 @@ TEST_F(FFmpegDemuxerTest, Initialize_Multitrack) {
   EXPECT_EQ(DemuxerStream::AUDIO, stream->type());
   EXPECT_EQ(kCodecPCM, stream->audio_decoder_config().codec());
 }
+#endif
 
 TEST_F(FFmpegDemuxerTest, Initialize_MultitrackText) {
   // Open a file containing the following streams:
@@ -771,6 +775,9 @@ TEST_F(FFmpegDemuxerTest,
 // Same test above, but using sync2.ogv which has video stream muxed before the
 // audio stream, so seeking based only on start time will fail since ffmpeg is
 // essentially just seeking based on file position.
+//
+// Android has no Theora support, so this test doesn't work.
+#if !defined(OS_ANDROID)
 TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOggDiscard_Sync) {
   // Many ogg files have negative starting timestamps, so ensure demuxing and
   // seeking work correctly with a negative start time.
@@ -793,7 +800,7 @@ TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOggDiscard_Sync) {
               demuxer_->start_time());
 
     // Though the internal start time may be below zero, the exposed media time
-    // must always be greater than zero.
+    // must always be >= zero.
     EXPECT_EQ(base::TimeDelta(), demuxer_->GetStartTime());
 
     video->Read(NewReadCB(FROM_HERE, 9997, 0, true));
@@ -811,6 +818,7 @@ TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOggDiscard_Sync) {
     event.RunAndWaitForStatus(PIPELINE_OK);
   }
 }
+#endif
 
 // Similar to the test above, but using an opus clip with a large amount of
 // pre-skip, which ffmpeg encodes as negative timestamps.
@@ -839,7 +847,7 @@ TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOpusDiscard_Sync) {
     }
 
     // Though the internal start time may be below zero, the exposed media time
-    // must always be greater than zero.
+    // must always be >= zero.
     EXPECT_EQ(base::TimeDelta(), demuxer_->GetStartTime());
 
     video->Read(NewReadCB(FROM_HERE, 16009, 0, true));
@@ -857,6 +865,59 @@ TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOpusDiscard_Sync) {
     event.RunAndWaitForStatus(PIPELINE_OK);
   }
 }
+
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+// Similar to the test above, but using an opus clip plus h264 b-frames to
+// ensure we don't apply chained ogg workarounds to other content.
+TEST_F(FFmpegDemuxerTest,
+       Read_AudioNegativeStartTimeAndOpusDiscardH264Mp4_Sync) {
+  CreateDemuxer("tos-h264-opus.mp4");
+  InitializeDemuxer();
+
+  // Attempt a read from the video stream and run the message loop until done.
+  DemuxerStream* video = GetStream(DemuxerStream::VIDEO);
+  DemuxerStream* audio = GetStream(DemuxerStream::AUDIO);
+  EXPECT_EQ(audio->audio_decoder_config().codec_delay(), 312);
+
+  // Packet size to timestamp (in microseconds) mapping for the first N packets
+  // which should be fully discarded.
+  static const int kTestExpectations[][2] = {
+      {234, 20000}, {228, 40000}, {340, 60000}};
+
+  // Run the test twice with a seek in between.
+  for (int i = 0; i < 2; ++i) {
+    audio->Read(NewReadCBWithCheckedDiscard(
+        FROM_HERE, 408, 0, base::TimeDelta::FromMicroseconds(6500), true));
+    base::RunLoop().Run();
+
+    for (size_t j = 0; j < arraysize(kTestExpectations); ++j) {
+      audio->Read(NewReadCB(FROM_HERE, kTestExpectations[j][0],
+                            kTestExpectations[j][1], true));
+      base::RunLoop().Run();
+    }
+
+    // Though the internal start time may be below zero, the exposed media time
+    // must always be >= zero.
+    EXPECT_EQ(base::TimeDelta(), demuxer_->GetStartTime());
+
+    video->Read(NewReadCB(FROM_HERE, 185105, 0, true));
+    base::RunLoop().Run();
+
+    video->Read(NewReadCB(FROM_HERE, 35941, 125000, false));
+    base::RunLoop().Run();
+
+    // If things aren't working correctly, this expectation will fail because
+    // the chained ogg workaround breaks out of order timestamps.
+    video->Read(NewReadCB(FROM_HERE, 8129, 84000, false));
+    base::RunLoop().Run();
+
+    // Seek back to the beginning and repeat the test.
+    WaitableMessageLoopEvent event;
+    demuxer_->Seek(base::TimeDelta(), event.GetPipelineStatusCB());
+    event.RunAndWaitForStatus(PIPELINE_OK);
+  }
+}
+#endif
 
 // Similar to the test above, but using sfx-opus.ogg, which has a much smaller
 // amount of discard padding and no |start_time| set on the AVStream.
@@ -877,7 +938,7 @@ TEST_F(FFmpegDemuxerTest, Read_AudioNegativeStartTimeAndOpusSfxDiscard_Sync) {
     base::RunLoop().Run();
 
     // Though the internal start time may be below zero, the exposed media time
-    // must always be greater than zero.
+    // must always be >= zero.
     EXPECT_EQ(base::TimeDelta(), demuxer_->GetStartTime());
 
     // Seek back to the beginning and repeat the test.
@@ -920,7 +981,8 @@ TEST_F(FFmpegDemuxerTest, Read_DiscardDisabledVideoStream) {
   EXPECT_LT(bytes_read_with_video_disabled, bytes_read_with_video_enabled);
 }
 
-TEST_F(FFmpegDemuxerTest, Read_DiscardDisabledTextStream) {
+// WebM text track discarding doesn't work in ffmpeg. http://crbug.com/681886.
+TEST_F(FFmpegDemuxerTest, DISABLED_Read_DiscardDisabledTextStream) {
   // This test case reads the same video frame twice, first with the text track
   // enabled, then with the text track disabled. When the text track is
   // disabled, FFmpegDemuxer sets the AVDISCARD_ALL flag on the corresponding
@@ -1123,11 +1185,11 @@ TEST_F(FFmpegDemuxerTest, SeekText) {
   base::RunLoop().Run();
 
   // Text read #1.
-  text_stream->Read(NewReadCB(FROM_HERE, 19, 500000, true));
+  text_stream->Read(NewReadCB(FROM_HERE, 19, 1000000, true));
   base::RunLoop().Run();
 
   // Text read #2.
-  text_stream->Read(NewReadCB(FROM_HERE, 19, 1000000, true));
+  text_stream->Read(NewReadCB(FROM_HERE, 19, 1500000, true));
   base::RunLoop().Run();
 }
 
@@ -1228,13 +1290,15 @@ TEST_F(FFmpegDemuxerTest, Mp3WithVideoStreamID3TagData) {
 #endif
 
 // Ensure a video with an unsupported audio track still results in the video
-// stream being demuxed.
+// stream being demuxed. Because we disable the speex parser for ogg, the audio
+// track won't even show up to the demuxer.
+//
+// Android has no Theora support, so this test doesn't work.
+#if !defined(OS_ANDROID)
 TEST_F(FFmpegDemuxerTest, UnsupportedAudioSupportedVideoDemux) {
   CreateDemuxerWithStrictMediaLog("speex_audio_vorbis_video.ogv");
 
   EXPECT_MEDIA_LOG(SimpleCreatedFFmpegDemuxerStream("video"));
-  EXPECT_MEDIA_LOG(FailedToCreateValidDecoderConfigFromStream("audio"));
-  EXPECT_MEDIA_LOG(SkippingUnsupportedStream("audio"));
 
   // TODO(wolenetz): Use a matcher that verifies more of the event parameters
   // than FoundStream. See https://crbug.com/749178.
@@ -1245,6 +1309,7 @@ TEST_F(FFmpegDemuxerTest, UnsupportedAudioSupportedVideoDemux) {
   EXPECT_TRUE(GetStream(DemuxerStream::VIDEO));
   EXPECT_FALSE(GetStream(DemuxerStream::AUDIO));
 }
+#endif
 
 // Ensure a video with an unsupported video track still results in the audio
 // stream being demuxed.

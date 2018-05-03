@@ -30,9 +30,9 @@ class OverscrollWindowDelegateTest : public aura::test::AuraTestBase,
         mode_changed_(false),
         current_mode_(OVERSCROLL_NONE),
         touch_start_threshold_(content::GetOverscrollConfig(
-            content::OVERSCROLL_CONFIG_HORIZ_THRESHOLD_START_TOUCHSCREEN)),
+            OverscrollConfig::THRESHOLD_START_TOUCHSCREEN)),
         touch_complete_threshold_(content::GetOverscrollConfig(
-            content::OVERSCROLL_CONFIG_HORIZ_THRESHOLD_COMPLETE)) {}
+            OverscrollConfig::THRESHOLD_COMPLETE_TOUCHSCREEN)) {}
 
   ~OverscrollWindowDelegateTest() override {}
 
@@ -80,6 +80,9 @@ class OverscrollWindowDelegateTest : public aura::test::AuraTestBase,
   gfx::Size GetDisplaySize() const override {
     return gfx::Size(kTestDisplayWidth, kTestDisplayWidth);
   }
+
+  void OnOverscrollBehaviorUpdate(
+      cc::OverscrollBehavior overscroll_behavior) override {}
 
   bool OnOverscrollUpdate(float delta_x, float delta_y) override {
     return true;

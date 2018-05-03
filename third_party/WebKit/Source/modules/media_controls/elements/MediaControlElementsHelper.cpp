@@ -8,9 +8,10 @@
 #include "core/html/HTMLDivElement.h"
 #include "core/html/media/HTMLMediaElement.h"
 #include "core/layout/LayoutSlider.h"
-#include "core/layout/api/LayoutSliderItem.h"
+#include "core/layout/LayoutView.h"
 #include "modules/media_controls/elements/MediaControlDivElement.h"
 #include "modules/media_controls/elements/MediaControlInputElement.h"
+#include "public/platform/WebSize.h"
 
 namespace blink {
 
@@ -35,13 +36,12 @@ bool MediaControlElementsHelper::IsUserInteractionEventForSlider(
     return true;
 
   // Some events are only captured during a slider drag.
-  const LayoutSliderItem& slider =
-      LayoutSliderItem(ToLayoutSlider(layout_object));
+  const LayoutSlider* slider = ToLayoutSlider(layout_object);
   // TODO(crbug.com/695459#c1): LayoutSliderItem::inDragMode is incorrectly
   // false for drags that start from the track instead of the thumb.
   // Use SliderThumbElement::m_inDragMode and
   // SliderContainerElement::m_touchStarted instead.
-  if (!slider.IsNull() && !slider.InDragMode())
+  if (slider && !slider->InDragMode())
     return false;
 
   const AtomicString& type = event->type();
@@ -79,8 +79,39 @@ const HTMLMediaElement* MediaControlElementsHelper::ToParentMediaElement(
 // static
 HTMLDivElement* MediaControlElementsHelper::CreateDiv(const AtomicString& id,
                                                       ContainerNode* parent) {
+  DCHECK(parent);
   HTMLDivElement* element = HTMLDivElement::Create(parent->GetDocument());
   element->SetShadowPseudoId(id);
+  parent->AppendChild(element);
+  return element;
+}
+
+// static
+WebSize MediaControlElementsHelper::GetSizeOrDefault(
+    const Element& element,
+    const WebSize& default_size) {
+  float zoom_factor = 1.0f;
+  int width = default_size.width;
+  int height = default_size.height;
+
+  if (LayoutBox* box = element.GetLayoutBox()) {
+    width = box->LogicalWidth().Round();
+    height = box->LogicalHeight().Round();
+  }
+
+  if (element.GetDocument().GetLayoutView())
+    zoom_factor = element.GetDocument().GetLayoutView()->ZoomFactor();
+
+  return WebSize(round(width / zoom_factor), round(height / zoom_factor));
+}
+
+// static
+HTMLDivElement* MediaControlElementsHelper::CreateDivWithId(
+    const AtomicString& id,
+    ContainerNode* parent) {
+  DCHECK(parent);
+  HTMLDivElement* element = HTMLDivElement::Create(parent->GetDocument());
+  element->setAttribute("id", id);
   parent->AppendChild(element);
   return element;
 }

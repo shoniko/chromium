@@ -13,10 +13,10 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLElement.h"
-#include "core/layout/api/LayoutAPIShim.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/EmptyClients.h"
 #include "core/testing/PageTestBase.h"
+#include "platform/testing/UseMockScrollbarSettings.h"
 #include "platform/wtf/Allocator.h"
 
 namespace blink {
@@ -27,7 +27,7 @@ class SingleChildLocalFrameClient final : public EmptyLocalFrameClient {
     return new SingleChildLocalFrameClient();
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(child_);
     EmptyLocalFrameClient::Trace(visitor);
   }
@@ -40,7 +40,7 @@ class SingleChildLocalFrameClient final : public EmptyLocalFrameClient {
   void DidDetachChild() { child_ = nullptr; }
 
  private:
-  explicit SingleChildLocalFrameClient() {}
+  explicit SingleChildLocalFrameClient() = default;
 
   Member<LocalFrame> child_;
 };
@@ -51,7 +51,7 @@ class LocalFrameClientWithParent final : public EmptyLocalFrameClient {
     return new LocalFrameClientWithParent(parent);
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(parent_);
     EmptyLocalFrameClient::Trace(visitor);
   }
@@ -66,7 +66,7 @@ class LocalFrameClientWithParent final : public EmptyLocalFrameClient {
   Member<LocalFrame> parent_;
 };
 
-class RenderingTest : public PageTestBase {
+class RenderingTest : public PageTestBase, public UseMockScrollbarSettings {
   USING_FAST_MALLOC(RenderingTest);
 
  public:
@@ -75,27 +75,20 @@ class RenderingTest : public PageTestBase {
   }
   virtual ChromeClient& GetChromeClient() const;
 
-  RenderingTest(LocalFrameClient* = nullptr);
+  explicit RenderingTest(LocalFrameClient* = nullptr);
 
  protected:
   void SetUp() override;
   void TearDown() override;
 
   LayoutView& GetLayoutView() const {
-    return *ToLayoutView(LayoutAPIShim::LayoutObjectFrom(
-        GetDocument().View()->GetLayoutViewItem()));
+    return *GetDocument().View()->GetLayoutView();
   }
 
-  // Both sets the inner html and runs the document lifecycle.
-  void SetBodyInnerHTML(const String& html_content) {
-    GetDocument().body()->SetInnerHTMLFromString(html_content,
-                                                 ASSERT_NO_EXCEPTION);
-    GetDocument().View()->UpdateAllLifecyclePhases();
+  LocalFrame& ChildFrame() {
+    return *ToLocalFrame(GetFrame().Tree().FirstChild());
   }
-
-  Document& ChildDocument() {
-    return *ToLocalFrame(GetFrame().Tree().FirstChild())->GetDocument();
-  }
+  Document& ChildDocument() { return *ChildFrame().GetDocument(); }
 
   void SetChildFrameHTML(const String&);
 
@@ -105,10 +98,6 @@ class RenderingTest : public PageTestBase {
     GetDocument().View()->SetParentVisible(true);
     GetDocument().View()->SetSelfVisible(true);
     GetDocument().View()->UpdateAllLifecyclePhases();
-  }
-
-  Element* GetElementById(const char* id) const {
-    return GetDocument().getElementById(id);
   }
 
   LayoutObject* GetLayoutObjectByElementId(const char* id) const {

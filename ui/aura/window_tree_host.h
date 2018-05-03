@@ -5,6 +5,8 @@
 #ifndef UI_AURA_WINDOW_TREE_HOST_H_
 #define UI_AURA_WINDOW_TREE_HOST_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <vector>
 
@@ -117,11 +119,11 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
 
   // Converts |point| from the root window's coordinate system to the
   // host window's.
-  void ConvertDIPToPixels(gfx::Point* point) const;
+  virtual void ConvertDIPToPixels(gfx::Point* point) const;
 
   // Converts |point| from the host window's coordinate system to the
   // root window's.
-  void ConvertPixelsToDIP(gfx::Point* point) const;
+  virtual void ConvertPixelsToDIP(gfx::Point* point) const;
 
   // Cursor.
   // Sets the currently-displayed cursor. If the cursor was previously hidden
@@ -168,6 +170,9 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
 
   // Overridden from ui::internal::InputMethodDelegate:
   ui::EventDispatchDetails DispatchKeyEventPostIME(ui::KeyEvent* event) final;
+
+  // Returns the id of the display. Default implementation queries Screen.
+  virtual int64_t GetDisplayId();
 
   // Returns the EventSource responsible for dispatching events to the window
   // tree.
@@ -247,6 +252,11 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t metrics) override;
 
+ protected:
+  const base::ObserverList<WindowTreeHostObserver>& observers() const {
+    return observers_;
+  }
+
  private:
   friend class test::WindowTreeHostTestApi;
 
@@ -292,8 +302,8 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
 
   gfx::Insets output_surface_padding_in_pixels_;
 
-  // Set to true if the next CompositorFrame will block on a new child surface.
-  bool synchronizing_with_child_on_next_frame_ = false;
+  // Set to the time the synchronization event began.
+  base::TimeTicks synchronization_start_time_;
 
   // Set to true if this WindowTreeHost is currently holding pointer moves.
   bool holding_pointer_moves_ = false;

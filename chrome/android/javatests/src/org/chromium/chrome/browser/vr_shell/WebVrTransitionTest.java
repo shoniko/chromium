@@ -13,7 +13,11 @@ import static org.chromium.chrome.test.util.ChromeRestriction.RESTRICTION_TYPE_V
 
 import android.app.Activity;
 import android.os.Build;
+import android.os.SystemClock;
+import android.support.test.InstrumentationRegistry;
+import android.support.test.filters.LargeTest;
 import android.support.test.filters.MediumTest;
+import android.support.test.uiautomator.UiDevice;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -55,8 +59,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @RunWith(ParameterizedRunner.class)
 @UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG, "enable-webvr"})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, "enable-webvr"})
 @MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT) // WebVR is only supported on K+
 public class WebVrTransitionTest {
     @ClassParameter
@@ -101,6 +104,7 @@ public class WebVrTransitionTest {
     @Test
     @MediumTest
     @CommandLineFlags.Remove({"enable-webvr"})
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testWebVrDisabledWithoutFlagSet() throws InterruptedException {
         // TODO(bsheedy): Remove this test once WebVR is on by default without
         // requiring an origin trial.
@@ -113,11 +117,12 @@ public class WebVrTransitionTest {
 
     /**
      * Tests that scanning the Daydream View NFC tag on supported devices fires the
-     * vrdisplayactivate event.
+     * vrdisplayactivate event and the event allows presentation without a user gesture.
      */
     @Test
-    @MediumTest
+    @LargeTest
     @Restriction(RESTRICTION_TYPE_VIEWER_DAYDREAM)
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testNfcFiresVrdisplayactivate() throws InterruptedException {
         mVrTestFramework.loadUrlAndAwaitInitialization(
                 VrTestFramework.getHtmlTestFile("test_nfc_fires_vrdisplayactivate"),
@@ -127,6 +132,11 @@ public class WebVrTransitionTest {
         NfcSimUtils.simNfcScan(mVrTestRule.getActivity());
         VrTestFramework.waitOnJavaScriptStep(mVrTestFramework.getFirstTabWebContents());
         VrTestFramework.endTest(mVrTestFramework.getFirstTabWebContents());
+        // VrCore has a 2000 ms debounce timeout on NFC scans. When run multiple times in different
+        // activities, it is possible for a latter test to be run in the 2 seconds after the
+        // previous test's NFC scan, causing it to fail flakily. So, wait 2 seconds to ensure that
+        // can't happen.
+        SystemClock.sleep(2000);
     }
 
     /**
@@ -136,6 +146,7 @@ public class WebVrTransitionTest {
     @Test
     @MediumTest
     @Restriction({RESTRICTION_TYPE_VIEWER_DAYDREAM, RESTRICTION_TYPE_DON_ENABLED})
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
     public void testPresentationPromiseUnresolvedDuringDon() throws InterruptedException {
         mVrTestFramework.loadUrlAndAwaitInitialization(
                 VrTestFramework.getHtmlTestFile("test_presentation_promise_unresolved_during_don"),
@@ -146,21 +157,50 @@ public class WebVrTransitionTest {
     }
 
     /**
+     * Tests that the requestPresent promise is rejected if the DON flow is canceled.
+     */
+    @Test
+    @MediumTest
+    @Restriction({RESTRICTION_TYPE_VIEWER_DAYDREAM, RESTRICTION_TYPE_DON_ENABLED})
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
+    public void testPresentationPromiseRejectedIfDonCanceled() throws InterruptedException {
+        mVrTestFramework.loadUrlAndAwaitInitialization(
+                VrTestFramework.getHtmlTestFile(
+                        "test_presentation_promise_rejected_if_don_canceled"),
+                PAGE_LOAD_TIMEOUT_S);
+        final UiDevice uiDevice =
+                UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+        VrTransitionUtils.enterPresentation(mVrTestFramework.getFirstTabCvc());
+        // Wait until the DON flow appears to be triggered
+        // TODO(bsheedy): Make this less hacky if there's ever an explicit way to check if the
+        // DON flow is currently active https://crbug.com/758296
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return uiDevice.getCurrentPackageName().equals("com.google.vr.vrcore");
+            }
+        }, POLL_TIMEOUT_LONG_MS, POLL_CHECK_INTERVAL_SHORT_MS);
+        uiDevice.pressBack();
+        mVrTestFramework.waitOnJavaScriptStep(mVrTestFramework.getFirstTabWebContents());
+        mVrTestFramework.endTest(mVrTestFramework.getFirstTabWebContents());
+    }
+
+    /**
      * Tests that an intent from a trusted app such as Daydream Home allows WebVR content
      * to auto present without the need for a user gesture.
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("enable-features=WebVrAutopresent")
+    @CommandLineFlags.Add("enable-features=WebVrAutopresentFromIntent")
     @Restriction(RESTRICTION_TYPE_VIEWER_DAYDREAM)
     public void testTrustedIntentAllowsAutoPresent() throws InterruptedException {
         VrIntentUtils.setHandlerInstanceForTesting(new MockVrIntentHandler(
                 true /* useMockImplementation */, true /* treatIntentsAsTrusted */));
 
         // Send an autopresent intent, which will open the link in a CCT
-        VrTransitionUtils.sendDaydreamAutopresentIntent(
+        VrTransitionUtils.sendVrLaunchIntent(
                 VrTestFramework.getHtmlTestFile("test_webvr_autopresent"),
-                mVrTestRule.getActivity());
+                mVrTestRule.getActivity(), true /* autopresent */);
 
         // Wait until a CCT is opened due to the intent
         final AtomicReference<CustomTabActivity> cct = new AtomicReference<CustomTabActivity>();
@@ -202,8 +242,7 @@ public class WebVrTransitionTest {
     public void testControlsVisibleAfterExitingVr() throws InterruptedException {
         mVrTestFramework.loadUrlAndAwaitInitialization(
                 VrTestFramework.getHtmlTestFile("generic_webvr_page"), PAGE_LOAD_TIMEOUT_S);
-        VrTransitionUtils.enterPresentationAndWait(
-                mVrTestFramework.getFirstTabCvc(), mVrTestFramework.getFirstTabWebContents());
+        VrTransitionUtils.enterPresentationOrFail(mVrTestFramework.getFirstTabCvc());
         VrTransitionUtils.forceExitVr();
         // The hiding of the controls may only propagate after VR has exited, so give it a chance
         // to propagate. In the worst case this test will erroneously pass, but should never
@@ -216,5 +255,27 @@ public class WebVrTransitionTest {
                 return activity.getFullscreenManager().getBrowserControlHiddenRatio() == 0.0;
             }
         }, POLL_TIMEOUT_SHORT_MS, POLL_CHECK_INTERVAL_SHORT_MS);
+    }
+
+    /**
+     * Tests that window.requestAnimationFrame stops firing while in WebVR presentation, but resumes
+     * afterwards.
+     */
+    @Test
+    @MediumTest
+    @VrActivityRestriction({VrActivityRestriction.SupportedActivity.ALL})
+    public void testWindowRafStopsFiringWhilePresenting() throws InterruptedException {
+        mVrTestFramework.loadUrlAndAwaitInitialization(
+                VrTestFramework.getHtmlTestFile("test_window_raf_stops_firing_while_presenting"),
+                PAGE_LOAD_TIMEOUT_S);
+        VrTestFramework.executeStepAndWait(
+                "stepVerifyBeforePresent()", mVrTestFramework.getFirstTabWebContents());
+        VrTransitionUtils.enterPresentationOrFail(mVrTestFramework.getFirstTabCvc());
+        VrTestFramework.executeStepAndWait(
+                "stepVerifyDuringPresent()", mVrTestFramework.getFirstTabWebContents());
+        VrTransitionUtils.forceExitVr();
+        VrTestFramework.executeStepAndWait(
+                "stepVerifyAfterPresent()", mVrTestFramework.getFirstTabWebContents());
+        VrTestFramework.endTest(mVrTestFramework.getFirstTabWebContents());
     }
 }

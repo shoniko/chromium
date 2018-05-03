@@ -8,6 +8,7 @@
 #include "core/frame/WebLocalFrameImpl.h"
 #include "core/layout/HitTestResult.h"
 #include "platform/exported/WebActiveGestureAnimation.h"
+#include "third_party/WebKit/common/page/page_visibility_state.mojom-blink.h"
 
 namespace blink {
 
@@ -22,7 +23,7 @@ WebViewFrameWidget::WebViewFrameWidget(WebWidgetClient& client,
   web_view_->SetCompositorVisibility(true);
 }
 
-WebViewFrameWidget::~WebViewFrameWidget() {}
+WebViewFrameWidget::~WebViewFrameWidget() = default;
 
 void WebViewFrameWidget::Close() {
   // Note: it's important to use the captured main frame pointer here. During
@@ -69,8 +70,8 @@ void WebViewFrameWidget::BeginFrame(double last_frame_time_monotonic) {
   return web_view_->BeginFrame(last_frame_time_monotonic);
 }
 
-void WebViewFrameWidget::UpdateAllLifecyclePhases() {
-  return web_view_->UpdateAllLifecyclePhases();
+void WebViewFrameWidget::UpdateLifecycle(LifecycleUpdate requested_update) {
+  return web_view_->UpdateLifecycle(requested_update);
 }
 
 void WebViewFrameWidget::Paint(WebCanvas* canvas, const WebRect& view_port) {
@@ -100,10 +101,6 @@ void WebViewFrameWidget::SetCursorVisibilityState(bool is_visible) {
   return web_view_->SetCursorVisibilityState(is_visible);
 }
 
-bool WebViewFrameWidget::HasTouchEventHandlersAt(const WebPoint& point) {
-  return web_view_->HasTouchEventHandlersAt(point);
-}
-
 void WebViewFrameWidget::ApplyViewportDeltas(
     const WebFloatSize& visual_viewport_delta,
     const WebFloatSize& layout_viewport_delta,
@@ -130,26 +127,9 @@ void WebViewFrameWidget::SetFocus(bool enable) {
   return web_view_->SetFocus(enable);
 }
 
-WebRange WebViewFrameWidget::CompositionRange() {
-  return web_view_->CompositionRange();
-}
-
 bool WebViewFrameWidget::SelectionBounds(WebRect& anchor,
                                          WebRect& focus) const {
   return web_view_->SelectionBounds(anchor, focus);
-}
-
-bool WebViewFrameWidget::SelectionTextDirection(WebTextDirection& start,
-                                                WebTextDirection& end) const {
-  return web_view_->SelectionTextDirection(start, end);
-}
-
-bool WebViewFrameWidget::IsSelectionAnchorFirst() const {
-  return web_view_->IsSelectionAnchorFirst();
-}
-
-void WebViewFrameWidget::SetTextDirection(WebTextDirection direction) {
-  return web_view_->SetTextDirection(direction);
 }
 
 bool WebViewFrameWidget::IsAcceleratedCompositingActive() const {
@@ -181,7 +161,7 @@ void WebViewFrameWidget::UpdateBrowserControlsState(
 }
 
 void WebViewFrameWidget::SetVisibilityState(
-    WebPageVisibilityState visibility_state) {
+    mojom::PageVisibilityState visibility_state) {
   return web_view_->SetVisibilityState(visibility_state, false);
 }
 

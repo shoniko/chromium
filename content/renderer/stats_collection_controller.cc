@@ -6,6 +6,7 @@
 
 #include "base/json/json_writer.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/strings/string_util.h"
@@ -59,13 +60,13 @@ void ConvertLoadTimeToJSON(
   base::DictionaryValue item;
 
   if (load_start_time.is_null()) {
-    item.Set("load_start_ms", base::MakeUnique<base::Value>());
+    item.Set("load_start_ms", std::make_unique<base::Value>());
   } else {
     item.SetDouble("load_start_ms", (load_start_time - base::Time::UnixEpoch())
                    .InMillisecondsF());
   }
   if (load_start_time.is_null() || load_stop_time.is_null()) {
-    item.Set("load_duration_ms", base::MakeUnique<base::Value>());
+    item.Set("load_duration_ms", std::make_unique<base::Value>());
   } else {
     item.SetDouble("load_duration_ms",
         (load_stop_time - load_start_time).InMillisecondsF());
@@ -121,7 +122,7 @@ std::string StatsCollectionController::GetHistogram(
   if (!histogram) {
     output = "{}";
   } else {
-    histogram->WriteJSON(&output);
+    histogram->WriteJSON(&output, base::JSON_VERBOSITY_LEVEL_FULL);
   }
   return output;
 }
@@ -136,7 +137,7 @@ std::string StatsCollectionController::GetBrowserHistogram(
 }
 
 std::string StatsCollectionController::GetTabLoadTiming() {
-  RenderViewImpl *render_view_impl = NULL;
+  RenderViewImpl* render_view_impl = nullptr;
   bool result = CurrentRenderViewImpl(&render_view_impl);
   DCHECK(result);
 

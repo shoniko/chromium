@@ -61,12 +61,16 @@ void BoxPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info,
     scroll_recorder.emplace(paint_info.context, layout_box_, paint_info.phase,
                             layout_box_.ScrolledContentOffset());
     if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-      PaintChunkProperties properties(
-          layout_box_.FirstFragment()->ContentsProperties());
-      properties.backface_hidden = layout_box_.HasHiddenBackface();
-      scoped_scroll_property.emplace(
-          paint_info.context.GetPaintController(), layout_box_,
-          DisplayItem::PaintPhaseToScrollType(paint_info.phase), properties);
+      DCHECK_EQ(layout_box_.HasHiddenBackface(),
+                paint_info.context.GetPaintController()
+                    .CurrentPaintChunkProperties()
+                    .backface_hidden);
+      if (const auto* fragment = paint_info.FragmentToPaint(layout_box_)) {
+        scoped_scroll_property.emplace(
+            paint_info.context.GetPaintController(),
+            fragment->ContentsProperties(), layout_box_,
+            DisplayItem::PaintPhaseToScrollType(paint_info.phase));
+      }
     }
 
     // The background painting code assumes that the borders are part of the
@@ -127,15 +131,15 @@ void BoxPainter::PaintBoxDecorationBackgroundWithRect(
           DisplayItem::kBoxDecorationBackground))
     return;
 
-  DrawingRecorder recorder(
-      paint_info.context, display_item_client,
-      DisplayItem::kBoxDecorationBackground,
-      FloatRect(BoundsForDrawingRecorder(paint_info, paint_offset)));
+  DrawingRecorder recorder(paint_info.context, display_item_client,
+                           DisplayItem::kBoxDecorationBackground);
   BoxDecorationData box_decoration_data(layout_box_);
   GraphicsContextStateSaver state_saver(paint_info.context, false);
 
   if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled() &&
       LayoutRect(EnclosingIntRect(paint_rect)) == paint_rect &&
+      // TODO(wkorman): Rename BoundsForDrawingRecorder as it's used
+      // here for another purpose.
       layout_box_.BackgroundIsKnownToBeOpaqueInRect(
           BoundsForDrawingRecorder(paint_info, LayoutPoint())))
     recorder.SetKnownToBeOpaque();
@@ -172,9 +176,11 @@ void BoxPainter::PaintBoxDecorationBackgroundWithRect(
                     box_decoration_data.background_color,
                     box_decoration_data.bleed_avoidance);
 
-    if (box_decoration_data.has_appearance)
-      theme_painter.PaintDecorations(layout_box_.GetNode(), style, paint_info,
-                                     snapped_paint_rect);
+    if (box_decoration_data.has_appearance) {
+      theme_painter.PaintDecorations(layout_box_.GetNode(),
+                                     layout_box_.GetDocument(), style,
+                                     paint_info, snapped_paint_rect);
+    }
   }
 
   if (!painting_overflow_contents) {
@@ -227,11 +233,7 @@ void BoxPainter::PaintMask(const PaintInfo& paint_info,
           paint_info.context, layout_box_, paint_info.phase))
     return;
 
-  LayoutRect visual_overflow_rect(layout_box_.VisualOverflowRect());
-  visual_overflow_rect.MoveBy(paint_offset);
-
-  DrawingRecorder recorder(paint_info.context, layout_box_, paint_info.phase,
-                           visual_overflow_rect);
+  DrawingRecorder recorder(paint_info.context, layout_box_, paint_info.phase);
   LayoutRect paint_rect = LayoutRect(paint_offset, layout_box_.Size());
   PaintMaskImages(paint_info, paint_rect);
 }
@@ -248,7 +250,8 @@ void BoxPainter::PaintMaskImages(const PaintInfo& paint_info,
 
   bool all_mask_images_loaded = true;
 
-  if (!mask_blending_applied_by_compositor) {
+  if (!mask_blending_applied_by_compositor &&
+      !RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
     push_transparency_layer = true;
     StyleImage* mask_box_image = layout_box_.Style()->MaskBoxImage().GetImage();
     const FillLayer& mask_layers = layout_box_.Style()->MaskLayers();
@@ -281,6 +284,8 @@ void BoxPainter::PaintMaskImages(const PaintInfo& paint_info,
 
 void BoxPainter::PaintClippingMask(const PaintInfo& paint_info,
                                    const LayoutPoint& paint_offset) {
+  // SPv175 always paints clipping mask in PaintLayerPainter.
+  DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
   DCHECK(paint_info.phase == PaintPhase::kClippingMask);
 
   if (layout_box_.Style()->Visibility() != EVisibility::kVisible)
@@ -296,8 +301,7 @@ void BoxPainter::PaintClippingMask(const PaintInfo& paint_info,
 
   IntRect paint_rect =
       PixelSnappedIntRect(LayoutRect(paint_offset, layout_box_.Size()));
-  DrawingRecorder recorder(paint_info.context, layout_box_, paint_info.phase,
-                           paint_rect);
+  DrawingRecorder recorder(paint_info.context, layout_box_, paint_info.phase);
   paint_info.context.FillRect(paint_rect, Color::kBlack);
 }
 

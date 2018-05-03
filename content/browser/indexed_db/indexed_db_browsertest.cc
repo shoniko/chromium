@@ -71,7 +71,7 @@ class IndexedDBBrowserTest : public ContentBrowserTest,
   }
 
   void TearDown() override {
-    IndexedDBClassFactory::SetIndexedDBClassFactoryGetter(NULL);
+    IndexedDBClassFactory::SetIndexedDBClassFactoryGetter(nullptr);
     ContentBrowserTest::TearDown();
   }
 
@@ -837,7 +837,7 @@ IN_PROC_BROWSER_TEST_F(
 // Verify that a "close" event is fired at database connections when
 // the backing store is deleted.
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ForceCloseEventTest) {
-  NavigateAndWaitForTitle(shell(), "force_close_event.html", NULL,
+  NavigateAndWaitForTitle(shell(), "force_close_event.html", nullptr,
                           "connection ready");
   // TODO(jsbell): Remove static_cast<> when overloads are eliminated.
   GetContext()->TaskRunner()->PostTask(
@@ -859,8 +859,14 @@ class IndexedDBBrowserTestSingleProcess : public IndexedDBBrowserTest {
   }
 };
 
+// https://crbug.com/788788
+#if defined(OS_ANDROID) && defined(ADDRESS_SANITIZER)
+#define MAYBE_RenderThreadShutdownTest DISABLED_RenderThreadShutdownTest
+#else
+#define MAYBE_RenderThreadShutdownTest RenderThreadShutdownTest
+#endif  // defined(OS_ANDROID) && defined(ADDRESS_SANITIZER)
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestSingleProcess,
-                       RenderThreadShutdownTest) {
+                       MAYBE_RenderThreadShutdownTest) {
   SimpleTest(GetTestUrl("indexeddb", "shutdown_with_requests.html"));
 }
 

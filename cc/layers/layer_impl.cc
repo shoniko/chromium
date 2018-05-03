@@ -474,7 +474,7 @@ void LayerImpl::NoteLayerPropertyChangedFromPropertyTrees() {
 
 void LayerImpl::ValidateQuadResourcesInternal(viz::DrawQuad* quad) const {
 #if DCHECK_IS_ON()
-  const ResourceProvider* resource_provider =
+  const LayerTreeResourceProvider* resource_provider =
       layer_tree_impl_->resource_provider();
   for (viz::ResourceId resource_id : quad->resources)
     resource_provider->ValidateResource(resource_id);
@@ -779,7 +779,7 @@ void LayerImpl::AsValueInto(base::trace_event::TracedValue* state) const {
     base::JSONReader json_reader;
     std::unique_ptr<base::Value> debug_info_value(json_reader.ReadToValue(str));
 
-    if (debug_info_value->IsType(base::Value::Type::DICTIONARY)) {
+    if (debug_info_value->is_dict()) {
       base::DictionaryValue* dictionary_value = nullptr;
       bool converted_to_dictionary =
           debug_info_value->GetAsDictionary(&dictionary_value);

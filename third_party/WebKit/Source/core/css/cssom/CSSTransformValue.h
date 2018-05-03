@@ -5,6 +5,7 @@
 #ifndef CSSTransformValue_h
 #define CSSTransformValue_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/cssom/CSSStyleValue.h"
 #include "core/css/cssom/CSSTransformComponent.h"
@@ -16,16 +17,16 @@ namespace blink {
 class DOMMatrix;
 
 class CORE_EXPORT CSSTransformValue final : public CSSStyleValue {
-  WTF_MAKE_NONCOPYABLE(CSSTransformValue);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CSSTransformValue* Create() { return new CSSTransformValue(); }
-
   static CSSTransformValue* Create(
-      const HeapVector<Member<CSSTransformComponent>>& transform_components) {
-    return new CSSTransformValue(transform_components);
-  }
+      const HeapVector<Member<CSSTransformComponent>>& transform_components,
+      ExceptionState&);
+
+  // Blink-internal constructor
+  static CSSTransformValue* Create(
+      const HeapVector<Member<CSSTransformComponent>>& transform_components);
 
   static CSSTransformValue* FromCSSValue(const CSSValue&);
 
@@ -49,12 +50,12 @@ class CORE_EXPORT CSSTransformValue final : public CSSStyleValue {
   }
 
  private:
-  CSSTransformValue() {}
   CSSTransformValue(
       const HeapVector<Member<CSSTransformComponent>>& transform_components)
       : CSSStyleValue(), transform_components_(transform_components) {}
 
   HeapVector<Member<CSSTransformComponent>> transform_components_;
+  DISALLOW_COPY_AND_ASSIGN(CSSTransformValue);
 };
 
 }  // namespace blink

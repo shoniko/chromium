@@ -38,7 +38,7 @@ class InstalledAppController::GetRelatedAppsCallbacks
   std::unique_ptr<AppInstalledCallbacks> callbacks_;
 };
 
-InstalledAppController::~InstalledAppController() {}
+InstalledAppController::~InstalledAppController() = default;
 
 void InstalledAppController::GetInstalledRelatedApps(
     std::unique_ptr<AppInstalledCallbacks> callbacks) {
@@ -56,7 +56,7 @@ void InstalledAppController::GetInstalledRelatedApps(
   // TODO(mgiuca): This roundtrip to content could be eliminated if the Manifest
   // class was moved from content into Blink.
   related_apps_fetcher_->GetManifestRelatedApplications(
-      WTF::MakeUnique<GetRelatedAppsCallbacks>(this, std::move(callbacks)));
+      std::make_unique<GetRelatedAppsCallbacks>(this, std::move(callbacks)));
 }
 
 void InstalledAppController::ProvideTo(
@@ -115,9 +115,8 @@ void InstalledAppController::FilterByInstalledApps(
 
   provider_->FilterInstalledApps(
       std::move(mojo_related_apps),
-      ConvertToBaseCallback(
-          WTF::Bind(&InstalledAppController::OnFilterInstalledApps,
-                    WrapPersistent(this), WTF::Passed(std::move(callbacks)))));
+      WTF::Bind(&InstalledAppController::OnFilterInstalledApps,
+                WrapPersistent(this), WTF::Passed(std::move(callbacks))));
 }
 
 void InstalledAppController::OnFilterInstalledApps(

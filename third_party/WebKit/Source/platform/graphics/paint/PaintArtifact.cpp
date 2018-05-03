@@ -30,12 +30,11 @@ void ComputeChunkBoundsAndOpaqueness(const DisplayItemList& display_items,
         continue;
       const auto& drawing = static_cast<const DrawingDisplayItem&>(item);
       if (drawing.GetPaintRecord() && drawing.KnownToBeOpaque()) {
-        // TODO(pdr): It may be too conservative to round in to the
-        // EnclosedIntRect.
-        SkIRect conservative_rounded_rect;
-        const SkRect& record_bounds = drawing.GetPaintRecordBounds();
-        record_bounds.roundIn(&conservative_rounded_rect);
-        known_to_be_opaque_region.op(conservative_rounded_rect,
+        // TODO(wkorman): Confirm the visual rect is in the right
+        // space. It looks correct now, and was perhaps incorrect
+        // previously?
+        LayoutRect visual_rect = drawing.VisualRect();
+        known_to_be_opaque_region.op(SkIRect(IntRect(visual_rect)),
                                      SkRegion::kUnion_Op);
       }
     }
@@ -61,7 +60,7 @@ PaintArtifact::PaintArtifact(PaintArtifact&& source)
     : display_item_list_(std::move(source.display_item_list_)),
       paint_chunks_(std::move(source.paint_chunks_)) {}
 
-PaintArtifact::~PaintArtifact() {}
+PaintArtifact::~PaintArtifact() = default;
 
 PaintArtifact& PaintArtifact::operator=(PaintArtifact&& source) {
   display_item_list_ = std::move(source.display_item_list_);
@@ -79,18 +78,22 @@ size_t PaintArtifact::ApproximateUnsharedMemoryUsage() const {
          paint_chunks_.capacity() * sizeof(paint_chunks_[0]);
 }
 
-void PaintArtifact::Replay(GraphicsContext& graphics_context) const {
-  TRACE_EVENT0("blink,benchmark", "PaintArtifact::replay");
+void PaintArtifact::Replay(GraphicsContext& graphics_context,
+                           const PropertyTreeState& replay_state,
+                           const IntPoint& offset) const {
   if (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
+    DCHECK(offset == IntPoint());
+    TRACE_EVENT0("blink,benchmark", "PaintArtifact::replay");
     for (const DisplayItem& display_item : display_item_list_)
       display_item.Replay(graphics_context);
   } else {
-    Replay(*graphics_context.Canvas());
+    Replay(*graphics_context.Canvas(), replay_state, offset);
   }
 }
 
 void PaintArtifact::Replay(PaintCanvas& canvas,
-                           const PropertyTreeState& replay_state) const {
+                           const PropertyTreeState& replay_state,
+                           const IntPoint& offset) const {
   TRACE_EVENT0("blink,benchmark", "PaintArtifact::replay");
   DCHECK(RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
   Vector<const PaintChunk*> pointer_paint_chunks;
@@ -102,8 +105,8 @@ void PaintArtifact::Replay(PaintCanvas& canvas,
     pointer_paint_chunks.push_back(&chunk);
   scoped_refptr<cc::DisplayItemList> display_item_list =
       PaintChunksToCcLayer::Convert(
-          pointer_paint_chunks, replay_state, gfx::Vector2dF(),
-          GetDisplayItemList(),
+          pointer_paint_chunks, replay_state,
+          gfx::Vector2dF(offset.X(), offset.Y()), GetDisplayItemList(),
           cc::DisplayItemList::kToBeReleasedAsPaintOpBuffer);
   canvas.drawPicture(display_item_list->ReleaseAsRecord());
 }

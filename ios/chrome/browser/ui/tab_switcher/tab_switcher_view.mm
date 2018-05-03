@@ -110,6 +110,17 @@ const CGFloat kNewTabButtonWidth = 48;
   DCHECK_EQ([[_panels objectAtIndex:index] superview], _scrollView);
   [[_panels objectAtIndex:index] removeFromSuperview];
   [_panels removeObjectAtIndex:index];
+
+  if (_previousPanelIndex > -1) {
+    NSUInteger previousPanelIndexUnsigned =
+        static_cast<NSUInteger>(_previousPanelIndex);
+    if (index < previousPanelIndexUnsigned)
+      _previousPanelIndex--;
+    else if (index == previousPanelIndexUnsigned) {
+      [self panelWasHiddenAtIndex:_previousPanelIndex];
+      _previousPanelIndex = -1;
+    }
+  }
   if (update)
     [self updateScrollViewContent];
 }
@@ -128,6 +139,14 @@ const CGFloat kNewTabButtonWidth = 48;
   [UIView beginAnimations:nil context:NULL];
   [[_headerView dismissButton] setAlpha:dismissButtonVisible ? 1.0 : 0.0];
   [UIView commitAnimations];
+}
+
+- (void)wasShown {
+  [self currentPanelWasShown];
+}
+
+- (void)wasHidden {
+  [self panelWasHiddenAtIndex:self.currentPageIndex];
 }
 
 #pragma mark - Private
@@ -320,16 +339,26 @@ const CGFloat kNewTabButtonWidth = 48;
   [self updateOverlayButtonState];
 
   NSInteger panelIndex = [self currentPanelIndex];
-  TabSwitcherPanelOverlayView* overlayView =
-      base::mac::ObjCCast<TabSwitcherPanelOverlayView>(
-          [_panels objectAtIndex:panelIndex]);
-  if (panelIndex != _previousPanelIndex && overlayView &&
-      [overlayView overlayType] ==
-          TabSwitcherPanelOverlayType::OVERLAY_PANEL_USER_SIGNED_OUT) {
-    base::RecordAction(
-        base::UserMetricsAction("Signin_Impression_FromTabSwitcher"));
+  if (panelIndex != _previousPanelIndex) {
+    if (_previousPanelIndex != -1)
+      [self panelWasHiddenAtIndex:_previousPanelIndex];
+    [self currentPanelWasShown];
   }
   _previousPanelIndex = panelIndex;
+}
+
+- (void)panelWasHiddenAtIndex:(NSUInteger)index {
+  if (index >= [_panels count])
+    return;
+  id panel = [_panels objectAtIndex:index];
+  if ([panel respondsToSelector:@selector(wasHidden)])
+    [panel wasHidden];
+}
+
+- (void)currentPanelWasShown {
+  id panel = [_panels objectAtIndex:self.currentPanelIndex];
+  if ([panel respondsToSelector:@selector(wasShown)])
+    [panel wasShown];
 }
 
 #pragma mark - UIScrollViewAccessibilityDelegate

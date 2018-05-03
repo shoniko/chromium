@@ -34,6 +34,7 @@
 
 #include "build/build_config.h"
 #include "platform/Histogram.h"
+#include "platform/ResolutionUnits.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/fonts/FontGlobalContext.h"
 #include "platform/fonts/FontPlatformData.h"
@@ -70,6 +71,15 @@ void HbFaceDeleter::operator()(hb_face_t* face) {
   if (face)
     hb_face_destroy(face);
 }
+
+struct HbSetDeleter {
+  void operator()(hb_set_t* set) {
+    if (set)
+      hb_set_destroy(set);
+  }
+};
+
+using HbSetUniquePtr = std::unique_ptr<hb_set_t, HbSetDeleter>;
 
 static scoped_refptr<HbFontCacheEntry> CreateHbFontCacheEntry(hb_face_t*);
 
@@ -134,15 +144,15 @@ static hb_bool_t HarfBuzzGetGlyphVerticalOrigin(hb_font_t* hb_font,
                                                 void* user_data) {
   HarfBuzzFontData* hb_font_data =
       reinterpret_cast<HarfBuzzFontData*>(font_data);
-  const OpenTypeVerticalData* vertical_data =
-      hb_font_data->simple_font_data_->VerticalData();
+  scoped_refptr<OpenTypeVerticalData> vertical_data =
+      hb_font_data->VerticalData();
   if (!vertical_data)
     return false;
 
   float result[] = {0, 0};
   Glyph the_glyph = glyph;
-  vertical_data->GetVerticalTranslationsForGlyphs(
-      hb_font_data->simple_font_data_, &the_glyph, 1, result);
+  vertical_data->GetVerticalTranslationsForGlyphs(hb_font_data->paint_,
+                                                  &the_glyph, 1, result);
   *x = SkiaTextMetrics::SkiaScalarToHarfBuzzPosition(-result[0]);
   *y = SkiaTextMetrics::SkiaScalarToHarfBuzzPosition(-result[1]);
   return true;
@@ -154,15 +164,15 @@ static hb_position_t HarfBuzzGetGlyphVerticalAdvance(hb_font_t* hb_font,
                                                      void* user_data) {
   HarfBuzzFontData* hb_font_data =
       reinterpret_cast<HarfBuzzFontData*>(font_data);
-  const OpenTypeVerticalData* vertical_data =
-      hb_font_data->simple_font_data_->VerticalData();
-  if (!vertical_data)
+  scoped_refptr<OpenTypeVerticalData> vertical_data =
+      hb_font_data->VerticalData();
+  if (!vertical_data) {
     return SkiaTextMetrics::SkiaScalarToHarfBuzzPosition(
-        hb_font_data->simple_font_data_->GetFontMetrics().Height());
+        hb_font_data->height_fallback_);
+  }
 
   Glyph the_glyph = glyph;
-  float advance_height =
-      -vertical_data->AdvanceHeight(hb_font_data->simple_font_data_, the_glyph);
+  float advance_height = -vertical_data->AdvanceHeight(the_glyph);
   return SkiaTextMetrics::SkiaScalarToHarfBuzzPosition(
       SkFloatToScalar(advance_height));
 }
@@ -207,6 +217,71 @@ static hb_bool_t HarfBuzzGetGlyphExtents(hb_font_t* hb_font,
   SkiaTextMetrics(&hb_font_data->paint_)
       .GetGlyphExtentsForHarfBuzz(glyph, extents);
   return true;
+}
+
+static inline bool TableHasSpace(hb_face_t* face,
+                                 hb_set_t* glyphs,
+                                 hb_tag_t tag,
+                                 hb_codepoint_t space) {
+  unsigned count = hb_ot_layout_table_get_lookup_count(face, tag);
+  for (unsigned i = 0; i < count; i++) {
+    hb_ot_layout_lookup_collect_glyphs(face, tag, i, glyphs, glyphs, glyphs,
+                                       nullptr);
+    if (hb_set_has(glyphs, space))
+      return true;
+  }
+  return false;
+}
+
+static bool GetSpaceGlyph(hb_font_t* font, hb_codepoint_t& space) {
+  return hb_font_get_nominal_glyph(font, kSpaceCharacter, &space);
+}
+
+bool HarfBuzzFace::HasSpaceInLigaturesOrKerning(TypesettingFeatures features) {
+  const hb_codepoint_t kInvalidCodepoint = static_cast<hb_codepoint_t>(-1);
+  hb_codepoint_t space = kInvalidCodepoint;
+
+  HbSetUniquePtr glyphs(hb_set_create());
+
+  // Check whether computing is needed and compute for gpos/gsub.
+  if (features & kKerning &&
+      harf_buzz_font_data_->space_in_gpos_ ==
+          HarfBuzzFontData::SpaceGlyphInOpenTypeTables::Unknown) {
+    if (space == kInvalidCodepoint && !GetSpaceGlyph(unscaled_font_, space))
+      return false;
+    // Compute for gpos.
+    hb_face_t* face = hb_font_get_face(unscaled_font_);
+    DCHECK(face);
+    harf_buzz_font_data_->space_in_gpos_ =
+        hb_ot_layout_has_positioning(face) &&
+                TableHasSpace(face, glyphs.get(), HB_OT_TAG_GPOS, space)
+            ? HarfBuzzFontData::SpaceGlyphInOpenTypeTables::Present
+            : HarfBuzzFontData::SpaceGlyphInOpenTypeTables::NotPresent;
+  }
+
+  hb_set_clear(glyphs.get());
+
+  if (features & kLigatures &&
+      harf_buzz_font_data_->space_in_gsub_ ==
+          HarfBuzzFontData::SpaceGlyphInOpenTypeTables::Unknown) {
+    if (space == kInvalidCodepoint && !GetSpaceGlyph(unscaled_font_, space))
+      return false;
+    // Compute for gpos.
+    hb_face_t* face = hb_font_get_face(unscaled_font_);
+    DCHECK(face);
+    harf_buzz_font_data_->space_in_gsub_ =
+        hb_ot_layout_has_substitution(face) &&
+                TableHasSpace(face, glyphs.get(), HB_OT_TAG_GSUB, space)
+            ? HarfBuzzFontData::SpaceGlyphInOpenTypeTables::Present
+            : HarfBuzzFontData::SpaceGlyphInOpenTypeTables::NotPresent;
+  }
+
+  return (features & kKerning &&
+          harf_buzz_font_data_->space_in_gpos_ ==
+              HarfBuzzFontData::SpaceGlyphInOpenTypeTables::Present) ||
+         (features & kLigatures &&
+          harf_buzz_font_data_->space_in_gsub_ ==
+              HarfBuzzFontData::SpaceGlyphInOpenTypeTables::Present);
 }
 
 static hb_font_funcs_t* HarfBuzzSkiaGetFontFuncs() {
@@ -332,16 +407,19 @@ static_assert(
     "size.");
 
 hb_font_t* HarfBuzzFace::GetScaledFont(
-    scoped_refptr<UnicodeRangeSet> range_set) const {
-  platform_data_->SetupPaint(&harf_buzz_font_data_->paint_);
-  harf_buzz_font_data_->paint_.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+    scoped_refptr<UnicodeRangeSet> range_set,
+    VerticalLayoutCallbacks vertical_layout) const {
+  PaintFont paint_font;
+  platform_data_->SetupPaintFont(&paint_font);
+  paint_font.SetTextEncoding(SkPaint::kGlyphID_TextEncoding);
   harf_buzz_font_data_->range_set_ = std::move(range_set);
-  harf_buzz_font_data_->UpdateSimpleFontData(platform_data_);
+  harf_buzz_font_data_->UpdateFallbackMetricsAndScale(
+      *platform_data_, paint_font.ToSkPaint(), vertical_layout);
 
-  DCHECK(harf_buzz_font_data_->simple_font_data_);
   int scale =
       SkiaTextMetrics::SkiaScalarToHarfBuzzPosition(platform_data_->size());
   hb_font_set_scale(unscaled_font_, scale, scale);
+  hb_font_set_ptem(unscaled_font_, platform_data_->size() / kCssPixelsPerPoint);
 
   SkTypeface* typeface = harf_buzz_font_data_->paint_.getTypeface();
   int axis_count = typeface->getVariationDesignPosition(nullptr, 0);

@@ -83,7 +83,7 @@ class CompositedScrollingBrowserTest : public ContentBrowserTest {
     NavigateToURL(shell(), data_url);
 
     RenderWidgetHostImpl* host = GetWidgetHost();
-    FrameWatcher frame_watcher(shell()->web_contents());
+    MainThreadFrameObserver observer(host);
     host->GetView()->SetSize(gfx::Size(400, 400));
 
     base::string16 ready_title(base::ASCIIToUTF16("ready"));
@@ -94,7 +94,7 @@ class CompositedScrollingBrowserTest : public ContentBrowserTest {
     // otherwise the injection of the synthetic gestures may get
     // dropped because of MainThread/Impl thread sync of touch event
     // regions.
-    frame_watcher.WaitFrames(1);
+    observer.Wait();
   }
 
   // ContentBrowserTest:
@@ -115,9 +115,9 @@ class CompositedScrollingBrowserTest : public ContentBrowserTest {
   int DoTouchScroll(const gfx::Point& point, const gfx::Vector2d& distance) {
     EXPECT_EQ(0, GetScrollTop());
 
-    int scrollHeight = ExecuteScriptAndExtractInt(
+    int scroll_height = ExecuteScriptAndExtractInt(
         "document.getElementById('scroller').scrollHeight");
-    EXPECT_EQ(1000, scrollHeight);
+    EXPECT_EQ(1000, scroll_height);
 
     SyntheticSmoothScrollGestureParams params;
     params.gesture_source_type = SyntheticGestureParams::TOUCH_INPUT;
@@ -136,7 +136,7 @@ class CompositedScrollingBrowserTest : public ContentBrowserTest {
 
     // Runs until we get the OnSyntheticGestureCompleted callback
     runner_->Run();
-    runner_ = NULL;
+    runner_ = nullptr;
 
     return GetScrollTop();
   }
@@ -159,11 +159,11 @@ class CompositedScrollingBrowserTest : public ContentBrowserTest {
 IN_PROC_BROWSER_TEST_F(CompositedScrollingBrowserTest,
                        MAYBE_Scroll3DTransformedScroller) {
   LoadURL();
-  int scrollDistance =
+  int scroll_distance =
       DoTouchScroll(gfx::Point(50, 150), gfx::Vector2d(0, 100));
   // The scroll distance is increased due to the rotation of the scroller.
   EXPECT_EQ(std::floor(100 / std::cos(gfx::DegToRad(30.f))) - 1,
-            scrollDistance);
+            scroll_distance);
 }
 
 }  // namespace content

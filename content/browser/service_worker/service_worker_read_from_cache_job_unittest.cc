@@ -26,7 +26,7 @@
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -91,10 +91,10 @@ class ServiceWorkerReadFromCacheJobTest : public testing::Test {
     run_loop.Run();
 
     // Populate a registration in the storage.
-    registration_ = new ServiceWorkerRegistration(
-        blink::mojom::ServiceWorkerRegistrationOptions(
-            GURL("http://example.com/scope")),
-        kRegistrationId, context()->AsWeakPtr());
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = GURL("http://example.com/scope");
+    registration_ = new ServiceWorkerRegistration(options, kRegistrationId,
+                                                  context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(registration_.get(), main_script_.url,
                                         kVersionId, context()->AsWeakPtr());
     std::vector<ServiceWorkerDatabase::ResourceRecord> resources;
@@ -199,7 +199,7 @@ TEST_F(ServiceWorkerReadFromCacheJobTest, ReadMainScript) {
                                           net::DEFAULT_PRIORITY, &delegate_,
                                           TRAFFIC_ANNOTATION_FOR_TESTS);
   test_job_interceptor_->set_main_intercept_job(
-      base::MakeUnique<ServiceWorkerReadFromCacheJob>(
+      std::make_unique<ServiceWorkerReadFromCacheJob>(
           request.get(), nullptr /* NetworkDelegate */,
           RESOURCE_TYPE_SERVICE_WORKER, context()->AsWeakPtr(), version_,
           main_script_.resource_id));
@@ -218,7 +218,7 @@ TEST_F(ServiceWorkerReadFromCacheJobTest, ReadImportedScript) {
                                           net::DEFAULT_PRIORITY, &delegate_,
                                           TRAFFIC_ANNOTATION_FOR_TESTS);
   test_job_interceptor_->set_main_intercept_job(
-      base::MakeUnique<ServiceWorkerReadFromCacheJob>(
+      std::make_unique<ServiceWorkerReadFromCacheJob>(
           request.get(), nullptr /* NetworkDelegate */, RESOURCE_TYPE_SCRIPT,
           context()->AsWeakPtr(), version_, imported_script_.resource_id));
   StartAndWaitForRequest(request.get());
@@ -249,7 +249,7 @@ TEST_F(ServiceWorkerReadFromCacheJobTest, ResourceNotFound) {
                                           TRAFFIC_ANNOTATION_FOR_TESTS);
   const int64_t kNonexistentResourceId = 100;
   test_job_interceptor_->set_main_intercept_job(
-      base::MakeUnique<ServiceWorkerReadFromCacheJob>(
+      std::make_unique<ServiceWorkerReadFromCacheJob>(
           request.get(), nullptr /* NetworkDelegate */,
           RESOURCE_TYPE_SERVICE_WORKER, context()->AsWeakPtr(), version_,
           kNonexistentResourceId));

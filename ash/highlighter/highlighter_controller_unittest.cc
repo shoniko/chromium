@@ -21,8 +21,8 @@ namespace {
 
 class HighlighterControllerTest : public AshTestBase {
  public:
-  HighlighterControllerTest() {}
-  ~HighlighterControllerTest() override {}
+  HighlighterControllerTest() = default;
+  ~HighlighterControllerTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
@@ -231,7 +231,6 @@ TEST_F(HighlighterControllerTest, HighlighterGestures) {
   EXPECT_EQ("0,50 200x200", controller_test_api_->selection().ToString());
 }
 
-// Test that stylus gesture recognition correctly handles display scaling
 TEST_F(HighlighterControllerTest, HighlighterGesturesScaled) {
   controller_test_api_->SetEnabled(true);
   GetEventGenerator().EnterPenPointerMode();

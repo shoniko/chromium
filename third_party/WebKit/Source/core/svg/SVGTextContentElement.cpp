@@ -234,7 +234,7 @@ void SVGTextContentElement::selectSubString(unsigned charnum,
   // TODO(editing-dev): We assume |start| and |end| are not null and we don't
   // known when |start| and |end| are null. Once we get a such case, we check
   // null for |start| and |end|.
-  GetDocument().GetFrame()->Selection().SetSelection(
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(start.DeepEquivalent(), end.DeepEquivalent())
           .SetAffinity(start.Affinity())
@@ -251,7 +251,7 @@ bool SVGTextContentElement::IsPresentationAttribute(
 void SVGTextContentElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name.Matches(XMLNames::spaceAttr)) {
     DEFINE_STATIC_LOCAL(const AtomicString, preserve_string, ("preserve"));
 

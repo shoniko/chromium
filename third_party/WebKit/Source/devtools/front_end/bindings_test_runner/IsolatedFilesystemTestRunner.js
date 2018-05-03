@@ -34,17 +34,17 @@ BindingsTestRunner.TestFileSystem.prototype = {
     }
   },
 
-  reportCreatedPromise: function() {
-    return new Promise(fulfill => this.reportCreated(fulfill));
+  reportCreatedPromise: function(type) {
+    return new Promise(fulfill => this.reportCreated(fulfill, type));
   },
 
-  reportCreated: function(callback) {
+  reportCreated: function(callback, type) {
     var fileSystemPath = this.fileSystemPath;
     BindingsTestRunner.TestFileSystem._instances[this.fileSystemPath] = this;
 
     InspectorFrontendHost.events.dispatchEventToListeners(
         InspectorFrontendHostAPI.Events.FileSystemAdded,
-        {fileSystem: {fileSystemPath: this.fileSystemPath, fileSystemName: this.fileSystemPath}});
+        {fileSystem: {fileSystemPath: this.fileSystemPath, fileSystemName: this.fileSystemPath, type}});
 
     Persistence.isolatedFileSystemManager.addEventListener(
         Persistence.IsolatedFileSystemManager.Events.FileSystemAdded, created);
@@ -231,8 +231,11 @@ BindingsTestRunner.TestFileSystem.Entry.prototype = {
 
     var entry = this;
 
-    for (var token of path.split('/'))
+    for (var token of path.split('/')) {
       entry = entry._childrenMap[token];
+      if (!entry)
+        break;
+    }
 
     (entry ? callback(entry) : errorCallback(new DOMException('Path not found: ' + path, 'NotFoundError')));
   },

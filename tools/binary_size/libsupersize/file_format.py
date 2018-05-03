@@ -6,6 +6,7 @@
 
 import cStringIO
 import calendar
+import contextlib
 import datetime
 import gzip
 import json
@@ -52,8 +53,7 @@ def _SaveSizeInfoToFile(size_info, file_obj):
   _LogSize(file_obj, 'paths')  # For libchrome, adds 200kb.
 
   # Symbol counts by section.
-  by_section = size_info.raw_symbols.GroupedBySectionName().Sorted(
-      key=lambda s:(s[0].IsBss(), s[0].address, s.full_name))
+  by_section = size_info.raw_symbols.GroupedBySectionName()
   file_obj.write('%s\n' % '\t'.join(g.name for g in by_section))
   file_obj.write('%s\n' % '\t'.join(str(len(g)) for g in by_section))
 
@@ -187,10 +187,18 @@ def _LoadSizeInfoFromFile(file_obj, size_path):
                          size_path=size_path)
 
 
+@contextlib.contextmanager
+def _OpenGzipForWrite(path):
+  # Open in a way that doesn't set any gzip header fields.
+  with open(path, 'wb') as f:
+    with gzip.GzipFile(filename='', mode='wb', fileobj=f, mtime=0) as fz:
+      yield fz
+
+
 def SaveSizeInfo(size_info, path):
   """Saves |size_info| to |path}."""
   if os.environ.get('SUPERSIZE_MEASURE_GZIP') == '1':
-    with gzip.open(path, 'wb') as f:
+    with _OpenGzipForWrite(path) as f:
       _SaveSizeInfoToFile(size_info, f)
   else:
     # It is seconds faster to do gzip in a separate step. 6s -> 3.5s.
@@ -199,7 +207,7 @@ def SaveSizeInfo(size_info, path):
 
     logging.debug('Serialization complete. Gzipping...')
     stringio.seek(0)
-    with gzip.open(path, 'wb') as f:
+    with _OpenGzipForWrite(path) as f:
       shutil.copyfileobj(stringio, f)
 
 

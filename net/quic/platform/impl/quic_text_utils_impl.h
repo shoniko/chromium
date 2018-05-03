@@ -70,7 +70,7 @@ class QuicTextUtilsImpl {
 
   // Returns a new std::string representing |in|.
   static std::string Uint64ToString(uint64_t in) {
-    return base::Uint64ToString(in);
+    return base::NumberToString(in);
   }
 
   // This converts |length| bytes of binary to a 2*|length|-character
@@ -78,6 +78,12 @@ class QuicTextUtilsImpl {
   // Return value: 2*|length| characters of ASCII std::string.
   static std::string HexEncode(QuicStringPiece data) {
     return base::ToLowerASCII(::base::HexEncode(data.data(), data.size()));
+  }
+
+  static std::string Hex(uint32_t v) {
+    std::stringstream ss;
+    ss << std::hex << v;
+    return ss.str();
   }
 
   // Converts |data| from a hexadecimal ASCII string to a binary string

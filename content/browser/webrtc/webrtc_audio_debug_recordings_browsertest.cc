@@ -16,6 +16,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 #if defined(OS_WIN)
@@ -76,6 +77,19 @@ std::vector<base::FilePath> GetRecordingFileNames(
   return ret;
 }
 
+// Deletes the the file specified by |path|. If that fails, waits for 100 ms and
+// tries again. Returns true if the delete was successful.
+// This is to handle when not being able to delete the file due to race when the
+// file is being closed. See comment for CallWithAudioDebugRecordings test case
+// below.
+bool DeleteFileWithRetryAfterPause(const base::FilePath& path, bool recursive) {
+  if (base::DeleteFile(path, recursive))
+    return true;
+
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
+  return base::DeleteFile(path, recursive);
+}
+
 }  // namespace
 
 namespace content {
@@ -106,12 +120,21 @@ class WebRtcAudioDebugRecordingsBrowserTest
 // HTML and Javascript is bypassed since it would trigger a file picker dialog.
 // Instead, the dialog callback FileSelected() is invoked directly. In fact,
 // there's never a webrtc-internals page opened at all since that's not needed.
+// Note: Both stopping the streams (at hangup()) and disabling the recordings
+// are asynchronous without response when finished. This means that closing the
+// files is asynchronous and being able to delete the files in the test is
+// therefore timing dependent and flaky prone. For this reason we use
+// DeleteFileWithRetryAfterPause() as a simple mitigation.
 IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
                        MAYBE_CallWithAudioDebugRecordings) {
   if (!HasAudioOutputDevices()) {
     LOG(INFO) << "Missing output devices: skipping test...";
     return;
   }
+
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAutoplayPolicy,
+      switches::autoplay::kNoUserGestureRequiredPolicy);
 
   bool prev_io_allowed = base::ThreadRestrictions::SetIOAllowed(true);
 
@@ -128,7 +151,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
 
   // This fakes the behavior of another open tab with webrtc-internals, and
   // enabling audio debug recordings in that tab.
-  WebRTCInternals::GetInstance()->FileSelected(base_file_path, -1, NULL);
+  WebRTCInternals::GetInstance()->FileSelected(base_file_path, -1, nullptr);
 
   // Make a call.
   GURL url(embedded_test_server()->GetURL("/media/peerconnection-call.html"));
@@ -138,27 +161,16 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
 
   WebRTCInternals::GetInstance()->DisableAudioDebugRecordings();
 
-  // Verify that the expected AEC dump file exists and contains some data.
-  base::ProcessId render_process_id = base::kNullProcessId;
-  EXPECT_TRUE(GetRenderProcessHostId(&render_process_id));
-  base::FilePath file_path =
-      GetExpectedAecDumpFileName(base_file_path, render_process_id);
-  EXPECT_TRUE(base::PathExists(file_path));
-  int64_t file_size = 0;
-  EXPECT_TRUE(base::GetFileSize(file_path, &file_size));
-  EXPECT_GT(file_size, 0);
-  EXPECT_TRUE(base::DeleteFile(file_path, false));
-
   // Verify that the expected input audio file exists and contains some data.
   std::vector<base::FilePath> input_files =
       GetRecordingFileNames(FILE_PATH_LITERAL("input"), base_file_path);
   EXPECT_EQ(input_files.size(), 1u);
-  file_size = 0;
+  int64_t file_size = 0;
   EXPECT_TRUE(base::GetFileSize(input_files[0], &file_size));
   EXPECT_GT(file_size, kWaveHeaderSizeBytes);
-  EXPECT_TRUE(base::DeleteFile(input_files[0], false));
+  EXPECT_TRUE(DeleteFileWithRetryAfterPause(input_files[0], false));
 
-  // Verify that the expected output audio files exists and contains some data.
+  // Verify that the expected output audio files exist and contain some data.
   // Two files are expected, one for each peer in the call.
   std::vector<base::FilePath> output_files =
       GetRecordingFileNames(FILE_PATH_LITERAL("output"), base_file_path);
@@ -167,8 +179,19 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
     file_size = 0;
     EXPECT_TRUE(base::GetFileSize(file_path, &file_size));
     EXPECT_GT(file_size, kWaveHeaderSizeBytes);
-    EXPECT_TRUE(base::DeleteFile(file_path, false));
+    EXPECT_TRUE(DeleteFileWithRetryAfterPause(file_path, false));
   }
+
+  // Verify that the expected AEC dump file exists and contains some data.
+  base::ProcessId render_process_id = base::kNullProcessId;
+  EXPECT_TRUE(GetRenderProcessHostId(&render_process_id));
+  base::FilePath file_path =
+      GetExpectedAecDumpFileName(base_file_path, render_process_id);
+  EXPECT_TRUE(base::PathExists(file_path));
+  file_size = 0;
+  EXPECT_TRUE(base::GetFileSize(file_path, &file_size));
+  EXPECT_GT(file_size, 0);
+  EXPECT_TRUE(DeleteFileWithRetryAfterPause(file_path, false));
 
   // Verify that no other files exist and remove temp dir.
   EXPECT_TRUE(base::IsDirectoryEmpty(temp_dir_path));
@@ -213,7 +236,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
 
   // This fakes the behavior of another open tab with webrtc-internals, and
   // enabling audio debug recordings in that tab, then disabling it.
-  WebRTCInternals::GetInstance()->FileSelected(base_file_path, -1, NULL);
+  WebRTCInternals::GetInstance()->FileSelected(base_file_path, -1, nullptr);
   WebRTCInternals::GetInstance()->DisableAudioDebugRecordings();
 
   // Make a call.
@@ -249,6 +272,10 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
     return;
   }
 
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAutoplayPolicy,
+      switches::autoplay::kNoUserGestureRequiredPolicy);
+
   bool prev_io_allowed = base::ThreadRestrictions::SetIOAllowed(true);
 
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -268,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
 
   // This fakes the behavior of another open tab with webrtc-internals, and
   // enabling audio debug recordings in that tab.
-  WebRTCInternals::GetInstance()->FileSelected(base_file_path, -1, NULL);
+  WebRTCInternals::GetInstance()->FileSelected(base_file_path, -1, nullptr);
 
   // Make the calls.
   GURL url(embedded_test_server()->GetURL("/media/peerconnection-call.html"));
@@ -286,26 +313,9 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
 
   WebRTCInternals::GetInstance()->DisableAudioDebugRecordings();
 
-  RenderProcessHost::iterator it =
-      content::RenderProcessHost::AllHostsIterator();
-  base::FilePath file_path;
   int64_t file_size = 0;
 
-  for (; !it.IsAtEnd(); it.Advance()) {
-    base::ProcessId render_process_id =
-        base::GetProcId(it.GetCurrentValue()->GetHandle());
-    EXPECT_NE(base::kNullProcessId, render_process_id);
-
-    // Verify that the expected AEC dump file exists and contains some data.
-    file_path = GetExpectedAecDumpFileName(base_file_path, render_process_id);
-    EXPECT_TRUE(base::PathExists(file_path));
-    file_size = 0;
-    EXPECT_TRUE(base::GetFileSize(file_path, &file_size));
-    EXPECT_GT(file_size, 0);
-    EXPECT_TRUE(base::DeleteFile(file_path, false));
-  }
-
-  // Verify that the expected input audio files exist and contains some data.
+  // Verify that the expected input audio files exist and contain some data.
   std::vector<base::FilePath> input_files =
       GetRecordingFileNames(FILE_PATH_LITERAL("input"), base_file_path);
   EXPECT_EQ(input_files.size(), 2u);
@@ -313,10 +323,10 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
     file_size = 0;
     EXPECT_TRUE(base::GetFileSize(file_path, &file_size));
     EXPECT_GT(file_size, kWaveHeaderSizeBytes);
-    EXPECT_TRUE(base::DeleteFile(file_path, false));
+    EXPECT_TRUE(DeleteFileWithRetryAfterPause(file_path, false));
   }
 
-  // Verify that the expected output audio files exists and contains some data.
+  // Verify that the expected output audio files exist and contain some data.
   // Four files are expected, one for each peer in each call. (Two calls * two
   // peers.)
   std::vector<base::FilePath> output_files =
@@ -326,7 +336,24 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
     file_size = 0;
     EXPECT_TRUE(base::GetFileSize(file_path, &file_size));
     EXPECT_GT(file_size, kWaveHeaderSizeBytes);
-    EXPECT_TRUE(base::DeleteFile(file_path, false));
+    EXPECT_TRUE(DeleteFileWithRetryAfterPause(file_path, false));
+  }
+
+  // Verify that the expected AEC dump files exist and contain some data.
+  RenderProcessHost::iterator it =
+      content::RenderProcessHost::AllHostsIterator();
+  base::FilePath file_path;
+  for (; !it.IsAtEnd(); it.Advance()) {
+    base::ProcessId render_process_id =
+        base::GetProcId(it.GetCurrentValue()->GetHandle());
+    EXPECT_NE(base::kNullProcessId, render_process_id);
+
+    file_path = GetExpectedAecDumpFileName(base_file_path, render_process_id);
+    EXPECT_TRUE(base::PathExists(file_path));
+    file_size = 0;
+    EXPECT_TRUE(base::GetFileSize(file_path, &file_size));
+    EXPECT_GT(file_size, 0);
+    EXPECT_TRUE(DeleteFileWithRetryAfterPause(file_path, false));
   }
 
   // Verify that no other files exist and remove temp dir.

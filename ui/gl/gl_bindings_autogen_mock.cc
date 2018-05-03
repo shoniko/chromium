@@ -12,14 +12,16 @@
 
 #include "ui/gl/gl_mock.h"
 
-namespace gl {
-
+namespace {
 // This is called mainly to prevent the compiler combining the code of mock
 // functions with identical contents, so that their function pointers will be
 // different.
 void MakeFunctionUnique(const char* func_name) {
   VLOG(2) << "Calling mock " << func_name;
 }
+}  // namespace
+
+namespace gl {
 
 void GL_BINDING_CALL MockGLInterface::Mock_glActiveTexture(GLenum texture) {
   MakeFunctionUnique("glActiveTexture");
@@ -297,8 +299,8 @@ void GL_BINDING_CALL MockGLInterface::Mock_glBlitFramebuffer(GLint srcX0,
                                                              GLbitfield mask,
                                                              GLenum filter) {
   MakeFunctionUnique("glBlitFramebuffer");
-  interface_->BlitFramebufferEXT(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0,
-                                 dstX1, dstY1, mask, filter);
+  interface_->BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1,
+                              dstY1, mask, filter);
 }
 
 void GL_BINDING_CALL
@@ -313,8 +315,8 @@ MockGLInterface::Mock_glBlitFramebufferANGLE(GLint srcX0,
                                              GLbitfield mask,
                                              GLenum filter) {
   MakeFunctionUnique("glBlitFramebufferANGLE");
-  interface_->BlitFramebufferANGLE(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0,
-                                   dstX1, dstY1, mask, filter);
+  interface_->BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1,
+                              dstY1, mask, filter);
 }
 
 void GL_BINDING_CALL MockGLInterface::Mock_glBlitFramebufferEXT(GLint srcX0,
@@ -328,8 +330,8 @@ void GL_BINDING_CALL MockGLInterface::Mock_glBlitFramebufferEXT(GLint srcX0,
                                                                 GLbitfield mask,
                                                                 GLenum filter) {
   MakeFunctionUnique("glBlitFramebufferEXT");
-  interface_->BlitFramebufferEXT(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0,
-                                 dstX1, dstY1, mask, filter);
+  interface_->BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1,
+                              dstY1, mask, filter);
 }
 
 void GL_BINDING_CALL MockGLInterface::Mock_glBufferData(GLenum target,
@@ -1149,6 +1151,14 @@ MockGLInterface::Mock_glFlushMappedBufferRange(GLenum target,
 }
 
 void GL_BINDING_CALL
+MockGLInterface::Mock_glFlushMappedBufferRangeEXT(GLenum target,
+                                                  GLintptr offset,
+                                                  GLsizeiptr length) {
+  MakeFunctionUnique("glFlushMappedBufferRangeEXT");
+  interface_->FlushMappedBufferRange(target, offset, length);
+}
+
+void GL_BINDING_CALL
 MockGLInterface::Mock_glFramebufferRenderbuffer(GLenum target,
                                                 GLenum attachment,
                                                 GLenum renderbuffertarget,
@@ -1210,7 +1220,7 @@ MockGLInterface::Mock_glFramebufferTexture2DMultisampleIMG(GLenum target,
                                                            GLint level,
                                                            GLsizei samples) {
   MakeFunctionUnique("glFramebufferTexture2DMultisampleIMG");
-  interface_->FramebufferTexture2DMultisampleIMG(target, attachment, textarget,
+  interface_->FramebufferTexture2DMultisampleEXT(target, attachment, textarget,
                                                  texture, level, samples);
 }
 
@@ -3000,8 +3010,8 @@ MockGLInterface::Mock_glRenderbufferStorageMultisampleANGLE(
     GLsizei width,
     GLsizei height) {
   MakeFunctionUnique("glRenderbufferStorageMultisampleANGLE");
-  interface_->RenderbufferStorageMultisampleANGLE(
-      target, samples, internalformat, width, height);
+  interface_->RenderbufferStorageMultisample(target, samples, internalformat,
+                                             width, height);
 }
 
 void GL_BINDING_CALL
@@ -3022,7 +3032,7 @@ MockGLInterface::Mock_glRenderbufferStorageMultisampleIMG(GLenum target,
                                                           GLsizei width,
                                                           GLsizei height) {
   MakeFunctionUnique("glRenderbufferStorageMultisampleIMG");
-  interface_->RenderbufferStorageMultisampleIMG(target, samples, internalformat,
+  interface_->RenderbufferStorageMultisampleEXT(target, samples, internalformat,
                                                 width, height);
 }
 
@@ -4017,6 +4027,14 @@ void GL_BINDING_CALL MockGLInterface::Mock_glWaitSync(GLsync sync,
   interface_->WaitSync(sync, flags, timeout);
 }
 
+void GL_BINDING_CALL
+MockGLInterface::Mock_glWindowRectanglesEXT(GLenum mode,
+                                            GLsizei n,
+                                            const GLint* box) {
+  MakeFunctionUnique("glWindowRectanglesEXT");
+  interface_->WindowRectanglesEXT(mode, n, box);
+}
+
 static void MockInvalidFunction() {
   NOTREACHED();
 }
@@ -4348,6 +4366,9 @@ MockGLInterface::GetGLProcAddress(const char* name) {
   if (strcmp(name, "glFlushMappedBufferRange") == 0)
     return reinterpret_cast<GLFunctionPointerType>(
         Mock_glFlushMappedBufferRange);
+  if (strcmp(name, "glFlushMappedBufferRangeEXT") == 0)
+    return reinterpret_cast<GLFunctionPointerType>(
+        Mock_glFlushMappedBufferRangeEXT);
   if (strcmp(name, "glFramebufferRenderbuffer") == 0)
     return reinterpret_cast<GLFunctionPointerType>(
         Mock_glFramebufferRenderbuffer);
@@ -5154,6 +5175,8 @@ MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<GLFunctionPointerType>(Mock_glViewport);
   if (strcmp(name, "glWaitSync") == 0)
     return reinterpret_cast<GLFunctionPointerType>(Mock_glWaitSync);
+  if (strcmp(name, "glWindowRectanglesEXT") == 0)
+    return reinterpret_cast<GLFunctionPointerType>(Mock_glWindowRectanglesEXT);
   return reinterpret_cast<GLFunctionPointerType>(&MockInvalidFunction);
 }
 

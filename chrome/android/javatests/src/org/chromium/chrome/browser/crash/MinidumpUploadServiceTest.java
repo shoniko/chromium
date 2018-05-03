@@ -9,6 +9,7 @@ import static org.chromium.chrome.browser.crash.MinidumpUploadService.GPU;
 import static org.chromium.chrome.browser.crash.MinidumpUploadService.OTHER;
 import static org.chromium.chrome.browser.crash.MinidumpUploadService.RENDERER;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
@@ -28,7 +29,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
@@ -72,6 +72,7 @@ public class MinidumpUploadServiceTest {
 
         private static class NetworkChangingPermissionManager
                 extends MockCrashReportingPermissionManager {
+            @Override
             public boolean isNetworkAvailableForCrashUploads() {
                 return mIsNetworkAvailable;
             }
@@ -81,6 +82,7 @@ public class MinidumpUploadServiceTest {
             }
         }
 
+        @Override
         CrashReportingPermissionManager getCrashReportingPermissionManager() {
             return mPermissionManager;
         }
@@ -200,7 +202,6 @@ public class MinidumpUploadServiceTest {
         runUploadCrashTest(callables);
     }
 
-    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private void runUploadCrashTest(final List<CountedMinidumpUploadCallable> callables)
             throws IOException, InterruptedException {
         // The JobScheduler API is used on Android M+.
@@ -666,6 +667,7 @@ public class MinidumpUploadServiceTest {
         public void cancelAll() {}
 
         @Override
+        @SuppressLint("WrongConstant")
         public int enqueue(JobInfo job, JobWorkItem work) {
             return 0;
         }

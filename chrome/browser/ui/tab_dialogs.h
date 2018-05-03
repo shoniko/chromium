@@ -8,10 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
 #include "base/supports_user_data.h"
-#include "chrome/browser/ui/validation_message_bubble.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
@@ -19,11 +16,6 @@ class Profile;
 
 namespace content {
 class WebContents;
-struct WebContentsUnresponsiveState;
-}
-
-namespace gfx {
-class Rect;
 }
 
 namespace ui {
@@ -50,9 +42,9 @@ class TabDialogs : public base::SupportsUserData::Data {
   virtual void ShowCollectedCookies() = 0;
 
   // Shows or hides the hung renderer dialog.
-  virtual void ShowHungRendererDialog(
-      const content::WebContentsUnresponsiveState& unresponsive_state) = 0;
+  virtual void ShowHungRendererDialog() = 0;
   virtual void HideHungRendererDialog() = 0;
+  virtual bool IsShowingHungRendererDialog() = 0;
 
   // Shows a dialog asking the user to confirm linking to a managed account.
   virtual void ShowProfileSigninConfirmation(
@@ -65,11 +57,6 @@ class TabDialogs : public base::SupportsUserData::Data {
   // Pass true for |user_action| if this is a user initiated action.
   virtual void ShowManagePasswordsBubble(bool user_action) = 0;
   virtual void HideManagePasswordsBubble() = 0;
-
-  virtual base::WeakPtr<ValidationMessageBubble> ShowValidationMessage(
-      const gfx::Rect& anchor_in_root_view,
-      const base::string16& main_text,
-      const base::string16& sub_text) = 0;
 
  protected:
   static const void* UserDataKey();

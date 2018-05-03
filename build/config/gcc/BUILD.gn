@@ -16,6 +16,7 @@ declare_args() {
   # especially when cross-compiling.
   # Note: this gn arg is similar to gyp target_rpath generator flag.
   gcc_target_rpath = ""
+  ldso_path = ""
 }
 
 # This config causes functions not to be automatically exported from shared
@@ -88,6 +89,9 @@ config("rpath_for_built_shared_libraries") {
         "-Wl,-rpath-link=${rpath_link}",
       ]
     }
+    if (current_toolchain == default_toolchain && ldso_path != "") {
+      ldflags += [ "-Wl,--dynamic-linker=${ldso_path}" ]
+    }
   }
 }
 
@@ -137,9 +141,4 @@ config("executable_ldconfig") {
       "-Wl,--disable-new-dtags",
     ]
   }
-}
-
-config("no_exceptions") {
-  cflags_cc = [ "-fno-exceptions" ]
-  cflags_objcc = cflags_cc
 }

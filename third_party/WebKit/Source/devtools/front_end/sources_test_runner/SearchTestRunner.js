@@ -99,7 +99,7 @@ SourcesTestRunner.replaceAndDumpChange = function(sourceFrame, searchConfig, rep
   searchableView._caseSensitiveButton.setToggled(searchConfig.caseSensitive);
   searchableView._regexButton.setToggled(searchConfig.isRegex);
   searchableView._searchInputElement.value = searchConfig.query;
-  searchableView._replaceCheckboxElement.checked = true;
+  searchableView._replaceToggleButton.setToggled(true);
   searchableView._updateSecondRowVisibility();
   searchableView._replaceInputElement.value = replacement;
   searchableView._performSearch(true, true);
@@ -140,7 +140,7 @@ SourcesTestRunner.replaceAndDumpChange = function(sourceFrame, searchConfig, rep
   }
 };
 
-TestRunner.initAsync(`
+TestRunner.deprecatedInitAsync(`
   if (window.GCController)
     GCController.collect();
 `);

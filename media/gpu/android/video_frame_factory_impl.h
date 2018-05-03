@@ -8,7 +8,7 @@
 #include "base/optional.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/texture_manager.h"
-#include "gpu/ipc/service/gpu_command_buffer_stub.h"
+#include "gpu/ipc/service/command_buffer_stub.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/android/codec_image.h"
 #include "media/gpu/android/codec_wrapper.h"
@@ -19,6 +19,7 @@
 #include "ui/gl/gl_bindings.h"
 
 namespace media {
+class CodecImageGroup;
 class GpuVideoFrameFactory;
 
 // VideoFrameFactoryImpl creates CodecOutputBuffer backed VideoFrames and tries
@@ -34,14 +35,15 @@ class MEDIA_GPU_EXPORT VideoFrameFactoryImpl : public VideoFrameFactory {
       GetStubCb get_stub_cb);
   ~VideoFrameFactoryImpl() override;
 
-  void Initialize(InitCb init_cb) override;
+  void Initialize(bool wants_promotion_hint, InitCb init_cb) override;
+  void SetSurfaceBundle(
+      scoped_refptr<AVDASurfaceBundle> surface_bundle) override;
   void CreateVideoFrame(
       std::unique_ptr<CodecOutputBuffer> output_buffer,
-      scoped_refptr<SurfaceTextureGLOwner> surface_texture,
       base::TimeDelta timestamp,
       gfx::Size natural_size,
       PromotionHintAggregator::NotifyPromotionHintCB promotion_hint_cb,
-      OutputWithReleaseMailboxCB output_cb) override;
+      VideoDecoder::OutputCB output_cb) override;
   void RunAfterPendingVideoFrames(base::OnceClosure closure) override;
 
  private:
@@ -50,6 +52,9 @@ class MEDIA_GPU_EXPORT VideoFrameFactoryImpl : public VideoFrameFactory {
   scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner_;
   GetStubCb get_stub_cb_;
 
+  // The surface texture that video frames should use, or nullptr.
+  scoped_refptr<SurfaceTextureGLOwner> surface_texture_;
+
   SEQUENCE_CHECKER(sequence_checker_);
   DISALLOW_COPY_AND_ASSIGN(VideoFrameFactoryImpl);
 };
@@ -57,12 +62,13 @@ class MEDIA_GPU_EXPORT VideoFrameFactoryImpl : public VideoFrameFactory {
 // GpuVideoFrameFactory is an implementation detail of VideoFrameFactoryImpl. It
 // may be created on any thread but only accessed on the gpu thread thereafter.
 class GpuVideoFrameFactory
-    : public gpu::GpuCommandBufferStub::DestructionObserver {
+    : public gpu::CommandBufferStub::DestructionObserver {
  public:
   GpuVideoFrameFactory();
   ~GpuVideoFrameFactory() override;
 
   scoped_refptr<SurfaceTextureGLOwner> Initialize(
+      bool wants_promotion_hint,
       VideoFrameFactory::GetStubCb get_stub_cb);
 
   // Creates and returns a VideoFrame with its ReleaseMailboxCB.
@@ -72,8 +78,12 @@ class GpuVideoFrameFactory
       base::TimeDelta timestamp,
       gfx::Size natural_size,
       PromotionHintAggregator::NotifyPromotionHintCB promotion_hint_cb,
-      VideoFrameFactory::OutputWithReleaseMailboxCB output_cb,
+      VideoDecoder::OutputCB output_cb,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
+  // Set our image group.  Must be called before the first call to
+  // CreateVideoFrame occurs.
+  void SetImageGroup(scoped_refptr<CodecImageGroup> image_group);
 
  private:
   // Creates a TextureRef and VideoFrame.
@@ -107,10 +117,21 @@ class GpuVideoFrameFactory
   // destructed).
   std::map<gpu::gles2::TextureRef*, scoped_refptr<gpu::gles2::TextureRef>>
       texture_refs_;
-  gpu::GpuCommandBufferStub* stub_;
+  gpu::CommandBufferStub* stub_;
+
+  // Callback to notify us that an image has been destroyed.
+  CodecImage::DestructionCb destruction_cb_;
+
+  // Do we want promotion hints from the compositor?
+  bool wants_promotion_hint_ = false;
 
   // A helper for creating textures. Only valid while |stub_| is valid.
   std::unique_ptr<GLES2DecoderHelper> decoder_helper_;
+
+  // Current image group to which new images (frames) will be added.  We'll
+  // replace this when SetImageGroup() is called.
+  scoped_refptr<CodecImageGroup> image_group_;
+
   THREAD_CHECKER(thread_checker_);
   base::WeakPtrFactory<GpuVideoFrameFactory> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(GpuVideoFrameFactory);

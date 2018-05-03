@@ -109,6 +109,12 @@ void AppCacheURLLoaderJob::FollowRedirect() {
   NOTREACHED() << "appcache never produces redirects";
 }
 
+void AppCacheURLLoaderJob::ProceedWithResponse() {
+  // TODO(arthursonzogni):  Implement this if AppCache starts using the
+  // AppCacheURLLoader before the Network Service has shipped.
+  NOTREACHED();
+}
+
 void AppCacheURLLoaderJob::SetPriority(net::RequestPriority priority,
                                        int32_t intra_priority_value) {}
 void AppCacheURLLoaderJob::PauseReadingBodyFromNet() {}
@@ -120,8 +126,8 @@ void AppCacheURLLoaderJob::DeleteIfNeeded() {
   delete this;
 }
 
-void AppCacheURLLoaderJob::Start(mojom::URLLoaderRequest request,
-                                 mojom::URLLoaderClientPtr client) {
+void AppCacheURLLoaderJob::Start(network::mojom::URLLoaderRequest request,
+                                 network::mojom::URLLoaderClientPtr client) {
   DCHECK(!binding_.is_bound());
   binding_.Bind(std::move(request));
   client_ = std::move(client);
@@ -142,8 +148,8 @@ AppCacheURLLoaderJob::AppCacheURLLoaderJob(
                                mojo::SimpleWatcher::ArmingPolicy::MANUAL),
       loader_callback_(std::move(loader_callback)),
       appcache_request_(appcache_request->GetWeakPtr()),
-      is_main_resource_load_(IsResourceTypeFrame(
-          appcache_request->GetResourceRequest()->resource_type)),
+      is_main_resource_load_(IsResourceTypeFrame(static_cast<ResourceType>(
+          appcache_request->GetResourceRequest()->resource_type))),
       weak_factory_(this) {}
 
 void AppCacheURLLoaderJob::CallLoaderCallback() {
@@ -255,7 +261,7 @@ void AppCacheURLLoaderJob::SendResponseInfo() {
   const net::HttpResponseInfo* http_info = is_range_request()
                                                ? range_response_info_.get()
                                                : info_->http_response_info();
-  ResourceResponseHead response_head;
+  network::ResourceResponseHead response_head;
   response_head.headers = http_info->headers;
   response_head.appcache_id = cache_id_;
   response_head.appcache_manifest_url = manifest_url_;
@@ -278,7 +284,7 @@ void AppCacheURLLoaderJob::SendResponseInfo() {
   response_head.load_timing = load_timing_info_;
 
   client_->OnReceiveResponse(response_head, http_info->ssl_info,
-                             mojom::DownloadedTempFilePtr());
+                             network::mojom::DownloadedTempFilePtr());
   client_->OnStartLoadingResponseBody(std::move(data_pipe_.consumer_handle));
 }
 
@@ -319,20 +325,19 @@ void AppCacheURLLoaderJob::NotifyCompleted(int error_code) {
   if (AppCacheRequestHandler::IsRunningInTests())
     return;
 
-  ResourceRequestCompletionStatus request_complete_data(error_code);
+  network::URLLoaderCompletionStatus status(error_code);
   if (!error_code) {
     const net::HttpResponseInfo* http_info =
         is_range_request() ? range_response_info_.get()
                            : (info_ ? info_->http_response_info() : nullptr);
-    request_complete_data.exists_in_cache = http_info->was_cached;
-    request_complete_data.completion_time = base::TimeTicks::Now();
-    request_complete_data.encoded_body_length =
+    status.exists_in_cache = http_info->was_cached;
+    status.completion_time = base::TimeTicks::Now();
+    status.encoded_body_length =
         is_range_request() ? range_response_info_->headers->GetContentLength()
                            : (info_ ? info_->response_data_size() : 0);
-    request_complete_data.decoded_body_length =
-        request_complete_data.encoded_body_length;
+    status.decoded_body_length = status.encoded_body_length;
   }
-  client_->OnComplete(request_complete_data);
+  client_->OnComplete(status);
 
   if (delivery_type_ == APPCACHED_DELIVERY) {
     AppCacheHistograms::CountResponseRetrieval(

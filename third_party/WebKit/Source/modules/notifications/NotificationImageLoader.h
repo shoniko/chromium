@@ -6,13 +6,13 @@
 #define NotificationImageLoader_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/loader/ThreadableLoader.h"
 #include "core/loader/ThreadableLoaderClient.h"
 #include "modules/ModulesExport.h"
 #include "platform/SharedBuffer.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Functional.h"
-#include "platform/wtf/RefPtr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace blink {
@@ -32,7 +32,7 @@ class MODULES_EXPORT NotificationImageLoader final
 
   // The bitmap may be empty if the request failed or the image data could not
   // be decoded.
-  using ImageCallback = Function<void(const SkBitmap&)>;
+  using ImageCallback = base::OnceCallback<void(const SkBitmap&)>;
 
   explicit NotificationImageLoader(Type);
   ~NotificationImageLoader() override;

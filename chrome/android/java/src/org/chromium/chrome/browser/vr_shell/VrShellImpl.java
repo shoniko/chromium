@@ -9,17 +9,14 @@ import android.graphics.Canvas;
 import android.graphics.Point;
 import android.os.StrictMode;
 import android.util.DisplayMetrics;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.ViewGroup.LayoutParams;
 import android.view.ViewTreeObserver.OnPreDrawListener;
 import android.widget.FrameLayout;
-import android.widget.ImageButton;
-import android.widget.RelativeLayout;
 
 import com.google.vr.ndk.base.AndroidCompat;
 import com.google.vr.ndk.base.GvrLayout;
@@ -32,7 +29,7 @@ import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.NativePage;
 import org.chromium.chrome.browser.UrlConstants;
-import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
+import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.page_info.PageInfoPopup;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.InterceptNavigationDelegateImpl;
@@ -51,9 +48,9 @@ import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.common.BrowserControlsState;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.base.WindowAndroid.PermissionCallback;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.VirtualDisplayAndroid;
 
@@ -61,15 +58,13 @@ import org.chromium.ui.display.VirtualDisplayAndroid;
  * This view extends from GvrLayout which wraps a GLSurfaceView that renders VR shell.
  */
 @JNINamespace("vr_shell")
-public class VrShellImpl
-        extends GvrLayout implements VrShell, SurfaceHolder.Callback, FullscreenListener {
+public class VrShellImpl extends GvrLayout implements VrShell, SurfaceHolder.Callback {
     private static final String TAG = "VrShellImpl";
     private static final float INCHES_TO_METERS = 0.0254f;
 
     private final ChromeActivity mActivity;
     private final VrShellDelegate mDelegate;
     private final VirtualDisplayAndroid mContentVirtualDisplay;
-    private final InterceptNavigationDelegateImpl mInterceptNavigationDelegate;
     private final TabRedirectHandler mTabRedirectHandler;
     private final TabObserver mTabObserver;
     private final TabModelSelectorObserver mTabModelSelectorObserver;
@@ -102,6 +97,7 @@ public class VrShellImpl
     private float mLastContentHeight;
     private float mLastContentDpr;
     private Boolean mPaused;
+
     private boolean mPendingVSyncPause;
 
     private AndroidUiGestureTarget mAndroidUiGestureTarget;
@@ -115,7 +111,7 @@ public class VrShellImpl
         mDelegate = delegate;
         mTabModelSelector = tabModelSelector;
 
-        mActivity.getFullscreenManager().addListener(this);
+        mActivity.getToolbarManager().setProgressBarEnabled(false);
 
         // This overrides the default intent created by GVR to return to Chrome when the DON flow
         // is triggered by resuming the GvrLayout, which is the usual way Daydream apps enter VR.
@@ -149,13 +145,10 @@ public class VrShellImpl
         ContentViewCore activeContentViewCore =
                 mActivity.getActivityTab().getActiveContentViewCore();
         assert activeContentViewCore != null;
-        mLastContentDpr = activeContentViewCore.getDeviceScaleFactor();
+        WindowAndroid wa = activeContentViewCore.getWindowAndroid();
+        mLastContentDpr = wa != null ? wa.getDisplay().getDipScale() : 1.0f;
         mLastContentWidth = activeContentViewCore.getViewportWidthPix() / mLastContentDpr;
         mLastContentHeight = activeContentViewCore.getViewportHeightPix() / mLastContentDpr;
-
-        mInterceptNavigationDelegate = new InterceptNavigationDelegateImpl(
-                new VrExternalNavigationDelegate(mActivity.getActivityTab()),
-                mActivity.getActivityTab());
 
         mTabRedirectHandler = new TabRedirectHandler(mActivity) {
             @Override
@@ -319,7 +312,7 @@ public class VrShellImpl
     // TODO(crbug.com/762588): Fix getRealMetrics and remove suppression.
     @SuppressLint("NewApi")
     public void initializeNative(Tab currentTab, boolean forWebVr,
-            boolean webVrAutopresentationExpected, boolean inCct) {
+            boolean webVrAutopresentationExpected, boolean inCct, boolean browsingDisabled) {
         assert currentTab != null;
         // Get physical and pixel size of the display, which is needed by native
         // to dynamically calculate the content's resolution and window size.
@@ -329,11 +322,15 @@ public class VrShellImpl
         float displayHeightMeters = (dm.heightPixels / dm.ydpi) * INCHES_TO_METERS;
 
         mContentVrWindowAndroid = new VrWindowAndroid(mActivity, mContentVirtualDisplay);
-        boolean browsingDisabled = !VrShellDelegate.isVrShellEnabled(mDelegate.getVrSupportLevel());
-        mNativeVrShell = nativeInit(mDelegate, mContentVrWindowAndroid.getNativePointer(), forWebVr,
+        boolean hasOrCanRequestAudioPermission =
+                mActivity.getWindowAndroid().hasPermission(android.Manifest.permission.RECORD_AUDIO)
+                || mActivity.getWindowAndroid().canRequestPermission(
+                           android.Manifest.permission.RECORD_AUDIO);
+        mNativeVrShell = nativeInit(mDelegate, mContentVrWindowAndroid, forWebVr,
                 webVrAutopresentationExpected, inCct, browsingDisabled,
-                getGvrApi().getNativeGvrContext(), mReprojectedRendering, displayWidthMeters,
-                displayHeightMeters, dm.widthPixels, dm.heightPixels);
+                hasOrCanRequestAudioPermission, getGvrApi().getNativeGvrContext(),
+                mReprojectedRendering, displayWidthMeters, displayHeightMeters, dm.widthPixels,
+                dm.heightPixels);
 
         reparentAllTabs(mContentVrWindowAndroid);
         swapToTab(currentTab);
@@ -389,7 +386,8 @@ public class VrShellImpl
 
     private void initializeTabForVR() {
         mNonVrInterceptNavigationDelegate = mTab.getInterceptNavigationDelegate();
-        mTab.setInterceptNavigationDelegate(mInterceptNavigationDelegate);
+        mTab.setInterceptNavigationDelegate(
+                new InterceptNavigationDelegateImpl(new VrExternalNavigationDelegate(mTab), mTab));
         // Make sure we are not redirecting to another app, i.e. out of VR mode.
         mNonVrTabRedirectHandler = mTab.getTabRedirectHandler();
         mTab.setTabRedirectHandler(mTabRedirectHandler);
@@ -420,6 +418,12 @@ public class VrShellImpl
         }
     }
 
+    // Returns true if Chrome has permission to use audio input.
+    @CalledByNative
+    public boolean hasAudioPermission() {
+        return mDelegate.hasAudioPermission();
+    }
+
     // Exits VR, telling the user to remove their headset, and returning to Chromium.
     @CalledByNative
     public void forceExitVr() {
@@ -442,6 +446,35 @@ public class VrShellImpl
         }, UiUnsupportedMode.UNHANDLED_PAGE_INFO);
     }
 
+    // Called because showing audio permission dialog isn't supported in VR. This happens when
+    // the user wants to do a voice search.
+    @CalledByNative
+    public void onUnhandledPermissionPrompt() {
+        VrShellDelegate.requestToExitVr(new OnExitVrRequestListener() {
+            @Override
+            public void onSucceeded() {
+                PermissionCallback callback = new PermissionCallback() {
+                    @Override
+                    public void onRequestPermissionsResult(
+                            String[] permissions, int[] grantResults) {
+                        ThreadUtils.postOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                VrShellDelegate.enterVrIfNecessary();
+                            }
+                        });
+                    }
+                };
+                String[] permissionArray = new String[1];
+                permissionArray[0] = android.Manifest.permission.RECORD_AUDIO;
+                mActivity.getWindowAndroid().requestPermissions(permissionArray, callback);
+            }
+
+            @Override
+            public void onDenied() {}
+        }, UiUnsupportedMode.VOICE_SEARCH_NEEDS_RECORD_AUDIO_OS_PERMISSION);
+    }
+
     // Exits CCT, returning to the app that opened it.
     @CalledByNative
     public void exitCct() {
@@ -455,11 +488,12 @@ public class VrShellImpl
         mLastContentHeight = height;
         mLastContentDpr = dpr;
 
+        // Native pages don't listen to our DPR changes, so to get them to render at the correct
+        // size we need to make them larger.
+        DisplayAndroid primaryDisplay = DisplayAndroid.getNonMultiDisplay(mActivity);
+        float dip = primaryDisplay.getDipScale();
+
         if (mNativePage != null) {
-            // Native pages don't listen to our DPR changes, so to get them to render at the correct
-            // size we need to make them larger.
-            DisplayAndroid primaryDisplay = DisplayAndroid.getNonMultiDisplay(mActivity);
-            float dip = primaryDisplay.getDipScale();
             width *= (dip / dpr);
             height *= (dip / dpr);
         }
@@ -468,10 +502,9 @@ public class VrShellImpl
         int surfaceHeight = (int) Math.ceil(height * dpr);
 
         Point size = new Point(surfaceWidth, surfaceHeight);
-        mContentVirtualDisplay.update(size, dpr, null, null, null, null, null);
+        mContentVirtualDisplay.update(size, dpr, dip / dpr, null, null, null, null, null);
         assert mTab != null;
         if (mTab.getContentViewCore() != null) {
-            mTab.getContentViewCore().onSizeChanged(surfaceWidth, surfaceHeight, 0, 0);
             nativeOnPhysicalBackingSizeChanged(
                     mNativeVrShell, mTab.getWebContents(), surfaceWidth, surfaceHeight);
         }
@@ -495,6 +528,24 @@ public class VrShellImpl
             mOnDispatchTouchEventForTesting.onDispatchTouchEvent(parentConsumed);
         }
         return parentConsumed;
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (mTab.getContentViewCore() != null
+                && mTab.getContentViewCore().dispatchKeyEvent(event)) {
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        if (mTab.getContentViewCore() != null
+                && mTab.getContentViewCore().onGenericMotionEvent(event)) {
+            return true;
+        }
+        return super.onGenericMotionEvent(event);
     }
 
     @Override
@@ -531,7 +582,6 @@ public class VrShellImpl
 
     @Override
     public void shutdown() {
-        mActivity.getFullscreenManager().removeListener(this);
         mActivity.getFullscreenManager().setPersistentFullscreenMode(false);
         reparentAllTabs(mActivity.getWindowAndroid());
         if (mNativeVrShell != 0) {
@@ -547,11 +597,22 @@ public class VrShellImpl
         assert mTab != null;
         if (mTab.getContentViewCore() != null) {
             View parent = mTab.getContentViewCore().getContainerView();
-            mTab.getContentViewCore().onSizeChanged(parent.getWidth(), parent.getHeight(), 0, 0);
+            mTab.getWebContents().setSize(parent.getWidth(), parent.getHeight());
         }
-        mTab.updateBrowserControlsState(BrowserControlsState.SHOWN, true);
+        mTab.updateFullscreenEnabledState();
+        mActivity.getToolbarManager().setProgressBarEnabled(true);
 
         mContentVirtualDisplay.destroy();
+
+        // Since VSync was paused, control heights may not have been propagated. If we request to
+        // show the controls before the old values have propagated we'll end up with the old values
+        // (ie. the controls hidden). The values will have propagated with the next frame received
+        // from the compositor, so we can tell the controls to show at that point.
+        mActivity.getCompositorViewHolder().getCompositorView().surfaceRedrawNeededAsync(() -> {
+            ChromeFullscreenManager manager = (ChromeFullscreenManager) mTab.getFullscreenManager();
+            manager.getBrowserVisibilityDelegate().showControlsTransient();
+        });
+
         super.shutdown();
     }
 
@@ -572,33 +633,22 @@ public class VrShellImpl
 
     @Override
     public void setWebVrModeEnabled(boolean enabled, boolean showToast) {
-        if (!enabled && !mPendingVSyncPause) mContentVrWindowAndroid.setVSyncPaused(false);
-        // TODO(mthiesse, crbug.com/760970) We shouldn't have to wait for the controls to be hidden
-        // before pausing VSync. Something is going wrong in the controls code and should be fixed.
-        mPendingVSyncPause = enabled;
-
         nativeSetWebVrMode(mNativeVrShell, enabled, showToast);
+        if (!enabled) mContentVrWindowAndroid.setVSyncPaused(false);
+
+        // Wait for the compositor to produce a frame to allow the omnibox to start hiding before
+        // we pause VSync. Control heights may not be correct as the omnibox might animate, but this
+        // is handled when exiting VR.
+        mPendingVSyncPause = enabled;
     }
 
-    @Override
-    public void onContentOffsetChanged(float offset) {}
-
-    @Override
-    public void onControlsOffsetChanged(float topOffset, float bottomOffset, boolean needsAnimate) {
-        if (!mPendingVSyncPause) return;
-        // As soon as the controls are starting to hide we can set vsync to paused.
-        // For some reason it seems onControlsOffsetChanged is sometimes called when the controls
-        // are partially hidden, but never called again when they're fully hidden.
-        if (mActivity.getFullscreenManager().getBrowserControlHiddenRatio() == 0.0) return;
-        mPendingVSyncPause = false;
-        mContentVrWindowAndroid.setVSyncPaused(true);
+    @CalledByNative
+    private void didSwapBuffers() {
+        if (mPendingVSyncPause) {
+            mContentVrWindowAndroid.setVSyncPaused(true);
+            mPendingVSyncPause = false;
+        }
     }
-
-    @Override
-    public void onToggleOverlayVideoMode(boolean enabled) {}
-
-    @Override
-    public void onBottomControlsHeightChanged(int bottomControlsHeight) {}
 
     @Override
     public boolean getWebVrModeEnabled() {
@@ -613,46 +663,6 @@ public class VrShellImpl
     @Override
     public FrameLayout getContainer() {
         return this;
-    }
-
-    @Override
-    public void onDensityChanged(float oldDpi, float newDpi) {
-        // TODO(mthiesse, crbug.com/767603): Remove this workaround for b/66493165.
-        // This is extremely hacky. The GvrUiLayout doesn't update in response to density changes,
-        // so we manually go in and scale their elements to be the correct size (though due to the
-        // scaling they don't actually look pixel-perfectly identical to what they should be).
-        // These elements are dynamically loaded and inserted into the view hierarchy so we don't
-        // have IDs for them that we can look up.
-        try {
-            float scale = newDpi / oldDpi;
-            ViewGroup gvrLayoutImpl = (ViewGroup) getContainer().getChildAt(0);
-            RelativeLayout relativeLayout = (RelativeLayout) gvrLayoutImpl.getChildAt(1);
-
-            ImageButton x_button = (ImageButton) relativeLayout.getChildAt(0);
-            RelativeLayout alignment_marker = (RelativeLayout) relativeLayout.getChildAt(1);
-            ImageButton settings_button = (ImageButton) relativeLayout.getChildAt(2);
-
-            ViewGroup.LayoutParams params = alignment_marker.getLayoutParams();
-            params.width = (int) (params.width * scale);
-            params.height = (int) (params.height * scale);
-            alignment_marker.setLayoutParams(params);
-
-            int padding = (int) (x_button.getPaddingLeft() * scale);
-
-            x_button.setImageDrawable(x_button.getDrawable().getConstantState().newDrawable(
-                    mActivity.getResources()));
-            x_button.setPadding(padding, padding, padding, padding);
-
-            settings_button.setImageDrawable(
-                    settings_button.getDrawable().getConstantState().newDrawable(
-                            mActivity.getResources()));
-            settings_button.setPadding(padding, padding, padding, padding);
-        } catch (Throwable e) {
-            // Ignore any errors. We're working around a bug in dynamically loaded code, so if it
-            // goes wrong that means the loaded code changed. ¯\_(ツ)_/¯
-            // In the worst case the close and settings buttons won't be drawn for the correct
-            // density.
-        }
     }
 
     @Override
@@ -737,7 +747,6 @@ public class VrShellImpl
 
     @CalledByNative
     private void loadUrl(String url) {
-        // TODO(bshe): reuse voice suggestion provider if possible.
         assert mTab != null;
         mTab.loadUrl(new LoadUrlParams(url));
     }
@@ -833,9 +842,9 @@ public class VrShellImpl
         return mPresentationView;
     }
 
-    private native long nativeInit(VrShellDelegate delegate, long nativeWindowAndroid,
-            boolean forWebVR, boolean webVrAutopresentationExpected, boolean inCct,
-            boolean browsingDisabled, long gvrApi, boolean reprojectedRendering,
+    private native long nativeInit(VrShellDelegate delegate, WindowAndroid window, boolean forWebVR,
+            boolean webVrAutopresentationExpected, boolean inCct, boolean browsingDisabled,
+            boolean hasOrCanRequestAudioPermission, long gvrApi, boolean reprojectedRendering,
             float displayWidthMeters, float displayHeightMeters, int displayWidthPixels,
             int displayHeightPixels);
     private native void nativeSetSurface(long nativeVrShell, Surface surface);

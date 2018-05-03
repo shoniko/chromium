@@ -4,17 +4,16 @@
 
 #include "chrome/browser/media/router/discovery/mdns/cast_media_sink_service_impl.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/default_clock.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/media/router/discovery/media_sink_service_base.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/common/media_router/discovery/media_sink_internal.h"
-#include "chrome/common/media_router/discovery/media_sink_service.h"
 #include "chrome/common/media_router/media_sink.h"
 #include "components/cast_channel/cast_channel_enum.h"
+#include "components/cast_channel/cast_channel_util.h"
 #include "components/cast_channel/cast_socket_service.h"
 #include "components/cast_channel/logger.h"
 #include "components/net_log/chrome_net_log.h"
@@ -30,7 +29,8 @@ media_router::MediaSinkInternal CreateCastSinkFromDialSink(
   const std::string& unique_id = dial_sink.sink().id();
   const std::string& friendly_name = dial_sink.sink().name();
   media_router::MediaSink sink(unique_id, friendly_name,
-                               media_router::SinkIconType::CAST);
+                               media_router::SinkIconType::CAST,
+                               media_router::MediaRouteProviderId::EXTENSION);
 
   media_router::CastSinkExtraData extra_data;
   extra_data.ip_endpoint =
@@ -170,19 +170,18 @@ CastMediaSinkServiceImpl::CastMediaSinkServiceImpl(
     const OnSinksDiscoveredCallback& callback,
     cast_channel::CastSocketService* cast_socket_service,
     DiscoveryNetworkMonitor* network_monitor,
-    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
-    const scoped_refptr<base::SequencedTaskRunner>& task_runner)
+    const scoped_refptr<net::URLRequestContextGetter>&
+        url_request_context_getter)
     : MediaSinkServiceBase(callback),
       cast_socket_service_(cast_socket_service),
       network_monitor_(network_monitor),
-      task_runner_(task_runner),
-      url_request_context_getter_(std::move(url_request_context_getter)),
-      clock_(new base::DefaultClock()) {
+      task_runner_(cast_socket_service_->task_runner()),
+      url_request_context_getter_(url_request_context_getter),
+      clock_(base::DefaultClock::GetInstance()),
+      weak_ptr_factory_(this) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
   DCHECK(cast_socket_service_);
   DCHECK(network_monitor_);
-  network_monitor_->AddObserver(this);
-  cast_socket_service_->AddObserver(this);
 
   retry_params_ = RetryParams::GetFromFieldTrialParam();
   open_params_ = OpenParams::GetFromFieldTrialParam();
@@ -223,32 +222,29 @@ CastMediaSinkServiceImpl::CastMediaSinkServiceImpl(
 
 CastMediaSinkServiceImpl::~CastMediaSinkServiceImpl() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  cast_channel::CastSocketService::GetInstance()->RemoveObserver(this);
   network_monitor_->RemoveObserver(this);
+  cast_socket_service_->RemoveObserver(this);
 }
 
-void CastMediaSinkServiceImpl::SetTaskRunnerForTest(
-    scoped_refptr<base::SequencedTaskRunner> task_runner) {
-  task_runner_ = task_runner;
+void CastMediaSinkServiceImpl::SetClockForTest(base::Clock* clock) {
+  clock_ = clock;
 }
 
-void CastMediaSinkServiceImpl::SetClockForTest(
-    std::unique_ptr<base::Clock> clock) {
-  clock_ = std::move(clock);
-}
-
-// MediaSinkService implementation
 void CastMediaSinkServiceImpl::Start() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   MediaSinkServiceBase::StartTimer();
+
+  cast_socket_service_->AddObserver(this);
+
+  // This call to |GetNetworkId| ensures that we get the current network ID at
+  // least once during startup in case |AddObserver| occurs after the first
+  // round of notifications has already been dispatched.
+  network_monitor_->GetNetworkId(base::BindOnce(
+      &CastMediaSinkServiceImpl::OnNetworksChanged, GetWeakPtr()));
+  network_monitor_->AddObserver(this);
 }
 
-void CastMediaSinkServiceImpl::Stop() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  MediaSinkServiceBase::StopTimer();
-}
-
-void CastMediaSinkServiceImpl::OnFetchCompleted() {
+void CastMediaSinkServiceImpl::OnDiscoveryComplete() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   current_sinks_.clear();
 
@@ -263,12 +259,30 @@ void CastMediaSinkServiceImpl::OnFetchCompleted() {
     current_sinks_.insert(sink_it.second);
   }
 
-  MediaSinkServiceBase::OnFetchCompleted();
+  MediaSinkServiceBase::OnDiscoveryComplete();
 }
 
 void CastMediaSinkServiceImpl::RecordDeviceCounts() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   metrics_.RecordDeviceCountsIfNeeded(current_sinks_.size(),
                                       known_ip_endpoints_.size());
+}
+
+void CastMediaSinkServiceImpl::OpenChannelsWithRandomizedDelay(
+    const std::vector<MediaSinkInternal>& cast_sinks,
+    SinkSource sink_source) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // Add a random backoff between 0s to 5s before opening channels to prevent
+  // different browser instances connecting to the same receiver at the same
+  // time.
+  base::TimeDelta delay =
+      base::TimeDelta::FromMilliseconds(base::RandInt(0, 50) * 100);
+  DVLOG(2) << "Open channels in [" << delay.InSeconds() << "] seconds";
+  task_runner()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&CastMediaSinkServiceImpl::OpenChannels, GetWeakPtr(),
+                     cast_sinks, sink_source),
+      delay);
 }
 
 void CastMediaSinkServiceImpl::OpenChannels(
@@ -289,6 +303,7 @@ void CastMediaSinkServiceImpl::OpenChannels(
 
 void CastMediaSinkServiceImpl::OnError(const cast_channel::CastSocket& socket,
                                        cast_channel::ChannelError error_state) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOG(1) << "OnError [ip_endpoint]: " << socket.ip_endpoint().ToString()
            << " [error_state]: "
            << cast_channel::ChannelErrorToString(error_state)
@@ -302,7 +317,7 @@ void CastMediaSinkServiceImpl::OnError(const cast_channel::CastSocket& socket,
   // Need a PostTask() here because RemoveSocket() will release the memory of
   // |socket|. Need to make sure all tasks on |socket| finish before deleting
   // the object.
-  task_runner_->PostTask(
+  task_runner_->PostNonNestableTask(
       FROM_HERE,
       base::Bind(
           base::IgnoreResult(&cast_channel::CastSocketService::RemoveSocket),
@@ -322,7 +337,7 @@ void CastMediaSinkServiceImpl::OnError(const cast_channel::CastSocket& socket,
   if (cast_sink_it != current_sinks_map_.end()) {
     task_runner_->PostTask(
         FROM_HERE,
-        base::BindOnce(&CastMediaSinkServiceImpl::OpenChannel, AsWeakPtr(),
+        base::BindOnce(&CastMediaSinkServiceImpl::OpenChannel, GetWeakPtr(),
                        ip_endpoint, cast_sink_it->second, nullptr,
                        SinkSource::kConnectionRetry));
     return;
@@ -338,21 +353,28 @@ void CastMediaSinkServiceImpl::OnMessage(
 
 void CastMediaSinkServiceImpl::OnNetworksChanged(
     const std::string& network_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // Although DiscoveryNetworkMonitor guarantees this condition won't be true
+  // from its Observer interface, the callback from |AddNetworkChangeObserver|
+  // could cause this to happen.
+  if (network_id == current_network_id_) {
+    return;
+  }
   std::string last_network_id = current_network_id_;
   current_network_id_ = network_id;
   dial_sink_failure_count_.clear();
-  if (IsNetworkIdUnknownOrDisconnected(network_id)) {
-    if (!IsNetworkIdUnknownOrDisconnected(last_network_id)) {
-      // Collect current sinks even if OnFetchCompleted hasn't collected the
-      // latest sinks.
-      std::vector<MediaSinkInternal> current_sinks;
-      for (const auto& sink_it : current_sinks_map_) {
-        current_sinks.push_back(sink_it.second);
-      }
-      sink_cache_[last_network_id] = std::move(current_sinks);
+  if (!IsNetworkIdUnknownOrDisconnected(last_network_id)) {
+    // Collect current sinks even if OnFetchCompleted hasn't collected the
+    // latest sinks.
+    std::vector<MediaSinkInternal> current_sinks;
+    for (const auto& sink_it : current_sinks_map_) {
+      current_sinks.push_back(sink_it.second);
     }
-    return;
+    sink_cache_[last_network_id] = std::move(current_sinks);
   }
+  if (IsNetworkIdUnknownOrDisconnected(network_id))
+    return;
+
   auto cache_entry = sink_cache_.find(network_id);
   // Check if we have any cached sinks for this network ID.
   if (cache_entry == sink_cache_.end())
@@ -362,7 +384,8 @@ void CastMediaSinkServiceImpl::OnNetworksChanged(
 
   DVLOG(2) << "Cache restored " << cache_entry->second.size()
            << " sink(s) for network " << network_id;
-  OpenChannels(cache_entry->second, SinkSource::kNetworkCache);
+  OpenChannelsWithRandomizedDelay(cache_entry->second,
+                                  SinkSource::kNetworkCache);
 }
 
 cast_channel::CastSocketOpenParams
@@ -401,6 +424,9 @@ void CastMediaSinkServiceImpl::OpenChannel(
     SinkSource sink_source) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  if (!cast_channel::IsValidCastIPAddress(ip_endpoint.address()))
+    return;
+
   // Erase the entry from |dial_sink_failure_count_| since the device is now
   // known to be a Cast device.
   if (sink_source != SinkSource::kDial)
@@ -419,7 +445,7 @@ void CastMediaSinkServiceImpl::OpenChannel(
       CreateCastSocketOpenParams(ip_endpoint);
   cast_socket_service_->OpenSocket(
       open_params,
-      base::BindOnce(&CastMediaSinkServiceImpl::OnChannelOpened, AsWeakPtr(),
+      base::BindOnce(&CastMediaSinkServiceImpl::OnChannelOpened, GetWeakPtr(),
                      cast_sink, std::move(backoff_entry), sink_source,
                      clock_->Now()));
 }
@@ -464,7 +490,7 @@ void CastMediaSinkServiceImpl::OnChannelErrorMayRetry(
   failure_count_map_[ip_endpoint] = std::min(failure_count, kMaxFailureCount);
 
   if (!backoff_entry)
-    backoff_entry = base::MakeUnique<net::BackoffEntry>(&backoff_policy_);
+    backoff_entry = std::make_unique<net::BackoffEntry>(&backoff_policy_);
 
   if (backoff_entry->failure_count() >= retry_params_.max_retry_attempts) {
     DVLOG(1) << "Fail to open channel after all retry attempts: "
@@ -472,7 +498,8 @@ void CastMediaSinkServiceImpl::OnChannelErrorMayRetry(
              << cast_channel::ChannelErrorToString(error_state);
 
     OnChannelOpenFailed(ip_endpoint);
-    CastAnalytics::RecordCastChannelConnectResult(false);
+    CastAnalytics::RecordCastChannelConnectResult(
+        MediaRouterChannelConnectResults::FAILURE);
     return;
   }
 
@@ -483,7 +510,7 @@ void CastMediaSinkServiceImpl::OnChannelErrorMayRetry(
 
   task_runner_->PostDelayedTask(
       FROM_HERE,
-      base::BindOnce(&CastMediaSinkServiceImpl::OpenChannel, AsWeakPtr(),
+      base::BindOnce(&CastMediaSinkServiceImpl::OpenChannel, GetWeakPtr(),
                      ip_endpoint, std::move(cast_sink),
                      std::move(backoff_entry), sink_source),
       delay);
@@ -496,7 +523,8 @@ void CastMediaSinkServiceImpl::OnChannelOpenSucceeded(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(socket);
 
-  CastAnalytics::RecordCastChannelConnectResult(true);
+  CastAnalytics::RecordCastChannelConnectResult(
+      MediaRouterChannelConnectResults::SUCCESS);
   media_router::CastSinkExtraData extra_data = cast_sink.cast_data();
   // Manually set device capabilities for sinks discovered via DIAL as DIAL
   // discovery does not provide capability info.
@@ -573,6 +601,22 @@ void CastMediaSinkServiceImpl::AttemptConnection(
                   SinkSource::kConnectionRetry);
     }
   }
+}
+
+OnDialSinkAddedCallback CastMediaSinkServiceImpl::GetDialSinkAddedCallback() {
+  return base::BindRepeating(
+      &CastMediaSinkServiceImpl::InvokeOnDialSinkAddedOnTaskRunner,
+      GetWeakPtr(), task_runner_);
+}
+
+// static
+void CastMediaSinkServiceImpl::InvokeOnDialSinkAddedOnTaskRunner(
+    const base::WeakPtr<CastMediaSinkServiceImpl>& impl,
+    const scoped_refptr<base::SequencedTaskRunner>& task_runner,
+    const MediaSinkInternal& dial_sink) {
+  task_runner->PostTask(
+      FROM_HERE, base::BindOnce(&CastMediaSinkServiceImpl::OnDialSinkAdded,
+                                impl, dial_sink));
 }
 
 CastMediaSinkServiceImpl::RetryParams::RetryParams()

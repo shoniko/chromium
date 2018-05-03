@@ -6,6 +6,9 @@
 
 #include <utility>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+
 namespace arc {
 
 FakeVoiceInteractionFrameworkInstance::FakeVoiceInteractionFrameworkInstance() =
@@ -14,25 +17,32 @@ FakeVoiceInteractionFrameworkInstance::FakeVoiceInteractionFrameworkInstance() =
 FakeVoiceInteractionFrameworkInstance::
     ~FakeVoiceInteractionFrameworkInstance() = default;
 
-void FakeVoiceInteractionFrameworkInstance::Init(
+void FakeVoiceInteractionFrameworkInstance::InitDeprecated(
     mojom::VoiceInteractionFrameworkHostPtr host_ptr) {
+  Init(std::move(host_ptr), base::BindOnce(&base::DoNothing));
+}
+
+void FakeVoiceInteractionFrameworkInstance::Init(
+    mojom::VoiceInteractionFrameworkHostPtr host_ptr,
+    InitCallback callback) {
   host_ = std::move(host_ptr);
+  std::move(callback).Run();
 }
 
 void FakeVoiceInteractionFrameworkInstance::StartVoiceInteractionSession(
     bool homescreen_is_active) {
   start_session_count_++;
-  state_ = ash::VoiceInteractionState::RUNNING;
+  state_ = arc::mojom::VoiceInteractionState::RUNNING;
   host_->SetVoiceInteractionState(state_);
 }
 
 void FakeVoiceInteractionFrameworkInstance::ToggleVoiceInteractionSession(
     bool homescreen_is_active) {
   toggle_session_count_++;
-  if (state_ == ash::VoiceInteractionState::RUNNING)
-    state_ = ash::VoiceInteractionState::STOPPED;
+  if (state_ == arc::mojom::VoiceInteractionState::RUNNING)
+    state_ = arc::mojom::VoiceInteractionState::STOPPED;
   else
-    state_ = ash::VoiceInteractionState::RUNNING;
+    state_ = arc::mojom::VoiceInteractionState::RUNNING;
 
   host_->SetVoiceInteractionState(state_);
 }

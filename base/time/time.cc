@@ -135,6 +135,15 @@ std::ostream& operator<<(std::ostream& os, TimeDelta time_delta) {
 // Time -----------------------------------------------------------------------
 
 // static
+Time Time::FromDeltaSinceWindowsEpoch(TimeDelta delta) {
+  return Time(delta.InMicroseconds());
+}
+
+TimeDelta Time::ToDeltaSinceWindowsEpoch() const {
+  return TimeDelta::FromMicroseconds(us_);
+}
+
+// static
 Time Time::FromTimeT(time_t tt) {
   if (tt == 0)
     return Time();  // Preserve 0 so we can tell it doesn't exist.
@@ -250,7 +259,7 @@ Time Time::LocalMidnight() const {
 bool Time::FromStringInternal(const char* time_string,
                               bool is_local,
                               Time* parsed_time) {
-  DCHECK((time_string != NULL) && (parsed_time != NULL));
+  DCHECK((time_string != nullptr) && (parsed_time != nullptr));
 
   if (time_string[0] == '\0')
     return false;

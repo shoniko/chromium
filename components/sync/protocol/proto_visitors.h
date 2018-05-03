@@ -475,14 +475,8 @@ VISIT_PROTO_FIELDS(const sync_pb::FaviconTrackingSpecifics& proto) {
   VISIT(is_bookmarked);
 }
 
-VISIT_PROTO_FIELDS(
-    const sync_pb::UserEventSpecifics::FieldTrial::FieldTrialPair& proto) {
-  VISIT(name_id);
-  VISIT(group_id);
-}
-
 VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::FieldTrial& proto) {
-  VISIT_REP(field_trial_pairs);
+  VISIT_REP(variation_ids);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::GcmChannelFlags& proto) {
@@ -605,6 +599,12 @@ VISIT_PROTO_FIELDS(const sync_pb::NavigationRedirect& proto) {
   VISIT(url);
 }
 
+VISIT_PROTO_FIELDS(const sync_pb::ReplacedNavigation& proto) {
+  VISIT(first_committed_url);
+  VISIT(first_timestamp_msec);
+  VISIT_ENUM(first_page_transition);
+}
+
 VISIT_PROTO_FIELDS(const sync_pb::NigoriSpecifics& proto) {
   VISIT(encryption_keybag);
   VISIT(keybag_is_frozen);
@@ -715,15 +715,12 @@ VISIT_PROTO_FIELDS(const sync_pb::SearchEngineSpecifics& proto) {
   VISIT(suggestions_url);
   VISIT(prepopulate_id);
   VISIT(autogenerate_keyword);
-  VISIT(instant_url);
   VISIT(last_modified);
   VISIT(sync_guid);
   VISIT_REP(alternate_urls);
-  VISIT(search_terms_replacement_key);
   VISIT(image_url);
   VISIT(search_url_post_params);
   VISIT(suggestions_url_post_params);
-  VISIT(instant_url_post_params);
   VISIT(image_url_post_params);
   VISIT(new_tab_url);
 }
@@ -858,7 +855,6 @@ VISIT_PROTO_FIELDS(const sync_pb::TabNavigation& proto) {
   VISIT(navigation_chain_start);
   VISIT(navigation_chain_end);
   VISIT(global_id);
-  VISIT(search_terms);
   VISIT(favicon_url);
   VISIT_ENUM(blocked_state);
   VISIT_REP(content_pack_categories);
@@ -871,6 +867,7 @@ VISIT_PROTO_FIELDS(const sync_pb::TabNavigation& proto) {
   VISIT_ENUM(password_state);
   VISIT(task_id);
   VISIT_REP(ancestor_task_id);
+  VISIT(replaced_navigation);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::ThemeSpecifics& proto) {
@@ -890,6 +887,14 @@ VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::Translation& proto) {
   VISIT(from_language_code);
   VISIT(to_language_code);
   VISIT_ENUM(interaction);
+}
+
+VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics::UserConsent& proto) {
+  VISIT(feature);
+  VISIT_REP(consent_grd_ids);
+  VISIT_REP(placeholder_replacements);
+  VISIT(locale);
+  VISIT_ENUM(status);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::TypeHint& proto) {
@@ -920,6 +925,7 @@ VISIT_PROTO_FIELDS(const sync_pb::UserEventSpecifics& proto) {
   VISIT(field_trial_event);
   VISIT(language_detection_event);
   VISIT(translation_event);
+  VISIT(user_consent);
   VISIT(gaia_password_reuse_event);
 }
 

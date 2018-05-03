@@ -12,10 +12,12 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_base.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -95,6 +97,7 @@ LogSourceAccessManager* FeedbackPrivateAPI::GetLogSourceAccessManager() const {
 
 void FeedbackPrivateAPI::RequestFeedbackForFlow(
     const std::string& description_template,
+    const std::string& description_placeholder_text,
     const std::string& category_tag,
     const std::string& extra_diagnostics,
     const GURL& page_url,
@@ -102,6 +105,8 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
   if (browser_context_ && EventRouter::Get(browser_context_)) {
     FeedbackInfo info;
     info.description = description_template;
+    info.description_placeholder =
+        std::make_unique<std::string>(description_placeholder_text);
     info.category_tag = std::make_unique<std::string>(category_tag);
     info.page_url = std::make_unique<std::string>(page_url.spec());
     info.system_information = std::make_unique<SystemInformationList>();
@@ -216,7 +221,9 @@ ExtensionFunction::ResponseAction FeedbackPrivateReadLogSourceFunction::Run() {
           api_params->params, extension_id(),
           base::Bind(&FeedbackPrivateReadLogSourceFunction::OnCompleted,
                      this))) {
-    return RespondNow(Error("Unable to initiate fetch from log source."));
+    return RespondNow(Error(base::StringPrintf(
+        "Unable to initiate fetch from log source %s.",
+        feedback_private::ToString(api_params->params.source))));
   }
 
   return RespondLater();
@@ -228,9 +235,9 @@ ExtensionFunction::ResponseAction FeedbackPrivateReadLogSourceFunction::Run() {
 
 #if defined(OS_CHROMEOS)
 void FeedbackPrivateReadLogSourceFunction::OnCompleted(
-    const feedback_private::ReadLogSourceResult& result) {
+    std::unique_ptr<feedback_private::ReadLogSourceResult> result) {
   Respond(
-      ArgumentList(feedback_private::ReadLogSource::Results::Create(result)));
+      ArgumentList(feedback_private::ReadLogSource::Results::Create(*result)));
 }
 #endif  // defined(OS_CHROMEOS)
 
@@ -291,7 +298,8 @@ ExtensionFunction::ResponseAction FeedbackPrivateSendFeedbackFunction::Run() {
 
   if (feedback_info.send_histograms) {
     auto histograms = std::make_unique<std::string>();
-    *histograms = base::StatisticsRecorder::ToJSON(std::string());
+    *histograms =
+        base::StatisticsRecorder::ToJSON(base::JSON_VERBOSITY_LEVEL_FULL);
     if (!histograms->empty())
       feedback_data->SetAndCompressHistograms(std::move(histograms));
   }

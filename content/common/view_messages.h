@@ -36,7 +36,6 @@
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/renderer_preferences.h"
-#include "content/public/common/screen_info.h"
 #include "content/public/common/three_d_api_types.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
@@ -160,24 +159,12 @@ IPC_STRUCT_TRAITS_BEGIN(blink::WebDeviceEmulationParams)
   IPC_STRUCT_TRAITS_MEMBER(screen_orientation_type)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(content::ScreenInfo)
-  IPC_STRUCT_TRAITS_MEMBER(device_scale_factor)
-  IPC_STRUCT_TRAITS_MEMBER(color_space)
-  IPC_STRUCT_TRAITS_MEMBER(icc_profile)
-  IPC_STRUCT_TRAITS_MEMBER(depth)
-  IPC_STRUCT_TRAITS_MEMBER(depth_per_component)
-  IPC_STRUCT_TRAITS_MEMBER(is_monochrome)
-  IPC_STRUCT_TRAITS_MEMBER(rect)
-  IPC_STRUCT_TRAITS_MEMBER(available_rect)
-  IPC_STRUCT_TRAITS_MEMBER(orientation_type)
-  IPC_STRUCT_TRAITS_MEMBER(orientation_angle)
-IPC_STRUCT_TRAITS_END()
-
 IPC_STRUCT_TRAITS_BEGIN(content::ResizeParams)
   IPC_STRUCT_TRAITS_MEMBER(screen_info)
   IPC_STRUCT_TRAITS_MEMBER(new_size)
   IPC_STRUCT_TRAITS_MEMBER(physical_backing_size)
   IPC_STRUCT_TRAITS_MEMBER(browser_controls_shrink_blink_size)
+  IPC_STRUCT_TRAITS_MEMBER(scroll_focused_node_into_view)
   IPC_STRUCT_TRAITS_MEMBER(top_controls_height)
   IPC_STRUCT_TRAITS_MEMBER(bottom_controls_height)
   IPC_STRUCT_TRAITS_MEMBER(local_surface_id)
@@ -226,6 +213,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(use_custom_colors)
   IPC_STRUCT_TRAITS_MEMBER(enable_referrers)
   IPC_STRUCT_TRAITS_MEMBER(enable_do_not_track)
+  IPC_STRUCT_TRAITS_MEMBER(enable_encrypted_media)
   IPC_STRUCT_TRAITS_MEMBER(webrtc_ip_handling_policy)
   IPC_STRUCT_TRAITS_MEMBER(webrtc_udp_min_port)
   IPC_STRUCT_TRAITS_MEMBER(webrtc_udp_max_port)
@@ -356,8 +344,11 @@ IPC_MESSAGE_ROUTED1(ViewMsg_Resize, content::ResizeParams /* params */)
 
 // Tells the widget to use the provided viz::LocalSurfaceId to submit
 // CompositorFrames for autosize.
-IPC_MESSAGE_ROUTED2(ViewMsg_SetLocalSurfaceIdForAutoResize,
+IPC_MESSAGE_ROUTED5(ViewMsg_SetLocalSurfaceIdForAutoResize,
                     uint64_t /* sequence_number */,
+                    gfx::Size /* min_size */,
+                    gfx::Size /* max_size */,
+                    content::ScreenInfo /* screen_info */,
                     viz::LocalSurfaceId /* local_surface_id */)
 
 // Enables device emulation. See WebDeviceEmulationParams for description.
@@ -521,11 +512,6 @@ IPC_MESSAGE_ROUTED1(ViewMsg_PpapiBrokerPermissionResult,
                     bool /* result */)
 #endif
 
-// An acknowledgement to ViewHostMsg_ShowDisambiguationPopup to notify the
-// renderer process to release the magnified image.
-IPC_MESSAGE_ROUTED1(ViewMsg_ReleaseDisambiguationPopupBitmap,
-                    viz::SharedBitmapId /* id */)
-
 // If the ViewHostMsg_ShowDisambiguationPopup resulted in the user tapping
 // inside the popup, instruct the renderer to generate a synthetic tap at that
 // offset.
@@ -567,6 +553,11 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SetViewportIntersection,
 
 // Sets the inert bit on an out-of-process iframe.
 IPC_MESSAGE_ROUTED1(ViewMsg_SetIsInert, bool /* inert */)
+
+// Toggles render throttling for an out-of-process iframe.
+IPC_MESSAGE_ROUTED2(ViewMsg_UpdateRenderThrottlingStatus,
+                    bool /* is_throttled */,
+                    bool /* subtree_throttled */)
 
 // -----------------------------------------------------------------------------
 // Messages sent from the renderer to the browser.
@@ -763,7 +754,7 @@ IPC_MESSAGE_ROUTED0(ViewHostMsg_UnlockMouse)
 IPC_MESSAGE_ROUTED3(ViewHostMsg_ShowDisambiguationPopup,
                     gfx::Rect, /* Border of touched targets */
                     gfx::Size, /* Size of zoomed image */
-                    viz::SharedBitmapId /* id */)
+                    base::SharedMemoryHandle /* Bitmap pixels */)
 
 // Message sent from renderer to the browser when the element that is focused
 // has been touched. A bool is passed in this message which indicates if the
@@ -771,28 +762,16 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_ShowDisambiguationPopup,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_FocusedNodeTouched,
                     bool /* editable */)
 
-// Message sent from the renderer to the browser when an HTML form has failed
-// validation constraints.
-IPC_MESSAGE_ROUTED3(ViewHostMsg_ShowValidationMessage,
-                    gfx::Rect /* anchor rectangle in root view coordinate */,
-                    base::string16 /* validation message */,
-                    base::string16 /* supplemental text */)
-
-// Message sent from the renderer to the browser when a HTML form validation
-// message should be hidden from view.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_HideValidationMessage)
-
-// Message sent from the renderer to the browser when the suggested co-ordinates
-// of the anchor for a HTML form validation message have changed.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_MoveValidationMessage,
-                    gfx::Rect /* anchor rectangle in root view coordinate */)
-
 // Sent once a paint happens after the first non empty layout. In other words,
 // after the frame widget has painted something.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_DidFirstVisuallyNonEmptyPaint)
 
 // Sent in reply to ViewMsg_WaitForNextFrameForTests.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_WaitForNextFrameForTests_ACK)
+
+// Sent once a frame with new RenderFrameMetadata has been submitted.
+IPC_MESSAGE_ROUTED1(ViewHostMsg_OnRenderFrameSubmitted,
+                    cc::RenderFrameMetadata /* metadata */)
 
 // Acknowledges that a SelectWordAroundCaret completed with the specified
 // result and adjustments to the selection offsets.

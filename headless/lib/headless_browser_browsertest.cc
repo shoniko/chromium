@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
@@ -262,7 +261,7 @@ IN_PROC_BROWSER_TEST_F(HeadlessBrowserTest, HttpProtocolHandler) {
   const std::string kResponseBody = "<p>HTTP response body</p>";
   ProtocolHandlerMap protocol_handlers;
   protocol_handlers[url::kHttpScheme] =
-      base::MakeUnique<TestProtocolHandler>(kResponseBody);
+      std::make_unique<TestProtocolHandler>(kResponseBody);
 
   HeadlessBrowserContext* browser_context =
       browser()
@@ -290,7 +289,7 @@ IN_PROC_BROWSER_TEST_F(HeadlessBrowserTest, HttpsProtocolHandler) {
   const std::string kResponseBody = "<p>HTTPS response body</p>";
   ProtocolHandlerMap protocol_handlers;
   protocol_handlers[url::kHttpsScheme] =
-      base::MakeUnique<TestProtocolHandler>(kResponseBody);
+      std::make_unique<TestProtocolHandler>(kResponseBody);
 
   HeadlessBrowserContext* browser_context =
       browser()
@@ -393,7 +392,7 @@ class ProtocolHandlerWithCookies
     : public net::URLRequestJobFactory::ProtocolHandler {
  public:
   explicit ProtocolHandlerWithCookies(net::CookieList* sent_cookies);
-  ~ProtocolHandlerWithCookies() override {}
+  ~ProtocolHandlerWithCookies() override = default;
 
   net::URLRequestJob* MaybeCreateJob(
       net::URLRequest* request,
@@ -410,7 +409,7 @@ class URLRequestJobWithCookies : public TestURLRequestJob {
   URLRequestJobWithCookies(net::URLRequest* request,
                            net::NetworkDelegate* network_delegate,
                            net::CookieList* sent_cookies);
-  ~URLRequestJobWithCookies() override {}
+  ~URLRequestJobWithCookies() override = default;
 
   // net::URLRequestJob implementation:
   void Start() override;
@@ -483,7 +482,7 @@ IN_PROC_BROWSER_TEST_F(HeadlessBrowserTest, ReadCookiesInProtocolHandler) {
   net::CookieList sent_cookies;
   ProtocolHandlerMap protocol_handlers;
   protocol_handlers[url::kHttpsScheme] =
-      base::MakeUnique<ProtocolHandlerWithCookies>(&sent_cookies);
+      std::make_unique<ProtocolHandlerWithCookies>(&sent_cookies);
 
   HeadlessBrowserContext* browser_context =
       browser()
@@ -674,7 +673,7 @@ class CrashReporterTest : public HeadlessBrowserTest,
                           inspector::ExperimentalObserver {
  public:
   CrashReporterTest() : devtools_client_(HeadlessDevToolsClient::Create()) {}
-  ~CrashReporterTest() override {}
+  ~CrashReporterTest() override = default;
 
   void SetUp() override {
     base::ThreadRestrictions::SetIOAllowed(true);
@@ -784,7 +783,7 @@ IN_PROC_BROWSER_TEST_F(HeadlessBrowserTest, PermissionManagerAlwaysASK) {
 
 class HeadlessBrowserTestWithNetLog : public HeadlessBrowserTest {
  public:
-  HeadlessBrowserTestWithNetLog() {}
+  HeadlessBrowserTestWithNetLog() = default;
 
   void SetUp() override {
     base::ThreadRestrictions::SetIOAllowed(true);
@@ -830,7 +829,7 @@ class TraceHelper : public tracing::ExperimentalObserver {
       : browser_test_(browser_test),
         target_(target),
         client_(HeadlessDevToolsClient::Create()),
-        tracing_data_(base::MakeUnique<base::ListValue>()) {
+        tracing_data_(std::make_unique<base::ListValue>()) {
     EXPECT_FALSE(target_->IsAttached());
     target_->AttachClient(client_.get());
     EXPECT_TRUE(target_->IsAttached());
@@ -928,6 +927,47 @@ IN_PROC_BROWSER_TEST_F(HeadlessBrowserTest, AllowInsecureLocalhostFlag) {
 
   // If the certificate fails to validate, this should fail.
   EXPECT_TRUE(WaitForLoad(web_contents));
+}
+
+class HeadlessBrowserTestAppendCommandLineFlags : public HeadlessBrowserTest {
+ public:
+  HeadlessBrowserTestAppendCommandLineFlags() {
+    options()->append_command_line_flags_callback = base::Bind(
+        &HeadlessBrowserTestAppendCommandLineFlags::AppendCommandLineFlags,
+        base::Unretained(this));
+  }
+
+  void AppendCommandLineFlags(base::CommandLine* command_line,
+                              HeadlessBrowserContext* child_browser_context,
+                              const std::string& child_process_type,
+                              int child_process_id) {
+    if (child_process_type != "renderer")
+      return;
+
+    callback_was_run_ = true;
+    EXPECT_LE(0, child_process_id);
+    EXPECT_NE(nullptr, command_line);
+    EXPECT_NE(nullptr, child_browser_context);
+  }
+
+ protected:
+  bool callback_was_run_ = false;
+};
+
+IN_PROC_BROWSER_TEST_F(HeadlessBrowserTestAppendCommandLineFlags,
+                       AppendChildProcessCommandLineFlags) {
+  // Create a new renderer process, and verify that callback was executed.
+  HeadlessBrowserContext* browser_context =
+      browser()->CreateBrowserContextBuilder().Build();
+  HeadlessWebContents* web_contents =
+      browser_context->CreateWebContentsBuilder()
+          .SetInitialURL(GURL("about:blank"))
+          .Build();
+
+  EXPECT_TRUE(callback_was_run_);
+
+  // Used only for lifetime.
+  (void)web_contents;
 }
 
 }  // namespace headless

@@ -21,7 +21,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
-#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/android/network_library.h"
 #endif
@@ -296,8 +296,7 @@ class NetworkChangeNotifier::HistogramWatcher : public ConnectionTypeObserver,
   // from the network thread.
   void NotifyDataReceived(const URLRequest& request, int bytes_read) {
     DCHECK(thread_checker_.CalledOnValidThread());
-    if (IsLocalhost(request.url().host()) ||
-        !request.url().SchemeIsHTTPOrHTTPS()) {
+    if (IsLocalhost(request.url()) || !request.url().SchemeIsHTTPOrHTTPS()) {
       return;
     }
 
@@ -392,8 +391,8 @@ class NetworkChangeNotifier::HistogramWatcher : public ConnectionTypeObserver,
 // NetworkState is thread safe.
 class NetworkChangeNotifier::NetworkState {
  public:
-  NetworkState() {}
-  ~NetworkState() {}
+  NetworkState() = default;
+  ~NetworkState() = default;
 
   void GetDnsConfig(DnsConfig* config) const {
     base::AutoLock lock(lock_);
@@ -411,8 +410,7 @@ class NetworkChangeNotifier::NetworkState {
 };
 
 NetworkChangeNotifier::NetworkChangeCalculatorParams::
-    NetworkChangeCalculatorParams() {
-}
+    NetworkChangeCalculatorParams() = default;
 
 // Calculates NetworkChange signal from IPAddress and ConnectionType signals.
 class NetworkChangeNotifier::NetworkChangeCalculator
@@ -501,6 +499,11 @@ NetworkChangeNotifier::~NetworkChangeNotifier() {
 }
 
 // static
+NetworkChangeNotifierFactory* NetworkChangeNotifier::GetFactory() {
+  return g_network_change_notifier_factory;
+}
+
+// static
 void NetworkChangeNotifier::SetFactory(
     NetworkChangeNotifierFactory* factory) {
   CHECK(!g_network_change_notifier_factory);
@@ -563,7 +566,8 @@ void NetworkChangeNotifier::GetMaxBandwidthAndConnectionType(
     ConnectionType* connection_type) {
   if (!g_network_change_notifier) {
     *connection_type = CONNECTION_UNKNOWN;
-    *max_bandwidth_mbps = GetMaxBandwidthForConnectionSubtype(SUBTYPE_UNKNOWN);
+    *max_bandwidth_mbps =
+        GetMaxBandwidthMbpsForConnectionSubtype(SUBTYPE_UNKNOWN);
     return;
   }
 
@@ -572,7 +576,7 @@ void NetworkChangeNotifier::GetMaxBandwidthAndConnectionType(
 }
 
 // static
-double NetworkChangeNotifier::GetMaxBandwidthForConnectionSubtype(
+double NetworkChangeNotifier::GetMaxBandwidthMbpsForConnectionSubtype(
     ConnectionSubtype subtype) {
   switch (subtype) {
     case SUBTYPE_GSM:
@@ -760,7 +764,7 @@ void NetworkChangeNotifier::LogOperatorCodeHistogram(ConnectionType type) {
       mcc_mnc = 0;
     }
   }
-  UMA_HISTOGRAM_SPARSE_SLOWLY("NCN.NetworkOperatorMCCMNC", mcc_mnc);
+  base::UmaHistogramSparse("NCN.NetworkOperatorMCCMNC", mcc_mnc);
 #endif
 }
 
@@ -991,22 +995,21 @@ NetworkChangeNotifier::NetworkChangeNotifier(
     /*= NetworkChangeCalculatorParams()*/)
     : ip_address_observer_list_(
           new base::ObserverListThreadSafe<IPAddressObserver>(
-              base::ObserverListBase<IPAddressObserver>::NOTIFY_EXISTING_ONLY)),
+              base::ObserverListPolicy::EXISTING_ONLY)),
       connection_type_observer_list_(
           new base::ObserverListThreadSafe<ConnectionTypeObserver>(
-              base::ObserverListBase<
-                  ConnectionTypeObserver>::NOTIFY_EXISTING_ONLY)),
+              base::ObserverListPolicy::EXISTING_ONLY)),
       resolver_state_observer_list_(
           new base::ObserverListThreadSafe<DNSObserver>(
-              base::ObserverListBase<DNSObserver>::NOTIFY_EXISTING_ONLY)),
-      network_change_observer_list_(new base::ObserverListThreadSafe<
-                                    NetworkChangeObserver>(
-          base::ObserverListBase<NetworkChangeObserver>::NOTIFY_EXISTING_ONLY)),
-      max_bandwidth_observer_list_(new base::ObserverListThreadSafe<
-                                   MaxBandwidthObserver>(
-          base::ObserverListBase<MaxBandwidthObserver>::NOTIFY_EXISTING_ONLY)),
+              base::ObserverListPolicy::EXISTING_ONLY)),
+      network_change_observer_list_(
+          new base::ObserverListThreadSafe<NetworkChangeObserver>(
+              base::ObserverListPolicy::EXISTING_ONLY)),
+      max_bandwidth_observer_list_(
+          new base::ObserverListThreadSafe<MaxBandwidthObserver>(
+              base::ObserverListPolicy::EXISTING_ONLY)),
       network_observer_list_(new base::ObserverListThreadSafe<NetworkObserver>(
-          base::ObserverListBase<NetworkObserver>::NOTIFY_EXISTING_ONLY)),
+          base::ObserverListPolicy::EXISTING_ONLY)),
       network_state_(new NetworkState()),
       network_change_calculator_(new NetworkChangeCalculator(params)) {
   DCHECK(!g_network_change_notifier);
@@ -1035,8 +1038,8 @@ void NetworkChangeNotifier::GetCurrentMaxBandwidthAndConnectionType(
   *connection_type = GetCurrentConnectionType();
   *max_bandwidth_mbps =
       *connection_type == CONNECTION_NONE
-          ? GetMaxBandwidthForConnectionSubtype(SUBTYPE_NONE)
-          : GetMaxBandwidthForConnectionSubtype(SUBTYPE_UNKNOWN);
+          ? GetMaxBandwidthMbpsForConnectionSubtype(SUBTYPE_NONE)
+          : GetMaxBandwidthMbpsForConnectionSubtype(SUBTYPE_UNKNOWN);
 }
 
 bool NetworkChangeNotifier::AreNetworkHandlesCurrentlySupported() const {

@@ -4,10 +4,11 @@
 
 #import "ios/chrome/browser/ui/toolbar/tools_menu_button_observer_bridge.h"
 
+#include <memory>
+
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "components/reading_list/core/reading_list_model.h"
-#import "ios/chrome/browser/ui/toolbar/toolbar_tools_menu_button.h"
+#import "ios/chrome/browser/ui/toolbar/clean/toolbar_tools_menu_button.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -33,7 +34,7 @@
     [_button addTarget:self
                   action:@selector(buttonPressed:)
         forControlEvents:UIControlEventTouchUpInside];
-    _modelBridge = base::MakeUnique<ReadingListModelBridge>(self, _model);
+    _modelBridge = std::make_unique<ReadingListModelBridge>(self, _model);
   }
   return self;
 }

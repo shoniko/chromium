@@ -334,6 +334,9 @@ PP_CdmMessageType CdmMessageTypeToPpMessageType(cdm::MessageType message) {
       return PP_CDMMESSAGETYPE_LICENSE_RENEWAL;
     case cdm::kLicenseRelease:
       return PP_CDMMESSAGETYPE_LICENSE_RELEASE;
+    case cdm::kIndividualizationRequest:
+      PP_NOTREACHED();
+      return PP_CDMMESSAGETYPE_LICENSE_REQUEST;
   }
 
   PP_NOTREACHED();
@@ -389,7 +392,7 @@ PpapiCdmAdapter::PpapiCdmAdapter(PP_Instance instance, pp::Module* module)
   callback_factory_.Initialize(this);
 }
 
-PpapiCdmAdapter::~PpapiCdmAdapter() {}
+PpapiCdmAdapter::~PpapiCdmAdapter() = default;
 
 CdmWrapper* PpapiCdmAdapter::CreateCdmInstance(const std::string& key_system) {
   // The Pepper plugin will be staticly linked to the CDM, so pass the plugin's
@@ -458,7 +461,7 @@ void PpapiCdmAdapter::Initialize(uint32_t promise_id,
   key_system_ = key_system;
   allow_distinctive_identifier_ = allow_distinctive_identifier;
   allow_persistent_state_ = allow_persistent_state;
-  cdm_->Initialize(allow_distinctive_identifier, allow_persistent_state);
+  cdm_->Initialize(allow_distinctive_identifier, allow_persistent_state, false);
   OnResolvePromise(promise_id);
 }
 
@@ -741,15 +744,6 @@ void PpapiCdmAdapter::OnRejectPromise(uint32_t promise_id,
                                       uint32_t system_code,
                                       const char* error_message,
                                       uint32_t error_message_size) {
-  // UMA to investigate http://crbug.com/410630
-  // TODO(xhwang): Remove after bug is fixed.
-  if (system_code == 0x27) {
-    pp::UMAPrivate uma_interface(this);
-    uma_interface.HistogramCustomCounts("Media.EME.CdmFileIO.FileSizeKBOnError",
-                                        last_read_file_size_kb_, kSizeKBMin,
-                                        kSizeKBMax, kSizeKBBuckets);
-  }
-
   RejectPromise(promise_id, exception, system_code,
                 std::string(error_message, error_message_size));
 }
@@ -1209,6 +1203,8 @@ void PpapiCdmAdapter::OnDeferredInitializationDone(cdm::StreamType stream_type,
 }
 
 void PpapiCdmAdapter::RequestStorageId(uint32_t version) {
+  PP_DCHECK(version < 0x80000000);  // Reserved versions not allowed.
+
   // If persistent storage is not allowed, no need to get the Storage ID.
   // As well, only allow the request if the current version (or "latest")
   // is requested.
@@ -1393,9 +1389,9 @@ void* GetCdmHost(int host_interface_version, void* user_data) {
 
   PP_DCHECK(
       // Future version is not supported.
-      !IsSupportedCdmHostVersion(cdm::Host_9::kVersion + 1) &&
+      !IsSupportedCdmHostVersion(cdm::Host_10::kVersion + 1) &&
       // Current version is supported.
-      IsSupportedCdmHostVersion(cdm::Host_9::kVersion) &&
+      IsSupportedCdmHostVersion(cdm::Host_10::kVersion) &&
       // Include all previous supported versions (if any) here.
       IsSupportedCdmHostVersion(cdm::Host_8::kVersion) &&
       // One older than the oldest supported version is not supported.

@@ -11,15 +11,17 @@ namespace tether {
 FakeTetherComponent::FakeTetherComponent(bool has_asynchronous_shutdown)
     : has_asynchronous_shutdown_(has_asynchronous_shutdown) {}
 
-FakeTetherComponent::~FakeTetherComponent() {}
+FakeTetherComponent::~FakeTetherComponent() = default;
 
 void FakeTetherComponent::FinishAsynchronousShutdown() {
   DCHECK(status() == TetherComponent::Status::SHUTTING_DOWN);
   TransitionToStatus(TetherComponent::Status::SHUT_DOWN);
 }
 
-void FakeTetherComponent::RequestShutdown() {
+void FakeTetherComponent::RequestShutdown(
+    const ShutdownReason& shutdown_reason) {
   DCHECK(status() == TetherComponent::Status::ACTIVE);
+  last_shutdown_reason_ = std::make_unique<ShutdownReason>(shutdown_reason);
 
   if (has_asynchronous_shutdown_)
     TransitionToStatus(TetherComponent::Status::SHUTTING_DOWN);

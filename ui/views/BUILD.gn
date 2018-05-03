@@ -2,12 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
 import("//build/config/features.gni")
+import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
+import("//components/vector_icons/vector_icons.gni")
 import("//testing/test.gni")
 import("//ui/base/ui_features.gni")
 import("//ui/ozone/ozone.gni")
-import("//components/vector_icons/vector_icons.gni")
+import("//ui/views/features.gni")
 
 config("flags") {
   defines = [ "TOOLKIT_VIEWS=1" ]
@@ -30,11 +33,17 @@ aggregate_vector_icons("views_vector_icons") {
   ]
 }
 
-component("views") {
+buildflag_header("features") {
+  header = "features.h"
+  flags =
+      [ "ENABLE_NATIVE_WINDOW_NAV_BUTTONS=$enable_native_window_nav_buttons" ]
+}
+
+jumbo_component("views") {
   all_dependent_configs = [ ":flags" ]
 
   public = [
-    "accessibility/native_view_accessibility.h",
+    "accessibility/view_accessibility.h",
     "accessible_pane_view.h",
     "animation/bounds_animator.h",
     "animation/bounds_animator_observer.h",
@@ -185,8 +194,8 @@ component("views") {
     "mouse_watcher_view_host.h",
     "native_cursor.h",
     "native_theme_delegate.h",
-    "painter.h",
     "paint_info.h",
+    "painter.h",
     "pointer_watcher.h",
     "rect_based_targeting_utils.h",
     "repeat_controller.h",
@@ -228,10 +237,10 @@ component("views") {
     "window/custom_frame_view.h",
     "window/dialog_client_view.h",
     "window/dialog_delegate.h",
+    "window/dialog_observer.h",
     "window/frame_background.h",
     "window/frame_buttons.h",
     "window/native_frame_view.h",
-    "window/nav_button_provider.h",
     "window/non_client_view.h",
     "window/window_button_order_provider.h",
     "window/window_resources.h",
@@ -240,6 +249,7 @@ component("views") {
   ]
 
   sources = [
+    "accessibility/view_accessibility.cc",
     "accessible_pane_view.cc",
     "animation/bounds_animator.cc",
     "animation/flood_fill_ink_drop_ripple.cc",
@@ -433,6 +443,7 @@ component("views") {
   defines = [ "VIEWS_IMPLEMENTATION" ]
 
   deps = [
+    ":features",
     "//base:i18n",
     "//base/third_party/dynamic_annotations",
     "//cc/paint",
@@ -628,7 +639,6 @@ component("views") {
           "widget/desktop_aura/x11_desktop_window_move_client.h",
           "widget/desktop_aura/x11_move_loop.h",
           "widget/desktop_aura/x11_move_loop_delegate.h",
-          "widget/desktop_aura/x11_pointer_grab.h",
           "widget/desktop_aura/x11_topmost_window_finder.h",
           "widget/desktop_aura/x11_whole_screen_move_loop.h",
           "widget/desktop_aura/x11_window_event_filter.h",
@@ -639,7 +649,6 @@ component("views") {
           "widget/desktop_aura/desktop_window_tree_host_x11.cc",
           "widget/desktop_aura/x11_desktop_handler.cc",
           "widget/desktop_aura/x11_desktop_window_move_client.cc",
-          "widget/desktop_aura/x11_pointer_grab.cc",
           "widget/desktop_aura/x11_topmost_window_finder.cc",
           "widget/desktop_aura/x11_whole_screen_move_loop.cc",
           "widget/desktop_aura/x11_window_event_filter.cc",
@@ -695,12 +704,14 @@ component("views") {
       "accessibility/native_view_accessibility_win.cc",
       "accessibility/native_view_accessibility_win.h",
     ]
-  } else {
-    sources += [ "accessibility/native_view_accessibility_stub.cc" ]
+  }
+
+  if (is_fuchsia) {
+    sources += [ "controls/menu/menu_config_fuchsia.cc" ]
   }
 }
 
-static_library("test_support_internal") {
+jumbo_source_set("test_support_internal") {
   testonly = true
   sources = [
     "animation/test/flood_fill_ink_drop_ripple_test_api.cc",
@@ -727,8 +738,6 @@ static_library("test_support_internal") {
     "animation/test/test_ink_drop_ripple_observer.h",
     "controls/textfield/textfield_test_api.cc",
     "controls/textfield/textfield_test_api.h",
-    "corewm/test/tooltip_aura_test_api.cc",
-    "corewm/test/tooltip_aura_test_api.h",
     "test/capture_tracking_view.cc",
     "test/capture_tracking_view.h",
     "test/combobox_test_api.cc",
@@ -814,6 +823,8 @@ static_library("test_support_internal") {
 
   if (use_aura) {
     sources += [
+      "corewm/test/tooltip_aura_test_api.cc",
+      "corewm/test/tooltip_aura_test_api.h",
       "corewm/tooltip_controller_test_helper.cc",
       "corewm/tooltip_controller_test_helper.h",
       "test/desktop_test_views_delegate_aura.cc",
@@ -854,7 +865,7 @@ static_library("test_support_internal") {
   }
 }
 
-static_library("test_support") {
+jumbo_static_library("test_support") {
   testonly = true
   public_deps = [
     ":test_support_internal",
@@ -1165,4 +1176,19 @@ source_set("views_interactive_ui_tests") {
   if (is_chromeos) {
     sources -= [ "corewm/desktop_capture_controller_unittest.cc" ]
   }
+}
+
+test("views_perftests") {
+  sources = [
+    "controls/label_perftest.cc",
+    "views_perftests.cc",
+  ]
+
+  deps = [
+    ":test_support",
+    "//base/test:test_support",
+    "//cc/base:base",
+    "//testing/perf",
+    "//ui/resources:ui_test_pak",
+  ]
 }

@@ -5,8 +5,8 @@
 #ifndef CSSStyleImageValue_h
 #define CSSStyleImageValue_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
-#include "core/css/CSSImageValue.h"
 #include "core/css/CSSImageValue.h"
 #include "core/css/cssom/CSSResourceValue.h"
 #include "core/css/cssom/CSSStyleValue.h"
@@ -21,11 +21,10 @@ namespace blink {
 // The corresponding idl file is CSSImageValue.idl.
 class CORE_EXPORT CSSStyleImageValue : public CSSResourceValue,
                                        public CanvasImageSource {
-  WTF_MAKE_NONCOPYABLE(CSSStyleImageValue);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  virtual ~CSSStyleImageValue() {}
+  virtual ~CSSStyleImageValue() = default;
 
   double intrinsicWidth(bool& is_null) const;
   double intrinsicHeight(bool& is_null) const;
@@ -34,13 +33,12 @@ class CORE_EXPORT CSSStyleImageValue : public CSSResourceValue,
   // CanvasImageSource
   bool IsCSSImageValue() const final { return true; }
   bool WouldTaintOrigin(
-      SecurityOrigin* destination_security_origin) const final {
+      const SecurityOrigin* destination_security_origin) const final {
     return true;
   }
   FloatSize ElementSize(const FloatSize& default_object_size) const final;
   scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
                                                AccelerationHint,
-                                               SnapshotReason,
                                                const FloatSize&) final {
     return GetImage();
   }
@@ -78,6 +76,7 @@ class CORE_EXPORT CSSStyleImageValue : public CSSResourceValue,
   scoped_refptr<Image> GetImage() const;
 
   Member<const CSSImageValue> image_value_;
+  DISALLOW_COPY_AND_ASSIGN(CSSStyleImageValue);
 };
 
 }  // namespace blink

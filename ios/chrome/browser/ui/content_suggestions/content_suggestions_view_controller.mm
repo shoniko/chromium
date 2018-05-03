@@ -215,6 +215,13 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
   if (@available(iOS 10, *)) {
     self.collectionView.prefetchingEnabled = NO;
   }
+  if (@available(iOS 11, *)) {
+    // Use automatic behavior as each element takes the safe area into account
+    // separately and the overscroll action does not work well with content
+    // offset.
+    self.collectionView.contentInsetAdjustmentBehavior =
+        UIScrollViewContentInsetAdjustmentAutomatic;
+  }
   self.collectionView.accessibilityIdentifier =
       [[self class] collectionAccessibilityIdentifier];
   _collectionUpdater.collectionViewController = self;
@@ -250,9 +257,11 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 
 - (void)viewWillAppear:(BOOL)animated {
   [super viewWillAppear:animated];
-  // Reload data to ensure the Most Visited tiles are correctly positionned, in
-  // particular during a rotation while a ViewController is presented in front
-  // of the NTP.
+  // Reload data to ensure the Most Visited tiles and fakeOmnibox are correctly
+  // positionned, in particular during a rotation while a ViewController is
+  // presented in front of the NTP.
+  [self.headerSynchronizer
+      updateFakeOmniboxOnNewWidth:self.collectionView.bounds.size.width];
   [self.collectionView.collectionViewLayout invalidateLayout];
 }
 
@@ -575,12 +584,13 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
       !self.containsToolbar)
     return;
 
+  CGFloat xOffset = self.collectionView.contentOffset.x;
   // Adjust the toolbar to be all the way on or off screen.
   if (targetY > toolbarHeight / 2) {
-    [self.collectionView setContentOffset:CGPointMake(0, toolbarHeight)
+    [self.collectionView setContentOffset:CGPointMake(xOffset, toolbarHeight)
                                  animated:YES];
   } else {
-    [self.collectionView setContentOffset:CGPointMake(0, 0) animated:YES];
+    [self.collectionView setContentOffset:CGPointMake(xOffset, 0) animated:YES];
   }
 }
 

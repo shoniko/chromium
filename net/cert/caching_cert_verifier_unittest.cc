@@ -12,6 +12,7 @@
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "net/log/net_log_with_source.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/gtest_util.h"
@@ -33,8 +34,8 @@ namespace {
 
 class MockCacheVisitor : public CachingCertVerifier::CacheVisitor {
  public:
-  MockCacheVisitor() {}
-  ~MockCacheVisitor() override {}
+  MockCacheVisitor() = default;
+  ~MockCacheVisitor() override = default;
 
   MOCK_METHOD5(VisitEntry,
                bool(const CachingCertVerifier::RequestParams& params,
@@ -49,7 +50,7 @@ class MockCacheVisitor : public CachingCertVerifier::CacheVisitor {
 class CachingCertVerifierTest : public ::testing::Test {
  public:
   CachingCertVerifierTest() : verifier_(std::make_unique<MockCertVerifier>()) {}
-  ~CachingCertVerifierTest() override {}
+  ~CachingCertVerifierTest() override = default;
 
  protected:
   CachingCertVerifier verifier_;
@@ -234,18 +235,22 @@ TEST_F(CachingCertVerifierTest, DifferentCACerts) {
       ImportCertFromFile(certs_dir, "verisign_intermediate_ca_2016.pem");
   ASSERT_TRUE(intermediate_cert2);
 
-  X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(intermediate_cert1->os_cert_handle());
+  std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
+  intermediates.push_back(
+      x509_util::DupCryptoBuffer(intermediate_cert1->cert_buffer()));
   scoped_refptr<X509Certificate> cert_chain1 =
-      X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
-                                        intermediates);
+      X509Certificate::CreateFromBuffer(
+          x509_util::DupCryptoBuffer(server_cert->cert_buffer()),
+          std::move(intermediates));
   ASSERT_TRUE(cert_chain1);
 
   intermediates.clear();
-  intermediates.push_back(intermediate_cert2->os_cert_handle());
+  intermediates.push_back(
+      x509_util::DupCryptoBuffer(intermediate_cert2->cert_buffer()));
   scoped_refptr<X509Certificate> cert_chain2 =
-      X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
-                                        intermediates);
+      X509Certificate::CreateFromBuffer(
+          x509_util::DupCryptoBuffer(server_cert->cert_buffer()),
+          std::move(intermediates));
   ASSERT_TRUE(cert_chain2);
 
   int error;

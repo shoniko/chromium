@@ -17,11 +17,11 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Browser;
 import android.support.annotation.Nullable;
-import android.support.v4.view.ViewCompat;
 import android.text.TextUtils;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
 import android.view.View;
+import android.view.View.OnAttachStateChangeListener;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.Button;
@@ -69,6 +69,9 @@ import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.media.ui.MediaSessionTabHelper;
+import org.chromium.chrome.browser.metrics.PageLoadMetrics;
+import org.chromium.chrome.browser.metrics.StartupPageLoadMetricsObserver;
+import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.ntp.NativePageAssassin;
 import org.chromium.chrome.browser.ntp.NativePageFactory;
@@ -90,6 +93,7 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabReparentingParams;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.vr_shell.VrShellDelegate;
 import org.chromium.chrome.browser.widget.PulseDrawable;
 import org.chromium.chrome.browser.widget.textbubble.TextBubble;
 import org.chromium.chrome.browser.widget.textbubble.ViewAnchoredTextBubble;
@@ -104,9 +108,12 @@ import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.crypto.CipherFactory;
 import org.chromium.content_public.browser.ChildProcessImportance;
+import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.GestureStateListener;
+import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.ImeEventObserver;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.BrowserControlsState;
 import org.chromium.content_public.common.Referrer;
@@ -205,6 +212,7 @@ public class Tab
     // Content layer Observers and Delegates
     private TabWebContentsObserver mWebContentsObserver;
     private TabWebContentsDelegateAndroid mWebContentsDelegate;
+    private StartupPageLoadMetricsObserver mStartupPageLoadMetricsObserver;
 
     /**
      * If this tab was opened from another tab, store the id of the tab that
@@ -227,6 +235,7 @@ public class Tab
 
     private boolean mIsClosing;
     private boolean mIsShowingErrorPage;
+    private boolean mIsShowingTabModalDialog;
 
     private Bitmap mFavicon;
 
@@ -408,6 +417,10 @@ public class Tab
     /** Whether or not the tab closing the tab can send the user back to the app that opened it. */
     private boolean mIsAllowedToReturnToExternalApp;
 
+    private int mTopControlsHeight;
+    private int mBottomControlsHeight;
+    private boolean mControlsResizeView;
+
     private GestureStateListener createGestureStateListener() {
         return new GestureStateListener() {
             @Override
@@ -441,6 +454,9 @@ public class Tab
 
     // TODO(dtrainor): Port more methods to the observer.
     private final TabObserver mTabObserver = new EmptyTabObserver() {
+        /** A runnable to delay the enabling of fullscreen mode if necessary. */
+        private Runnable mEnterFullscreenRunnable;
+
         @Override
         public void onSSLStateUpdated(Tab tab) {
             PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
@@ -469,11 +485,65 @@ public class Tab
                 didFinishPageLoad();
             }
         }
+
+        @Override
+        public void onInteractabilityChanged(boolean interactable) {
+            if (interactable && mEnterFullscreenRunnable != null) mEnterFullscreenRunnable.run();
+        }
+
+        @Override
+        public void onToggleFullscreenMode(Tab tab, boolean enable) {
+            if (!isUserInteractable() && enable) {
+                mEnterFullscreenRunnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        toggleFullscreenInternal(true);
+                        mEnterFullscreenRunnable = null;
+                    }
+                };
+                return;
+            } else if (!enable && mEnterFullscreenRunnable != null) {
+                mEnterFullscreenRunnable = null;
+                return;
+            }
+
+            toggleFullscreenInternal(enable);
+        }
+
+        /**
+         * Do the actual enter/exit of fullscreen mode.
+         * @param enable Whether or not fullscreen is enabled.
+         */
+        private void toggleFullscreenInternal(boolean enable) {
+            if (mFullscreenManager != null) {
+                mFullscreenManager.setPersistentFullscreenMode(enable);
+            }
+
+            if (enable && getWebContents() != null) {
+                SelectionPopupController controller =
+                        SelectionPopupController.fromWebContents(getWebContents());
+                controller.destroySelectActionMode();
+            }
+
+            // When going into fullscreen, we want to remove any cached thumbnail of the Tab.
+            if (enable && mNativeTabAndroid != 0) {
+                nativeClearThumbnailPlaceholder(mNativeTabAndroid);
+            }
+        }
     };
 
     private TabDelegateFactory mDelegateFactory;
 
     private BrowserControlsVisibilityDelegate mBrowserControlsVisibilityDelegate;
+
+    /** Listens for views related to the tab to be attached or detached. */
+    private OnAttachStateChangeListener mAttachStateChangeListener;
+
+    /** Whether the tab can currently be interacted with. */
+    private boolean mInteractableState;
+
+    /** Whether or not the tab's active view is attached to the window. */
+    private boolean mIsViewAttachedToWindow;
 
     /**
      * Creates an instance of a {@link Tab}.
@@ -545,6 +615,20 @@ public class Tab
                         && creationState == TabCreationState.FROZEN_ON_RESTORE;
             }
         }
+
+        mAttachStateChangeListener = new OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View view) {
+                mIsViewAttachedToWindow = true;
+                updateInteractableState();
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View view) {
+                mIsViewAttachedToWindow = false;
+                updateInteractableState();
+            }
+        };
     }
 
     private int calculateDefaultThemeColor() {
@@ -664,6 +748,13 @@ public class Tab
                 return handleJavaCrash();
             }
 
+            if (mNativeTabAndroid == 0) {
+                // if mNativeTabAndroid is invalid then we are going to crash anyways on the
+                // native side. Lets crash on the java side so that we can have a better stack
+                // trace. https://crbug.com/662877
+                throw new RuntimeException("Please post this crash on crbug.com/662877");
+            }
+
             // We load the URL from the tab rather than directly from the ContentView so the tab has
             // a chance of using a prerenderer page is any.
             int loadType = nativeLoadUrl(mNativeTabAndroid, params.getUrl(),
@@ -716,6 +807,13 @@ public class Tab
      */
     public boolean isShowingInterstitialPage() {
         return getWebContents() != null && getWebContents().isShowingInterstitialPage();
+    }
+
+    /**
+     * @return Whether a tab modal dialog is showing.
+     */
+    public boolean isShowingTabModalDialog() {
+        return mIsShowingTabModalDialog;
     }
 
     /**
@@ -1158,6 +1256,7 @@ public class Tab
             // Keep unsetting mIsHidden above loadIfNeeded(), so that we pass correct visibility
             // when spawning WebContents in loadIfNeeded().
             mIsHidden = false;
+            updateInteractableState();
 
             loadIfNeeded();
             assert !isFrozen();
@@ -1201,6 +1300,7 @@ public class Tab
             TraceEvent.begin("Tab.hide");
             if (isHidden()) return;
             mIsHidden = true;
+            updateInteractableState();
 
             if (mContentViewCore != null) mContentViewCore.onHide();
 
@@ -1237,7 +1337,13 @@ public class Tab
     private void showNativePage(NativePage nativePage) {
         if (mNativePage == nativePage) return;
         NativePage previousNativePage = mNativePage;
+        if (mNativePage != null && !(mNativePage instanceof FrozenNativePage)) {
+            mNativePage.getView().removeOnAttachStateChangeListener(mAttachStateChangeListener);
+        }
         mNativePage = nativePage;
+        if (mNativePage != null && !(mNativePage instanceof FrozenNativePage)) {
+            mNativePage.getView().addOnAttachStateChangeListener(mAttachStateChangeListener);
+        }
         pushNativePageStateToNavigationEntry();
         // Notifying of theme color change before content change because some of
         // the observers depend on the theme information being correct in
@@ -1255,6 +1361,7 @@ public class Tab
         if (mNativePage == null || mNativePage instanceof FrozenNativePage) return;
         assert mNativePage.getView().getParent() == null : "Cannot freeze visible native page";
         mNativePage = FrozenNativePage.freeze(mNativePage);
+        updateInteractableState();
     }
 
     /**
@@ -1265,6 +1372,9 @@ public class Tab
 
         if (mNativePage == null) return;
         NativePage previousNativePage = mNativePage;
+        if (!(mNativePage instanceof FrozenNativePage)) {
+            mNativePage.getView().removeOnAttachStateChangeListener(mAttachStateChangeListener);
+        }
         mNativePage = null;
         notifyContentChanged();
         destroyNativePageInternal(previousNativePage);
@@ -1422,6 +1532,10 @@ public class Tab
         // with an activity, and will crash. crbug.com/657007
         if (mContentViewCore != null) mContentViewCore.updateWindowAndroid(null);
         attachTabContentManager(null);
+
+        for (TabObserver observer : mObservers) {
+            observer.onActivityAttachmentChanged(this, false);
+        }
     }
 
     /**
@@ -1445,10 +1559,6 @@ public class Tab
         mIsTabStateDirty = true;
 
         if (finalizeCallback != null) finalizeCallback.run();
-
-        for (TabObserver observer : mObservers) {
-            observer.onReparentingFinished(this);
-        }
     }
 
     /**
@@ -1489,6 +1599,10 @@ public class Tab
             setInterceptNavigationDelegate(
                     mDelegateFactory.createInterceptNavigationDelegate(this));
             getAppBannerManager().setIsEnabledForTab(mDelegateFactory.canShowAppBanners(this));
+        }
+
+        for (TabObserver observer : mObservers) {
+            observer.onActivityAttachmentChanged(this, true);
         }
     }
 
@@ -1677,14 +1791,15 @@ public class Tab
     }
 
     private ContentViewCore createContentViewCore(WebContents webContents) {
-        ContentViewCore cvc = new ContentViewCore(mThemedApplicationContext, PRODUCT_VERSION);
+        ContentViewCore cvc = ContentViewCore.create(mThemedApplicationContext, PRODUCT_VERSION);
         ContentView cv = ContentView.createContentView(mThemedApplicationContext, cvc);
         cv.setContentDescription(mThemedApplicationContext.getResources().getString(
                 R.string.accessibility_content_view));
         cvc.initialize(new TabViewAndroidDelegate(this, cv), cv, webContents, getWindowAndroid());
-        ChromeActionModeCallback actionModeCallback = new ChromeActionModeCallback(
-                mThemedApplicationContext, this, cvc.getActionModeCallbackHelper());
-        cvc.setActionModeCallback(actionModeCallback);
+        SelectionPopupController controller = SelectionPopupController.fromWebContents(webContents);
+        ChromeActionModeCallback actionModeCallback =
+                new ChromeActionModeCallback(this, controller.getActionModeCallbackHelper());
+        controller.setActionModeCallback(actionModeCallback);
         return cvc;
     }
 
@@ -1716,17 +1831,19 @@ public class Tab
             cvc.getContainerView().setOnSystemUiVisibilityChangeListener(this);
 
             mContentView = cvc.getContainerView();
+            mContentView.addOnAttachStateChangeListener(mAttachStateChangeListener);
+            updateInteractableState();
             mWebContentsDelegate = mDelegateFactory.createWebContentsDelegate(this);
             mWebContentsObserver =
                     new TabWebContentsObserver(mContentViewCore.getWebContents(), this);
+            if (UmaUtils.isRunningApplicationStart()) {
+                mStartupPageLoadMetricsObserver = new StartupPageLoadMetricsObserver();
+                PageLoadMetrics.addObserver(mStartupPageLoadMetricsObserver);
+            }
 
             mDownloadDelegate = new ChromeDownloadDelegate(mThemedApplicationContext, this);
 
-            assert mNativeTabAndroid != 0;
-            nativeInitWebContents(mNativeTabAndroid, mIncognito, mIsDetached,
-                    mContentViewCore.getWebContents(), mWebContentsDelegate,
-                    new TabContextMenuPopulator(
-                            mDelegateFactory.createContextMenuPopulator(this), this));
+            initWebContents(mContentViewCore.getWebContents());
 
             // In the case where restoring a Tab or showing a prerendered one we already have a
             // valid infobar container, no need to recreate one.
@@ -1741,7 +1858,7 @@ public class Tab
                 mInfoBarContainer = new InfoBarContainer(mThemedApplicationContext, bottomContainer,
                         this);
             }
-            mInfoBarContainer.setContentViewCore(mContentViewCore);
+            mInfoBarContainer.setWebContents(getWebContents());
 
             mSwipeRefreshHandler = new SwipeRefreshHandler(mThemedApplicationContext, this);
 
@@ -1753,34 +1870,43 @@ public class Tab
             // web views.
             mContentViewCore.setShouldSetAccessibilityFocusOnPageLoad(true);
 
-            mContentViewCore.addImeEventObserver(new ImeEventObserver() {
-                @Override
-                public void onImeEvent() {
-                    // Some text was set in the page. Don't reuse it if a tab is
-                    // open from the same external application, we might lose some
-                    // user data.
-                    mAppAssociatedWith = null;
-                }
+            ImeAdapter.fromWebContents(mContentViewCore.getWebContents())
+                    .addEventObserver(new ImeEventObserver() {
+                        @Override
+                        public void onImeEvent() {
+                            // Some text was set in the page. Don't reuse it if a tab is
+                            // open from the same external application, we might lose some
+                            // user data.
+                            mAppAssociatedWith = null;
+                        }
 
-                @Override
-                public void onNodeAttributeUpdated(boolean editable, boolean password) {
-                    if (getFullscreenManager() == null) return;
-                    updateFullscreenEnabledState();
-                }
-            });
+                        @Override
+                        public void onNodeAttributeUpdated(boolean editable, boolean password) {
+                            if (getFullscreenManager() == null) return;
+                            updateFullscreenEnabledState();
+                        }
+                    });
 
             setInterceptNavigationDelegate(mDelegateFactory.createInterceptNavigationDelegate(
                     this));
 
             getAppBannerManager().setIsEnabledForTab(mDelegateFactory.canShowAppBanners(this));
-
-            if (mGestureStateListener == null) {
-                mGestureStateListener = createGestureStateListener();
-            }
-            cvc.addGestureStateListener(mGestureStateListener);
         } finally {
             TraceEvent.end("ChromeTab.setContentViewCore");
         }
+    }
+
+    private void initWebContents(WebContents webContents) {
+        assert mNativeTabAndroid != 0;
+        nativeInitWebContents(mNativeTabAndroid, mIncognito, mIsDetached, webContents,
+                mWebContentsDelegate,
+                new TabContextMenuPopulator(
+                        mDelegateFactory.createContextMenuPopulator(this), this));
+
+        if (mGestureStateListener == null) {
+            mGestureStateListener = createGestureStateListener();
+        }
+        GestureListenerManager.fromWebContents(webContents).addListener(mGestureStateListener);
     }
 
     /**
@@ -2195,7 +2321,29 @@ public class Tab
      */
     @CalledByNative
     public boolean isUserInteractable() {
-        return !mIsHidden && ViewCompat.isAttachedToWindow(getView());
+        return mInteractableState;
+    }
+
+    /**
+     * Update the interactable state of the tab. If the state has changed, it will call the
+     * {@link #onInteractableStateChanged(boolean)} method.
+     */
+    private void updateInteractableState() {
+        boolean currentState =
+                !mIsHidden && !isFrozen() && (mIsViewAttachedToWindow || VrShellDelegate.isInVr());
+
+        if (currentState == mInteractableState) return;
+
+        mInteractableState = currentState;
+        onInteractableStateChanged(currentState);
+    }
+
+    /**
+     * A notification that the interactability of this tab has changed.
+     * @param interactable Whether the tab is interactable.
+     */
+    private void onInteractableStateChanged(boolean interactable) {
+        for (TabObserver observer : mObservers) observer.onInteractabilityChanged(interactable);
     }
 
     /**
@@ -2290,19 +2438,25 @@ public class Tab
 
         mContentViewCore.getContainerView().setOnHierarchyChangeListener(null);
         mContentViewCore.getContainerView().setOnSystemUiVisibilityChangeListener(null);
-        if (mGestureStateListener != null) {
-            mContentViewCore.removeGestureStateListener(mGestureStateListener);
-        }
 
         if (mInfoBarContainer != null && mInfoBarContainer.getParent() != null) {
             mInfoBarContainer.removeFromParentView();
-            mInfoBarContainer.setContentViewCore(null);
+            mInfoBarContainer.setWebContents(null);
         }
         if (mSwipeRefreshHandler != null) {
             mSwipeRefreshHandler.destroy();
             mSwipeRefreshHandler = null;
         }
+        mContentView.removeOnAttachStateChangeListener(mAttachStateChangeListener);
         mContentView = null;
+        updateInteractableState();
+
+        if (mGestureStateListener != null) {
+            GestureListenerManager manager =
+                    GestureListenerManager.fromWebContents(mContentViewCore.getWebContents());
+            manager.removeListener(mGestureStateListener);
+        }
+
         mContentViewCore.destroy();
         mContentViewCore = null;
 
@@ -2311,6 +2465,11 @@ public class Tab
         if (mWebContentsObserver != null) {
             mWebContentsObserver.destroy();
             mWebContentsObserver = null;
+        }
+
+        if (mStartupPageLoadMetricsObserver != null) {
+            PageLoadMetrics.removeObserver(mStartupPageLoadMetricsObserver);
+            mStartupPageLoadMetricsObserver = null;
         }
 
         assert mNativeTabAndroid != 0;
@@ -2430,12 +2589,10 @@ public class Tab
         destroyContentViewCore(deleteOldNativeWebContents);
         NativePage previousNativePage = mNativePage;
         mNativePage = null;
-        // Size of the new ContentViewCore is zero at this point. If we don't call onSizeChanged(),
-        // next onShow() call would send a resize message with the current ContentViewCore size
-        // (zero) to the renderer process, although the new size will be set soon.
-        // However, this size fluttering may confuse Blink and rendered result can be broken
-        // (see http://crbug.com/340987).
-        newContentViewCore.onSizeChanged(originalWidth, originalHeight, 0, 0);
+        // Size of the new content is zero at this point. Set the view size in advance
+        // so that next onShow() call won't send a resize message with zero size
+        // to the renderer process. This prevents the size fluttering that may confuse
+        // Blink and break rendered result (see http://crbug.com/340987).
         newContentViewCore.getWebContents().setSize(originalWidth, originalHeight);
 
         if (!bounds.isEmpty()) {
@@ -2582,19 +2739,11 @@ public class Tab
     }
 
     /**
-     * Toggles fullscreen mode and notifies all observers.
+     * Toggles fullscreen mode. If enabling fullscreen while the tab is not interactable, fullscreen
+     * will be delayed until the tab is interactable.
      * @param enableFullscreen Whether fullscreen should be enabled.
      */
     public void toggleFullscreenMode(boolean enableFullscreen) {
-        if (mFullscreenManager != null) {
-            mFullscreenManager.setPersistentFullscreenMode(enableFullscreen);
-        }
-
-        // When going into fullscreen, we want to remove any cached thumbnail of the Tab.
-        if (enableFullscreen && mNativeTabAndroid != 0) {
-            nativeClearThumbnailPlaceholder(mNativeTabAndroid);
-        }
-
         RewindableIterator<TabObserver> observers = getTabObservers();
         while (observers.hasNext()) {
             observers.next().onToggleFullscreenMode(this, enableFullscreen);
@@ -2636,10 +2785,8 @@ public class Tab
 
         int constraints = getBrowserControlsStateConstraints();
 
-        // TODO(peconn): Figure out why updating without animations breaks fullscreen activity.
-        boolean animate = constraints != BrowserControlsState.HIDDEN
-                || ChromeFeatureList.isEnabled(ChromeFeatureList.FULLSCREEN_ACTIVITY);
-        updateBrowserControlsState(constraints, BrowserControlsState.BOTH, animate);
+        updateBrowserControlsState(constraints, BrowserControlsState.BOTH,
+                constraints != BrowserControlsState.HIDDEN);
 
         if (getContentViewCore() != null && mFullscreenManager != null) {
             getContentViewCore().updateMultiTouchZoomSupport(
@@ -2730,6 +2877,29 @@ public class Tab
             constraints = BrowserControlsState.SHOWN;
         }
         return constraints;
+    }
+
+    public void setTopControlsHeight(int height, boolean controlsResizeView) {
+        float scale = getWindowAndroid().getDisplay().getDipScale();
+        mTopControlsHeight = (int) (height / scale);
+        mControlsResizeView = controlsResizeView;
+    }
+
+    public void setBottomControlsHeight(int height) {
+        float scale = getWindowAndroid().getDisplay().getDipScale();
+        mBottomControlsHeight = (int) (height / scale);
+    }
+
+    int getTopControlsHeight() {
+        return mTopControlsHeight;
+    }
+
+    int getBottomControlsHeight() {
+        return mBottomControlsHeight;
+    }
+
+    boolean controlsResizeView() {
+        return mControlsResizeView;
     }
 
     /**
@@ -3053,7 +3223,6 @@ public class Tab
         Rect bounds = getEstimatedContentSize(context);
         int width = bounds.right - bounds.left;
         int height = bounds.bottom - bounds.top;
-        tab.getContentViewCore().onSizeChanged(width, height, 0, 0);
         tab.getWebContents().setSize(width, height);
 
         tab.detach();
@@ -3197,6 +3366,17 @@ public class Tab
      */
     public void onOrientationChange() {
         hideMediaDownloadInProductHelp();
+    }
+
+    /**
+     * Handle browser controls when a tab modal dialog is shown.
+     * @param isShowing Whether a tab modal dialog is showing.
+     */
+    public void onTabModalDialogStateChanged(boolean isShowing) {
+        mIsShowingTabModalDialog = isShowing;
+        if (mFullscreenManager == null) return;
+        mFullscreenManager.setPositionsForTabToNonFullscreen();
+        updateBrowserControlsState(BrowserControlsState.SHOWN, false);
     }
 
     @CalledByNative

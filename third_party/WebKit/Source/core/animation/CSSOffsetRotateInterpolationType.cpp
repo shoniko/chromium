@@ -14,11 +14,11 @@ namespace blink {
 
 class CSSOffsetRotationNonInterpolableValue : public NonInterpolableValue {
  public:
-  ~CSSOffsetRotationNonInterpolableValue() override {}
+  ~CSSOffsetRotationNonInterpolableValue() override = default;
 
   static scoped_refptr<CSSOffsetRotationNonInterpolableValue> Create(
       OffsetRotationType rotation_type) {
-    return WTF::AdoptRef(
+    return base::AdoptRef(
         new CSSOffsetRotationNonInterpolableValue(rotation_type));
   }
 
@@ -105,7 +105,7 @@ InterpolationValue CSSOffsetRotateInterpolationType::MaybeConvertNeutral(
 InterpolationValue CSSOffsetRotateInterpolationType::MaybeConvertInitial(
     const StyleResolverState&,
     ConversionCheckers& conversion_checkers) const {
-  return ConvertOffsetRotate(StyleOffsetRotation(0, kOffsetRotationAuto));
+  return ConvertOffsetRotate(StyleOffsetRotation(0, OffsetRotationType::kAuto));
 }
 
 InterpolationValue CSSOffsetRotateInterpolationType::MaybeConvertInherit(

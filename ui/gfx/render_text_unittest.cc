@@ -50,6 +50,7 @@
 #if defined(OS_MACOSX)
 #include <ApplicationServices/ApplicationServices.h>
 
+#include "base/mac/mac_util.h"
 #include "ui/gfx/render_text_mac.h"
 #endif
 
@@ -541,6 +542,50 @@ class RenderTextTest : public testing::Test,
     return GetSubstringBoundsUnion(render_text_->selection());
   }
 
+  // Checks left-to-right text, ensuring that the caret moves to the right as
+  // the cursor position increments through the logical text. Also ensures that
+  // each glyph is to the right of the prior glyph. RenderText automatically
+  // updates invalid cursor positions (eg. between a surrogate pair) to a valid
+  // neighbor, so the positions may be unchanged for some iterations. Invoking
+  // this in a test gives coverage of the sanity checks in functions such as
+  // TextRunHarfBuzz::GetGraphemeBounds() which rely on sensible glyph positions
+  // being provided by installed typefaces.
+  void CheckBoundsForCursorPositions() {
+    ASSERT_FALSE(render_text_->text().empty());
+
+    // Use a wide display rect to avoid scrolling.
+    render_text_->SetDisplayRect(gfx::Rect(0, 0, 1000, 50));
+    test_api()->EnsureLayout();
+    EXPECT_LT(render_text_->GetContentWidthF(),
+              render_text_->display_rect().width());
+
+    // Assume LTR for now.
+    int max_cursor_x = 0;
+    int max_glyph_x = 0, max_glyph_right = 0;
+
+    for (size_t i = 0; i <= render_text_->text().size(); ++i) {
+      render_text_->SetCursorPosition(i);
+
+      SCOPED_TRACE(testing::Message()
+                   << "Cursor position: " << i
+                   << " selection: " << render_text_->selection().ToString());
+
+      const gfx::Rect cursor_bounds = render_text_->GetUpdatedCursorBounds();
+
+      // The cursor should always be one pixel wide.
+      EXPECT_EQ(1, cursor_bounds.width());
+      EXPECT_LE(max_cursor_x, cursor_bounds.x());
+      max_cursor_x = cursor_bounds.x();
+
+      const gfx::Rect glyph_bounds =
+          render_text_->GetCursorBounds(render_text_->selection_model(), false);
+      EXPECT_LE(max_glyph_x, glyph_bounds.x());
+      EXPECT_LE(max_glyph_right, glyph_bounds.right());
+      max_glyph_x = glyph_bounds.x();
+      max_glyph_right = glyph_bounds.right();
+    }
+  }
+
   Canvas* canvas() { return &canvas_; }
   TestSkiaTextRenderer* renderer() { return &renderer_; }
   test::RenderTextTestApi* test_api() { return test_api_.get(); };
@@ -869,9 +914,9 @@ TEST_P(RenderTextHarfBuzzTest, ObscuredText) {
     EXPECT_TRUE(selection.caret_pos() == 0U || selection.caret_pos() == 2U);
   }
 
-  // GetGlyphBounds() should yield the entire string bounds for text index 0.
+  // GetCursorSpan() should yield the entire string bounds for text index 0.
   EXPECT_EQ(render_text->GetStringSize().width(),
-            static_cast<int>(render_text->GetGlyphBounds(0U).length()));
+            static_cast<int>(render_text->GetCursorSpan({0, 1}).length()));
 
   // Cursoring is independent of underlying characters when text is obscured.
   const char* const texts[] = {
@@ -1354,8 +1399,13 @@ TEST_P(RenderTextHarfBuzzTest, MoveCursor_Word) {
                                         SELECTION_NONE, &expected);
 
   // Move right twice.
+#if defined(OS_WIN)  // Move word right includes space/punctuation.
+  expected.push_back(Range(4));
+  expected.push_back(Range(8));
+#else  // Non-Windows: move word right does NOT include space/punctuation.
   expected.push_back(Range(3));
   expected.push_back(Range(7));
+#endif
   RunMoveCursorTestAndClearExpectations(render_text, WORD_BREAK, CURSOR_RIGHT,
                                         SELECTION_NONE, &expected);
 
@@ -1369,7 +1419,11 @@ TEST_P(RenderTextHarfBuzzTest, MoveCursor_Word) {
 
   // Move right twice.
   expected.push_back(Range(6));
+#if defined(OS_WIN)  // Select word right includes space/punctuation.
+  expected.push_back(Range(6, 8));
+#else  // Non-Windows: select word right does NOT include space/punctuation.
   expected.push_back(Range(6, 7));
+#endif
   RunMoveCursorTestAndClearExpectations(render_text, WORD_BREAK, CURSOR_RIGHT,
                                         SELECTION_CARET, &expected);
 
@@ -1387,7 +1441,11 @@ TEST_P(RenderTextHarfBuzzTest, MoveCursor_Word) {
                                         SELECTION_RETAIN, &expected);
 
   // Move right twice.
+#if defined(OS_WIN)  // Select word right includes space/punctuation.
+  expected.push_back(Range(6, 8));
+#else  // Non-Windows: select word right does NOT include space/punctuation.
   expected.push_back(Range(6, 7));
+#endif
   expected.push_back(Range(6, 11));
   RunMoveCursorTestAndClearExpectations(render_text, WORD_BREAK, CURSOR_RIGHT,
                                         SELECTION_RETAIN, &expected);
@@ -1406,7 +1464,11 @@ TEST_P(RenderTextHarfBuzzTest, MoveCursor_Word) {
                                         SELECTION_EXTEND, &expected);
 
   // Move right twice.
+#if defined(OS_WIN)  // Select word right includes space/punctuation.
+  expected.push_back(Range(4, 8));
+#else  // Non-Windows: select word right does NOT include space/punctuation.
   expected.push_back(Range(4, 7));
+#endif
   expected.push_back(Range(4, 11));
   RunMoveCursorTestAndClearExpectations(render_text, WORD_BREAK, CURSOR_RIGHT,
                                         SELECTION_EXTEND, &expected);
@@ -1867,7 +1929,7 @@ TEST_P(RenderTextHarfBuzzTest, FindCursorPosition) {
     SCOPED_TRACE(base::StringPrintf("Testing case[%" PRIuS "]", i));
     render_text->SetText(UTF8ToUTF16(kTestStrings[i]));
     for (size_t j = 0; j < render_text->text().length(); ++j) {
-      const Range range(render_text->GetGlyphBounds(j));
+      const Range range(render_text->GetCursorSpan(Range(j, j + 1)));
       // Test a point just inside the leading edge of the glyph bounds.
       int x = range.is_reversed() ? range.GetMax() - 1 : range.GetMin() + 1;
       EXPECT_EQ(
@@ -3554,6 +3616,14 @@ TEST_P(RenderTextHarfBuzzTest, Multiline_SurrogatePairsOrCombiningChars) {
 // Test that Zero width characters have the correct line breaking behavior.
 TEST_P(RenderTextHarfBuzzTest, Multiline_ZeroWidthChars) {
   RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+
+#if defined(OS_MACOSX)
+  // Don't use Helvetica Neue on 10.10 - it has a buggy zero-width space that
+  // actually gets some width. See http://crbug.com/799333.
+  if (base::mac::IsOS10_10())
+    render_text->SetFontList(FontList("Arial, 12px"));
+#endif
+
   render_text->SetMultiline(true);
   render_text->SetWordWrapBehavior(WRAP_LONG_WORDS);
 
@@ -3569,8 +3639,9 @@ TEST_P(RenderTextHarfBuzzTest, Multiline_ZeroWidthChars) {
   render_text->SetDisplayRect(Rect(0, 0, kTestWidth, 0));
   render_text->Draw(canvas());
 
-  ASSERT_EQ(3u, test_api()->lines().size());
-  for (size_t j = 0; j < test_api()->lines().size(); ++j) {
+  EXPECT_EQ(3u, test_api()->lines().size());
+  for (size_t j = 0;
+       j < std::min(arraysize(char_ranges), test_api()->lines().size()); ++j) {
     SCOPED_TRACE(base::StringPrintf("%" PRIuS "-th line", j));
     int segment_size = test_api()->lines()[j].segments.size();
     ASSERT_GT(segment_size, 0);
@@ -3928,6 +3999,116 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_BreakRunsByEmoji) {
   EXPECT_EQ("[0][1->2][3][4]", GetRunListStructureString());
 }
 
+TEST_P(RenderTextHarfBuzzTest, HarfBuzz_BreakRunsByEmojiVariationSelectors) {
+  constexpr int kGlyphWidth = 30;
+  SetGlyphWidth(30);
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+
+  // ☎ (U+260E BLACK TELEPHONE) and U+FE0F (a variation selector) combine to
+  // form (on some platforms), ☎️, a red (or blue) telephone. The run can
+  // not break between the codepoints, or the incorrect glyph will be chosen.
+  render_text->SetText(WideToUTF16(L"z\u260E\uFE0Fy"));
+  render_text->SetDisplayRect(Rect(1000, 50));
+  test_api()->EnsureLayout();
+  EXPECT_EQ(ToString16Vec({"z", "☎\uFE0F", "y"}), GetRunListStrings());
+  EXPECT_EQ("[0][1->2][3]", GetRunListStructureString());
+
+  // Also test moving the cursor across the telephone.
+  EXPECT_EQ(gfx::Range(0, 0), render_text->selection());
+  EXPECT_EQ(0, render_text->GetUpdatedCursorBounds().x());
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(gfx::Range(1, 1), render_text->selection());
+  EXPECT_EQ(1 * kGlyphWidth, render_text->GetUpdatedCursorBounds().x());
+
+#if defined(OS_MACOSX)
+  // Early versions of macOS provide a tofu glyph for the variation selector.
+  // Bail out early except on 10.12 and above.
+  if (base::mac::IsAtMostOS10_11())
+    return;
+#endif
+
+  // Jump over the telephone: two codepoints, but a single glyph.
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(gfx::Range(3, 3), render_text->selection());
+  EXPECT_EQ(2 * kGlyphWidth, render_text->GetUpdatedCursorBounds().x());
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(gfx::Range(4, 4), render_text->selection());
+  EXPECT_EQ(3 * kGlyphWidth, render_text->GetUpdatedCursorBounds().x());
+
+  // Nothing else.
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(gfx::Range(4, 4), render_text->selection());
+  EXPECT_EQ(3 * kGlyphWidth, render_text->GetUpdatedCursorBounds().x());
+}
+
+TEST_P(RenderTextHarfBuzzTest, HarfBuzz_OrphanedVariationSelector) {
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+
+  // It should never happen in normal usage, but a variation selector can appear
+  // by itself. In this case, it can form its own text run, with no glyphs.
+  render_text->SetText(WideToUTF16(L"\uFE0F"));
+  test_api()->EnsureLayout();
+  EXPECT_EQ(ToString16Vec({"\uFE0F"}), GetRunListStrings());
+  EXPECT_EQ("[0]", GetRunListStructureString());
+  CheckBoundsForCursorPositions();
+}
+
+TEST_P(RenderTextHarfBuzzTest, HarfBuzz_AsciiVariationSelector) {
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+#if defined(OS_MACOSX)
+  // Don't use a system font on macOS - asking for a variation selector on
+  // ASCII glyphs can tickle OS bugs. See http://crbug.com/785522.
+  render_text->SetFontList(FontList("Arial, 12px"));
+#endif
+  // A variation selector doesn't have to appear with Emoji. It will probably
+  // cause the typesetter to render tofu in this case, but it should not break
+  // a text run.
+  render_text->SetText(WideToUTF16(L"z\uFE0Fy"));
+  test_api()->EnsureLayout();
+  EXPECT_EQ(ToString16Vec({"z\uFE0Fy"}), GetRunListStrings());
+  EXPECT_EQ("[0->2]", GetRunListStructureString());
+  CheckBoundsForCursorPositions();
+}
+
+TEST_P(RenderTextHarfBuzzTest, HarfBuzz_LeadingVariationSelector) {
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+
+  // When a variation selector appears either side of an emoji, ensure the one
+  // after is in the same run.
+  render_text->SetText(WideToUTF16(L"\uFE0F\u260E\uFE0Fy"));
+  test_api()->EnsureLayout();
+  EXPECT_EQ(ToString16Vec({"\uFE0F", "☎\uFE0F", "y"}), GetRunListStrings());
+  EXPECT_EQ("[0][1->2][3]", GetRunListStructureString());
+  CheckBoundsForCursorPositions();
+}
+
+TEST_P(RenderTextHarfBuzzTest, HarfBuzz_TrailingVariationSelector) {
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+
+  // If a redundant variation selector appears in an emoji run, it also gets
+  // merged into the emoji run. Usually there should be no effect. That's
+  // ultimately up to the typeface but, however it choses, cursor and glyph
+  // positions should behave.
+  render_text->SetText(WideToUTF16(L"z\u260E\uFE0F\uFE0Fy"));
+  test_api()->EnsureLayout();
+  EXPECT_EQ(ToString16Vec({"z", "☎\uFE0F\uFE0F", "y"}), GetRunListStrings());
+  EXPECT_EQ("[0][1->3][4]", GetRunListStructureString());
+  CheckBoundsForCursorPositions();
+}
+
+TEST_P(RenderTextHarfBuzzTest, HarfBuzz_MultipleVariationSelectorEmoji) {
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+
+  // Two emoji with variation selectors appearing in a correct sequence should
+  // be in the same run.
+  render_text->SetText(WideToUTF16(L"z\u260E\uFE0F\u260E\uFE0Fy"));
+  test_api()->EnsureLayout();
+  EXPECT_EQ(ToString16Vec({"z", "☎\uFE0F☎\uFE0F", "y"}), GetRunListStrings());
+  EXPECT_EQ("[0][1->4][5]", GetRunListStructureString());
+  CheckBoundsForCursorPositions();
+}
+
 TEST_P(RenderTextHarfBuzzTest, HarfBuzz_BreakRunsByAscii) {
   RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
 
@@ -3974,7 +4155,7 @@ TEST_P(RenderTextHarfBuzzTest, GlyphBounds) {
     test_api()->EnsureLayout();
 
     for (size_t j = 0; j < render_text->text().length(); ++j)
-      EXPECT_FALSE(render_text->GetGlyphBounds(j).is_empty());
+      EXPECT_FALSE(render_text->GetCursorSpan(Range(j, j + 1)).is_empty());
   }
 }
 
@@ -4103,17 +4284,9 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_UnicodeFallback) {
 }
 #endif  // !defined(OS_LINUX)
 
-// http://crbug/624513
-#if !defined(OS_WIN)
 // Ensure that the width reported by RenderText is sufficient for drawing. Draws
 // to a canvas and checks if any pixel beyond the bounding rectangle is colored.
 TEST_P(RenderTextTest, TextDoesntClip) {
-// Fails on Mac with RenderTextHarfBuzz. See http://crbug.com/640068.
-#if defined(OS_MACOSX)
-  if (GetParam() == RENDER_TEXT_HARFBUZZ)
-    return;
-#endif
-
   const char* kTestStrings[] = {
       "            ",
       // TODO(dschuyler): Underscores draw outside GetStringSize;
@@ -4121,8 +4294,7 @@ TEST_P(RenderTextTest, TextDoesntClip) {
       // revealed by the prior unit tests.
       // "TEST_______",
       "TEST some stuff", "WWWWWWWWWW", "gAXAXAXAXAXAXA",
-      // TODO(dschuyler): A-Ring draws outside GetStringSize; crbug.com/459812.
-      // "g\u00C5X\u00C5X\u00C5X\u00C5X\u00C5X\u00C5X\u00C5",
+      "g\u00C5X\u00C5X\u00C5X\u00C5X\u00C5X\u00C5X\u00C5",
       "\u0647\u0654\u0647\u0654\u0647\u0654\u0647\u0654\u0645\u0631\u062D"
       "\u0628\u0627"};
   const Size kCanvasSize(300, 50);
@@ -4140,11 +4312,11 @@ TEST_P(RenderTextTest, TextDoesntClip) {
   for (auto* string : kTestStrings) {
     paint_canvas.clear(SK_ColorWHITE);
     render_text->SetText(UTF8ToUTF16(string));
-    const Size string_size = render_text->GetStringSize();
     render_text->ApplyBaselineStyle(SUPERSCRIPT, Range(1, 2));
     render_text->ApplyBaselineStyle(SUPERIOR, Range(3, 4));
     render_text->ApplyBaselineStyle(INFERIOR, Range(5, 6));
     render_text->ApplyBaselineStyle(SUBSCRIPT, Range(7, 8));
+    const Size string_size = render_text->GetStringSize();
     render_text->SetWeight(Font::Weight::BOLD);
     render_text->SetDisplayRect(
         Rect(kTestSize, kTestSize, string_size.width(), string_size.height()));
@@ -4159,37 +4331,25 @@ TEST_P(RenderTextTest, TextDoesntClip) {
     TestRectangleBuffer rect_buffer(string, buffer, kCanvasSize.width(),
                                     kCanvasSize.height());
     {
-#if !defined(OS_CHROMEOS)
-      int top_test_height = kTestSize;
-      // Windows 8+ and RenderTextMac (since 10.13) draw 1 pixel above the
-      // display rect.
-      if (IsWin8Plus() || GetParam() == RENDER_TEXT_MAC)
-        top_test_height = kTestSize - 1;
-
-      // TODO(dschuyler): On ChromeOS text draws above the GetStringSize rect.
       SCOPED_TRACE("TextDoesntClip Top Side");
       rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, 0, kCanvasSize.width(),
-                                  top_test_height);
-#endif // !OS_CHROMEOS
+                                  kTestSize);
     }
     {
-      int bottom_test_y = kTestSize + string_size.height();
-      int bottom_test_height = kTestSize;
-      // Windows 8+ draws 1 pixel below the display rect.
-      if (IsWin8Plus()) {
-        bottom_test_y = kTestSize + string_size.height() + 1;
-        bottom_test_height = kTestSize - 1;
-      }
       SCOPED_TRACE("TextDoesntClip Bottom Side");
-      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, bottom_test_y,
-                                  kCanvasSize.width(), bottom_test_height);
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0,
+                                  kTestSize + string_size.height(),
+                                  kCanvasSize.width(), kTestSize);
     }
     {
       SCOPED_TRACE("TextDoesntClip Left Side");
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
-      // TODO(dschuyler): On Windows, Chrome OS and Mac smoothing draws to the
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS) || \
+    defined(ARCH_CPU_MIPS_FAMILY)
+      // TODO(dschuyler): On Windows, Chrome OS, and Mac smoothing draws to the
       // left of text.  This appears to be a preexisting issue that wasn't
-      // revealed by the prior unit tests.
+      // revealed by the prior unit tests.  RenderText currently only uses
+      // origins and advances and ignores bounding boxes so cannot account for
+      // under- and over-hang.
       rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, kTestSize, kTestSize - 1,
                                   string_size.height());
 #else
@@ -4199,18 +4359,26 @@ TEST_P(RenderTextTest, TextDoesntClip) {
     }
     {
       SCOPED_TRACE("TextDoesntClip Right Side");
-#if !defined(OS_MACOSX)
-      // TODO(dschuyler): On Mac text draws to right of GetStringSize.  This
-      // appears to be a preexisting issue that wasn't revealed by the prior
-      // unit tests.
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS) || \
+    defined(ARCH_CPU_MIPS_FAMILY)
+      // TODO(dschuyler): On Windows, Chrome OS, and Mac smoothing draws to the
+      // right of text.  This appears to be a preexisting issue that wasn't
+      // revealed by the prior unit tests.  RenderText currently only uses
+      // origins and advances and ignores bounding boxes so cannot account for
+      // under- and over-hang.
       rect_buffer.EnsureSolidRect(SK_ColorWHITE,
-                                  kTestSize + string_size.width(), kTestSize,
-                                  kTestSize, string_size.height());
+                                  kTestSize + string_size.width() + 1,
+                                  kTestSize, kTestSize - 1,
+                                  string_size.height());
+#else
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE,
+                                  kTestSize + string_size.width(),
+                                  kTestSize, kTestSize,
+                                  string_size.height());
 #endif
     }
   }
 }
-#endif  // !defined(OS_WIN)
 
 // Ensure that the text will clip to the display rect. Draws to a canvas and
 // checks whether any pixel beyond the bounding rectangle is colored.
@@ -4882,6 +5050,94 @@ TEST_P(RenderTextHarfBuzzTest, TeluguGraphemeBoundaries) {
   selection_bounds = GetSelectionBoundsUnion();
   EXPECT_EQ(0, selection_bounds.x());
   EXPECT_EQ(whole_width, selection_bounds.width());
+}
+
+// Test cursor bounds for Emoji flags (unicode regional indicators) when the
+// flag does not merge into a single glyph.
+TEST_P(RenderTextHarfBuzzTest, MissingFlagEmoji) {
+  RenderText* render_text = GetRenderText();
+  render_text->SetDisplayRect(Rect(1000, 1000));
+
+  // Usually these pair into country codes, but for this test we do not want
+  // them to combine into a flag. Instead, the placeholder glyphs should be used
+  // but cursor navigation should still behave as though they are joined. To get
+  // placeholder glyphs, make up a non-existent country. The codes used are
+  // based on ISO 3166-1 alpha-2. Codes starting with X are user-assigned.
+  base::string16 text(UTF8ToUTF16("🇽🇽🇽🇽"));
+  // Each flag is 4 UTF16 characters (2 surrogate pair code points).
+  EXPECT_EQ(8u, text.length());
+
+  render_text->SetText(text);
+  test_api()->EnsureLayout();
+
+  const int whole_width = render_text->GetStringSize().width();
+  const int half_width = whole_width / 2;
+  EXPECT_LE(6, whole_width);  // Sanity check.
+
+  EXPECT_EQ("[0->7]", GetRunListStructureString());
+
+  // Move from the left to the right.
+  const Rect start_cursor = render_text->GetUpdatedCursorBounds();
+  EXPECT_EQ(0, start_cursor.x());
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(Range(4, 4), render_text->selection());
+  const Rect middle_cursor = render_text->GetUpdatedCursorBounds();
+
+  // Should move about half way. Cursor bounds round to the nearest integer, so
+  // account for that.
+  EXPECT_LE(half_width - 1, middle_cursor.x());
+  EXPECT_GE(half_width + 1, middle_cursor.x());
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(Range(8, 8), render_text->selection());
+  const Rect end_cursor = render_text->GetUpdatedCursorBounds();
+  EXPECT_LE(whole_width - 1, end_cursor.x());  // Should move most of the way.
+  EXPECT_GE(whole_width + 1, end_cursor.x());
+
+  // Move right to left.
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(Range(4, 4), render_text->selection());
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(Range(0, 0), render_text->selection());
+
+  // Select from the left to the right. The first "flag" should be selected.
+  // Note cursor bounds and selection bounds differ on integer rounding - see
+  // http://crbug.com/735346.
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_RETAIN);
+  EXPECT_EQ(Range(0, 4), render_text->selection());
+  Rect selection_bounds = GetSelectionBoundsUnion();
+  EXPECT_EQ(0, selection_bounds.x());
+  EXPECT_LE(half_width - 1, selection_bounds.width());  // Allow for rounding.
+  EXPECT_GE(half_width + 1, selection_bounds.width());
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_RETAIN);
+  EXPECT_EQ(Range(0, 8), render_text->selection());
+  selection_bounds = GetSelectionBoundsUnion();
+  EXPECT_EQ(0, selection_bounds.x());
+  EXPECT_EQ(whole_width, selection_bounds.width());
+}
+
+// Ensures that glyph spacing is correctly applied to obscured texts.
+TEST_P(RenderTextHarfBuzzTest, GlyphSpacing) {
+  const base::string16 seuss = UTF8ToUTF16("hop on pop");
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+  render_text->SetText(seuss);
+  render_text->SetObscured(true);
+  test_api()->EnsureLayout();
+  const internal::TextRunList* run_list = GetHarfBuzzRunList();
+  ASSERT_EQ(1U, run_list->size());
+  internal::TextRunHarfBuzz* run = run_list->runs()[0].get();
+  // The default glyph spacing is zero.
+  EXPECT_EQ(0, render_text->glyph_spacing());
+  ShapeRunWithFont(render_text->text(), Font(), FontRenderParams(), run);
+  const float width_without_glyph_spacing = run->width;
+
+  const float kGlyphSpacing = 5;
+  render_text->set_glyph_spacing(kGlyphSpacing);
+  ShapeRunWithFont(render_text->text(), Font(), FontRenderParams(), run);
+  // The new width is the sum of |width_without_glyph_spacing| and the spacing.
+  const float total_spacing = seuss.length() * kGlyphSpacing;
+  EXPECT_EQ(width_without_glyph_spacing + total_spacing, run->width);
 }
 
 // Prefix for test instantiations intentionally left blank since each test

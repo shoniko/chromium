@@ -93,12 +93,23 @@ int ClientLoFiVersion();
 int AMPRedirectionPreviewsVersion();
 int NoScriptPreviewsVersion();
 
+// Whether server optimization hints are enabled.
+bool IsOptimizationHintsEnabled();
+
 // The threshold of EffectiveConnectionType above which Client Lo-Fi previews
 // should not be served.
 net::EffectiveConnectionType EffectiveConnectionTypeThresholdForClientLoFi();
 
 // Returns the hosts that are blacklisted by the Client Lo-Fi field trial.
 std::vector<std::string> GetBlackListedHostsForClientLoFiFieldTrial();
+
+// For estimating NoScript data savings, this is the percentage factor to
+// multiple by the network bytes for inflating the original_bytes count.
+int NoScriptPreviewsInflationPercent();
+
+// For estimating NoScript data savings, this is the number of bytes to
+// for inflating the original_bytes count.
+int NoScriptPreviewsInflationBytes();
 
 }  // namespace params
 

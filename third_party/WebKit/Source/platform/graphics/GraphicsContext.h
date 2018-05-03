@@ -37,6 +37,7 @@
 #include "platform/graphics/HighContrastImageClassifier.h"
 #include "platform/graphics/HighContrastSettings.h"
 #include "platform/graphics/ImageOrientation.h"
+#include "platform/graphics/paint/PaintFilter.h"
 #include "platform/graphics/paint/PaintRecord.h"
 #include "platform/graphics/paint/PaintRecorder.h"
 #include "platform/graphics/skia/SkiaUtils.h"
@@ -44,7 +45,6 @@
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Noncopyable.h"
 #include "third_party/skia/include/core/SkClipOp.h"
-#include "third_party/skia/include/core/SkImageFilter.h"
 #include "third_party/skia/include/core/SkMetaData.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
@@ -73,7 +73,7 @@ class PLATFORM_EXPORT GraphicsContext {
 
   explicit GraphicsContext(PaintController&,
                            DisabledMode = kNothingDisabled,
-                           SkMetaData* = 0);
+                           SkMetaData* = nullptr);
 
   ~GraphicsContext();
 
@@ -81,6 +81,9 @@ class PLATFORM_EXPORT GraphicsContext {
   const PaintCanvas* Canvas() const { return canvas_; }
 
   PaintController& GetPaintController() { return paint_controller_; }
+  const PaintController& GetPaintController() const {
+    return paint_controller_;
+  }
 
   bool ContextDisabled() const { return disabled_state_; }
 
@@ -298,9 +301,9 @@ class PLATFORM_EXPORT GraphicsContext {
   // (i.e. endLayer()).
   void BeginLayer(float opacity = 1.0f,
                   SkBlendMode = SkBlendMode::kSrcOver,
-                  const FloatRect* = 0,
+                  const FloatRect* = nullptr,
                   ColorFilter = kColorFilterNone,
-                  sk_sp<SkImageFilter> = nullptr);
+                  sk_sp<PaintFilter> = nullptr);
   void EndLayer();
 
   // Instead of being dispatched to the active canvas, draw commands following

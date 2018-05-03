@@ -14,7 +14,7 @@
 #import "ios/web/public/navigation_item.h"
 #include "ios/web/public/ssl_status.h"
 #include "ios/web/public/test/web_test.h"
-#import "ios/web/test/fakes/test_navigation_manager_delegate.h"
+#import "ios/web/test/fakes/fake_navigation_manager_delegate.h"
 #import "ios/web/web_state/wk_web_view_security_util.h"
 #include "net/cert/x509_util_ios_and_mac.h"
 #include "net/test/cert_test_util.h"
@@ -136,7 +136,7 @@ class CRWSSLStatusUpdaterTest : public web::WebTest {
   CRWSSLStatusUpdaterTestDataSource* data_source_;
   id delegate_;
   std::unique_ptr<web::NavigationManagerImpl> nav_manager_;
-  TestNavigationManagerDelegate nav_delegate_;
+  FakeNavigationManagerDelegate nav_delegate_;
   CRWSSLStatusUpdater* ssl_status_updater_;
   base::ScopedCFTypeRef<SecTrustRef> trust_;
 };
@@ -161,10 +161,12 @@ TEST_F(CRWSSLStatusUpdaterTest, HttpItem) {
 
   // No certificate for http.
   EXPECT_FALSE(!!item->GetSSL().certificate);
+
+  // Always normal content for http.
+  EXPECT_EQ(web::SSLStatus::NORMAL_CONTENT, item->GetSSL().content_status);
+
   // Make sure that security style and content status did change.
   EXPECT_EQ(web::SECURITY_STYLE_UNAUTHENTICATED, item->GetSSL().security_style);
-  EXPECT_EQ(web::SSLStatus::DISPLAYED_INSECURE_CONTENT,
-            item->GetSSL().content_status);
 }
 
 // Tests that delegate callback is not called if no changes were made to http

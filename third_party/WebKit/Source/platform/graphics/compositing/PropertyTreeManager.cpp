@@ -301,7 +301,8 @@ void PropertyTreeManager::EmitClipMaskLayer() {
   cc::EffectNode& mask_isolation = *GetEffectTree().Node(current_effect_id_);
   // Assignment of mask_isolation.stable_id was delayed until now.
   // See PropertyTreeManager::SynthesizeCcEffectsForClipsIfNeeded().
-  DCHECK_EQ(cc::EffectNode::INVALID_STABLE_ID, mask_isolation.stable_id);
+  DCHECK_EQ(static_cast<uint64_t>(cc::EffectNode::INVALID_STABLE_ID),
+            mask_isolation.stable_id);
   mask_isolation.stable_id = mask_isolation_id.ToInternalValue();
 
   cc::EffectNode& mask_effect = *GetEffectTree().Node(
@@ -578,7 +579,8 @@ bool PropertyTreeManager::BuildEffectNodesRecursively(
     DCHECK(used_blend_mode == SkBlendMode::kDstIn);
     DCHECK(next_effect->Filter().IsEmpty());
     effect_node.filters.Append(cc::FilterOperation::CreateReferenceFilter(
-        SkColorFilterImageFilter::Make(SkLumaColorFilter::Make(), nullptr)));
+        sk_make_sp<ColorFilterPaintFilter>(SkLumaColorFilter::Make(),
+                                           nullptr)));
   } else {
     effect_node.filters = next_effect->Filter().AsCcFilterOperations();
   }

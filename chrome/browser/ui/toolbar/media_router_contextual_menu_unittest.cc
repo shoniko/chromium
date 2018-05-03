@@ -8,6 +8,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_action_test_util.h"
+#include "chrome/browser/extensions/load_error_reporter.h"
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
@@ -38,6 +39,7 @@ class MediaRouterContextualMenuUnitTest : public BrowserWithTestWindowTest {
 
   void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
+    extensions::LoadErrorReporter::Init(true);
 
     toolbar_actions_model_ =
         extensions::extension_action_test_util::CreateToolbarModelForProfile(
@@ -46,8 +48,8 @@ class MediaRouterContextualMenuUnitTest : public BrowserWithTestWindowTest {
     signin_manager_ =
         SigninManagerFactory::GetInstance()->GetForProfile(profile());
     browser_action_test_util_ =
-        base::MakeUnique<BrowserActionTestUtil>(browser(), false);
-    action_ = base::MakeUnique<MediaRouterAction>(
+        std::make_unique<BrowserActionTestUtil>(browser(), false);
+    action_ = std::make_unique<MediaRouterAction>(
         browser(), browser_action_test_util_->GetToolbarActionsBar());
 
     // Pin the Media Router action to the toolbar.
@@ -125,12 +127,17 @@ TEST_F(MediaRouterContextualMenuUnitTest, Basic) {
 
 // Note that "Manage devices" is always disabled on Linux.
 TEST_F(MediaRouterContextualMenuUnitTest, ManageDevicesDisabledInIncognito) {
-  // Create the MediaRouterAction under an incognito profile.
-  profile()->ForceIncognito(true);
-  action_ = base::MakeUnique<MediaRouterAction>(
-      browser(), browser_action_test_util_->GetToolbarActionsBar());
+  std::unique_ptr<BrowserWindow> window(CreateBrowserWindow());
+  std::unique_ptr<Browser> incognito_browser(
+      CreateBrowser(profile()->GetOffTheRecordProfile(), Browser::TYPE_TABBED,
+                    false, window.get()));
+
+  action_ = std::make_unique<MediaRouterAction>(
+      incognito_browser.get(),
+      browser_action_test_util_->GetToolbarActionsBar());
   model_ = static_cast<ui::SimpleMenuModel*>(action_->GetContextMenu());
   EXPECT_EQ(-1, model_->GetIndexOfCommandId(IDC_MEDIA_ROUTER_MANAGE_DEVICES));
+  action_.reset();
 }
 
 // "Report an issue" should be present for normal profiles but not for
@@ -138,12 +145,17 @@ TEST_F(MediaRouterContextualMenuUnitTest, ManageDevicesDisabledInIncognito) {
 TEST_F(MediaRouterContextualMenuUnitTest, EnableAndDisableReportIssue) {
   EXPECT_NE(-1, model_->GetIndexOfCommandId(IDC_MEDIA_ROUTER_REPORT_ISSUE));
 
-  // Create the MediaRouterAction under an incognito profile.
-  profile()->ForceIncognito(true);
-  action_ = base::MakeUnique<MediaRouterAction>(
-      browser(), browser_action_test_util_->GetToolbarActionsBar());
+  std::unique_ptr<BrowserWindow> window(CreateBrowserWindow());
+  std::unique_ptr<Browser> incognito_browser(
+      CreateBrowser(profile()->GetOffTheRecordProfile(), Browser::TYPE_TABBED,
+                    false, window.get()));
+
+  action_ = std::make_unique<MediaRouterAction>(
+      incognito_browser.get(),
+      browser_action_test_util_->GetToolbarActionsBar());
   model_ = static_cast<ui::SimpleMenuModel*>(action_->GetContextMenu());
   EXPECT_EQ(-1, model_->GetIndexOfCommandId(IDC_MEDIA_ROUTER_REPORT_ISSUE));
+  action_.reset();
 }
 
 // Tests whether the cloud services item is correctly toggled. This menu item

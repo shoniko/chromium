@@ -118,12 +118,15 @@
 #   documentation should state that the policy supports dynamic refresh or not.
 #   Supporting dynamic refresh means that Chrome respects the changes to the
 #   policy immediately, without the need for restart.
-#   'can_be_mandatory' can be set to False to exclude that policy in the
-#   mandatory policies template. This only affects the template generation;
-#   The default is True.
-#   'can_be_recommended' can be set to True to include that policy in the
-#   recommended policies templates. This only affects the template generation;
-#   all policies can be at the recommended level. The default is False.
+#   'can_be_mandatory' Set to False to suppress the policy in the generated
+#   mandatory policy templates. The generated documentation for the policy
+#   will contain a suitable hint for administrators.
+#   'can_be_recommended' Set to True to include the policy in the generated
+#   recommended policy templates. The generated documentation for the policy
+#   will contain a suitable hint for administrators.
+#   Policies settings in the mandatory template override user preferences, while
+#   recommended policies provide a default setting that may be overridden by the
+#   user. By default, each policy is mandatory and not recommended.
 #   'per_profile' controls whether a user policy applies to every user logging
 #   into the browser or only one profile.
 #
@@ -143,7 +146,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 394
+#   For your editing convenience: highest ID currently used: 414
 #   And don't forget to also update the EnterprisePolicies enum of
 #   histograms.xml (run 'python tools/metrics/histograms/update_policies.py').
 #
@@ -1846,19 +1849,20 @@
       'name': 'DisablePluginFinder',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:11-', 'chrome_os:11-'],
+      'supported_on': ['chrome.*:11-64', 'chrome_os:11-64'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': False,
       },
+      'deprecated': True,
       'example_value': True,
       'id': 66,
-      'caption': '''Specify whether the plugin finder should be disabled''',
+      'caption': '''Specify whether the plugin finder should be disabled (deprecated)''',
       'tags': [],
-      'desc': '''If you set this setting to enabled the automatic search and installation of missing plugins will be disabled in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+      'desc': '''This policy has been removed as of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> 64.
 
-      Setting this option to disabled or leave it not set the plugin finder will be active.''',
-      'label': '''Disable plugin finder''',
+      Automatic search and installation of missing plugins is no longer supported.''',
+      'label': '''Disable plugin finder (deprecated)''',
     },
     {
       'name': 'SyncDisabled',
@@ -2626,9 +2630,9 @@
       'tags': ['website-sharing'],
       'desc': '''Controls whether NTLMv2 is enabled.
 
-          All recent versions of Samba and Windows servers support NTLMv2. This should only be disabled for backwards compatability and reduces the security of authentication.
+          All recent versions of Samba and Windows servers support NTLMv2. This should only be disabled for backwards compatibility and reduces the security of authentication.
 
-          The default value when this policy is not defined is currently false for backwards compatability, but will change to true in the future.''',
+          The default value when this policy is not defined is currently false for backwards compatibility, but will change to true in the future.''',
     },
     {
       'name': 'ExtensionInstallBlacklist',
@@ -2907,33 +2911,8 @@
 
           This policy maps an extension ID or an update URL to its configuration. With an extension ID, configuration will be applied to the specified extension only. A default configuration can be set for the special ID <ph name="DEFAULT_SCOPE">"*"</ph>, which will apply to all extensions that don't have a custom configuration set in this policy. With an update URL, configuration will be applied to all extensions with the exact update URL stated in manifest of this extension, as described at <ph name="LINK_TO_EXTENSION_DOC1">https://developer.chrome.com/extensions/autoupdate</ph>.
 
-          The configuration for each extension (or extensions with same update URL) is another dictionary that can contain the fields documented below.
-
-          <ph name="INSTALLATION_MODE">"installation_mode"</ph>: maps to a string indicating the installation mode for the extension. The valid strings are:
-          * <ph name="ALLOWED">"allowed"</ph>: allows the extension to be installed by the user. This is the default behavior.
-          * <ph name="BLOCKED">"blocked"</ph>: blocks installation of the extension.
-          * <ph name="FORCE_INSTALLED">"force_installed"</ph>: the extension is automatically installed and can't be removed by the user.
-          * <ph name="NORMAL_INSTALLED">"normal_installed"</ph>: the extension is automatically installed but can be disabled by the user.
-
-          The <ph name="INSTALLTION_MODE">"installation_mode"</ph> can also be configured for multiple extensions as well, including the <ph name="DEFAULT_SCOPE">"*"</ph> extension (as default settings) and extensions with same update URL. Only the <ph name="ALLOWED">"allowed"</ph> and <ph name="BLOCKED">"blocked"</ph> values can be used in this case.
-
-          If the mode is set to <ph name="FORCE_INSTALLED">"force_installed"</ph> or <ph name="NORMAL_INSTALLED">"normal_installed"</ph> then an <ph name="UPDATE_URL">"update_url"</ph> must be configured too. Note that the update URL set in this policy is only used for the initial installation; subsequent updates of the extension will use the update URL indicated in the extension's manifest. The update URL should point to an Update Manifest XML document as mentioned above.
-
-          <ph name="BLOCKED_PERMISSIONS">"blocked_permissions"</ph>: maps to a list of strings indicating the blocked API permissions for the extension. The permissions names are same as the permission strings declared in manifest of extension as described at <ph name="LINK_TO_EXTENSION_DOC3">https://developer.chrome.com/extensions/declare_permissions</ph>. This setting also can be configured for <ph name="DEFAULT_SCOPE">"*"</ph> extension. If the extension requires a permission which is on the blocklist, it will not be allowed to load. If it contains a blocked permission as optional requirement, it will be handled in the normal way, but requesting conflicting permissions will be declined automatically at runtime.
-
-          <ph name="ALLOWED_PERMISSIONS">"allowed_permissions"</ph>: similar to <ph name="BLOCKED_PERMISSIONS">"blocked_permissions"</ph>, but instead explicitly allow some permissions which might be blocked by global blocked permission list, thus can not be configured for <ph name="DEFAULT_SCOPE">"*"</ph> extension. Note that this setting doesn't give granted permissions to extensions automatically.
-
-          <ph name="MINIMUM_VERSION_REQUIRED">"minimum_version_required"</ph>: maps to a version string. The format of the version string is the same as the one used in extension manifest, as described at <ph name="LINK_TO_EXTENSION_DOC4">https://developer.chrome.com/apps/manifest/version</ph>. An extension with a version older than the specified minimum version will be disabled. This applies to force-installed extensions as well.
-
-          The following settings can be used only for the default <ph name="DEFAULT_SCOPE">"*"</ph> configuration:
-
-          <ph name="INSTALL_SOURCES">"install_sources"</ph>: Each item in this list is an extension-style match pattern (<ph name="LINK_TO_MATCH_PATTERNS">https://developer.chrome.com/extensions/match_patterns</ph>). Users will be able to easily install items from any URL that matches an item in this list. Both the location of the <ph name="EXTENSION_SUFFIX_WILDCARD">*.crx</ph> file and the page where the download is started from (i.e.  the referrer) must be allowed by these patterns.
-
-          <ph name="ALLOWED_TYPES">"allowed_types"</ph>: This setting whitelists the allowed types of extension/apps that can be installed in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.  The value is a list of strings, each of which should be one of the following: <ph name="VALID_ALLOWED_TYPES">"extension", "theme", "user_script", "hosted_app", "legacy_packaged_app", "platform_app"</ph>. See the <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> extensions documentation for more information on these types.
-          <ph name="BLOCKED_INSTALL_MESSAGE">"blocked_install_message"</ph>: If a user tries to install an extension, but it is blocked by policy the Chrome Webstore displays a generic error message. This setting allows you to append text to the error message. This could be be used to direct users to your help desk, explain why a particular extension is blocked, or something else. This error message will be truncated if longer than 1000 characters.
-          <ph name="RUNTIME_BLOCKED_HOSTS">"runtime_blocked_hosts"</ph>: Accepts a list of hosts that an extension will be blocked from interacting with. This includes injecting javascript, altering and viewing webRequests / webNavigation, viewing and altering cookies. The format is similar to Match Patterns <ph name="LINK_TO_MATCH_PATTERNS">https://developer.chrome.com/extensions/match_patterns</ph> except no paths may be defined. e.g. "*://*.example.com". This also supports effective TLD wildcarding e.g. "*://example.*".
-          <ph name="RUNTIME_ALLOWED_HOSTS">"runtime_allowed_hosts"</ph>: Accepts a list of hosts that an extension can interact with regardless of whether they are listed in <ph name="RUNTIME_BLOCKED_HOSTS">"runtime_blocked_hosts"</ph>. This is the same format as <ph name="RUNTIME_BLOCKED_HOSTS">"runtime_blocked_hosts"</ph>.
-          '''
+          For a full description of possible settings and structure of this policy please visit https://www.chromium.org/administrators/policy-list-3/extension-settings-full
+          ''',
     },
     {
       'name': 'ShowHomeButton',
@@ -3168,7 +3147,7 @@
       'tags': ['website-sharing'],
       'desc': '''Specifies the URL of the search engine used when doing a default search. The URL should contain the string '<ph name="SEARCH_TERM_MARKER">{searchTerms}</ph>', which will be replaced at query time by the terms the user is searching for.
 
-          Google's search URL can be specified as: <ph name="GOOGLE_SEARCH_URL">'{google:baseURL}search?q={searchTerms}&amp;{google:RLZ}{google:originalQueryForSuggestion}{google:assistedQueryStats}{google:searchFieldtrialParameter}{google:searchClient}{google:sourceId}{google:instantExtendedEnabledParameter}ie={inputEncoding}'</ph>.
+          Google's search URL can be specified as: <ph name="GOOGLE_SEARCH_URL">'{google:baseURL}search?q={searchTerms}&amp;{google:RLZ}{google:originalQueryForSuggestion}{google:assistedQueryStats}{google:searchFieldtrialParameter}{google:searchClient}{google:sourceId}ie={inputEncoding}'</ph>.
 
           This option must be set when the 'DefaultSearchProviderEnabled' policy is enabled and will only be respected if this is the case.''',
     },
@@ -3197,7 +3176,8 @@
       'name': 'DefaultSearchProviderInstantURL',
       'type': 'string',
       'schema': { 'type': 'string' },
-      'supported_on': ['chrome.*:10-', 'chrome_os:11-', 'android:30-'],
+      'supported_on': ['chrome.*:10-63', 'chrome_os:11-63', 'android:30-63'],
+      'deprecated': True,
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -3281,7 +3261,8 @@
       'name': 'DefaultSearchProviderSearchTermsReplacementKey',
       'type': 'string',
       'schema': { 'type': 'string' },
-      'supported_on': ['chrome.*:25-', 'chrome_os:25-', 'android:30-'],
+      'supported_on': ['chrome.*:25-63', 'chrome_os:25-63', 'android:30-63'],
+      'deprecated': True,
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -3376,7 +3357,8 @@
       'name': 'DefaultSearchProviderInstantURLPostParams',
       'type': 'string',
       'schema': { 'type': 'string' },
-      'supported_on': ['chrome.*:29-', 'chrome_os:29-', 'android:30-'],
+      'supported_on': ['chrome.*:29-63', 'chrome_os:29-63', 'android:30-63'],
+      'deprecated': True,
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -3553,6 +3535,8 @@
       'desc': '''Allows you to set whether websites are allowed to automatically run the <ph name="FLASH_PLUGIN_NAME">Flash</ph> plugin. Automatically running the <ph name="FLASH_PLUGIN_NAME">Flash</ph> plugin can be either allowed for all websites or denied for all websites.
 
           Click to play allows the <ph name="FLASH_PLUGIN_NAME">Flash</ph> plugin to run but the user must click on the placeholder to start its execution.
+
+          Automatic playback is only allowed for domains explictly listed in the <ph name="PLUGINS_ALLOWED_FOR_URLS_POLICY_NAME">PluginsAllowedForUrls</ph> policy. If you want to enabled automatic playback for all sites consider adding http://* and https://* to this list.
 
           If this policy is left not set, the user will be able to change this setting manually.''',
     },
@@ -3776,7 +3760,7 @@
         'dynamic_refresh': True,
         'per_profile': True,
       },
-      'example_value': ["{\\\"pattern\\\":\\\"https://www.example.com\\\",\\\"filter\\\":{\\\"ISSUER\\\":{\\\"CN\\\":\\\"certificate issuer name\\\"}}}"],
+      'example_value': ['{"pattern":"https://www.example.com","filter":{"ISSUER":{"CN":"certificate issuer name"}}}'],
       'id': 102,
       'caption': '''Automatically select client certificates for these sites''',
       'tags': ['website-sharing'],
@@ -3785,6 +3769,28 @@
           The value must be an array of stringified JSON dictionaries. Each dictionary must have the form { "pattern": "$URL_PATTERN", "filter" : $FILTER }, where $URL_PATTERN is a content setting pattern. $FILTER restricts from which client certificates the browser will automatically select. Independent of the filter, only certificates will be selected that match the server's certificate request. If $FILTER has the form { "ISSUER": { "CN": "$ISSUER_CN" } }, additionally only client certificates are selected that are issued by a certificate with the CommonName $ISSUER_CN. If $FILTER is the empty dictionary {}, the selection of client certificates is not additionally restricted.
 
           If this policy is left not set, no auto-selection will be done for any site.''',
+    },
+    {
+      'name': 'DeviceLoginScreenAutoSelectCertificateForUrls',
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': { 'type': 'string' },
+      },
+      'supported_on': ['chrome_os:65-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': ['{"pattern":"https://www.example.com","filter":{"ISSUER":{"CN":"certificate issuer name"}}}'],
+      'id': 396,
+      'caption': '''Automatically select client certificates for these sites on the sign-in screen''',
+      'tags': ['website-sharing'],
+      'desc': '''Allows you to specify a list of url patterns that specify sites for which a client certificate is automatically selected on the sign-in screen in the frame hosting the SAML flow, if the site requests a certificate. An example usage is to configure a device-wide certificate to be presented to the SAML IdP.
+
+      The value must be an array of stringified JSON dictionaries. Each dictionary must have the form { "pattern": "$URL_PATTERN", "filter" : $FILTER }, where $URL_PATTERN is a content setting pattern. $FILTER restricts from which client certificates the browser will automatically select. Independent of the filter, only certificates will be selected that match the server's certificate request. If $FILTER has the form { "ISSUER": { "CN": "$ISSUER_CN" } }, additionally only client certificates are selected that are issued by a certificate with the CommonName $ISSUER_CN. If $FILTER is the empty dictionary {}, the selection of client certificates is not additionally restricted.
+
+      If this policy is left not set, no auto-selection will be done for any site.''',
     },
     {
       'name': 'CookiesAllowedForUrls',
@@ -4487,6 +4493,28 @@
       'arc_support': 'When multiple users are logged in, only the primary user can use Android apps.',
     },
     {
+      'name': 'SecondaryGoogleAccountSigninAllowed',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:65-'],
+      'features': {
+        # The case where a user is already signed into an unmanaged account from the content area cannot be handled right now and hence this is not dynamic.
+        'dynamic_refresh': False,
+        'per_profile': True,
+      },
+      'example_value': False,
+      'id': 406,
+      'caption': '''Allow Multiple Sign-in Within the Browser''',
+      'tags': [],
+      'desc': '''This setting allows users to switch between Google accounts within the content area of their browser window after they sign into their <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> device.
+
+      If this policy is set to false, signing in to a different account from non-Incognito browser content area will not be allowed.
+
+      If this policy is unset or set to true, the default behavior will be used: signing in to a different account from the browser content area will be allowed, except for child accounts where it will be blocked for non-Incognito content area.
+
+      In case signing in to a different account shouldn't be allowed via the Incognito mode, consider blocking that mode using the IncognitoModeAvailability policy.''',
+    },
+    {
       'name': 'InstantEnabled',
       'type': 'main',
       'schema': { 'type': 'boolean' },
@@ -4533,9 +4561,9 @@
       'tags': [],
       'desc': '''Enables the integrated Google Translate service on <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-      If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will show an integrated toolbar offering to translate the page for the user, when appropriate.
+      If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will offer translation functionality to the user by showing an integrated translate toolbar (when appropriate) and a translate option on the right-click context menu.
 
-      If you disable this setting, users will never see the translation bar.
+      If you disable this setting, all built-in translate features will be disabled.
 
       If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
@@ -4564,14 +4592,15 @@
       'name': 'AlwaysAuthorizePlugins',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:13-', 'chrome_os:13-'],
+      'supported_on': ['chrome.*:13-64', 'chrome_os:13-64'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
       },
+      'deprecated': True,
       'example_value': True,
       'id': 86,
-      'caption': '''Always runs plugins that require authorization''',
+      'caption': '''Always runs plugins that require authorization (deprecated)''',
       'tags': ['system-security'],
       'desc': '''If you enable this setting, plugins that are not outdated always run.
 
@@ -4674,6 +4703,27 @@
       If you disable this setting, whenever the user performs an action which would provoke a file selection dialog (like importing bookmarks, uploading files, saving links, etc.) a message is displayed instead and the user is assumed to have clicked Cancel on the file selection dialog.
 
       If this setting is not set, users can open file selection dialogs as normal.''',
+    },
+    {
+      'name': 'SecurityKeyPermitAttestation',
+      'tags': ['website-sharing'],
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': { 'type': 'string' },
+      },
+      'supported_on': ['chrome.*:65-', 'chrome_os:65-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': ['https://example.com'],
+      'id': 402,
+      'caption': '''URLs/domains automatically permitted direct Security Key attestation''',
+      'tags': [],
+      'desc': '''Specifies URLs and domains for which no prompt will be shown when attestation certificates from Security Keys are requested. Additionally, a signal will be sent to the Security Key indicating that individual attestation may be used. Without this, users will be prompted in Chrome 65+ when sites request attestation of Security Keys.
+
+      URLs (like https://example.com/some/path) will only match as U2F appIDs. Domains (like example.com) only match as webauthn RP IDs. Thus, to cover both U2F and webauthn APIs for a given site, both the appID URL and domain would need to be listed.''',
     },
     {
       'name': 'GCFUserDataDir',
@@ -8455,17 +8505,16 @@
       'name': 'ForceBrowserSignin',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.win:62-', 'chrome.linux:62-', 'android:63-'],
+      'supported_on': ['chrome.win:64-', 'android:65-'],
       'features': {
         'dynamic_refresh': False,
         'per_profile': False,
       },
-      'future': True,
       'example_value': False,
       'id': 346,
       'caption': '''Enables force sign in for <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>''',
       'tags': [],
-      'desc': '''If this policy is set to true, user has to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> with their profile before using the browser. And the default value of BrowserGuestModeEnabled will be set to false.
+      'desc': '''If this policy is set to true, user has to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> with their profile before using the browser. And the default value of BrowserGuestModeEnabled will be set to false. Note that existing unsigned profiles will be locked and inaccessible after enabling this policy. For more information, see help center article.
 
       If this policy is set to false or not configured, user can use the browser without sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
     },
@@ -8604,7 +8653,7 @@
       'id': 361,
       'caption': '''Maximum SSL version enabled''',
       'tags': ['system-security'],
-      'desc': '''Warning: The max TLS version policy will be entirely removed from <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> around version 66 (around February 2018).
+      'desc': '''Warning: The max TLS version policy will be entirely removed from <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> around version 72 (around January 2019).
 
       If this policy is not configured then <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> uses the default maximum version.
 
@@ -9427,9 +9476,9 @@
       },
       'example_value': 'managedchrome.com,example.com',
       'id': 331,
-      'caption': '''Define domains allowed to access Google Apps''',
+      'caption': '''Define domains allowed to access G Suite''',
       'tags': ['filtering'],
-      'desc': '''Enables <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>'s restricted log in feature in Google Apps and prevents users from changing this setting.
+      'desc': '''Enables <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>'s restricted log in feature in G Suite and prevents users from changing this setting.
 
       If you define this setting, the user will only be able to access Google
       Apps using accounts from the specified domains (note that this does not
@@ -9438,10 +9487,10 @@
       This setting will NOT prevent the user from loging in on a managed device
       that requires Google authentication. The user will still be allowed to
       sign in to accounts from other domains, but they will receive an error
-      when trying to use Google Apps with those accounts.
+      when trying to use G Suite with those accounts.
 
       If you leave this setting empty/not-configured, the user will be able to
-      access Google Apps with any account.
+      access G Suite with any account.
 
       This policy causes the X-GoogApps-Allowed-Domains header to be appended to
       all HTTP and HTTPS requests to all google.com domains, as described in
@@ -10556,7 +10605,7 @@
         'ignored_policy_proto_tags': [3, 8]
       },
       'id': 380,
-      'caption': '''Off hours intervals when device OffHours |ignored_policy_proto_tags| are released''',
+      'caption': '''Off hours intervals when the specified device policies are released''',
       'tags': [],
       'desc': '''If "OffHours" policy is set, then the specified device policies are ignored (use the default settings of these policies) during the defined time intervals. Device policies are re-applied by Chrome on every event when "OffHours" period starts or ends. User will be notified and forced to sign out when "OffHours" time end and device policy settings are changed (e.g. when user is logged in not with an allowed account).''',
     },
@@ -10582,7 +10631,329 @@
       This policy is not available on Windows instances that are not joined to a <ph name="MS_AD_NAME">Microsoft® Active Directory®</ph> domain.
       '''
     },
+    {
+      'name': 'PromptForDownloadLocation',
+      'type': 'main',
+      'schema': { 'type': 'boolean'},
+      'supported_on': ['chrome.*:64-', 'chrome_os:64-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': False,
+      'id': 395,
+      'caption': '''Ask where to save each file before downloading''',
+      'tags': [],
+      'desc': '''
+      If the policy is enabled, the user will be asked where to save each file before downloading.
+      If the policy is disabled, downloads will start immediately, and the user will not be asked where to save the file.
+      If the policy is not configured, the user will be able to change this setting.
+      '''
+    },
+    {
+      'name': 'UnaffiliatedArcAllowed',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:64-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': False,
+      },
+      'example_value': False,
+      'id': 397,
+      'caption': '''Allow unaffiliated users to use ARC''',
+      'tags': [],
+      'desc': '''If the policy is set to false, unaffiliated users will not be allowed to use ARC.
+
+      If the policy is unset or set to true, all users are allowed to use ARC (unless ARC is disabled by other means).
+
+      Changes to the policy will only be applied while ARC is not running, e.g. while Chrome OS is starting.''',
+    },
+    {
+      'name': 'IsolateOrigins',
+      'type': 'string',
+      'schema': { 'type': 'string' },
+      'supported_on': ['chrome.*:63-', 'chrome_os:63-'],
+      'device_only': False,
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': 'https://example.com/,https://othersite.org/',
+      'id': 398,
+      'caption': '''Enable Site Isolation for specified origins''',
+      'tags': ['system-security'],
+      'desc': '''
+      NOTE: This policy is experimental and may break functionality!
+      If the policy is enabled, each of the named origins in a
+      comma-separated list will run in its own process. This will also isolate
+      origins named by subdomains; e.g. specifying https://example.com/ will
+      also cause https://foo.example.com/ to be isolated as part of the
+      https://example.com/ site.
+      If the policy is disabled, the pre-Site Isolation process management logic will take effect.
+      If the policy is not configured, the user will be able to change this setting.
+      ''',
+    },
+    {
+      'name': 'SitePerProcess',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:63-', 'chrome_os:63-'],
+      'device_only': False,
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': True,
+      'id': 399,
+      'caption': '''Enable Site Isolation for every site''',
+      'tags': ['system-security'],
+      'desc': '''
+      NOTE: This policy is experimental and may break functionality!
+      You might want to look at the IsolateOrigins policy setting to get the
+      best of both worlds, isolation and limited impact for users, by using
+      IsolateOrigins with a list of the sites you want to isolate. This setting,
+      SitePerProcess, isolates all sites.
+      If the policy is enabled, each site will run in its own process.
+      If the policy is disabled, the pre-Site Isolation process management logic will take effect.
+      If the policy is not configured, the user will be able to change this setting.
+      ''',
+    },
+    {
+      'name': 'WebDriverOverridesIncompatiblePolicies',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:65-'],
+      'device_only': False,
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': True,
+      'id': 414,
+      'caption': '''Allow WebDriver to Override Incompatible Policies''',
+      'tags': ['system-security'],
+      'desc': '''This policy allows users of the WebDriver feature to override
+      policies which can interfere with its operation.
+
+      Currently this policy disables SitePerProcess and IsolateOrigins policies.
+
+      If the policy is enabled, WebDriver will be able to override incomaptible
+      policies.
+      If the policy is disabled or not configured, WebDriver will not be allowed
+      to override incompatible policies.''',
+    },
+    {
+      'name': 'UnsafelyTreatInsecureOriginAsSecure',
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': { 'type': 'string' },
+      },
+      'supported_on': ['chrome.*:65-'],
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': True,
+      },
+      'example_value': ['http://testserver.example.com/'],
+      'id': 400,
+      'caption': '''Origins to be treated as secure context.''',
+      'tags': ['system-security'],
+      'desc': '''
+      The policy specifies a list of origins (URLs) to be treated as secure context. The intent is to allow organizations to set up a staging server for internal web development, so that their developers can test out features requiring secure contexts without having to deploy TLS on the staging server.
+      Setting a list of URLs in this policy has the same effect as setting the command-line flag '--unsafely-treat-insecure-origin-as-secure' to a comma-separated list of the same URLs. If the policy is set, it will override the command-line flag.
+      For more information on secure contexts, see https://www.w3.org/TR/secure-contexts/
+      '''
+    },
+    {
+      'name': 'DefaultDownloadDirectory',
+      'type': 'string',
+      'schema': { 'type': 'string' },
+      'supported_on': ['chrome.*:64-', 'chrome_os:64-'],
+      'features': {
+        'can_be_mandatory': False,
+        'can_be_recommended': True,
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': '/home/${user_name}/Downloads',
+      'id': 401,
+      'caption': '''Set default download directory''',
+      'tags': ['local-data-access'],
+      'desc': '''Configures the default directory that <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use for downloading files.
+
+      If you set this policy, it will change the default directory that <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> downloads files to. This policy is not mandatory, so the user will be able to change the directory.
+
+      If you do not set this policy, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use its usual default directory (platform-specific).
+
+      See https://www.chromium.org/administrators/policy-list-3/user-data-directory-variables for a list of variables that can be used.''',
+    },
+    {
+      'name': 'DeviceHostnameTemplate',
+      'type': 'string',
+      'schema': { 'type': 'string' },
+      'supported_on': ['chrome_os:64-'],
+      'device_only': True,
+      'future': True,
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': 'chromebook-${ASSET_ID}',
+      'id': 403,
+      'caption': '''Device network hostname''',
+      'tags': [],
+      'desc': '''Determine the hostname of the device used in DHCP requests.
+
+      If this policy is set to a non empty string, that string will be used as the device hostname during DHCP request.
+
+      The string can contain variables ${ASSET_ID}, ${SERIAL_NUM}, ${MAC_ADDR} that would be replaced with values on the device before using as a hostname. Resulting substitution should be a valid hostname (per RFC 1035, section 3.1).
+
+      If this policy is not set, or the value after substitution is not a valid hostname, no hostname will be set in DHCP request. '''
+    },
+    {
+      'name': 'AbusiveExperienceInterventionEnforce',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:65-', 'chrome_os:65-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 404,
+      'caption': '''Abusive Experience Intervention Enforce''',
+      'tags': [],
+      'desc': '''Allows you to set whether sites with abusive experiences should be prevented from opening new windows or tabs.
+
+      If this policy is set to True, sites with abusive experiences will be prevented from opening new windows or tabs.
+      However this behavior will not trigger if SafeBrowsingEnabled policy is set to False.
+      If this policy is set to False, sites with abusive experiences will be allowed to open new windows or tabs.
+      If this policy is left not set, True will be used.''',
+    },
+    {
+      'name': 'SpellcheckLanguage',
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': { 'type': 'string' }
+      },
+      # Spell checking is provided by macOS, so can't be controlled on Mac.
+      'supported_on': ['chrome.win:65-', 'chrome.linux:65-', 'chrome_os:65-'],
+      'features': {
+        'can_be_recommended': False,
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': ['fr', 'es'],
+      'id': 405,
+      'caption': '''Force enable spellcheck languages''',
+      'tags': [],
+      'desc': '''Force-enables spellcheck languages. Unrecognized languages in that list will be ignored.
+
+      If you enable this policy, spellcheck will be enabled for the languages specified, in addition to the languages for which the user has enabled spellcheck.
+
+      If you do not set this policy, or disable it, there will be no change to the user's spellcheck preferences.
+
+      If the SpellcheckEnabled policy is set to disabled, this policy will have no effect.
+
+      The currently supported languages are: af, bg, ca, cs, da, de, el, en-AU, en-CA, en-GB, en-US, es, es-419, es-AR, es-ES, es-MX, es-US, et, fa, fo, fr, he, hi, hr, hu, id, it, ko, lt, lv, nb, nl, pl, pt-BR, pt-PT, ro, ru, sh, sk, sl, sq, sr, sv, ta, tg, tr, uk, vi.'''
+    },
+    {
+      'name': 'ThirdPartyBlockingEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.win:65-'],
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': False,
+      'id': 407,
+      'caption': '''Enables third party software injection blocking''',
+      'tags': [],
+      'desc': '''If the policy is set to false then third party software will be allowed to inject executable code into Chrome's processes. If the policy is unset or set to true then third party software will be prevented from injecting executable code into Chrome's processes.''',
+    },
+    {
+      'name': 'SpellcheckEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:65-', 'chrome_os:65-'],
+      'features': {
+        'can_be_recommended': False,
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': False,
+      'id': 408,
+      'caption': '''Enable spellcheck''',
+      'tags': [],
+      'desc': '''If this policy is not set or enabled, the user is allowed to use spellcheck.
+
+      If this policy is disabled, the user is not allowed to use spellcheck. The SpellcheckLanguage policy will also be ignored when this policy is disabled.
+      '''
+    },
+    {
+      'name': 'AdsSettingForIntrusiveAdsSites',
+      'type': 'int-enum',
+      'schema': {
+        'type': 'integer',
+        'enum': [ 1, 2 ],
+      },
+      'items': [
+        {
+          'name': 'AllowAds',
+          'value': 1,
+          'caption': '''Allow ads on all sites''',
+        },
+        {
+          'name': 'BlockAds',
+          'value': 2,
+          'caption': '''Do not allow ads on sites with intrusive ads''',
+        },
+      ],
+      'supported_on': ['chrome.*:65-', 'chrome_os:65-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': 1,
+      'id': 409,
+      'caption': '''Ads setting for sites with intrusive ads''',
+      'tags': [],
+      'desc': '''Allows you to set whether ads should be blocked on sites with intrusive ads.
+
+      If this policy is set to 2, ads will be blocked on sites with intrusive ads.
+      However this behavior will not trigger if SafeBrowsingEnabled policy is set to False.
+      If this policy is set to 1, ads will not be blocked on sites with intrusive ads.
+      If this policy is left not set, 2 will be used.''',
+    },
+    {
+      'name': 'RestrictAccountsToPatterns',
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': { 'type': 'string' }
+      },
+      'supported_on': ['android:65-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': ['*@example.com', 'user@managedchrome.com'],
+      'id': 410,
+      'caption': '''Restrict accounts that are visible in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>''',
+      'tags': [],
+      'desc': '''Contains a list of patterns which are used to control the visiblity of accounts in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      Account on the device will be visible in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> if its name matches any pattern from the list. Otherwise account will be filtered out and hidden.
+
+      The wildcard character '*' can be used to match zero or more arbitrary characters. The escape character is '\\', so to match actual '*' or '\\' characters, you can put a '\\' in front of them.
+
+      If this policy is left not set then all Google accounts on the device will be visible in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+    },
   ],
+
   'messages': {
     # Messages that are not associated to any policies.
     'win_supported_winxpsp2': {
@@ -10655,29 +11026,13 @@
     },
     'doc_intro': {
       'desc': '''Introduction text for the generated policy documentation''',
-      'text': '''Both Chromium and Google Chrome support the same set of
-      policies. Please note that this document may include unreleased policies
-      (i.e. their 'Supported on' entry refers to a not-yet released version of
-      <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>) which are subject
-      to change or removal without notice and for which no guarantees of any
-      kind are provided, including no guarantees with respect to their security
-      and privacy properties.
+      'text': '''Both Chromium and Google Chrome support the same set of policies. Please note that this document may include unreleased policies (i.e. their 'Supported on' entry refers to a not-yet released version of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>) which are subject to change or removal without notice and for which no guarantees of any kind are provided, including no guarantees with respect to their security and privacy properties.
 
-      These policies are strictly intended to be used to configure instances of
-      <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> internal to your
-      organization. Use of these policies outside of your organization (for
-      example, in a publicly distributed program) is considered malware and will
-      likely be labeled as malware by Google and anti-virus vendors.
+These policies are strictly intended to be used to configure instances of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> internal to your organization. Use of these policies outside of your organization (for example, in a publicly distributed program) is considered malware and will likely be labeled as malware by Google and anti-virus vendors.
 
-      These settings don't need to be configured manually! Easy-to-use
-      templates for Windows, Mac and Linux are available for download from <ph
-      name="POLICY_TEMPLATE_DOWNLOAD_URL">https://www.chromium.org/administrators/policy-templates<ex>
-      https://www.chromium.org/administrators/policy-templates</ex></ph>.
+These settings don't need to be configured manually! Easy-to-use templates for Windows, Mac and Linux are available for download from <ph name="POLICY_TEMPLATE_DOWNLOAD_URL">https://www.chromium.org/administrators/policy-templates<ex> https://www.chromium.org/administrators/policy-templates</ex></ph>.
 
-      The recommended way to configure policy on Windows is via GPO, although
-      provisioning policy via registry is still supported for Windows instances
-      that are joined to a <ph name="MS_AD_NAME">Microsoft® Active
-      Directory®</ph> domain.'''
+The recommended way to configure policy on Windows is via GPO, although provisioning policy via registry is still supported for Windows instances that are joined to a <ph name="MS_AD_NAME">Microsoft® Active Directory®</ph> domain.'''
     },
     'doc_back_to_top': {
       'desc': '''Text of a link in the generated policy documentation, that takes the user to the top of the page''',
@@ -10730,4 +11085,3 @@
   },
   'placeholders': [],
 }
-

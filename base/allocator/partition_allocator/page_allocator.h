@@ -17,6 +17,8 @@ namespace base {
 
 #if defined(OS_WIN)
 static const size_t kPageAllocationGranularityShift = 16;  // 64KB
+#elif defined(_MIPS_ARCH_LOONGSON)
+static const size_t kPageAllocationGranularityShift = 14;  // 16KB
 #else
 static const size_t kPageAllocationGranularityShift = 12;  // 4KB
 #endif
@@ -27,9 +29,11 @@ static const size_t kPageAllocationGranularityOffsetMask =
 static const size_t kPageAllocationGranularityBaseMask =
     ~kPageAllocationGranularityOffsetMask;
 
-// All Blink-supported systems have 4096 sized system pages and can handle
-// permissions and commit / decommit at this granularity.
+#if defined(_MIPS_ARCH_LOONGSON)
+static const size_t kSystemPageSize = 16384;
+#else
 static const size_t kSystemPageSize = 4096;
+#endif
 static const size_t kSystemPageOffsetMask = kSystemPageSize - 1;
 static_assert((kSystemPageSize & (kSystemPageSize - 1)) == 0,
               "kSystemPageSize must be power of 2");
@@ -39,7 +43,6 @@ enum PageAccessibilityConfiguration {
   PageInaccessible,
   PageReadWrite,
   PageReadExecute,
-  PageReadWriteExecute,
 };
 
 // Allocate one or more pages.
@@ -96,8 +99,11 @@ BASE_EXPORT WARN_UNUSED_RESULT bool SetSystemPagesAccess(
 // no analogue in the POSIX memory API where virtual memory pages are
 // best-effort allocated resources on the first touch. To create a
 // platform-agnostic abstraction, this API simulates the Windows "decommit"
-// state by both discarding the region (allowing the OS to aviod swap
+// state by both discarding the region (allowing the OS to avoid swap
 // operations) and changing the page protections so accesses fault.
+//
+// TODO(ajwong): This currently does not change page protections on POSIX
+// systems due to a perf regression. Tracked at http://crbug.com/766882.
 BASE_EXPORT void DecommitSystemPages(void* address, size_t length);
 
 // Recommit one or more system pages, starting at |address| and continuing for

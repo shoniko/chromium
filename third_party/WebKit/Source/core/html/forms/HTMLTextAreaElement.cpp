@@ -79,12 +79,12 @@ HTMLTextAreaElement::HTMLTextAreaElement(Document& document)
 
 HTMLTextAreaElement* HTMLTextAreaElement::Create(Document& document) {
   HTMLTextAreaElement* text_area = new HTMLTextAreaElement(document);
-  text_area->EnsureUserAgentShadowRoot();
+  text_area->EnsureUserAgentShadowRootV1();
   return text_area;
 }
 
 void HTMLTextAreaElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
-  root.AppendChild(TextControlInnerEditorElement::Create(GetDocument()));
+  root.AppendChild(CreateInnerEditorElement());
 }
 
 const AtomicString& HTMLTextAreaElement::FormControlType() const {
@@ -126,7 +126,7 @@ bool HTMLTextAreaElement::IsPresentationAttribute(
 void HTMLTextAreaElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == wrapAttr) {
     if (ShouldWrapText()) {
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyWhiteSpace,
@@ -152,7 +152,7 @@ void HTMLTextAreaElement::ParseAttribute(
   if (name == rowsAttr) {
     unsigned rows = 0;
     if (value.IsEmpty() || !ParseHTMLNonNegativeInteger(value, rows) ||
-        rows <= 0)
+        rows <= 0 || rows > 0x7fffffffu)
       rows = kDefaultRows;
     if (rows_ != rows) {
       rows_ = rows;
@@ -165,11 +165,11 @@ void HTMLTextAreaElement::ParseAttribute(
   } else if (name == colsAttr) {
     unsigned cols = 0;
     if (value.IsEmpty() || !ParseHTMLNonNegativeInteger(value, cols) ||
-        cols <= 0)
+        cols <= 0 || cols > 0x7fffffffu)
       cols = kDefaultCols;
     if (cols_ != cols) {
       cols_ = cols;
-      if (LayoutObject* layout_object = this->GetLayoutObject()) {
+      if (LayoutObject* layout_object = GetLayoutObject()) {
         layout_object
             ->SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
                 LayoutInvalidationReason::kAttributeChanged);
@@ -190,7 +190,7 @@ void HTMLTextAreaElement::ParseAttribute(
       wrap = kSoftWrap;
     if (wrap != wrap_) {
       wrap_ = wrap;
-      if (LayoutObject* layout_object = this->GetLayoutObject()) {
+      if (LayoutObject* layout_object = GetLayoutObject()) {
         layout_object
             ->SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
                 LayoutInvalidationReason::kAttributeChanged);
@@ -246,8 +246,9 @@ bool HTMLTextAreaElement::ShouldShowFocusRingOnMouseFocus() const {
   return true;
 }
 
-void HTMLTextAreaElement::UpdateFocusAppearance(
-    SelectionBehaviorOnFocus selection_behavior) {
+void HTMLTextAreaElement::UpdateFocusAppearanceWithOptions(
+    SelectionBehaviorOnFocus selection_behavior,
+    const FocusOptions& options) {
   switch (selection_behavior) {
     case SelectionBehaviorOnFocus::kReset:  // Fallthrough.
     case SelectionBehaviorOnFocus::kRestore:
@@ -256,8 +257,10 @@ void HTMLTextAreaElement::UpdateFocusAppearance(
     case SelectionBehaviorOnFocus::kNone:
       return;
   }
-  if (GetDocument().GetFrame())
-    GetDocument().GetFrame()->Selection().RevealSelection();
+  if (!options.preventScroll()) {
+    if (GetDocument().GetFrame())
+      GetDocument().GetFrame()->Selection().RevealSelection();
+  }
 }
 
 void HTMLTextAreaElement::DefaultEventHandler(Event* event) {
@@ -565,11 +568,13 @@ void HTMLTextAreaElement::AccessKeyAction(bool) {
 }
 
 void HTMLTextAreaElement::setCols(unsigned cols) {
-  SetUnsignedIntegralAttribute(colsAttr, cols ? cols : kDefaultCols);
+  SetUnsignedIntegralAttribute(colsAttr, cols ? cols : kDefaultCols,
+                               kDefaultCols);
 }
 
 void HTMLTextAreaElement::setRows(unsigned rows) {
-  SetUnsignedIntegralAttribute(rowsAttr, rows ? rows : kDefaultRows);
+  SetUnsignedIntegralAttribute(rowsAttr, rows ? rows : kDefaultRows,
+                               kDefaultRows);
 }
 
 bool HTMLTextAreaElement::MatchesReadOnlyPseudoClass() const {

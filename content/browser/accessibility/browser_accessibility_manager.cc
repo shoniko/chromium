@@ -42,7 +42,7 @@ BrowserAccessibility* FindNodeWithChildTreeId(BrowserAccessibility* node,
 // Map from AXTreeID to BrowserAccessibilityManager
 using AXTreeIDMap = base::hash_map<ui::AXTreeIDRegistry::AXTreeID,
                                    BrowserAccessibilityManager*>;
-base::LazyInstance<AXTreeIDMap>::DestructorAtExit g_ax_tree_id_map =
+base::LazyInstance<AXTreeIDMap>::Leaky g_ax_tree_id_map =
     LAZY_INSTANCE_INITIALIZER;
 
 // A function to call when focus changes, for testing only.
@@ -177,13 +177,17 @@ BrowserAccessibilityManager::~BrowserAccessibilityManager() {
 void BrowserAccessibilityManager::Initialize(
     const ui::AXTreeUpdate& initial_tree) {
   if (!tree_->Unserialize(initial_tree)) {
+    static auto* ax_tree_error = base::debug::AllocateCrashKeyString(
+        "ax_tree_error", base::debug::CrashKeySize::Size32);
+    static auto* ax_tree_update = base::debug::AllocateCrashKeyString(
+        "ax_tree_update", base::debug::CrashKeySize::Size64);
     // Temporarily log some additional crash keys so we can try to
     // figure out why we're getting bad accessibility trees here.
     // http://crbug.com/765490
     // Be sure to re-enable BrowserAccessibilityManagerTest.TestFatalError
     // when done (or delete it if no longer needed).
-    base::debug::SetCrashKeyValue("ax_tree_error", tree_->error());
-    base::debug::SetCrashKeyValue("ax_tree_update", initial_tree.ToString());
+    base::debug::SetCrashKeyString(ax_tree_error, tree_->error());
+    base::debug::SetCrashKeyString(ax_tree_update, initial_tree.ToString());
     LOG(FATAL) << tree_->error();
   }
 }
@@ -336,6 +340,10 @@ void BrowserAccessibilityManager::NavigationFailed() {
   user_is_navigating_away_ = false;
 }
 
+void BrowserAccessibilityManager::DidStopLoading() {
+  user_is_navigating_away_ = false;
+}
+
 bool BrowserAccessibilityManager::UseRootScrollOffsetsWhenComputingBounds() {
   return true;
 }
@@ -361,6 +369,12 @@ void BrowserAccessibilityManager::OnAccessibilityEvents(
       }
       return;
     }
+  }
+
+  // If this page is hidden by an interstitial, suppress all events.
+  if (GetRootManager()->hidden_by_interstitial_page()) {
+    ClearEvents();
+    return;
   }
 
   // If the root's parent is in another accessibility tree but it wasn't
@@ -444,27 +458,6 @@ void BrowserAccessibilityManager::OnFindInPageResult(
 
   if (find_in_page_info_.active_request_id == request_id)
     ActivateFindInPageResult(request_id);
-}
-
-void BrowserAccessibilityManager::OnChildFrameHitTestResult(
-    const gfx::Point& point,
-    int hit_obj_id,
-    ui::AXEvent event_to_fire) {
-  BrowserAccessibility* obj = GetFromID(hit_obj_id);
-  if (!obj || !obj->HasIntAttribute(ui::AX_ATTR_CHILD_TREE_ID))
-    return;
-
-  BrowserAccessibilityManager* child_manager =
-      BrowserAccessibilityManager::FromID(
-          obj->GetIntAttribute(ui::AX_ATTR_CHILD_TREE_ID));
-  if (!child_manager || !child_manager->delegate())
-    return;
-
-  ui::AXActionData action_data;
-  action_data.target_point = point;
-  action_data.action = ui::AX_ACTION_HIT_TEST;
-  action_data.hit_test_event_to_fire = event_to_fire;
-  return child_manager->delegate()->AccessibilityPerformAction(action_data);
 }
 
 void BrowserAccessibilityManager::ActivateFindInPageResult(
@@ -758,9 +751,18 @@ BrowserAccessibility* BrowserAccessibilityManager::NextInTreeOrder(
 // static
 // Previous object in tree using depth-first pre-order traversal.
 BrowserAccessibility* BrowserAccessibilityManager::PreviousInTreeOrder(
-    const BrowserAccessibility* object) {
+    const BrowserAccessibility* object,
+    bool can_wrap_to_last_element) {
   if (!object)
     return nullptr;
+
+  // For android, this needs to be handled carefully. If not, there is a chance
+  // of getting into infinite loop.
+  if (can_wrap_to_last_element &&
+      object->GetRole() == ui::AX_ROLE_ROOT_WEB_AREA &&
+      object->PlatformChildCount() != 0) {
+    return object->PlatformDeepestLastChild();
+  }
 
   BrowserAccessibility* sibling = object->GetPreviousSibling();
   if (!sibling)
@@ -775,9 +777,9 @@ BrowserAccessibility* BrowserAccessibilityManager::PreviousInTreeOrder(
 // static
 BrowserAccessibility* BrowserAccessibilityManager::PreviousTextOnlyObject(
     const BrowserAccessibility* object) {
-  BrowserAccessibility* previous_object = PreviousInTreeOrder(object);
+  BrowserAccessibility* previous_object = PreviousInTreeOrder(object, false);
   while (previous_object && !previous_object->IsTextOnlyObject())
-    previous_object = PreviousInTreeOrder(previous_object);
+    previous_object = PreviousInTreeOrder(previous_object, false);
 
   return previous_object;
 }
@@ -877,7 +879,7 @@ BrowserAccessibilityManager::FindTextOnlyObjectsInRange(
 
   const BrowserAccessibility* start_text_object = nullptr;
   const BrowserAccessibility* end_text_object = nullptr;
-  if (&start_object == &end_object && start_object.IsSimpleTextControl()) {
+  if (&start_object == &end_object && start_object.IsPlainTextField()) {
     // We need to get to the shadow DOM that is inside the text control in order
     // to find the text-only objects.
     if (!start_object.InternalChildCount())
@@ -934,7 +936,7 @@ base::string16 BrowserAccessibilityManager::GetTextForRange(
   DCHECK_GE(start_offset, 0);
   DCHECK_GE(end_offset, 0);
 
-  if (&start_object == &end_object && start_object.IsSimpleTextControl()) {
+  if (&start_object == &end_object && start_object.IsPlainTextField()) {
     if (start_offset > end_offset)
       std::swap(start_offset, end_offset);
 
@@ -1004,7 +1006,7 @@ gfx::Rect BrowserAccessibilityManager::GetPageBoundsForRange(
   DCHECK_GE(start_offset, 0);
   DCHECK_GE(end_offset, 0);
 
-  if (&start_object == &end_object && start_object.IsSimpleTextControl()) {
+  if (&start_object == &end_object && start_object.IsPlainTextField()) {
     if (start_offset > end_offset)
       std::swap(start_offset, end_offset);
 

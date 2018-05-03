@@ -7,7 +7,6 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/Path.h"
 #include "public/platform/WebDisplayItemList.h"
-#include "third_party/skia/include/core/SkPictureAnalyzer.h"
 #include "third_party/skia/include/core/SkScalar.h"
 
 namespace blink {
@@ -33,7 +32,7 @@ void EndClipPathDisplayItem::AppendToWebDisplayItemList(
   list->AppendEndClipPathItem();
 }
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 void BeginClipPathDisplayItem::PropertiesAsJSON(JSONObject& json) const {
   DisplayItem::PropertiesAsJSON(json);
   json.SetInteger("pathVerbs", clip_path_.countVerbs());

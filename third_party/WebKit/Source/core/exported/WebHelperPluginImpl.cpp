@@ -30,11 +30,11 @@
 
 #include "core/exported/WebHelperPluginImpl.h"
 
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/exported/WebPluginContainerImpl.h"
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/WebLocalFrameImpl.h"
 #include "core/html/HTMLObjectElement.h"
+#include "public/platform/TaskType.h"
 #include "public/web/WebPlugin.h"
 
 namespace blink {
@@ -61,11 +61,10 @@ bool WebHelperPluginImpl::Initialize(const String& plugin_type,
   Vector<String> attribute_names;
   Vector<String> attribute_values;
   DCHECK(frame->GetFrame()->GetDocument()->Url().IsValid());
-  plugin_container_ =
-      ToWebPluginContainerImpl(frame->GetFrame()->Client()->CreatePlugin(
-          *object_element_, frame->GetFrame()->GetDocument()->Url(),
-          attribute_names, attribute_values, plugin_type, false,
-          LocalFrameClient::kAllowDetachedPlugin));
+  plugin_container_ = frame->GetFrame()->Client()->CreatePlugin(
+      *object_element_, frame->GetFrame()->GetDocument()->Url(),
+      attribute_names, attribute_values, plugin_type, false,
+      LocalFrameClient::kAllowDetachedPlugin);
 
   if (!plugin_container_)
     return false;
@@ -83,15 +82,15 @@ void WebHelperPluginImpl::ReallyDestroy() {
 
 void WebHelperPluginImpl::Destroy() {
   // Defer deletion so we don't do too much work when called via
-  // stopSuspendableObjects().
+  // stopPausableObjects().
   // FIXME: It's not clear why we still need this. The original code held a
   // Page and a WebFrame, and destroying it would cause JavaScript triggered by
-  // frame detach to run, which isn't allowed inside stopSuspendableObjects().
+  // frame detach to run, which isn't allowed inside stopPausableObjects().
   // Removing this causes one Chrome test to fail with a timeout.
-  TaskRunnerHelper::Get(TaskType::kUnspecedTimer,
-                        &object_element_->GetDocument())
-      ->PostTask(BLINK_FROM_HERE, WTF::Bind(&WebHelperPluginImpl::ReallyDestroy,
-                                            WTF::Unretained(this)));
+  object_element_->GetDocument()
+      .GetTaskRunner(TaskType::kUnspecedTimer)
+      ->PostTask(FROM_HERE, WTF::Bind(&WebHelperPluginImpl::ReallyDestroy,
+                                      WTF::Unretained(this)));
 }
 
 WebPlugin* WebHelperPluginImpl::GetPlugin() {

@@ -95,10 +95,9 @@ Network.ResourceWebSocketFrameView = class extends UI.VBox {
      * @this {Network.ResourceWebSocketFrameView}
      */
     function onRowContextMenu(contextMenu, node) {
-      contextMenu.appendItem(
+      contextMenu.clipboardSection().appendItem(
           Common.UIString('Copy message'), InspectorFrontendHost.copyText.bind(InspectorFrontendHost, node.data.data));
-      contextMenu.appendSeparator();
-      contextMenu.appendItem(Common.UIString('Clear all'), this._clearFrames.bind(this));
+      contextMenu.footerSection().appendItem(Common.UIString('Clear all'), this._clearFrames.bind(this));
     }
   }
 
@@ -170,11 +169,11 @@ Network.ResourceWebSocketFrameView = class extends UI.VBox {
     this._currentSelectedNode = selectedNode;
     var contentProvider = selectedNode.contentProvider();
     var content = await contentProvider.requestContent();
-    var parsedJSON = await SourceFrame.JSONView.parseJSON(content);
+    var jsonView = await SourceFrame.JSONView.createView(content);
     if (this._currentSelectedNode !== selectedNode)
       return;
-    if (parsedJSON)
-      this._splitWidget.setSidebarWidget(SourceFrame.JSONView.createSearchableView(parsedJSON));
+    if (jsonView)
+      this._splitWidget.setSidebarWidget(jsonView);
     else
       this._splitWidget.setSidebarWidget(new SourceFrame.ResourceSourceFrame(contentProvider));
   }

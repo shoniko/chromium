@@ -43,27 +43,29 @@
 #include "WebCommon.h"
 #include "WebData.h"
 #include "WebDataConsumerHandle.h"
-#include "WebFeaturePolicy.h"
 #include "WebGamepadListener.h"
 #include "WebGestureDevice.h"
 #include "WebLocalizedString.h"
 #include "WebPlatformEventType.h"
 #include "WebSize.h"
 #include "WebSpeechSynthesizer.h"
-#include "WebStorageQuotaCallbacks.h"
-#include "WebStorageQuotaType.h"
 #include "WebString.h"
 #include "WebURLError.h"
 #include "WebURLLoader.h"
 #include "WebURLLoaderFactory.h"
-#include "WebVector.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/time/time.h"
 #include "components/viz/common/quads/shared_bitmap.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/message_pipe.h"
-#include "public/platform/scheduler/single_thread_task_runner.h"
+#include "third_party/WebKit/common/feature_policy/feature_policy.h"
+#include "third_party/WebKit/common/quota/quota_types.mojom-shared.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace device {
 class Gamepads;
@@ -86,7 +88,6 @@ class Local;
 namespace blink {
 
 class InterfaceProvider;
-class TrialPolicy;
 class WebAudioBus;
 class WebAudioLatencyHint;
 class WebBlobRegistry;
@@ -163,7 +164,7 @@ class BLINK_PLATFORM_EXPORT Platform {
   virtual WebCookieJar* CookieJar() { return nullptr; }
 
   // Must return non-null.
-  virtual WebClipboard* Clipboard() { return nullptr; }
+  virtual WebClipboard* Clipboard();
 
   // Must return non-null.
   virtual WebFileUtilities* GetFileUtilities() { return nullptr; }
@@ -260,6 +261,10 @@ class BLINK_PLATFORM_EXPORT Platform {
   // Return a LocalStorage namespace
   virtual std::unique_ptr<WebStorageNamespace> CreateLocalStorageNamespace();
 
+  // Return a SessionStorage namespace
+  virtual std::unique_ptr<WebStorageNamespace> CreateSessionStorageNamespace(
+      int64_t namespace_id);
+
   // FileSystem ----------------------------------------------------------
 
   // Must return non-null.
@@ -337,7 +342,7 @@ class BLINK_PLATFORM_EXPORT Platform {
     return nullptr;
   }
 
-  // Returns a WebDataConsumerHandle for given a mojo data pipe endpoint.
+  // Returns a WebDataConsumerHandle for a given mojo data pipe endpoint.
   virtual std::unique_ptr<WebDataConsumerHandle> CreateDataConsumerHandle(
       mojo::ScopedDataPipeConsumerHandle handle) {
     return nullptr;
@@ -394,6 +399,8 @@ class BLINK_PLATFORM_EXPORT Platform {
                                          const WebString& parameter2) {
     return WebString();
   }
+
+  virtual bool IsRendererSideResourceSchedulerEnabled() const { return false; }
 
   // Threads -------------------------------------------------------
 
@@ -462,7 +469,24 @@ class BLINK_PLATFORM_EXPORT Platform {
 
   // Returns an interface to the file task runner.
   WebTaskRunner* FileTaskRunner() const;
-  SingleThreadTaskRunnerRefPtr BaseFileTaskRunner() const;
+  scoped_refptr<base::SingleThreadTaskRunner> BaseFileTaskRunner() const;
+
+  // Returns an interface to the IO task runner.
+  virtual scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() const {
+    return nullptr;
+  }
+
+  // Returns an interface to run nested message loop. Used for debugging.
+  class NestedMessageLoopRunner {
+   public:
+    virtual ~NestedMessageLoopRunner() = default;
+    virtual void Run() = 0;
+    virtual void QuitNow() = 0;
+  };
+  virtual std::unique_ptr<NestedMessageLoopRunner>
+  CreateNestedMessageLoopRunner() const {
+    return nullptr;
+  }
 
   // Testing -------------------------------------------------------------
 
@@ -551,11 +575,11 @@ class BLINK_PLATFORM_EXPORT Platform {
       const WebFloatPoint& velocity,
       const WebSize& cumulative_scroll);
 
-  // Whether the command line flag: --disable-gpu-compositing or --disable-gpu
-  // exists or not
+  // Whether the compositor is using gpu and expects gpu resources as inputs,
+  // or software based resources.
   // NOTE: This function should not be called from core/ and modules/, but
   // called by platform/graphics/ is fine.
-  virtual bool IsGPUCompositingEnabled() { return true; }
+  virtual bool IsGpuCompositingDisabled() { return true; }
 
   // WebRTC ----------------------------------------------------------
 
@@ -563,7 +587,8 @@ class BLINK_PLATFORM_EXPORT Platform {
   // May return null if WebRTC functionality is not avaliable or if it's out of
   // resources.
   virtual std::unique_ptr<WebRTCPeerConnectionHandler>
-  CreateRTCPeerConnectionHandler(WebRTCPeerConnectionHandlerClient*);
+  CreateRTCPeerConnectionHandler(WebRTCPeerConnectionHandlerClient*,
+                                 scoped_refptr<base::SingleThreadTaskRunner>);
 
   // Creates a WebMediaRecorderHandler to record MediaStreams.
   // May return null if the functionality is not available or out of resources.
@@ -585,8 +610,10 @@ class BLINK_PLATFORM_EXPORT Platform {
 
   // Fills in the WebMediaStream to capture from the WebMediaPlayer identified
   // by the second parameter.
-  virtual void CreateHTMLVideoElementCapturer(WebMediaStream*,
-                                              WebMediaPlayer*) {}
+  virtual void CreateHTMLVideoElementCapturer(
+      WebMediaStream*,
+      WebMediaPlayer*,
+      scoped_refptr<base::SingleThreadTaskRunner>) {}
   virtual void CreateHTMLAudioElementCapturer(WebMediaStream*,
                                               WebMediaPlayer*) {}
 
@@ -668,13 +695,15 @@ class BLINK_PLATFORM_EXPORT Platform {
   // Quota -----------------------------------------------------------
 
   // Queries the storage partition's storage usage and quota information.
-  // WebStorageQuotaCallbacks::DidQueryStorageUsageAndQuota will be called
-  // with the current usage and quota information for the partition. When
-  // an error occurs WebStorageQuotaCallbacks::DidFail is called with an
-  // error code.
-  virtual void QueryStorageUsageAndQuota(const WebURL& storage_partition,
-                                         WebStorageQuotaType,
-                                         WebStorageQuotaCallbacks) {}
+  // The callback will be called with the current usage and quota information
+  // for the partition. When an error occurs the callback is called with a
+  // status code other than kOk.
+  using QueryStorageUsageAndQuotaCallback =
+      base::OnceCallback<void(mojom::QuotaStatusCode, int64_t, int64_t)>;
+  virtual void QueryStorageUsageAndQuota(
+      const WebSecurityOrigin& storage_partition,
+      mojom::StorageType,
+      QueryStorageUsageAndQuotaCallback) {}
 
   // WebDatabase --------------------------------------------------------
 
@@ -682,7 +711,9 @@ class BLINK_PLATFORM_EXPORT Platform {
 
   // Web Notifications --------------------------------------------------
 
-  virtual WebNotificationManager* GetNotificationManager() { return nullptr; }
+  virtual WebNotificationManager* GetWebNotificationManager() {
+    return nullptr;
+  }
 
   // Push API------------------------------------------------------------
 
@@ -692,10 +723,11 @@ class BLINK_PLATFORM_EXPORT Platform {
 
   virtual WebSyncProvider* BackgroundSyncProvider() { return nullptr; }
 
-  // Experimental Framework ----------------------------------------------
+  // Origin Trials ------------------------------------------------------
 
-  virtual std::unique_ptr<WebTrialTokenValidator> TrialTokenValidator();
-  virtual std::unique_ptr<TrialPolicy> OriginTrialPolicy();
+  // TODO(crbug.com/738505): Remove the Web layer and return a
+  // blink::TrialTokenValidator directly.
+  virtual std::unique_ptr<WebTrialTokenValidator> CreateTrialTokenValidator();
 
   // Media Capabilities --------------------------------------------------
 
@@ -715,24 +747,6 @@ class BLINK_PLATFORM_EXPORT Platform {
   // tools/v8_context_snapshot/v8_context_snapshot_generator is running (which
   // runs during Chromium's build step).
   virtual bool IsTakingV8ContextSnapshot() { return false; }
-
-  // Feature Policy -----------------------------------------------------
-
-  // Create a new feature policy object for a document, given its parent
-  // document's policy (may be nullptr), its container policy (may be empty),
-  // the header policy with which it was delivered (may be empty), and the
-  // document's origin.
-  virtual std::unique_ptr<WebFeaturePolicy> CreateFeaturePolicy(
-      const WebFeaturePolicy* parent_policy,
-      const WebParsedFeaturePolicy& container_policy,
-      const WebParsedFeaturePolicy& policy_header,
-      const WebSecurityOrigin&);
-
-  // Create a new feature policy for a document whose origin has changed, given
-  // the previous policy object and the new origin.
-  virtual std::unique_ptr<WebFeaturePolicy> DuplicateFeaturePolicyWithOrigin(
-      const WebFeaturePolicy&,
-      const WebSecurityOrigin&);
 
  protected:
   Platform();

@@ -42,7 +42,7 @@ class UserGestureToken;
 // processing the user gesture in case it was not consumed meanwhile.
 class WebUserGestureToken {
  public:
-  WebUserGestureToken() {}
+  WebUserGestureToken() = default;
   WebUserGestureToken(const WebUserGestureToken& other) { Assign(other); }
   WebUserGestureToken& operator=(const WebUserGestureToken& other) {
     Assign(other);
@@ -54,8 +54,8 @@ class WebUserGestureToken {
   bool IsNull() const { return token_.IsNull(); }
 
 #if INSIDE_BLINK
-  explicit WebUserGestureToken(RefPtr<UserGestureToken>);
-  operator RefPtr<UserGestureToken>() const;
+  explicit WebUserGestureToken(scoped_refptr<UserGestureToken>);
+  operator scoped_refptr<UserGestureToken>() const;
 #endif
 
  private:

@@ -7,9 +7,9 @@
 #include <stddef.h>
 
 #include <string>
+#include <utility>
 
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
@@ -24,10 +24,12 @@
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs_factory.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/arc/arc_package_syncable_service.h"
+#include "chrome/browser/ui/app_list/arc/arc_pai_starter.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/arc/arc_prefs.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/arc_util.h"
+#include "components/arc/connection_holder.h"
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -56,9 +58,10 @@ constexpr char kShortcut[] = "shortcut";
 constexpr char kShouldSync[] = "should_sync";
 constexpr char kSystem[] = "system";
 constexpr char kUninstalled[] = "uninstalled";
+constexpr char kVPNProvider[] = "vpnprovider";
 
 constexpr base::TimeDelta kDetectDefaultAppAvailabilityTimeout =
-    base::TimeDelta::FromSeconds(15);
+    base::TimeDelta::FromMinutes(1);
 
 // Provider of write access to a dictionary storing ARC prefs.
 class ScopedArcPrefUpdate : public DictionaryPrefUpdate {
@@ -73,12 +76,12 @@ class ScopedArcPrefUpdate : public DictionaryPrefUpdate {
   // DictionaryPrefUpdate overrides:
   base::DictionaryValue* Get() override {
     base::DictionaryValue* dict = DictionaryPrefUpdate::Get();
-    base::DictionaryValue* dict_item = nullptr;
-    if (!dict->GetDictionaryWithoutPathExpansion(id_, &dict_item)) {
-      dict_item = dict->SetDictionaryWithoutPathExpansion(
-          id_, base::MakeUnique<base::DictionaryValue>());
+    base::Value* dict_item =
+        dict->FindKeyOfType(id_, base::Value::Type::DICTIONARY);
+    if (!dict_item) {
+      dict_item = dict->SetKey(id_, base::Value(base::Value::Type::DICTIONARY));
     }
-    return dict_item;
+    return static_cast<base::DictionaryValue*>(dict_item);
   }
 
  private:
@@ -234,8 +237,9 @@ void UpdatePlayStoreDictionary(PrefService* service) {
 // static
 ArcAppListPrefs* ArcAppListPrefs::Create(
     Profile* profile,
-    arc::InstanceHolder<arc::mojom::AppInstance>* app_instance_holder) {
-  return new ArcAppListPrefs(profile, app_instance_holder);
+    arc::ConnectionHolder<arc::mojom::AppInstance, arc::mojom::AppHost>*
+        app_connection_holder) {
+  return new ArcAppListPrefs(profile, app_connection_holder);
 }
 
 // static
@@ -267,15 +271,15 @@ std::string ArcAppListPrefs::GetAppId(const std::string& package_name,
 
 ArcAppListPrefs::ArcAppListPrefs(
     Profile* profile,
-    arc::InstanceHolder<arc::mojom::AppInstance>* app_instance_holder)
+    arc::ConnectionHolder<arc::mojom::AppInstance, arc::mojom::AppHost>*
+        app_connection_holder)
     : profile_(profile),
       prefs_(profile->GetPrefs()),
-      app_instance_holder_(app_instance_holder),
-      binding_(this),
+      app_connection_holder_(app_connection_holder),
       default_apps_(this, profile),
       weak_ptr_factory_(this) {
   DCHECK(profile);
-  DCHECK(app_instance_holder);
+  DCHECK(app_connection_holder);
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   const base::FilePath& base_path = profile->GetPath();
   base_path_ = base_path.AppendASCII(arc::prefs::kArcApps);
@@ -293,7 +297,6 @@ ArcAppListPrefs::ArcAppListPrefs(
 
   const std::vector<std::string> existing_app_ids = GetAppIds();
   tracked_apps_.insert(existing_app_ids.begin(), existing_app_ids.end());
-
   // Once default apps are ready OnDefaultAppsReady is called.
 }
 
@@ -303,7 +306,7 @@ ArcAppListPrefs::~ArcAppListPrefs() {
     return;
   DCHECK(arc::ArcServiceManager::Get());
   arc_session_manager->RemoveObserver(this);
-  app_instance_holder_->RemoveObserver(this);
+  app_connection_holder_->RemoveObserver(this);
 }
 
 void ArcAppListPrefs::StartPrefs() {
@@ -325,9 +328,10 @@ void ArcAppListPrefs::StartPrefs() {
     arc_session_manager->AddObserver(this);
   }
 
-  app_instance_holder_->AddObserver(this);
-  if (!app_instance_holder_->has_instance())
-    OnInstanceClosed();
+  app_connection_holder_->SetHost(this);
+  app_connection_holder_->AddObserver(this);
+  if (!app_connection_holder_->IsConnected())
+    OnConnectionClosed();
 }
 
 base::FilePath ArcAppListPrefs::GetAppPath(const std::string& app_id) const {
@@ -391,7 +395,7 @@ void ArcAppListPrefs::RequestIcon(const std::string& app_id,
   if (!ready_apps_.count(app_id))
     return;
 
-  if (!app_instance_holder_->has_instance()) {
+  if (!app_connection_holder_->IsConnected()) {
     // AppInstance should be ready since we have app_id in ready_apps_. This
     // can happen in browser_tests.
     return;
@@ -405,8 +409,8 @@ void ArcAppListPrefs::RequestIcon(const std::string& app_id,
 
   if (app_info->icon_resource_id.empty()) {
     auto* app_instance =
-        ARC_GET_INSTANCE_FOR_METHOD(app_instance_holder_, RequestAppIcon);
-    // Version 0 instance should always be available here because has_instance()
+        ARC_GET_INSTANCE_FOR_METHOD(app_connection_holder_, RequestAppIcon);
+    // Version 0 instance should always be available here because IsConnected()
     // returned true above.
     DCHECK(app_instance);
     app_instance->RequestAppIcon(
@@ -414,7 +418,7 @@ void ArcAppListPrefs::RequestIcon(const std::string& app_id,
         static_cast<arc::mojom::ScaleFactor>(scale_factor));
   } else {
     auto* app_instance =
-        ARC_GET_INSTANCE_FOR_METHOD(app_instance_holder_, RequestIcon);
+        ARC_GET_INSTANCE_FOR_METHOD(app_connection_holder_, RequestIcon);
     if (!app_instance)
       return;  // The instance version on ARC side was too old.
     app_instance->RequestIcon(
@@ -453,7 +457,7 @@ void ArcAppListPrefs::SetNotificationsEnabled(const std::string& app_id,
     return;
   }
 
-  auto* app_instance = ARC_GET_INSTANCE_FOR_METHOD(app_instance_holder_,
+  auto* app_instance = ARC_GET_INSTANCE_FOR_METHOD(app_connection_holder_,
                                                    SetNotificationsEnabled);
   if (!app_instance)
     return;
@@ -495,16 +499,18 @@ std::unique_ptr<ArcAppListPrefs::PackageInfo> ArcAppListPrefs::GetPackage(
   int64_t last_backup_time = 0;
   bool should_sync = false;
   bool system = false;
+  bool vpn_provider = false;
 
   GetInt64FromPref(package, kLastBackupAndroidId, &last_backup_android_id);
   GetInt64FromPref(package, kLastBackupTime, &last_backup_time);
   package->GetInteger(kPackageVersion, &package_version);
   package->GetBoolean(kShouldSync, &should_sync);
   package->GetBoolean(kSystem, &system);
+  package->GetBoolean(kVPNProvider, &vpn_provider);
 
-  return base::MakeUnique<PackageInfo>(package_name, package_version,
+  return std::make_unique<PackageInfo>(package_name, package_version,
                                        last_backup_android_id, last_backup_time,
-                                       should_sync, system);
+                                       should_sync, system, vpn_provider);
 }
 
 std::vector<std::string> ArcAppListPrefs::GetAppIds() const {
@@ -593,7 +599,7 @@ std::unique_ptr<ArcAppListPrefs::AppInfo> ArcAppListPrefs::GetApp(
   arc::mojom::OrientationLock orientation_lock =
       static_cast<arc::mojom::OrientationLock>(orientation_lock_value);
 
-  return base::MakeUnique<AppInfo>(
+  return std::make_unique<AppInfo>(
       name, package_name, activity, intent_uri, icon_resource_id,
       last_launch_time, GetInstallTime(app_id), sticky, notifications_enabled,
       ready_apps_.count(app_id) > 0,
@@ -642,6 +648,9 @@ void ArcAppListPrefs::SetLastLaunchTime(const std::string& app_id) {
   base::DictionaryValue* app_dict = update.Get();
   const std::string string_value = base::Int64ToString(time.ToInternalValue());
   app_dict->SetString(kLastLaunchTime, string_value);
+
+  for (auto& observer : observer_list_)
+    observer.OnAppLastLaunchTimeUpdated(app_id);
 
   if (first_launch_app_request_) {
     first_launch_app_request_ = false;
@@ -804,30 +813,20 @@ void ArcAppListPrefs::SimulateDefaultAppAvailabilityTimeoutForTesting() {
   DetectDefaultAppAvailability();
 }
 
-void ArcAppListPrefs::OnInstanceReady() {
-  arc::mojom::AppInstance* app_instance =
-      ARC_GET_INSTANCE_FOR_METHOD(app_instance_holder_, Init);
-
+void ArcAppListPrefs::OnConnectionReady() {
   // Note, sync_service_ may be nullptr in testing.
   sync_service_ = arc::ArcPackageSyncableService::Get(profile_);
-
-  // In some tests app_instance may not be set.
-  if (!app_instance)
-    return;
-
   is_initialized_ = false;
 
-  arc::mojom::AppHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  app_instance->Init(std::move(host_proxy));
+  if (!app_list_refreshed_callback_.is_null())
+    std::move(app_list_refreshed_callback_).Run();
 }
 
-void ArcAppListPrefs::OnInstanceClosed() {
+void ArcAppListPrefs::OnConnectionClosed() {
   DisableAllApps();
   installing_packages_count_ = 0;
   default_apps_installations_.clear();
   detect_default_app_availability_timeout_.Stop();
-  binding_.Close();
   ClearIconRequestRecord();
 
   if (sync_service_) {
@@ -837,6 +836,7 @@ void ArcAppListPrefs::OnInstanceClosed() {
 
   is_initialized_ = false;
   package_list_initial_refreshed_ = false;
+  app_list_refreshed_callback_.Reset();
 }
 
 void ArcAppListPrefs::HandleTaskCreated(const base::Optional<std::string>& name,
@@ -873,6 +873,11 @@ void ArcAppListPrefs::AddAppAndShortcut(
     const arc::mojom::OrientationLock orientation_lock) {
   const std::string app_id = shortcut ? GetAppId(package_name, intent_uri)
                                       : GetAppId(package_name, activity);
+
+  // Do not add Play Store app for Public Session and Kiosk modes.
+  if (app_id == arc::kPlayStoreAppId && arc::IsRobotAccountMode())
+    return;
+
   std::string updated_name = name;
   // Add "(beta)" string to Play Store. See crbug.com/644576 for details.
   if (app_id == arc::kPlayStoreAppId)
@@ -1008,6 +1013,7 @@ void ArcAppListPrefs::AddOrUpdatePackagePrefs(
   package_dict->SetString(kLastBackupTime, time_str);
   package_dict->SetBoolean(kSystem, package.system);
   package_dict->SetBoolean(kUninstalled, false);
+  package_dict->SetBoolean(kVPNProvider, package.vpn_provider);
 
   if (old_package_version == -1 ||
       old_package_version == package.package_version) {
@@ -1035,6 +1041,16 @@ void ArcAppListPrefs::RemovePackageFromPrefs(PrefService* prefs,
 
 void ArcAppListPrefs::OnAppListRefreshed(
     std::vector<arc::mojom::AppInfoPtr> apps) {
+  DCHECK(app_list_refreshed_callback_.is_null());
+  if (!app_connection_holder_->IsConnected()) {
+    LOG(ERROR) << "App instance is not connected. Delaying app list refresh. "
+               << "See b/70566216.";
+    app_list_refreshed_callback_ =
+        base::BindOnce(&ArcAppListPrefs::OnAppListRefreshed,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(apps));
+    return;
+  }
+
   DCHECK(IsArcAndroidEnabledForProfile(profile_));
   std::vector<std::string> old_apps = GetAppIds();
 
@@ -1073,8 +1089,19 @@ void ArcAppListPrefs::OnAppListRefreshed(
 
   if (!is_initialized_) {
     is_initialized_ = true;
-    MaybeSetDefaultAppLoadingTimeout();
+
     UMA_HISTOGRAM_COUNTS_1000("Arc.AppsInstalledAtStartup", ready_apps_.size());
+
+    arc::ArcPaiStarter* pai_starter =
+        arc::ArcSessionManager::Get()->pai_starter();
+
+    if (pai_starter) {
+      pai_starter->AddOnStartCallback(
+          base::BindOnce(&ArcAppListPrefs::MaybeSetDefaultAppLoadingTimeout,
+                         weak_ptr_factory_.GetWeakPtr()));
+    } else {
+      MaybeSetDefaultAppLoadingTimeout();
+    }
   }
 }
 
@@ -1416,6 +1443,7 @@ void ArcAppListPrefs::OnPackageAdded(
   AddOrUpdatePackagePrefs(prefs_, *package_info);
   for (auto& observer : observer_list_)
     observer.OnPackageInstalled(*package_info);
+
   if (unknown_package &&
       current_batch_installation_revision_ !=
           last_shown_batch_installation_revision_) {
@@ -1604,10 +1632,12 @@ ArcAppListPrefs::PackageInfo::PackageInfo(const std::string& package_name,
                                           int64_t last_backup_android_id,
                                           int64_t last_backup_time,
                                           bool should_sync,
-                                          bool system)
+                                          bool system,
+                                          bool vpn_provider)
     : package_name(package_name),
       package_version(package_version),
       last_backup_android_id(last_backup_android_id),
       last_backup_time(last_backup_time),
       should_sync(should_sync),
-      system(system) {}
+      system(system),
+      vpn_provider(vpn_provider) {}

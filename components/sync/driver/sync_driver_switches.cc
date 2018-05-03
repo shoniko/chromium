@@ -41,6 +41,14 @@ const base::Feature kSyncClearDataOnPassphraseEncryption{
 const base::Feature kSyncUserEvents{"SyncUserEvents",
                                     base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Gates emission of FieldTrial events.
+const base::Feature kSyncUserFieldTrialEvents{"SyncUserFieldTrialEvents",
+                                              base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Gates emission of UserConsent events.
+const base::Feature kSyncUserConsentEvents{"SyncUserConsentEvents",
+                                           base::FEATURE_ENABLED_BY_DEFAULT};
+
 // Gates registration for user language detection events.
 const base::Feature kSyncUserLanguageDetectionEvents{
     "SyncUserLanguageDetectionEvents", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -51,7 +59,7 @@ const base::Feature kSyncUserTranslationEvents{
 
 // Enables USS implementation of Autocomplete datatype.
 const base::Feature kSyncUSSAutocomplete{"SyncUSSAutocomplete",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
+                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enable USS implementation of Bookmarks datatype.
 const base::Feature kSyncUSSBookmarks{"SyncUSSBookmarks",

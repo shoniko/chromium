@@ -25,12 +25,12 @@
 #ifndef TimingFunction_h
 #define TimingFunction_h
 
+#include "base/memory/scoped_refptr.h"
 #include "cc/animation/timing_function.h"
 #include "platform/PlatformExport.h"
 #include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -40,7 +40,7 @@ class PLATFORM_EXPORT TimingFunction : public RefCounted<TimingFunction> {
  public:
   using Type = cc::TimingFunction::Type;
 
-  virtual ~TimingFunction() {}
+  virtual ~TimingFunction() = default;
 
   Type GetType() const { return type_; }
 
@@ -68,11 +68,11 @@ class PLATFORM_EXPORT LinearTimingFunction final : public TimingFunction {
  public:
   static LinearTimingFunction* Shared() {
     DEFINE_STATIC_REF(LinearTimingFunction, linear,
-                      (WTF::AdoptRef(new LinearTimingFunction())));
+                      (base::AdoptRef(new LinearTimingFunction())));
     return linear;
   }
 
-  ~LinearTimingFunction() override {}
+  ~LinearTimingFunction() override = default;
 
   // TimingFunction implementation.
   String ToString() const override;
@@ -92,12 +92,12 @@ class PLATFORM_EXPORT CubicBezierTimingFunction final : public TimingFunction {
                                                          double y1,
                                                          double x2,
                                                          double y2) {
-    return WTF::AdoptRef(new CubicBezierTimingFunction(x1, y1, x2, y2));
+    return base::AdoptRef(new CubicBezierTimingFunction(x1, y1, x2, y2));
   }
 
   static CubicBezierTimingFunction* Preset(EaseType);
 
-  ~CubicBezierTimingFunction() override {}
+  ~CubicBezierTimingFunction() override = default;
 
   // TimingFunction implementation.
   String ToString() const override;
@@ -155,7 +155,7 @@ class PLATFORM_EXPORT StepsTimingFunction final : public TimingFunction {
 
   static scoped_refptr<StepsTimingFunction> Create(int steps,
                                                    StepPosition step_position) {
-    return WTF::AdoptRef(new StepsTimingFunction(steps, step_position));
+    return base::AdoptRef(new StepsTimingFunction(steps, step_position));
   }
 
   static StepsTimingFunction* Preset(StepPosition position) {
@@ -177,7 +177,7 @@ class PLATFORM_EXPORT StepsTimingFunction final : public TimingFunction {
     }
   }
 
-  ~StepsTimingFunction() override {}
+  ~StepsTimingFunction() override = default;
 
   // TimingFunction implementation.
   String ToString() const override;
@@ -199,10 +199,10 @@ class PLATFORM_EXPORT StepsTimingFunction final : public TimingFunction {
 class PLATFORM_EXPORT FramesTimingFunction final : public TimingFunction {
  public:
   static scoped_refptr<FramesTimingFunction> Create(int frames) {
-    return WTF::AdoptRef(new FramesTimingFunction(frames));
+    return base::AdoptRef(new FramesTimingFunction(frames));
   }
 
-  ~FramesTimingFunction() override {}
+  ~FramesTimingFunction() override = default;
 
   // TimingFunction implementation.
   String ToString() const override;

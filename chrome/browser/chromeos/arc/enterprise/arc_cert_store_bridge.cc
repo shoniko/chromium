@@ -103,7 +103,6 @@ ArcCertStoreBridge::ArcCertStoreBridge(content::BrowserContext* context,
                                        ArcBridgeService* bridge_service)
     : context_(context),
       arc_bridge_service_(bridge_service),
-      binding_(this),
       weak_ptr_factory_(this) {
   DVLOG(1) << "ArcCertStoreBridge::ArcCertStoreBridge";
 
@@ -112,6 +111,7 @@ ArcCertStoreBridge::ArcCertStoreBridge(content::BrowserContext* context,
   policy_service_ = profile_policy_connector->policy_service();
   DCHECK(policy_service_);
 
+  arc_bridge_service_->cert_store()->SetHost(this);
   arc_bridge_service_->cert_store()->AddObserver(this);
 }
 
@@ -119,27 +119,20 @@ ArcCertStoreBridge::~ArcCertStoreBridge() {
   DVLOG(1) << "ArcCertStoreBridge::~ArcCertStoreBridge";
 
   arc_bridge_service_->cert_store()->RemoveObserver(this);
+  arc_bridge_service_->cert_store()->SetHost(nullptr);
 }
 
-void ArcCertStoreBridge::OnInstanceReady() {
-  DVLOG(1) << "ArcCertStoreBridge::OnInstanceReady";
+void ArcCertStoreBridge::OnConnectionReady() {
+  DVLOG(1) << "ArcCertStoreBridge::OnConnectionReady";
 
   policy_service_->AddObserver(policy::POLICY_DOMAIN_CHROME, this);
   net::CertDatabase::GetInstance()->AddObserver(this);
 
-  auto* instance =
-      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->cert_store(), Init);
-  DCHECK(instance);
-
-  mojom::CertStoreHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  instance->Init(std::move(host_proxy));
-
   UpdateFromKeyPermissionsPolicy();
 }
 
-void ArcCertStoreBridge::OnInstanceClosed() {
-  DVLOG(1) << "ArcCertStoreBridge::OnInstanceClosed";
+void ArcCertStoreBridge::OnConnectionClosed() {
+  DVLOG(1) << "ArcCertStoreBridge::OnConnectionClosed";
 
   policy_service_->RemoveObserver(policy::POLICY_DOMAIN_CHROME, this);
   net::CertDatabase::GetInstance()->RemoveObserver(this);
@@ -300,7 +293,7 @@ void ArcCertStoreBridge::OnCertificatesListed(
             x509_cert, Profile::FromBrowserContext(context_)->GetPrefs())) {
       mojom::CertificatePtr certificate = mojom::Certificate::New();
       certificate->alias = cert->nickname;
-      net::X509Certificate::GetPEMEncoded(x509_cert->os_cert_handle(),
+      net::X509Certificate::GetPEMEncoded(x509_cert->cert_buffer(),
                                           &certificate->cert);
       permitted_certs.emplace_back(std::move(certificate));
     }

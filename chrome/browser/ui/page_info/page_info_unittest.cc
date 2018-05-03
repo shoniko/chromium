@@ -4,12 +4,13 @@
 
 #include "chrome/browser/ui/page_info/page_info.h"
 
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/at_exit.h"
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
@@ -211,70 +212,85 @@ bool PermissionInfoListContainsPermission(const PermissionInfoList& permissions,
 
 }  // namespace
 
-TEST_F(PageInfoTest, NonFactoryDefaultPermissionsShown) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kSiteDetails);
-
+TEST_F(PageInfoTest, NonFactoryDefaultAndRecentlyChangedPermissionsShown) {
   page_info()->PresentSitePermissions();
-// By default, the number of permissions shown should be 0, except on Android,
-// where Geolocation needs to be checked for DSE settings.
+  std::set<ContentSettingsType> expected_visible_permissions;
+
 #if defined(OS_ANDROID)
-  EXPECT_EQ(1uL, last_permission_info_list().size());
+  // Geolocation is always allowed to pass through to Android-specific logic to
+  // check for DSE settings (so expect 1 item), but isn't actually shown later
+  // on because this test isn't testing with a default search engine origin.
+  expected_visible_permissions.insert(CONTENT_SETTINGS_TYPE_GEOLOCATION);
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
+  EXPECT_EQ(CONTENT_SETTINGS_TYPE_GEOLOCATION,
+            last_permission_info_list().back().type);
 #else
-  EXPECT_EQ(0uL, last_permission_info_list().size());
+  expected_visible_permissions.insert(CONTENT_SETTINGS_TYPE_PLUGINS);
+  // Flash is always visible on desktop - see https://crbug.com/791142.
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
+  EXPECT_EQ(CONTENT_SETTINGS_TYPE_PLUGINS,
+            last_permission_info_list().back().type);
 #endif
 
-  std::vector<ContentSettingsType> non_default_permissions = {
-      CONTENT_SETTINGS_TYPE_GEOLOCATION, CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-  };
   // Change some default-ask settings away from the default.
   page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_GEOLOCATION,
                                        CONTENT_SETTING_ALLOW);
+  expected_visible_permissions.insert(CONTENT_SETTINGS_TYPE_GEOLOCATION);
   page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
                                        CONTENT_SETTING_ALLOW);
+  expected_visible_permissions.insert(CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
   page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
                                        CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(non_default_permissions.size(), last_permission_info_list().size());
+  expected_visible_permissions.insert(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
 
-  non_default_permissions.push_back(CONTENT_SETTINGS_TYPE_POPUPS);
+  expected_visible_permissions.insert(CONTENT_SETTINGS_TYPE_POPUPS);
   // Change a default-block setting to a user-preference block instead.
   page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_POPUPS,
                                        CONTENT_SETTING_BLOCK);
-  EXPECT_EQ(non_default_permissions.size(), last_permission_info_list().size());
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
 
-  non_default_permissions.push_back(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
+  expected_visible_permissions.insert(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
   // Change a default-allow setting away from the default.
   page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
                                        CONTENT_SETTING_BLOCK);
-  EXPECT_EQ(non_default_permissions.size(), last_permission_info_list().size());
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
 
-  // Make sure setting a default setting to the default doesn't do anything.
+  // Make sure changing a setting to its default causes it to show up, since it
+  // has been recently changed.
+  expected_visible_permissions.insert(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
   page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
                                        CONTENT_SETTING_DEFAULT);
-  EXPECT_EQ(non_default_permissions.size(), last_permission_info_list().size());
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
 
-  non_default_permissions.pop_back();
-  // Clear the Javascript setting.
+  // Set the Javascript setting to default should keep it shown.
   page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
                                        CONTENT_SETTING_DEFAULT);
-  EXPECT_EQ(non_default_permissions.size(), last_permission_info_list().size());
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
 
-  non_default_permissions.push_back(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
   // Change the default setting for Javascript away from the factory default.
   page_info()->content_settings_->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_JAVASCRIPT, CONTENT_SETTING_BLOCK);
   page_info()->PresentSitePermissions();
-  EXPECT_EQ(non_default_permissions.size(), last_permission_info_list().size());
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
 
   // Change it back to ALLOW, which is its factory default, but has a source
   // from the user preference (i.e. it counts as non-factory default).
   page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
                                        CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(non_default_permissions.size(), last_permission_info_list().size());
+  EXPECT_EQ(expected_visible_permissions.size(),
+            last_permission_info_list().size());
 
   // Sanity check the correct permissions are being shown.
-  for (ContentSettingsType type : non_default_permissions) {
+  for (ContentSettingsType type : expected_visible_permissions) {
     EXPECT_TRUE(PermissionInfoListContainsPermission(
         last_permission_info_list(), type));
   }
@@ -715,6 +731,7 @@ TEST_F(PageInfoTest, HTTPSConnectionError) {
   EXPECT_EQ(base::string16(), page_info()->organization_name());
 }
 
+#if defined(OS_CHROMEOS)
 TEST_F(PageInfoTest, HTTPSPolicyCertConnection) {
   security_info_.security_level =
       security_state::SECURE_WITH_POLICY_INSTALLED_CERT;
@@ -735,6 +752,7 @@ TEST_F(PageInfoTest, HTTPSPolicyCertConnection) {
             page_info()->site_identity_status());
   EXPECT_EQ(base::string16(), page_info()->organization_name());
 }
+#endif
 
 TEST_F(PageInfoTest, HTTPSSHA1) {
   security_info_.security_level = security_state::NONE;
@@ -780,6 +798,26 @@ TEST_F(PageInfoTest, ShowInfoBar) {
                                        CONTENT_SETTING_ALLOW);
   page_info()->OnUIClosing();
   ASSERT_EQ(1u, infobar_service()->infobar_count());
+
+  infobar_service()->RemoveInfoBar(infobar_service()->infobar_at(0));
+}
+
+TEST_F(PageInfoTest, NoInfoBarWhenSoundSettingChanged) {
+  EXPECT_EQ(0u, infobar_service()->infobar_count());
+  page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_SOUND,
+                                       CONTENT_SETTING_BLOCK);
+  page_info()->OnUIClosing();
+  EXPECT_EQ(0u, infobar_service()->infobar_count());
+}
+
+TEST_F(PageInfoTest, ShowInfoBarWhenSoundSettingAndAnotherSettingChanged) {
+  EXPECT_EQ(0u, infobar_service()->infobar_count());
+  page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+                                       CONTENT_SETTING_BLOCK);
+  page_info()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_SOUND,
+                                       CONTENT_SETTING_BLOCK);
+  page_info()->OnUIClosing();
+  EXPECT_EQ(1u, infobar_service()->infobar_count());
 
   infobar_service()->RemoveInfoBar(infobar_service()->infobar_at(0));
 }
@@ -955,7 +993,7 @@ TEST_F(PageInfoTest, SubresourceFilterSetting_MatchesActivation) {
       HostContentSettingsMapFactory::GetForProfile(profile());
   content_settings->SetWebsiteSettingDefaultScope(
       url(), GURL(), CONTENT_SETTINGS_TYPE_ADS_DATA, std::string(),
-      base::MakeUnique<base::DictionaryValue>());
+      std::make_unique<base::DictionaryValue>());
   page_info();
   EXPECT_TRUE(showing_setting(last_permission_info_list()));
 }

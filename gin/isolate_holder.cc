@@ -15,6 +15,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "gin/debug_impl.h"
 #include "gin/function_template.h"
@@ -27,6 +28,7 @@ namespace gin {
 
 namespace {
 v8::ArrayBuffer::Allocator* g_array_buffer_allocator = nullptr;
+const intptr_t* g_reference_table = nullptr;
 }  // namespace
 
 IsolateHolder::IsolateHolder(
@@ -39,14 +41,12 @@ IsolateHolder::IsolateHolder(
     : IsolateHolder(std::move(task_runner),
                     access_mode,
                     kAllowAtomicsWait,
-                    nullptr,
                     nullptr) {}
 
 IsolateHolder::IsolateHolder(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     AccessMode access_mode,
     AllowAtomicsWaitMode atomics_wait_mode,
-    const intptr_t* reference,
     v8::StartupData* startup_data)
     : access_mode_(access_mode) {
   v8::ArrayBuffer::Allocator* allocator = g_array_buffer_allocator;
@@ -59,10 +59,10 @@ IsolateHolder::IsolateHolder(
                                        base::SysInfo::AmountOfVirtualMemory());
   params.array_buffer_allocator = allocator;
   params.allow_atomics_wait = atomics_wait_mode == kAllowAtomicsWait;
-  params.external_references = reference;
+  params.external_references = g_reference_table;
 
   if (startup_data) {
-    CHECK(reference);
+    CHECK(g_reference_table);
     V8Initializer::GetV8ContextSnapshotData(startup_data);
     if (startup_data->data) {
       params.snapshot_blob = startup_data;
@@ -70,11 +70,12 @@ IsolateHolder::IsolateHolder(
   }
   isolate_ = v8::Isolate::New(params);
 
-  SetUp(std::move(task_runner));
+  SetUp(task_runner);
 }
 
-IsolateHolder::IsolateHolder(const intptr_t* reference_table,
-                             v8::StartupData* existing_blob)
+IsolateHolder::IsolateHolder(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    v8::StartupData* existing_blob)
     : access_mode_(AccessMode::kSingleThread) {
   CHECK(existing_blob);
 
@@ -85,10 +86,11 @@ IsolateHolder::IsolateHolder(const intptr_t* reference_table,
   }
 
   snapshot_creator_.reset(
-      new v8::SnapshotCreator(reference_table, existing_blob));
+      new v8::SnapshotCreator(g_reference_table, existing_blob));
   isolate_ = snapshot_creator_->GetIsolate();
 
-  SetUp(nullptr);
+  DCHECK(task_runner->BelongsToCurrentThread());
+  SetUp(task_runner);
 }
 
 IsolateHolder::~IsolateHolder() {
@@ -114,10 +116,12 @@ IsolateHolder::~IsolateHolder() {
 // static
 void IsolateHolder::Initialize(ScriptMode mode,
                                V8ExtrasMode v8_extras_mode,
-                               v8::ArrayBuffer::Allocator* allocator) {
+                               v8::ArrayBuffer::Allocator* allocator,
+                               const intptr_t* reference_table) {
   CHECK(allocator);
   V8Initializer::Initialize(mode, v8_extras_mode);
   g_array_buffer_allocator = allocator;
+  g_reference_table = reference_table;
 }
 
 void IsolateHolder::AddRunMicrotasksObserver() {
@@ -140,11 +144,13 @@ void IsolateHolder::EnableIdleTasks(
 
 void IsolateHolder::SetUp(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  DCHECK(task_runner);
   v8::ArrayBuffer::Allocator* allocator = g_array_buffer_allocator;
   CHECK(allocator) << "You need to invoke gin::IsolateHolder::Initialize first";
   isolate_data_.reset(
       new PerIsolateData(isolate_, allocator, access_mode_, task_runner));
-  isolate_memory_dump_provider_.reset(new V8IsolateMemoryDumpProvider(this));
+  isolate_memory_dump_provider_.reset(
+      new V8IsolateMemoryDumpProvider(this, task_runner));
 #if defined(OS_WIN)
   {
     void* code_range;

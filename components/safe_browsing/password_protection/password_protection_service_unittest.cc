@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 #include "components/safe_browsing/password_protection/password_protection_service.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -104,9 +105,8 @@ class TestPasswordProtectionService : public PasswordProtectionService {
 
   void set_incognito(bool enabled) { is_incognito_ = enabled; }
 
-  bool IsPingingEnabled(const base::Feature& feature,
+  bool IsPingingEnabled(LoginReputationClientRequest::TriggerType trigger_type,
                         RequestOutcome* reason) override {
-    checked_feature_name_ = feature.name;
     return true;
   }
 
@@ -134,8 +134,6 @@ class TestPasswordProtectionService : public PasswordProtectionService {
     return latest_request_ ? latest_request_->request_proto() : nullptr;
   }
 
-  std::string checked_feature_name() { return checked_feature_name_; }
-
   MOCK_METHOD3(FillReferrerChain,
                void(const GURL&, int, LoginReputationClientRequest::Frame*));
   MOCK_METHOD1(MaybeLogPasswordReuseDetectedEvent, void(content::WebContents*));
@@ -146,13 +144,14 @@ class TestPasswordProtectionService : public PasswordProtectionService {
   MOCK_METHOD2(UpdateSecurityState,
                void(safe_browsing::SBThreatType, content::WebContents*));
   MOCK_METHOD1(UserClickedThroughSBInterstitial, bool(content::WebContents*));
+  MOCK_METHOD2(RemoveUnhandledSyncPasswordReuseOnURLsDeleted,
+               void(bool, const history::URLRows&));
 
  private:
   bool is_extended_reporting_;
   bool is_incognito_;
   PasswordProtectionRequest* latest_request_;
   std::unique_ptr<LoginReputationClientResponse> latest_response_;
-  std::string checked_feature_name_;
   DISALLOW_COPY_AND_ASSIGN(TestPasswordProtectionService);
 };
 
@@ -180,7 +179,7 @@ class PasswordProtectionServiceTest
     database_manager_ = new MockSafeBrowsingDatabaseManager();
     dummy_request_context_getter_ = new DummyURLRequestContextGetter();
     password_protection_service_ =
-        base::MakeUnique<TestPasswordProtectionService>(
+        std::make_unique<TestPasswordProtectionService>(
             database_manager_, dummy_request_context_getter_,
             content_setting_map_);
 
@@ -254,10 +253,10 @@ class PasswordProtectionServiceTest
             std::string(), nullptr));
 
     if (!verdict_dictionary.get())
-      verdict_dictionary = base::MakeUnique<base::DictionaryValue>();
+      verdict_dictionary = std::make_unique<base::DictionaryValue>();
 
     std::unique_ptr<base::DictionaryValue> invalid_verdict_entry =
-        base::MakeUnique<base::DictionaryValue>();
+        std::make_unique<base::DictionaryValue>();
     invalid_verdict_entry->SetString("invalid", "invalid_string");
 
     verdict_dictionary->SetWithoutPathExpansion(
@@ -286,7 +285,7 @@ class PasswordProtectionServiceTest
 
 TEST_P(PasswordProtectionServiceTest, TestParseInvalidVerdictEntry) {
   std::unique_ptr<base::DictionaryValue> invalid_verdict_entry =
-      base::MakeUnique<base::DictionaryValue>();
+      std::make_unique<base::DictionaryValue>();
   invalid_verdict_entry->SetString("cache_creation_time", "invalid_time");
 
   int cache_creation_time;
@@ -1030,21 +1029,6 @@ TEST_P(PasswordProtectionServiceTest,
   } else {
     EXPECT_EQ(0, reuse_event.domains_matching_password_size());
   }
-}
-
-TEST_P(PasswordProtectionServiceTest, VerifyCanSendPing) {
-  GURL suspicious_url("http://phishing.com");
-  EXPECT_TRUE(password_protection_service_->CanSendPing(
-      kProtectedPasswordEntryPinging, suspicious_url,
-      true /* is_sync_password */));
-  EXPECT_EQ(kProtectedPasswordEntryPinging.name,
-            password_protection_service_->checked_feature_name());
-
-  EXPECT_TRUE(password_protection_service_->CanSendPing(
-      kPasswordFieldOnFocusPinging, suspicious_url,
-      false /* is_sync_password */));
-  EXPECT_EQ(kPasswordFieldOnFocusPinging.name,
-            password_protection_service_->checked_feature_name());
 }
 
 TEST_P(PasswordProtectionServiceTest, VerifyShouldShowModalWarning) {

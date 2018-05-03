@@ -20,12 +20,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-import static org.chromium.chrome.browser.ntp.cards.ContentSuggestionsUnitTestUtils.bindViewHolders;
 import static org.chromium.chrome.browser.ntp.cards.ContentSuggestionsUnitTestUtils.makeUiConfig;
 import static org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.createDummySuggestions;
 import static org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.registerCategory;
 import static org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.stringify;
 
+import android.accounts.Account;
 import android.content.res.Resources;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.AdapterDataObserver;
@@ -35,6 +35,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -75,9 +76,15 @@ import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
+import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.CategoryInfoBuilder;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
+import org.chromium.components.signin.AccountManagerFacade;
+import org.chromium.components.signin.test.util.AccountHolder;
+import org.chromium.components.signin.test.util.FakeAccountManagerDelegate;
 import org.chromium.net.NetworkChangeNotifier;
+import org.chromium.testing.local.CustomShadowAsyncTask;
 import org.chromium.testing.local.LocalRobolectricTestRunner;
 
 import java.util.ArrayList;
@@ -87,21 +94,19 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
- * Unit tests for {@link NewTabPageAdapter}.
+ * Unit tests for {@link NewTabPageAdapter}. {@link AccountManagerFacade} uses AsyncTasks, thus
+ * the need for {@link CustomShadowAsyncTask}.
  */
 @RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
-@Features({@Features.Register(value = ChromeFeatureList.NTP_CONDENSED_LAYOUT, enabled = false),
-        @Features.Register(value = ChromeFeatureList.CHROME_HOME, enabled = false),
-        @Features.Register(value = ChromeFeatureList.CONTENT_SUGGESTIONS_SCROLL_TO_LOAD,
-                enabled = false),
-        @Features.Register(value = ChromeFeatureList.ANDROID_SIGNIN_PROMOS, enabled = false)})
+@Config(manifest = Config.NONE, shadows = {CustomShadowAsyncTask.class})
+@DisableFeatures({ChromeFeatureList.NTP_CONDENSED_LAYOUT, ChromeFeatureList.CHROME_HOME,
+        ChromeFeatureList.CONTENT_SUGGESTIONS_SCROLL_TO_LOAD})
 public class NewTabPageAdapterTest {
     @Rule
     public DisableHistogramsRule mDisableHistogramsRule = new DisableHistogramsRule();
 
     @Rule
-    public Features.Processor mFeatureProcessor = new Features.Processor();
+    public TestRule mFeatureProcessor = new Features.JUnitProcessor();
 
     @CategoryInt
     private static final int TEST_CATEGORY = 42;
@@ -283,9 +288,16 @@ public class NewTabPageAdapterTest {
         // Set empty variation params for the test.
         CardsVariationParameters.setTestVariationParams(new HashMap<>());
 
+        // Initialise AccountManagerFacade and add one dummy account.
+        FakeAccountManagerDelegate fakeAccountManager = new FakeAccountManagerDelegate(
+                FakeAccountManagerDelegate.ENABLE_PROFILE_DATA_SOURCE);
+        AccountManagerFacade.overrideAccountManagerFacadeForTests(fakeAccountManager);
+        Account account = AccountManagerFacade.createAccountFromName("test@gmail.com");
+        fakeAccountManager.addAccountHolderExplicitly(new AccountHolder.Builder(account).build());
+        assertFalse(AccountManagerFacade.get().isUpdatePending());
+
         // Initialise the sign in state. We will be signed in by default in the tests.
-        assertFalse(
-                ChromePreferenceManager.getInstance().getNewTabPageGenericSigninPromoDismissed());
+        assertFalse(ChromePreferenceManager.getInstance().getNewTabPageSigninPromoDismissed());
         SigninManager.setInstanceForTesting(mMockSigninManager);
         when(mMockSigninManager.isSignedInOnNative()).thenReturn(true);
         when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
@@ -303,7 +315,8 @@ public class NewTabPageAdapterTest {
     public void tearDown() {
         CardsVariationParameters.setTestVariationParams(null);
         SigninManager.setInstanceForTesting(null);
-        ChromePreferenceManager.getInstance().setNewTabPageGenericSigninPromoDismissed(false);
+        ChromePreferenceManager.getInstance().setNewTabPageSigninPromoDismissed(false);
+        ChromePreferenceManager.getInstance().clearNewTabPageSigninPromoSuppressionPeriodStart();
     }
 
     /**
@@ -510,8 +523,8 @@ public class NewTabPageAdapterTest {
         reloadNtp();
         assertItemsFor(section(suggestions), section(otherSuggestions));
 
-        // Bind the whole section - indicate that it is being viewed.
-        bindViewHolders(mAdapter.getSectionListForTesting().getSection(otherCategory));
+        // Indicate that the whole section is being viewed.
+        for (SnippetArticle article : otherSuggestions) article.mExposed = true;
 
         List<SnippetArticle> newSuggestions = createDummySuggestions(3, TEST_CATEGORY, "new");
         mSource.setSuggestionsForCategory(TEST_CATEGORY, newSuggestions);
@@ -973,7 +986,41 @@ public class NewTabPageAdapterTest {
 
     @Test
     @Feature({"Ntp"})
-    @Features(@Features.Register(ChromeFeatureList.CHROME_HOME))
+    public void testSigninPromoSuppressionActive() {
+        when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
+        when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
+
+        // Suppress promo.
+        ChromePreferenceManager.getInstance().setNewTabPageSigninPromoSuppressionPeriodStart(
+                System.currentTimeMillis());
+
+        resetUiDelegate();
+        reloadNtp();
+        assertFalse(isSignInPromoVisible());
+    }
+
+    @Test
+    @Feature({"Ntp"})
+    public void testSigninPromoSuppressionExpired() {
+        when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
+        when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
+
+        // Suppress promo.
+        ChromePreferenceManager preferenceManager = ChromePreferenceManager.getInstance();
+        preferenceManager.setNewTabPageSigninPromoSuppressionPeriodStart(
+                System.currentTimeMillis() - SignInPromo.SUPPRESSION_PERIOD_MS);
+
+        resetUiDelegate();
+        reloadNtp();
+        assertTrue(isSignInPromoVisible());
+
+        // SignInPromo should clear shared preference when suppression period ends.
+        assertEquals(0, preferenceManager.getNewTabPageSigninPromoSuppressionPeriodStart());
+    }
+
+    @Test
+    @Feature({"Ntp"})
+    @EnableFeatures(ChromeFeatureList.CHROME_HOME)
     public void testSigninPromoModern() {
         when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
         when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
@@ -989,12 +1036,13 @@ public class NewTabPageAdapterTest {
     @Config(shadows = MyShadowResources.class)
     public void testSigninPromoDismissal() {
         final String signInPromoText = "sign in";
-        when(MyShadowResources.sResources.getText(R.string.snippets_disabled_generic_prompt))
+        when(MyShadowResources.sResources.getText(
+                     R.string.signin_promo_description_ntp_content_suggestions))
                 .thenReturn(signInPromoText);
 
         when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
         when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
-        ChromePreferenceManager.getInstance().setNewTabPageGenericSigninPromoDismissed(false);
+        ChromePreferenceManager.getInstance().setNewTabPageSigninPromoDismissed(false);
         reloadNtp();
 
         final int signInPromoPosition = mAdapter.getFirstPositionForType(ItemViewType.PROMO);
@@ -1005,8 +1053,7 @@ public class NewTabPageAdapterTest {
 
         verify(itemDismissedCallback).onResult(anyString());
         assertFalse(isSignInPromoVisible());
-        assertTrue(
-                ChromePreferenceManager.getInstance().getNewTabPageGenericSigninPromoDismissed());
+        assertTrue(ChromePreferenceManager.getInstance().getNewTabPageSigninPromoDismissed());
 
         reloadNtp();
         assertFalse(isSignInPromoVisible());
@@ -1140,7 +1187,7 @@ public class NewTabPageAdapterTest {
 
     @Test
     @Feature({"Ntp"})
-    @Features(@Features.Register(ChromeFeatureList.CHROME_HOME))
+    @EnableFeatures(ChromeFeatureList.CHROME_HOME)
     public void testAllDismissedModern() {
         when(mUiDelegate.isVisible()).thenReturn(true);
 
@@ -1258,7 +1305,7 @@ public class NewTabPageAdapterTest {
      */
     private SectionDescriptor sectionWithStatusCard() {
         assertFalse(FeatureUtilities.isChromeHomeEnabled());
-        return new SectionDescriptor(Collections.emptyList()).withStatusCard();
+        return new SectionDescriptor(Collections.<SnippetArticle>emptyList()).withStatusCard();
     }
 
     /**
@@ -1269,7 +1316,7 @@ public class NewTabPageAdapterTest {
      */
     private SectionDescriptor emptySection() {
         assertTrue(FeatureUtilities.isChromeHomeEnabled());
-        return new SectionDescriptor(Collections.emptyList());
+        return new SectionDescriptor(Collections.<SnippetArticle>emptyList());
     }
 
     private void resetUiDelegate() {
@@ -1281,8 +1328,8 @@ public class NewTabPageAdapterTest {
 
     private void reloadNtp() {
         mSource.removeObservers();
-        mAdapter = new NewTabPageAdapter(mUiDelegate, mock(View.class), makeUiConfig(),
-                mOfflinePageBridge, mock(ContextMenuManager.class),
+        mAdapter = new NewTabPageAdapter(mUiDelegate, mock(View.class), /* logoView = */ null,
+                makeUiConfig(), mOfflinePageBridge, mock(ContextMenuManager.class),
                 /* tileGroupDelegate = */ null, /* suggestionsCarousel = */ null);
         mAdapter.refreshSuggestions();
     }

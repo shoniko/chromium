@@ -4,6 +4,9 @@
 
 #include "modules/ModulesInitializer.h"
 
+#include <memory>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/modules/v8/ModuleBindingsInitializer.h"
 #include "core/css/CSSPaintImageGenerator.h"
 #include "core/dom/ContextFeaturesClientImpl.h"
@@ -14,7 +17,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/frame/WebLocalFrameImpl.h"
-#include "core/html/HTMLCanvasElement.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "core/html/media/HTMLMediaElement.h"
 #include "core/inspector/InspectorSession.h"
 #include "core/leak_detector/BlinkLeakDetector.h"
@@ -26,6 +29,7 @@
 #include "modules/EventModulesFactory.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "modules/accessibility/InspectorAccessibilityAgent.h"
+#include "modules/animationworklet/AnimationWorkletThread.h"
 #include "modules/app_banner/AppBannerController.h"
 #include "modules/audio_output_devices/AudioOutputDeviceClient.h"
 #include "modules/audio_output_devices/AudioOutputDeviceClientImpl.h"
@@ -34,8 +38,6 @@
 #include "modules/canvas/canvas2d/CanvasRenderingContext2D.h"
 #include "modules/canvas/imagebitmap/ImageBitmapRenderingContext.h"
 #include "modules/canvas/offscreencanvas2d/OffscreenCanvasRenderingContext2D.h"
-#include "modules/compositorworker/AnimationWorkletThread.h"
-#include "modules/credentialmanager/CredentialManagerClient.h"
 #include "modules/csspaint/CSSPaintImageGeneratorImpl.h"
 #include "modules/device_orientation/DeviceMotionController.h"
 #include "modules/device_orientation/DeviceOrientationAbsoluteController.h"
@@ -68,7 +70,6 @@
 #include "modules/remoteplayback/RemotePlayback.h"
 #include "modules/screen_orientation/ScreenOrientationControllerImpl.h"
 #include "modules/serviceworkers/NavigatorServiceWorker.h"
-#include "modules/serviceworkers/ServiceWorkerLinkResource.h"
 #include "modules/speech/SpeechRecognitionClientProxy.h"
 #include "modules/storage/DOMWindowStorageController.h"
 #include "modules/storage/InspectorDOMStorageAgent.h"
@@ -79,10 +80,12 @@
 #include "modules/webdatabase/DatabaseClient.h"
 #include "modules/webdatabase/DatabaseManager.h"
 #include "modules/webdatabase/InspectorDatabaseAgent.h"
+#include "modules/webdatabase/WebDatabaseImpl.h"
 #include "modules/webgl/WebGL2RenderingContext.h"
 #include "modules/webgl/WebGLRenderingContext.h"
+#include "platform/CrossThreadFunctional.h"
 #include "platform/mojo/MojoHelper.h"
-#include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Functional.h"
 #include "public/platform/InterfaceRegistry.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/web/WebViewClient.h"
@@ -109,44 +112,45 @@ void ModulesInitializer::Initialize() {
   // Some unit tests may have no message loop ready, so we can't initialize the
   // mojo stuff here. They can initialize those mojo stuff they're interested in
   // later after they got a message loop ready.
-  if (CanInitializeMojo())
+  if (CanInitializeMojo()) {
     TimeZoneMonitorClient::Init();
+  }
 
   CoreInitializer::Initialize();
 
   // Canvas context types must be registered with the HTMLCanvasElement.
   HTMLCanvasElement::RegisterRenderingContextFactory(
-      WTF::MakeUnique<CanvasRenderingContext2D::Factory>());
+      std::make_unique<CanvasRenderingContext2D::Factory>());
   HTMLCanvasElement::RegisterRenderingContextFactory(
-      WTF::MakeUnique<WebGLRenderingContext::Factory>());
+      std::make_unique<WebGLRenderingContext::Factory>());
   HTMLCanvasElement::RegisterRenderingContextFactory(
-      WTF::MakeUnique<WebGL2RenderingContext::Factory>());
+      std::make_unique<WebGL2RenderingContext::Factory>());
   HTMLCanvasElement::RegisterRenderingContextFactory(
-      WTF::MakeUnique<ImageBitmapRenderingContext::Factory>());
+      std::make_unique<ImageBitmapRenderingContext::Factory>());
 
   // OffscreenCanvas context types must be registered with the OffscreenCanvas.
   OffscreenCanvas::RegisterRenderingContextFactory(
-      WTF::MakeUnique<OffscreenCanvasRenderingContext2D::Factory>());
+      std::make_unique<OffscreenCanvasRenderingContext2D::Factory>());
   OffscreenCanvas::RegisterRenderingContextFactory(
-      WTF::MakeUnique<WebGLRenderingContext::Factory>());
+      std::make_unique<WebGLRenderingContext::Factory>());
   OffscreenCanvas::RegisterRenderingContextFactory(
-      WTF::MakeUnique<WebGL2RenderingContext::Factory>());
+      std::make_unique<WebGL2RenderingContext::Factory>());
 }
 
 void ModulesInitializer::InitLocalFrame(LocalFrame& frame) const {
   // CoreInitializer::RegisterLocalFrameInitCallback([](LocalFrame& frame) {
   if (frame.IsMainFrame()) {
-    frame.GetInterfaceRegistry()->AddInterface(WTF::Bind(
+    frame.GetInterfaceRegistry()->AddInterface(WTF::BindRepeating(
         &CopylessPasteServer::BindMojoRequest, WrapWeakPersistent(&frame)));
   }
-  frame.GetInterfaceRegistry()->AddInterface(
-      WTF::Bind(&InstallationServiceImpl::Create, WrapWeakPersistent(&frame)));
+  frame.GetInterfaceRegistry()->AddInterface(WTF::BindRepeating(
+      &InstallationServiceImpl::Create, WrapWeakPersistent(&frame)));
   // TODO(dominickn): This interface should be document-scoped rather than
   // frame-scoped, as the resulting banner event is dispatched to
   // frame()->document().
-  frame.GetInterfaceRegistry()->AddInterface(WTF::Bind(
+  frame.GetInterfaceRegistry()->AddInterface(WTF::BindRepeating(
       &AppBannerController::BindMojoRequest, WrapWeakPersistent(&frame)));
-  frame.GetInterfaceRegistry()->AddInterface(WTF::Bind(
+  frame.GetInterfaceRegistry()->AddInterface(WTF::BindRepeating(
       &TextSuggestionBackendImpl::Create, WrapWeakPersistent(&frame)));
 }
 
@@ -208,11 +212,6 @@ void ModulesInitializer::InitInspectorAgentSession(
   }
 }
 
-LinkResource* ModulesInitializer::CreateServiceWorkerLinkResource(
-    HTMLLinkElement* owner) const {
-  return ServiceWorkerLinkResource::Create(owner);
-}
-
 void ModulesInitializer::OnClearWindowObjectInMainWorld(
     Document& document,
     const Settings& settings) const {
@@ -242,7 +241,7 @@ std::unique_ptr<WebMediaPlayer> ModulesInitializer::CreateWebMediaPlayer(
       HTMLMediaElementEncryptedMedia::From(html_media_element);
   WebString sink_id(
       HTMLMediaElementAudioOutputDevice::sinkId(html_media_element));
-  return WTF::WrapUnique(web_frame_client->CreateMediaPlayer(
+  return base::WrapUnique(web_frame_client->CreateMediaPlayer(
       source, media_player_client, &encrypted_media,
       encrypted_media.ContentDecryptionModule(), sink_id, view));
 }
@@ -250,13 +249,6 @@ std::unique_ptr<WebMediaPlayer> ModulesInitializer::CreateWebMediaPlayer(
 WebRemotePlaybackClient* ModulesInitializer::CreateWebRemotePlaybackClient(
     HTMLMediaElement& html_media_element) const {
   return HTMLMediaElementRemotePlayback::remote(html_media_element);
-}
-
-void ModulesInitializer::ProvideCredentialManagerClient(
-    Page& page,
-    WebCredentialManagerClient* web_credential_manager_client) const {
-  ::blink::ProvideCredentialManagerClientTo(
-      page, new CredentialManagerClient(web_credential_manager_client));
 }
 
 void ModulesInitializer::ProvideModulesToPage(Page& page,
@@ -277,6 +269,14 @@ void ModulesInitializer::ForceNextWebGLContextCreationToFail() const {
 
 void ModulesInitializer::CollectAllGarbageForAnimationWorklet() const {
   AnimationWorkletThread::CollectAllGarbage();
+}
+
+void ModulesInitializer::RegisterInterfaces(
+    service_manager::BinderRegistry& registry) {
+  DCHECK(Platform::Current());
+  registry.AddInterface(
+      ConvertToBaseCallback(blink::CrossThreadBind(&WebDatabaseImpl::Create)),
+      Platform::Current()->GetIOTaskRunner());
 }
 
 }  // namespace blink

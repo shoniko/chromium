@@ -8,9 +8,9 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
-#include "build/build_config.h"
+#include "chrome/browser/autofill/address_normalizer_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/autofill/risk_util.h"
 #include "chrome/browser/browser_process.h"
@@ -36,6 +36,7 @@
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_view.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/browser_sync/profile_sync_service.h"
@@ -150,6 +151,12 @@ ukm::UkmRecorder* ChromeAutofillClient::GetUkmRecorder() {
   return ukm::UkmRecorder::Get();
 }
 
+AddressNormalizer* ChromeAutofillClient::GetAddressNormalizer() {
+  if (base::FeatureList::IsEnabled(features::kAutofillAddressNormalizer))
+    return AddressNormalizerFactory::GetInstance();
+  return nullptr;
+}
+
 SaveCardBubbleController* ChromeAutofillClient::GetSaveCardBubbleController() {
 #if defined(OS_ANDROID)
   return nullptr;
@@ -188,7 +195,7 @@ void ChromeAutofillClient::ConfirmSaveCreditCardLocally(
 #if defined(OS_ANDROID)
   InfoBarService::FromWebContents(web_contents())
       ->AddInfoBar(CreateSaveCardInfoBarMobile(
-          base::MakeUnique<AutofillSaveCardInfoBarDelegateMobile>(
+          std::make_unique<AutofillSaveCardInfoBarDelegateMobile>(
               false, card, std::unique_ptr<base::DictionaryValue>(nullptr),
               callback, GetPrefs())));
 #else
@@ -209,7 +216,7 @@ void ChromeAutofillClient::ConfirmSaveCreditCardToCloud(
 #if defined(OS_ANDROID)
   std::unique_ptr<AutofillSaveCardInfoBarDelegateMobile>
       save_card_info_bar_delegate_mobile =
-          base::MakeUnique<AutofillSaveCardInfoBarDelegateMobile>(
+          std::make_unique<AutofillSaveCardInfoBarDelegateMobile>(
               true, card, std::move(legal_message), callback, GetPrefs());
   if (save_card_info_bar_delegate_mobile->LegalMessagesParsedSuccessfully()) {
     InfoBarService::FromWebContents(web_contents())
@@ -231,11 +238,11 @@ void ChromeAutofillClient::ConfirmCreditCardFillAssist(
     const base::Closure& callback) {
 #if defined(OS_ANDROID)
   auto infobar_delegate =
-      base::MakeUnique<AutofillCreditCardFillingInfoBarDelegateMobile>(
+      std::make_unique<AutofillCreditCardFillingInfoBarDelegateMobile>(
           card, callback);
   auto* raw_delegate = infobar_delegate.get();
-  if (InfoBarService::FromWebContents(web_contents())->AddInfoBar(
-          base::MakeUnique<AutofillCreditCardFillingInfoBar>(
+  if (InfoBarService::FromWebContents(web_contents())
+          ->AddInfoBar(std::make_unique<AutofillCreditCardFillingInfoBar>(
               std::move(infobar_delegate)))) {
     raw_delegate->set_was_shown();
   }
@@ -349,8 +356,7 @@ void ChromeAutofillClient::DidFillOrPreviewField(
 #endif  // defined(OS_ANDROID)
 }
 
-void ChromeAutofillClient::DidInteractWithNonsecureCreditCardInput(
-    content::RenderFrameHost* rfh) {
+void ChromeAutofillClient::DidInteractWithNonsecureCreditCardInput() {
   InsecureSensitiveInputDriverFactory* factory =
       InsecureSensitiveInputDriverFactory::GetOrCreateForWebContents(
           web_contents());

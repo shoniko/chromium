@@ -16,17 +16,20 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
+#include "chrome/common/plugin.mojom.h"
 #include "chrome/renderer/media/chrome_key_systems_provider.h"
 #include "components/nacl/common/features.h"
 #include "components/rappor/public/interfaces/rappor_recorder.mojom.h"
 #include "components/safe_browsing/common/safe_browsing.mojom.h"
 #include "components/spellcheck/spellcheck_build_features.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/public/renderer/render_thread.h"
 #include "extensions/features/features.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "media/media_features.h"
 #include "ppapi/features/features.h"
 #include "printing/features/features.h"
+#include "services/service_manager/public/cpp/local_interface_provider.h"
 #include "v8/include/v8.h"
 
 #if defined (OS_CHROMEOS)
@@ -46,8 +49,6 @@ class PrescientNetworkingDispatcher;
 #if BUILDFLAG(ENABLE_SPELLCHECK)
 class SpellCheck;
 #endif
-
-struct ChromeViewHostMsg_GetPluginInfo_Output;
 
 namespace content {
 class BrowserPluginDelegate;
@@ -106,7 +107,9 @@ enum YouTubeRewriteStatus {
 
 }  // namespace internal
 
-class ChromeContentRendererClient : public content::ContentRendererClient {
+class ChromeContentRendererClient
+    : public content::ContentRendererClient,
+      public service_manager::LocalInterfaceProvider {
  public:
   ChromeContentRendererClient();
   ~ChromeContentRendererClient() override;
@@ -125,12 +128,13 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   bool HasErrorPage(int http_status_code) override;
   bool ShouldSuppressErrorPage(content::RenderFrame* render_frame,
                                const GURL& url) override;
-  void GetNavigationErrorStrings(content::RenderFrame* render_frame,
-                                 const blink::WebURLRequest& failed_request,
-                                 const blink::WebURLError& error,
-                                 std::string* error_html,
-                                 base::string16* error_description) override;
-  void GetNavigationErrorStringsForHttpStatusError(
+  bool ShouldTrackUseCounter(const GURL& url) override;
+  void PrepareErrorPage(content::RenderFrame* render_frame,
+                        const blink::WebURLRequest& failed_request,
+                        const blink::WebURLError& error,
+                        std::string* error_html,
+                        base::string16* error_description) override;
+  void PrepareErrorPageForHttpStatusError(
       content::RenderFrame* render_frame,
       const blink::WebURLRequest& failed_request,
       const GURL& unreachable_url,
@@ -154,7 +158,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       blink::WebLocalFrame* frame,
       ui::PageTransition transition_type,
       const blink::WebURL& url,
-      std::vector<std::unique_ptr<content::URLLoaderThrottle>>* throttles,
       GURL* new_url) override;
   bool IsPrefetchOnly(content::RenderFrame* render_frame,
                       const blink::WebURLRequest& request) override;
@@ -164,7 +167,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   blink::WebPrescientNetworking* GetPrescientNetworking() override;
   bool ShouldOverridePageVisibilityState(
       const content::RenderFrame* render_frame,
-      blink::WebPageVisibilityState* override_state) override;
+      blink::mojom::PageVisibilityState* override_state) override;
   bool IsExternalPepperPlugin(const std::string& module_name) override;
   std::unique_ptr<blink::WebSocketHandshakeThrottle>
   CreateWebSocketHandshakeThrottle() override;
@@ -217,6 +220,11 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const GURL& url,
       base::Time cert_validity_start,
       std::string* console_messsage) override;
+  std::unique_ptr<content::URLLoaderThrottleProvider>
+  CreateURLLoaderThrottleProvider(
+      content::URLLoaderThrottleProviderType provider_type) override;
+  blink::WebFrame* FindFrame(blink::WebLocalFrame* relative_to_frame,
+                             const std::string& name) override;
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   // Sets a new |spellcheck|. Used for testing only.
@@ -225,16 +233,23 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 #endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
+  static chrome::mojom::PluginInfoHostAssociatedPtr& GetPluginInfoHost();
+
   static blink::WebPlugin* CreatePlugin(
       content::RenderFrame* render_frame,
       const blink::WebPluginParams& params,
-      const ChromeViewHostMsg_GetPluginInfo_Output& output);
+      const chrome::mojom::PluginInfo& plugin_info);
 #endif
 
 #if BUILDFLAG(ENABLE_PLUGINS) && BUILDFLAG(ENABLE_EXTENSIONS)
   static bool IsExtensionOrSharedModuleWhitelisted(
-      const GURL& url, const std::set<std::string>& whitelist);
+      const GURL& url,
+      const std::set<std::string>& whitelist);
 #endif
+
+  prerender::PrerenderDispatcher* prerender_dispatcher() const {
+    return prerender_dispatcher_.get();
+  }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromeContentRendererClientTest, NaClRestriction);
@@ -244,15 +259,18 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   static GURL GetNaClContentHandlerURL(const std::string& actual_mime_type,
                                        const content::WebPluginInfo& plugin);
 
+  // service_manager::LocalInterfaceProvider:
+  void GetInterface(const std::string& name,
+                    mojo::ScopedMessagePipeHandle request_handle) override;
+
   // Initialises |safe_browsing_| if it is not already initialised.
   void InitSafeBrowsingIfNecessary();
 
-  void GetNavigationErrorStringsInternal(
-      content::RenderFrame* render_frame,
-      const blink::WebURLRequest& failed_request,
-      const error_page::Error& error,
-      std::string* error_html,
-      base::string16* error_description);
+  void PrepareErrorPageInternal(content::RenderFrame* render_frame,
+                                const blink::WebURLRequest& failed_request,
+                                const error_page::Error& error,
+                                std::string* error_html,
+                                base::string16* error_description);
 
   // Time at which this object was created. This is very close to the time at
   // which the RendererMain function was entered.
@@ -276,7 +294,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   std::unique_ptr<network_hints::PrescientNetworkingDispatcher>
       prescient_networking_dispatcher_;
 
-  chrome::ChromeKeySystemsProvider key_systems_provider_;
+  ChromeKeySystemsProvider key_systems_provider_;
 
   safe_browsing::mojom::SafeBrowsingPtr safe_browsing_;
 

@@ -40,6 +40,7 @@ import org.chromium.chrome.browser.widget.PulseDrawable;
 import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.chrome.browser.widget.ToolbarProgressBar;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.ui.UiUtils;
 
 import javax.annotation.Nullable;
@@ -179,6 +180,11 @@ public abstract class ToolbarLayout extends FrameLayout implements Toolbar {
             }
 
             @Override
+            public String getTitle() {
+                return "";
+            }
+
+            @Override
             public NewTabPage getNewTabPageForCurrentTab() {
                 return null;
             }
@@ -196,6 +202,31 @@ public abstract class ToolbarLayout extends FrameLayout implements Toolbar {
             @Override
             public boolean isOfflinePage() {
                 return false;
+            }
+
+            @Override
+            public boolean shouldShowGoogleG(String urlBarText) {
+                return false;
+            }
+
+            @Override
+            public boolean shouldShowSecurityIcon() {
+                return false;
+            }
+
+            @Override
+            public boolean shouldShowVerboseStatus() {
+                return false;
+            }
+
+            @Override
+            public int getSecurityLevel() {
+                return ConnectionSecurityLevel.NONE;
+            }
+
+            @Override
+            public int getSecurityIconResource() {
+                return 0;
             }
         };
 

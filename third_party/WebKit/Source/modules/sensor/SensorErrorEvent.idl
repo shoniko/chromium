@@ -7,7 +7,9 @@
 
 [
     OriginTrialEnabled=Sensor,
-    Constructor(DOMString type, SensorErrorEventInit eventInitDict)
+    SecureContext,
+    Constructor(DOMString type, SensorErrorEventInit eventInitDict),
+    Exposed=Window
 ] interface SensorErrorEvent : Event {
     readonly attribute DOMException error;
 };

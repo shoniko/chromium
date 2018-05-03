@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import zipfile
 
 from devil.utils import cmd_helper
@@ -32,12 +33,13 @@ class Symbolizer(object):
   """A helper class to symbolize stack."""
 
   def __init__(self, apk_under_test=None,
-               enable_relocation_packing=None):
+               non_native_packed_relocations=None):
     self._apk_under_test = apk_under_test
-    self._enable_relocation_packing = enable_relocation_packing
+    self._non_native_packed_relocations = non_native_packed_relocations
     self._libs_dir = None
     self._apk_libs = []
     self._has_unzipped = False
+    self._time_spent_symbolizing = 0
 
 
   def __del__(self):
@@ -52,12 +54,15 @@ class Symbolizer(object):
     if self._libs_dir:
       shutil.rmtree(self._libs_dir)
       self._libs_dir = None
+    if self._time_spent_symbolizing > 0:
+      logging.info(
+          'Total time spent symbolizing: %.2fs', self._time_spent_symbolizing)
 
 
   def UnzipAPKIfNecessary(self):
     """Unzip apk if packed relocation is enabled."""
     if (self._has_unzipped
-        or not self._enable_relocation_packing
+        or not self._non_native_packed_relocations
         or not self._apk_under_test):
       return
     self._libs_dir = tempfile.mkdtemp()
@@ -89,7 +94,7 @@ class Symbolizer(object):
 
     cmd = [_STACK_TOOL, '--arch', arch, '--output-directory',
            constants.GetOutDirectory(), '--more-info']
-    if self._enable_relocation_packing and self._apk_libs:
+    if self._non_native_packed_relocations and self._apk_libs:
       for apk_lib in self._apk_libs:
         cmd.extend(['--packed-lib', apk_lib])
     env = dict(os.environ)
@@ -97,7 +102,11 @@ class Symbolizer(object):
     with tempfile.NamedTemporaryFile() as f:
       f.write('\n'.join(data_to_symbolize))
       f.flush()
-      _, output = cmd_helper.GetCmdStatusAndOutput(cmd + [f.name], env=env)
+      start = time.time()
+      try:
+        _, output = cmd_helper.GetCmdStatusAndOutput(cmd + [f.name], env=env)
+      finally:
+        self._time_spent_symbolizing += time.time() - start
     for line in output.splitlines():
       if not include_stack and 'Stack Data:' in line:
         break

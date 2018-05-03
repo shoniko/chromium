@@ -8,13 +8,19 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/power_monitor/power_monitor.h"
-#include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "components/metrics/metrics_pref_names.h"
+#include "chrome/common/features.h"
+#include "chrome/common/pref_names.h"
+#include "components/metrics/daily_event.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+#include "chrome/browser/background/background_mode_manager.h"
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 
 namespace metrics {
 
@@ -26,7 +32,7 @@ constexpr base::TimeDelta kDailyEventIntervalTimeDelta =
     base::TimeDelta::FromMilliseconds(60 * 30);
 
 // The global TabStatsTracker instance.
-TabStatsTracker* g_instance = nullptr;
+TabStatsTracker* g_tab_stats_tracker_instance = nullptr;
 
 }  // namespace
 
@@ -96,15 +102,23 @@ TabStatsTracker::~TabStatsTracker() {
 
 // static
 void TabStatsTracker::SetInstance(std::unique_ptr<TabStatsTracker> instance) {
-  DCHECK_EQ(nullptr, g_instance);
-  g_instance = instance.release();
+  DCHECK_EQ(nullptr, g_tab_stats_tracker_instance);
+  g_tab_stats_tracker_instance = instance.release();
 }
 
 TabStatsTracker* TabStatsTracker::GetInstance() {
-  return g_instance;
+  return g_tab_stats_tracker_instance;
 }
 
-void TabStatsTracker::TabStatsDailyObserver::OnDailyEvent() {
+void TabStatsTracker::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterIntegerPref(prefs::kTabStatsTotalTabCountMax, 0);
+  registry->RegisterIntegerPref(prefs::kTabStatsMaxTabsPerWindow, 0);
+  registry->RegisterIntegerPref(prefs::kTabStatsWindowCountMax, 0);
+  DailyEvent::RegisterPref(registry, prefs::kTabStatsDailySample);
+}
+
+void TabStatsTracker::TabStatsDailyObserver::OnDailyEvent(
+    DailyEvent::IntervalType type) {
   reporting_delegate_->ReportDailyMetrics(data_store_->tab_stats());
   data_store_->ResetMaximumsToCurrentState();
 }
@@ -148,10 +162,8 @@ void TabStatsTracker::UmaStatsReportingDelegate::ReportTabCountOnResume(
     size_t tab_count) {
   // Don't report the number of tabs on resume if Chrome is running in
   // background with no visible window.
-  if (g_browser_process && g_browser_process->background_mode_manager()
-                               ->IsBackgroundWithoutWindows()) {
+  if (IsChromeBackgroundedWithoutWindows())
     return;
-  }
   UMA_HISTOGRAM_COUNTS_10000(kNumberOfTabsOnResumeHistogramName, tab_count);
 }
 
@@ -168,6 +180,17 @@ void TabStatsTracker::UmaStatsReportingDelegate::ReportDailyMetrics(
                              tab_stats.max_tab_per_window);
   UMA_HISTOGRAM_COUNTS_10000(kMaxWindowsInADayHistogramName,
                              tab_stats.window_count_max);
+}
+
+bool TabStatsTracker::UmaStatsReportingDelegate::
+    IsChromeBackgroundedWithoutWindows() {
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+  if (g_browser_process && g_browser_process->background_mode_manager()
+                               ->IsBackgroundWithoutWindows()) {
+    return true;
+  }
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
+  return false;
 }
 
 }  // namespace metrics

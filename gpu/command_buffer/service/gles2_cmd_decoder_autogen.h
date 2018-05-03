@@ -4643,33 +4643,6 @@ error::Error GLES2DecoderImpl::HandleCompressedCopyTextureCHROMIUM(
   return error::kNoError;
 }
 
-error::Error GLES2DecoderImpl::HandleProduceTextureCHROMIUMImmediate(
-    uint32_t immediate_data_size,
-    const volatile void* cmd_data) {
-  const volatile gles2::cmds::ProduceTextureCHROMIUMImmediate& c = *static_cast<
-      const volatile gles2::cmds::ProduceTextureCHROMIUMImmediate*>(cmd_data);
-  GLenum target = static_cast<GLenum>(c.target);
-  uint32_t data_size;
-  if (!GLES2Util::ComputeDataSize<GLbyte, 16>(1, &data_size)) {
-    return error::kOutOfBounds;
-  }
-  if (data_size > immediate_data_size) {
-    return error::kOutOfBounds;
-  }
-  volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
-      c, data_size, immediate_data_size);
-  if (!validators_->texture_bind_target.IsValid(target)) {
-    LOCAL_SET_GL_ERROR_INVALID_ENUM("glProduceTextureCHROMIUM", target,
-                                    "target");
-    return error::kNoError;
-  }
-  if (mailbox == NULL) {
-    return error::kOutOfBounds;
-  }
-  DoProduceTextureCHROMIUM(target, mailbox);
-  return error::kNoError;
-}
-
 error::Error GLES2DecoderImpl::HandleProduceTextureDirectCHROMIUMImmediate(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
@@ -4678,7 +4651,6 @@ error::Error GLES2DecoderImpl::HandleProduceTextureDirectCHROMIUMImmediate(
           const volatile gles2::cmds::ProduceTextureDirectCHROMIUMImmediate*>(
           cmd_data);
   GLuint texture = c.texture;
-  GLenum target = static_cast<GLenum>(c.target);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize<GLbyte, 16>(1, &data_size)) {
     return error::kOutOfBounds;
@@ -4688,15 +4660,10 @@ error::Error GLES2DecoderImpl::HandleProduceTextureDirectCHROMIUMImmediate(
   }
   volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
       c, data_size, immediate_data_size);
-  if (!validators_->texture_bind_target.IsValid(target)) {
-    LOCAL_SET_GL_ERROR_INVALID_ENUM("glProduceTextureDirectCHROMIUM", target,
-                                    "target");
-    return error::kNoError;
-  }
   if (mailbox == NULL) {
     return error::kOutOfBounds;
   }
-  DoProduceTextureDirectCHROMIUM(texture, target, mailbox);
+  DoProduceTextureDirectCHROMIUM(texture, mailbox);
   return error::kNoError;
 }
 
@@ -4706,7 +4673,6 @@ error::Error GLES2DecoderImpl::HandleCreateAndConsumeTextureINTERNALImmediate(
   const volatile gles2::cmds::CreateAndConsumeTextureINTERNALImmediate& c =
       *static_cast<const volatile gles2::cmds::
                        CreateAndConsumeTextureINTERNALImmediate*>(cmd_data);
-  GLenum target = static_cast<GLenum>(c.target);
   GLuint texture = static_cast<GLuint>(c.texture);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize<GLbyte, 16>(1, &data_size)) {
@@ -4717,15 +4683,10 @@ error::Error GLES2DecoderImpl::HandleCreateAndConsumeTextureINTERNALImmediate(
   }
   volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
       c, data_size, immediate_data_size);
-  if (!validators_->texture_bind_target.IsValid(target)) {
-    LOCAL_SET_GL_ERROR_INVALID_ENUM("glCreateAndConsumeTextureINTERNAL", target,
-                                    "target");
-    return error::kNoError;
-  }
   if (mailbox == NULL) {
     return error::kOutOfBounds;
   }
-  DoCreateAndConsumeTextureINTERNAL(target, texture, mailbox);
+  DoCreateAndConsumeTextureINTERNAL(texture, mailbox);
   return error::kNoError;
 }
 
@@ -5196,6 +5157,30 @@ error::Error GLES2DecoderImpl::HandleBeginRasterCHROMIUM(
   return error::kNoError;
 }
 
+error::Error GLES2DecoderImpl::HandleRasterCHROMIUM(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::RasterCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::RasterCHROMIUM*>(cmd_data);
+  if (!features().chromium_raster_transport) {
+    return error::kUnknownCommand;
+  }
+
+  GLsizeiptr size = static_cast<GLsizeiptr>(c.size);
+  uint32_t data_size = size;
+  const void* list = GetSharedMemoryAs<const void*>(
+      c.list_shm_id, c.list_shm_offset, data_size);
+  if (size < 0) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glRasterCHROMIUM", "size < 0");
+    return error::kNoError;
+  }
+  if (list == NULL) {
+    return error::kOutOfBounds;
+  }
+  DoRasterCHROMIUM(size, list);
+  return error::kNoError;
+}
+
 error::Error GLES2DecoderImpl::HandleEndRasterCHROMIUM(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
@@ -5204,6 +5189,52 @@ error::Error GLES2DecoderImpl::HandleEndRasterCHROMIUM(
   }
 
   DoEndRasterCHROMIUM();
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleCreateTransferCacheEntryINTERNAL(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CreateTransferCacheEntryINTERNAL& c =
+      *static_cast<
+          const volatile gles2::cmds::CreateTransferCacheEntryINTERNAL*>(
+          cmd_data);
+  GLuint entry_type = static_cast<GLuint>(c.entry_type);
+  GLuint entry_id = static_cast<GLuint>(c.entry_id);
+  GLuint handle_shm_id = static_cast<GLuint>(c.handle_shm_id);
+  GLuint handle_shm_offset = static_cast<GLuint>(c.handle_shm_offset);
+  GLuint data_shm_id = static_cast<GLuint>(c.data_shm_id);
+  GLuint data_shm_offset = static_cast<GLuint>(c.data_shm_offset);
+  GLuint data_size = static_cast<GLuint>(c.data_size);
+  DoCreateTransferCacheEntryINTERNAL(entry_type, entry_id, handle_shm_id,
+                                     handle_shm_offset, data_shm_id,
+                                     data_shm_offset, data_size);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleDeleteTransferCacheEntryINTERNAL(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteTransferCacheEntryINTERNAL& c =
+      *static_cast<
+          const volatile gles2::cmds::DeleteTransferCacheEntryINTERNAL*>(
+          cmd_data);
+  GLuint entry_type = static_cast<GLuint>(c.entry_type);
+  GLuint entry_id = static_cast<GLuint>(c.entry_id);
+  DoDeleteTransferCacheEntryINTERNAL(entry_type, entry_id);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleUnlockTransferCacheEntryINTERNAL(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UnlockTransferCacheEntryINTERNAL& c =
+      *static_cast<
+          const volatile gles2::cmds::UnlockTransferCacheEntryINTERNAL*>(
+          cmd_data);
+  GLuint entry_type = static_cast<GLuint>(c.entry_type);
+  GLuint entry_id = static_cast<GLuint>(c.entry_id);
+  DoUnlockTransferCacheEntryINTERNAL(entry_type, entry_id);
   return error::kNoError;
 }
 
@@ -5244,6 +5275,40 @@ error::Error GLES2DecoderImpl::HandleTexStorage2DImageCHROMIUM(
   }
   DoTexStorage2DImageCHROMIUM(target, internalFormat, bufferUsage, width,
                               height);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleWindowRectanglesEXTImmediate(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  if (!feature_info_->IsWebGL2OrES3Context())
+    return error::kUnknownCommand;
+  const volatile gles2::cmds::WindowRectanglesEXTImmediate& c =
+      *static_cast<const volatile gles2::cmds::WindowRectanglesEXTImmediate*>(
+          cmd_data);
+  if (!features().ext_window_rectangles) {
+    return error::kUnknownCommand;
+  }
+
+  GLenum mode = static_cast<GLenum>(c.mode);
+  GLsizei count = static_cast<GLsizei>(c.count);
+  uint32_t data_size = 0;
+  if (count >= 0 && !GLES2Util::ComputeDataSize<GLint, 4>(count, &data_size)) {
+    return error::kOutOfBounds;
+  }
+  if (data_size > immediate_data_size) {
+    return error::kOutOfBounds;
+  }
+  volatile const GLint* box = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
+  if (!validators_->window_rectangles_mode.IsValid(mode)) {
+    LOCAL_SET_GL_ERROR_INVALID_ENUM("glWindowRectanglesEXT", mode, "mode");
+    return error::kNoError;
+  }
+  if (box == NULL) {
+    return error::kOutOfBounds;
+  }
+  DoWindowRectanglesEXT(mode, count, box);
   return error::kNoError;
 }
 

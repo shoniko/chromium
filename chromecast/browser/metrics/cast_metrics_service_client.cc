@@ -8,7 +8,6 @@
 #include "base/guid.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -239,20 +238,21 @@ std::string CastMetricsServiceClient::GetMetricsServerUrl() {
 std::unique_ptr<::metrics::MetricsLogUploader>
 CastMetricsServiceClient::CreateUploader(
     base::StringPiece server_url,
+    base::StringPiece insecure_server_url,
     base::StringPiece mime_type,
     ::metrics::MetricsLogUploader::MetricServiceType service_type,
     const ::metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
   return std::unique_ptr<::metrics::MetricsLogUploader>(
       new ::metrics::NetMetricsLogUploader(request_context_, server_url,
-                                           mime_type, service_type,
-                                           on_upload_complete));
+                                           insecure_server_url, mime_type,
+                                           service_type, on_upload_complete));
 }
 
 base::TimeDelta CastMetricsServiceClient::GetStandardUploadInterval() {
   return base::TimeDelta::FromMinutes(kStandardUploadIntervalMinutes);
 }
 
-bool CastMetricsServiceClient::IsConsentGiven() {
+bool CastMetricsServiceClient::IsConsentGiven() const {
   return pref_service_->GetBoolean(prefs::kOptInStats);
 }
 
@@ -357,7 +357,7 @@ void CastMetricsServiceClient::Initialize(CastService* cast_service) {
             new ::metrics::ScreenInfoMetricsProvider));
   }
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<::metrics::NetworkMetricsProvider>());
+      std::make_unique<::metrics::NetworkMetricsProvider>());
   shell::CastBrowserProcess::GetInstance()->browser_client()->
       RegisterMetricsProviders(metrics_service_.get());
 

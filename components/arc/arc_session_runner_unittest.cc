@@ -8,6 +8,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -16,6 +17,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
 #include "components/arc/arc_session_runner.h"
+#include "components/arc/arc_util.h"
 #include "components/arc/test/fake_arc_session.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -257,8 +259,8 @@ TEST_F(ArcSessionRunnerTest, Crash_MiniInstance) {
   EXPECT_FALSE(stopped_called());
 }
 
-// Tests that RequestStart() works even after EmitLoginPromptVisibleCalled()
-// is called.
+// Tests that RequestStart(FULL_INSTANCE) works after calling
+// RequestStart(MINI_INSTANCE).
 TEST_F(ArcSessionRunnerTest, Upgrade) {
   EXPECT_FALSE(arc_session());
 
@@ -269,18 +271,6 @@ TEST_F(ArcSessionRunnerTest, Upgrade) {
   arc_session_runner()->RequestStart(ArcInstanceMode::FULL_INSTANCE);
   ASSERT_TRUE(arc_session());
   EXPECT_TRUE(arc_session()->is_running());
-}
-
-// We expect mini instance starts to run if EmitLoginPromptVisible signal is
-// emitted.
-TEST_F(ArcSessionRunnerTest, EmitLoginPromptVisible) {
-  EXPECT_FALSE(arc_session());
-
-  chromeos::DBusThreadManager::Get()
-      ->GetSessionManagerClient()
-      ->EmitLoginPromptVisible();
-  ASSERT_TRUE(arc_session());
-  EXPECT_FALSE(arc_session()->is_running());
 }
 
 // If the instance is stopped, it should be re-started.

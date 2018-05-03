@@ -30,7 +30,6 @@
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -132,10 +131,6 @@ void StartUserSession(Profile* user_profile, const std::string& login_user_id) {
   bool is_running_test = command_line->HasSwitch(::switches::kTestName) ||
                          command_line->HasSwitch(::switches::kTestType);
   if (!is_running_test) {
-    // Enable CrasAudioHandler logging when chrome restarts after crashing.
-    if (chromeos::CrasAudioHandler::IsInitialized())
-      chromeos::CrasAudioHandler::Get()->LogErrors();
-
     // We did not log in (we crashed or are debugging), so we need to
     // restore Sync.
     UserSessionManager::GetInstance()->RestoreAuthenticationSession(
@@ -145,6 +140,8 @@ void StartUserSession(Profile* user_profile, const std::string& login_user_id) {
     if (tether_service)
       tether_service->StartTetherIfPossible();
   }
+
+  UserSessionManager::GetInstance()->CheckEolStatus(user_profile);
 }
 
 // Starts a user session with stub user. This also happens on a dev machine
@@ -166,14 +163,6 @@ void ChromeSessionManager::Initialize(
     const base::CommandLine& parsed_command_line,
     Profile* profile,
     bool is_running_test) {
-  // Keep Chrome alive for mash.
-  // TODO(xiyuan): Remove this when session manager is moved out of Chrome.
-  if (ash_util::IsRunningInMash() &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kDisableZeroBrowsersOpenForTests)) {
-    g_browser_process->platform_part()->RegisterKeepAlive();
-  }
-
   // Tests should be able to tune login manager before showing it. Thus only
   // show login UI (login and out-of-box) in normal (non-testing) mode with
   // --login-manager switch and if test passed --force-login-manager-in-tests.
@@ -232,11 +221,12 @@ void ChromeSessionManager::SessionStarted() {
 
 void ChromeSessionManager::NotifyUserLoggedIn(const AccountId& user_account_id,
                                               const std::string& user_id_hash,
-                                              bool browser_restart) {
+                                              bool browser_restart,
+                                              bool is_child) {
   BootTimesRecorder* btl = BootTimesRecorder::Get();
   btl->AddLoginTimeMarker("UserLoggedIn-Start", false);
   session_manager::SessionManager::NotifyUserLoggedIn(
-      user_account_id, user_id_hash, browser_restart);
+      user_account_id, user_id_hash, browser_restart, is_child);
   btl->AddLoginTimeMarker("UserLoggedIn-End", false);
 }
 

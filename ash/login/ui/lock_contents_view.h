@@ -13,6 +13,7 @@
 #include "ash/login/lock_screen_apps_focus_observer.h"
 #include "ash/login/ui/login_data_dispatcher.h"
 #include "ash/login/ui/non_accessible_view.h"
+#include "ash/session/session_observer.h"
 #include "ash/system/system_tray_focus_observer.h"
 #include "base/macros.h"
 #include "base/optional.h"
@@ -48,7 +49,8 @@ class ASH_EXPORT LockContentsView : public NonAccessibleView,
                                     public LoginDataDispatcher::Observer,
                                     public SystemTrayFocusObserver,
                                     public display::DisplayObserver,
-                                    public views::StyledLabelListener {
+                                    public views::StyledLabelListener,
+                                    public SessionObserver {
  public:
   // TestApi is used for tests to get internal implementation details.
   class ASH_EXPORT TestApi {
@@ -61,6 +63,7 @@ class ASH_EXPORT LockContentsView : public NonAccessibleView,
     const std::vector<LoginUserView*>& user_views() const;
     views::View* note_action() const;
     LoginBubble* tooltip_bubble() const;
+    views::View* dev_channel_info() const;
 
    private:
     LockContentsView* const view_;
@@ -75,6 +78,7 @@ class ASH_EXPORT LockContentsView : public NonAccessibleView,
   void AddedToWidget() override;
   void OnFocus() override;
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // LockScreenAppsFocusObserver:
   void OnFocusLeavingLockScreenApps(bool reverse) override;
@@ -89,6 +93,9 @@ class ASH_EXPORT LockContentsView : public NonAccessibleView,
   void OnShowEasyUnlockIcon(
       const AccountId& user,
       const mojom::EasyUnlockIconOptionsPtr& icon) override;
+  void OnDevChannelInfoChanged(const std::string& os_version_label_text,
+                               const std::string& enterprise_info_text,
+                               const std::string& bluetooth_name) override;
 
   // SystemTrayFocusObserver:
   void OnFocusLeavingSystemTray(bool reverse) override;
@@ -101,6 +108,8 @@ class ASH_EXPORT LockContentsView : public NonAccessibleView,
   void StyledLabelLinkClicked(views::StyledLabel* label,
                               const gfx::Range& range,
                               int event_flags) override{};
+  // SessionObserver:
+  void OnLockStateChanged(bool locked) override;
 
  private:
   class UserState {
@@ -136,6 +145,10 @@ class ASH_EXPORT LockContentsView : public NonAccessibleView,
   // Lay out the entire view. This is called when the view is attached to a
   // widget and when the screen is rotated.
   void DoLayout();
+
+  // Lay out the top header. This is called when the children of the top header
+  // change contents or visibility.
+  void LayoutTopHeader();
 
   // Creates a new view with |landscape| and |portrait| preferred sizes.
   // |landscape| and |portrait| specify the width of the preferred size; the
@@ -211,14 +224,21 @@ class ASH_EXPORT LockContentsView : public NonAccessibleView,
   std::vector<LoginUserView*> user_views_;
   views::ScrollView* scroller_ = nullptr;
 
+  // View that contains the note action button and the dev channel info labels,
+  // placed on the top right corner of the screen without affecting layout of
+  // other views.
+  views::View* top_header_ = nullptr;
+
   // View for launching a note taking action handler from the lock screen.
-  // This is placed on the top right of the screen without affecting layout
-  // of other views.
   NoteActionLaunchButton* note_action_ = nullptr;
+
+  // View for showing the version, enterprise and bluetooth info in dev and
+  // canary channels.
+  views::View* dev_channel_info_ = nullptr;
 
   // Contains authentication user and the additional user views.
   NonAccessibleView* main_view_ = nullptr;
-  // Layout used for |main_view_|.
+  // Layout used for |main_view_|. Pointer owned by the View base class.
   views::BoxLayout* main_layout_ = nullptr;
 
   // Actions that should be executed when rotation changes. A full layout pass
@@ -226,6 +246,7 @@ class ASH_EXPORT LockContentsView : public NonAccessibleView,
   std::vector<OnRotate> rotation_actions_;
 
   ScopedObserver<display::Screen, display::DisplayObserver> display_observer_;
+  ScopedSessionObserver session_observer_;
 
   std::unique_ptr<LoginBubble> error_bubble_;
   std::unique_ptr<LoginBubble> tooltip_bubble_;

@@ -22,16 +22,13 @@ class CC_EXPORT SurfaceLayer : public Layer {
   static scoped_refptr<SurfaceLayer> Create(
       scoped_refptr<viz::SurfaceReferenceFactory> ref_factory);
 
-  void SetPrimarySurfaceInfo(const viz::SurfaceInfo& surface_info);
+  void SetPrimarySurfaceId(const viz::SurfaceId& surface_id,
+                           base::Optional<uint32_t> deadline_in_frames);
   void SetFallbackSurfaceId(const viz::SurfaceId& surface_id);
 
   // When stretch_content_to_fill_bounds is true, the scale of the embedded
   // surface is ignored and the content will be stretched to fill the bounds.
   void SetStretchContentToFillBounds(bool stretch_content_to_fill_bounds);
-
-  // Specifies the |background_color| to use when a primary surface is
-  // specified, and a fallback surface is unavailable.
-  void SetDefaultBackgroundColor(SkColor background_color);
 
   // Layer overrides.
   std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
@@ -43,8 +40,8 @@ class CC_EXPORT SurfaceLayer : public Layer {
     return ref_factory_;
   }
 
-  const viz::SurfaceInfo& primary_surface_info() const {
-    return primary_surface_info_;
+  const viz::SurfaceId& primary_surface_id() const {
+    return primary_surface_id_;
   }
 
   const viz::SurfaceId& fallback_surface_id() const {
@@ -60,13 +57,13 @@ class CC_EXPORT SurfaceLayer : public Layer {
   ~SurfaceLayer() override;
   void RemoveReference(base::Closure reference_returner);
 
-  viz::SurfaceInfo primary_surface_info_;
+  viz::SurfaceId primary_surface_id_;
   viz::SurfaceId fallback_surface_id_;
   base::Closure fallback_reference_returner_;
+  base::Optional<uint32_t> deadline_in_frames_;
 
   scoped_refptr<viz::SurfaceReferenceFactory> ref_factory_;
   bool stretch_content_to_fill_bounds_ = false;
-  SkColor default_background_color_ = SK_ColorWHITE;
 
   DISALLOW_COPY_AND_ASSIGN(SurfaceLayer);
 };

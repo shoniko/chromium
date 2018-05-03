@@ -32,6 +32,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/prerender_types.h"
+#include "chrome/common/prerender_util.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/common/pref_names.h"
@@ -323,8 +324,6 @@ class PrerenderTest : public testing::Test {
         field_trial_list_(nullptr) {
     prerender::PrerenderManager::SetMode(
         prerender::PrerenderManager::PRERENDER_MODE_ENABLED);
-    prerender::PrerenderManager::SetInstantMode(
-        prerender::PrerenderManager::PRERENDER_MODE_ENABLED);
     prerender::PrerenderManager::SetOmniboxMode(
         prerender::PrerenderManager::PRERENDER_MODE_ENABLED);
     prerender_manager()->SetIsLowEndDevice(false);
@@ -463,8 +462,6 @@ TEST_F(PrerenderTest, PrerenderRespectsDisableFlag) {
             PrerenderManager::GetMode(ORIGIN_NONE));
   EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
             PrerenderManager::GetMode(ORIGIN_OMNIBOX));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
-            PrerenderManager::GetMode(ORIGIN_INSTANT));
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParameters) {
@@ -481,28 +478,6 @@ TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParameters) {
             PrerenderManager::GetMode(ORIGIN_NONE));
   EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
             PrerenderManager::GetMode(ORIGIN_OMNIBOX));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
-            PrerenderManager::GetMode(ORIGIN_INSTANT));
-}
-
-TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersPrefetchInstant) {
-  test_utils::RestorePrerenderMode restore_prerender_mode;
-
-  base::test::ScopedFeatureList scoped_feature_list;
-  SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
-                    kNoStatePrefetchFeatureModeParameterSimpleLoad},
-                   {kNoStatePrefetchFeatureInstantModeParameterName,
-                    kNoStatePrefetchFeatureModeParameterPrefetch}},
-                  &scoped_feature_list);
-
-  prerender::ConfigurePrerender();
-  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
-            PrerenderManager::GetMode(ORIGIN_NONE));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
-            PrerenderManager::GetMode(ORIGIN_OMNIBOX));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH,
-            PrerenderManager::GetMode(ORIGIN_INSTANT));
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersPrefetchOmnibox) {
@@ -521,30 +496,6 @@ TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersPrefetchOmnibox) {
             PrerenderManager::GetMode(ORIGIN_NONE));
   EXPECT_EQ(PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH,
             PrerenderManager::GetMode(ORIGIN_OMNIBOX));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
-            PrerenderManager::GetMode(ORIGIN_INSTANT));
-}
-
-TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersNoneButInstant) {
-  test_utils::RestorePrerenderMode restore_prerender_mode;
-
-  base::test::ScopedFeatureList scoped_feature_list;
-  SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
-                    kNoStatePrefetchFeatureModeParameterDisabled},
-                   {kNoStatePrefetchFeatureInstantModeParameterName,
-                    kNoStatePrefetchFeatureModeParameterPrerender},
-                   {kNoStatePrefetchFeatureOmniboxModeParameterName,
-                    kNoStatePrefetchFeatureModeParameterDisabled}},
-                  &scoped_feature_list);
-
-  prerender::ConfigurePrerender();
-  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
-            PrerenderManager::GetMode(ORIGIN_NONE));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
-            PrerenderManager::GetMode(ORIGIN_OMNIBOX));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_ENABLED,
-            PrerenderManager::GetMode(ORIGIN_INSTANT));
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersNoneAtAll) {
@@ -554,8 +505,6 @@ TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersNoneAtAll) {
   SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
                     kNoStatePrefetchFeatureModeParameterDisabled},
                    {kNoStatePrefetchFeatureOmniboxModeParameterName,
-                    kNoStatePrefetchFeatureModeParameterDisabled},
-                   {kNoStatePrefetchFeatureInstantModeParameterName,
                     kNoStatePrefetchFeatureModeParameterDisabled}},
                   &scoped_feature_list);
 
@@ -565,8 +514,6 @@ TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersNoneAtAll) {
             PrerenderManager::GetMode(ORIGIN_NONE));
   EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
             PrerenderManager::GetMode(ORIGIN_OMNIBOX));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
-            PrerenderManager::GetMode(ORIGIN_INSTANT));
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersDefaultNone) {
@@ -583,8 +530,6 @@ TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersDefaultNone) {
             PrerenderManager::GetMode(ORIGIN_NONE));
   EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
             PrerenderManager::GetMode(ORIGIN_OMNIBOX));
-  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
-            PrerenderManager::GetMode(ORIGIN_INSTANT));
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsThirdPartyCookiesPref) {
@@ -607,7 +552,6 @@ TEST_F(PrerenderTest, PrerenderModePerOrigin) {
       PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
   EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
   EXPECT_TRUE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OMNIBOX));
-  EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_INSTANT));
   EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OMNIBOX));
 
   prerender_manager()->SetMode(PrerenderManager::PRERENDER_MODE_ENABLED);
@@ -616,20 +560,15 @@ TEST_F(PrerenderTest, PrerenderModePerOrigin) {
   EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OMNIBOX));
 
   prerender_manager()->SetMode(PrerenderManager::PRERENDER_MODE_DISABLED);
-  prerender_manager()->SetInstantMode(
-      PrerenderManager::PRERENDER_MODE_DISABLED);
   prerender_manager()->SetOmniboxMode(
       PrerenderManager::PRERENDER_MODE_DISABLED);
   EXPECT_FALSE(PrerenderManager::IsAnyPrerenderingPossible());
 
   prerender_manager()->SetMode(
       PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT);
-  prerender_manager()->SetInstantMode(
-      PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT);
   EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
   EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OMNIBOX));
   EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OMNIBOX));
-  EXPECT_TRUE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_INSTANT));
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsPrerenderModeNoStatePrefetch) {
@@ -1846,25 +1785,19 @@ TEST_F(PrerenderTest, LinkManagerExpireRevealingLaunch) {
 }
 
 TEST_F(PrerenderTest, PrerenderContentsIsValidHttpMethod) {
-  DummyPrerenderContents* prerender_contents =
-      prerender_manager()->CreateNextPrerenderContents(
-          GURL("my://dummy.url"), FINAL_STATUS_MANAGER_SHUTDOWN);
+  EXPECT_TRUE(IsValidHttpMethod(FULL_PRERENDER, "GET"));
+  EXPECT_TRUE(IsValidHttpMethod(FULL_PRERENDER, "HEAD"));
+  EXPECT_TRUE(IsValidHttpMethod(FULL_PRERENDER, "OPTIONS"));
+  EXPECT_TRUE(IsValidHttpMethod(FULL_PRERENDER, "POST"));
+  EXPECT_TRUE(IsValidHttpMethod(FULL_PRERENDER, "TRACE"));
+  EXPECT_FALSE(IsValidHttpMethod(FULL_PRERENDER, "WHATEVER"));
 
-  prerender_contents->SetPrerenderMode(FULL_PRERENDER);
-  EXPECT_TRUE(prerender_contents->IsValidHttpMethod("GET"));
-  EXPECT_TRUE(prerender_contents->IsValidHttpMethod("HEAD"));
-  EXPECT_TRUE(prerender_contents->IsValidHttpMethod("OPTIONS"));
-  EXPECT_TRUE(prerender_contents->IsValidHttpMethod("POST"));
-  EXPECT_TRUE(prerender_contents->IsValidHttpMethod("TRACE"));
-  EXPECT_FALSE(prerender_contents->IsValidHttpMethod("WHATEVER"));
-
-  prerender_contents->SetPrerenderMode(PREFETCH_ONLY);
-  EXPECT_TRUE(prerender_contents->IsValidHttpMethod("GET"));
-  EXPECT_TRUE(prerender_contents->IsValidHttpMethod("HEAD"));
-  EXPECT_FALSE(prerender_contents->IsValidHttpMethod("OPTIONS"));
-  EXPECT_FALSE(prerender_contents->IsValidHttpMethod("POST"));
-  EXPECT_FALSE(prerender_contents->IsValidHttpMethod("TRACE"));
-  EXPECT_FALSE(prerender_contents->IsValidHttpMethod("WHATEVER"));
+  EXPECT_TRUE(IsValidHttpMethod(PREFETCH_ONLY, "GET"));
+  EXPECT_TRUE(IsValidHttpMethod(PREFETCH_ONLY, "HEAD"));
+  EXPECT_FALSE(IsValidHttpMethod(PREFETCH_ONLY, "OPTIONS"));
+  EXPECT_FALSE(IsValidHttpMethod(PREFETCH_ONLY, "POST"));
+  EXPECT_FALSE(IsValidHttpMethod(PREFETCH_ONLY, "TRACE"));
+  EXPECT_FALSE(IsValidHttpMethod(PREFETCH_ONLY, "WHATEVER"));
 }
 
 TEST_F(PrerenderTest, PrerenderContentsIncrementsByteCount) {

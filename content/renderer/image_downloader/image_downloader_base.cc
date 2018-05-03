@@ -89,7 +89,7 @@ bool ImageDownloaderBase::FetchImage(const GURL& image_url,
 
   // Create an image resource fetcher and assign it with a call back object.
   image_fetchers_.push_back(
-      base::MakeUnique<MultiResolutionImageResourceFetcher>(
+      std::make_unique<MultiResolutionImageResourceFetcher>(
           image_url, frame, 0,
           is_favicon ? WebURLRequest::kRequestContextFavicon
                      : WebURLRequest::kRequestContextImage,
@@ -113,7 +113,9 @@ void ImageDownloaderBase::DidFetchImage(
     if (iter->get() == fetcher) {
       iter->release();
       image_fetchers_.erase(iter);
-      base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, fetcher);
+      render_frame()
+          ->GetTaskRunner(blink::TaskType::kUnthrottled)
+          ->DeleteSoon(FROM_HERE, fetcher);
       break;
     }
   }

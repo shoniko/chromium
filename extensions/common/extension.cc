@@ -397,7 +397,7 @@ const HashedExtensionId& Extension::hashed_id() const {
 }
 
 const std::string Extension::VersionString() const {
-  return version()->GetString();
+  return version_.GetString();
 }
 
 const std::string Extension::GetVersionForDisplay() const {
@@ -581,8 +581,8 @@ bool Extension::LoadVersion(base::string16* error) {
     *error = base::ASCIIToUTF16(errors::kInvalidVersion);
     return false;
   }
-  version_.reset(new base::Version(version_str));
-  if (!version_->IsValid() || version_->components().size() > 4) {
+  version_ = base::Version(version_str);
+  if (!version_.IsValid() || version_.components().size() > 4) {
     *error = base::ASCIIToUTF16(errors::kInvalidVersion);
     return false;
   }
@@ -637,7 +637,7 @@ bool Extension::LoadExtent(const char* key,
     std::string pattern_string;
     if (!pattern_list->GetString(i, &pattern_string)) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i), errors::kExpectString);
+          value_error, base::NumberToString(i), errors::kExpectString);
       return false;
     }
 
@@ -650,7 +650,7 @@ bool Extension::LoadExtent(const char* key,
 
     if (parse_result != URLPattern::PARSE_SUCCESS) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i),
+          value_error, base::NumberToString(i),
           URLPattern::GetParseResultString(parse_result));
       return false;
     }
@@ -658,7 +658,7 @@ bool Extension::LoadExtent(const char* key,
     // Do not allow authors to claim "<all_urls>".
     if (pattern.match_all_urls()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i),
+          value_error, base::NumberToString(i),
           errors::kCannotClaimAllURLsInExtent);
       return false;
     }
@@ -666,7 +666,7 @@ bool Extension::LoadExtent(const char* key,
     // Do not allow authors to claim "*" for host.
     if (pattern.host().empty()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i),
+          value_error, base::NumberToString(i),
           errors::kCannotClaimAllHostsInExtent);
       return false;
     }
@@ -675,7 +675,7 @@ bool Extension::LoadExtent(const char* key,
     // imply one at the end.
     if (pattern.path().find('*') != std::string::npos) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i), errors::kNoWildCardsInPaths);
+          value_error, base::NumberToString(i), errors::kNoWildCardsInPaths);
       return false;
     }
     pattern.SetPath(pattern.path() + '*');

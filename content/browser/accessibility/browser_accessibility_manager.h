@@ -15,7 +15,7 @@
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "content/browser/accessibility/accessibility_flags.h"
-#include "content/browser/accessibility/ax_platform_position.h"
+#include "content/browser/accessibility/browser_accessibility_position.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/ax_event_notification_details.h"
 #include "third_party/WebKit/public/web/WebAXEnums.h"
@@ -172,6 +172,16 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   virtual void UserIsReloading();
   void NavigationSucceeded();
   void NavigationFailed();
+  void DidStopLoading();
+
+  // Keep track of if this page is hidden by an interstitial, in which case
+  // we need to suppress all events.
+  void set_hidden_by_interstitial_page(bool hidden) {
+    hidden_by_interstitial_page_ = hidden;
+  }
+  bool hidden_by_interstitial_page() const {
+    return hidden_by_interstitial_page_;
+  }
 
   // Pretend that the given node has focus, for testing only. Doesn't
   // communicate with the renderer and doesn't fire any events.
@@ -209,7 +219,9 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   void SetValue(
       const BrowserAccessibility& node, const base::string16& value);
   void SetSelection(
-      ui::AXRange<AXPlatformPosition::AXPositionInstance::element_type> range);
+      ui::AXRange<
+          BrowserAccessibilityPosition::AXPositionInstance::element_type>
+          range);
   void ShowContextMenu(const BrowserAccessibility& node);
 
   // Retrieve the bounds of the parent View in screen coordinates.
@@ -233,13 +245,6 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   void OnFindInPageResult(
       int request_id, int match_index, int start_id, int start_offset,
       int end_id, int end_offset);
-
-  // Called in response to a hit test, when the object hit has a child frame
-  // (like an iframe element or browser plugin), and we need to do another
-  // hit test recursively.
-  void OnChildFrameHitTestResult(const gfx::Point& point,
-                                 int hit_obj_id,
-                                 ui::AXEvent event_to_fire);
 
   // This is called when the user has committed to a find in page query,
   // e.g. by pressing enter or tapping on the next / previous result buttons.
@@ -288,7 +293,8 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   static BrowserAccessibility* NextInTreeOrder(
       const BrowserAccessibility* object);
   static BrowserAccessibility* PreviousInTreeOrder(
-      const BrowserAccessibility* object);
+      const BrowserAccessibility* object,
+      bool can_wrap_to_last_element);
   static BrowserAccessibility* NextTextOnlyObject(
       const BrowserAccessibility* object);
   static BrowserAccessibility* PreviousTextOnlyObject(
@@ -381,8 +387,10 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   void CacheHitTestResult(BrowserAccessibility* hit_test_result);
 
  protected:
-  using AXPlatformPositionInstance = AXPlatformPosition::AXPositionInstance;
-  using AXPlatformRange = ui::AXRange<AXPlatformPositionInstance::element_type>;
+  using BrowserAccessibilityPositionInstance =
+      BrowserAccessibilityPosition::AXPositionInstance;
+  using AXPlatformRange =
+      ui::AXRange<BrowserAccessibilityPositionInstance::element_type>;
 
   BrowserAccessibilityManager(
       BrowserAccessibilityDelegate* delegate,
@@ -414,6 +422,10 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
 
   // True if the user has initiated a navigation to another page.
   bool user_is_navigating_away_;
+
+  // Interstitial page, like an SSL warning.
+  // If so we need to suppress any events.
+  bool hidden_by_interstitial_page_ = false;
 
   BrowserAccessibilityFindInPageInfo find_in_page_info_;
 

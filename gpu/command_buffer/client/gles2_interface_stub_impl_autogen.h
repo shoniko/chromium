@@ -948,14 +948,10 @@ void GLES2InterfaceStub::DrawElementsInstancedANGLE(GLenum /* mode */,
 void GLES2InterfaceStub::VertexAttribDivisorANGLE(GLuint /* index */,
                                                   GLuint /* divisor */) {}
 void GLES2InterfaceStub::GenMailboxCHROMIUM(GLbyte* /* mailbox */) {}
-void GLES2InterfaceStub::ProduceTextureCHROMIUM(GLenum /* target */,
-                                                const GLbyte* /* mailbox */) {}
 void GLES2InterfaceStub::ProduceTextureDirectCHROMIUM(
     GLuint /* texture */,
-    GLenum /* target */,
     const GLbyte* /* mailbox */) {}
 GLuint GLES2InterfaceStub::CreateAndConsumeTextureCHROMIUM(
-    GLenum /* target */,
     const GLbyte* /* mailbox */) {
   return 0;
 }
@@ -979,13 +975,8 @@ void GLES2InterfaceStub::DiscardFramebufferEXT(
     const GLenum* /* attachments */) {}
 void GLES2InterfaceStub::LoseContextCHROMIUM(GLenum /* current */,
                                              GLenum /* other */) {}
-GLuint64 GLES2InterfaceStub::InsertFenceSyncCHROMIUM() {
-  return 0;
-}
-void GLES2InterfaceStub::GenSyncTokenCHROMIUM(GLuint64 /* fence_sync */,
-                                              GLbyte* /* sync_token */) {}
+void GLES2InterfaceStub::GenSyncTokenCHROMIUM(GLbyte* /* sync_token */) {}
 void GLES2InterfaceStub::GenUnverifiedSyncTokenCHROMIUM(
-    GLuint64 /* fence_sync */,
     GLbyte* /* sync_token */) {}
 void GLES2InterfaceStub::VerifySyncTokensCHROMIUM(GLbyte** /* sync_tokens */,
                                                   GLsizei /* count */) {}
@@ -1019,9 +1010,6 @@ void GLES2InterfaceStub::ScheduleCALayerCHROMIUM(
     GLuint /* edge_aa_mask */,
     const GLfloat* /* bounds_rect */,
     GLuint /* filter */) {}
-void GLES2InterfaceStub::SetColorSpaceForScanoutCHROMIUM(
-    GLuint /* texture_id */,
-    GLColorSpace /* color_space */) {}
 void GLES2InterfaceStub::ScheduleCALayerInUseQueryCHROMIUM(
     GLsizei /* count */,
     const GLuint* /* textures */) {}
@@ -1212,15 +1200,29 @@ void GLES2InterfaceStub::BeginRasterCHROMIUM(
     GLboolean /* can_use_lcd_text */,
     GLboolean /* use_distance_field_text */,
     GLint /* pixel_config */) {}
-void GLES2InterfaceStub::RasterCHROMIUM(const cc::DisplayItemList* /* list */,
-                                        GLint /* x */,
-                                        GLint /* y */,
-                                        GLint /* w */,
-                                        GLint /* h */) {}
+void* GLES2InterfaceStub::MapRasterCHROMIUM(GLsizeiptr /* size */) {
+  return 0;
+}
+void GLES2InterfaceStub::UnmapRasterCHROMIUM(GLsizeiptr /* written_size */) {}
 void GLES2InterfaceStub::EndRasterCHROMIUM() {}
 void GLES2InterfaceStub::TexStorage2DImageCHROMIUM(GLenum /* target */,
                                                    GLenum /* internalFormat */,
                                                    GLenum /* bufferUsage */,
                                                    GLsizei /* width */,
                                                    GLsizei /* height */) {}
+void GLES2InterfaceStub::SetColorSpaceMetadataCHROMIUM(
+    GLuint /* texture_id */,
+    GLColorSpace /* color_space */) {}
+void GLES2InterfaceStub::WindowRectanglesEXT(GLenum /* mode */,
+                                             GLsizei /* count */,
+                                             const GLint* /* box */) {}
+GLuint GLES2InterfaceStub::CreateGpuFenceCHROMIUM() {
+  return 0;
+}
+GLuint GLES2InterfaceStub::CreateClientGpuFenceCHROMIUM(
+    ClientGpuFence /* source */) {
+  return 0;
+}
+void GLES2InterfaceStub::WaitGpuFenceCHROMIUM(GLuint /* gpu_fence_id */) {}
+void GLES2InterfaceStub::DestroyGpuFenceCHROMIUM(GLuint /* gpu_fence_id */) {}
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_STUB_IMPL_AUTOGEN_H_

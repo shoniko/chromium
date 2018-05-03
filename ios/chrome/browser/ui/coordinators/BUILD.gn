@@ -19,6 +19,19 @@ source_set("coordinators") {
   ]
 }
 
+source_set("chrome_coordinators") {
+  sources = [
+    "chrome_coordinator.h",
+    "chrome_coordinator.mm",
+  ]
+
+  configs += [ "//build/config/compiler:enable_arc" ]
+
+  deps = [
+    "//base",
+  ]
+}
+
 source_set("test_support") {
   testonly = true
   sources = [
@@ -26,6 +39,8 @@ source_set("test_support") {
     "browser_coordinator_test.mm",
     "browser_coordinator_test_util.h",
     "browser_coordinator_test_util.mm",
+    "test_browser_coordinator.h",
+    "test_browser_coordinator.mm",
   ]
 
   configs += [ "//build/config/compiler:enable_arc" ]

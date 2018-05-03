@@ -22,6 +22,7 @@
 #include "build/build_config.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_shader.h"
+#include "cc/paint/paint_text_blob.h"
 #include "third_party/icu/source/common/unicode/rbbi.h"
 #include "third_party/icu/source/common/unicode/utf16.h"
 #include "third_party/skia/include/core/SkDrawLooper.h"
@@ -241,7 +242,12 @@ void SkiaTextRenderer::DrawPosText(const SkPoint* pos,
   static_assert(sizeof(*pos) == 2 * sizeof(*run_buffer.pos), "");
   memcpy(run_buffer.pos, pos, glyph_count * sizeof(*pos));
 
-  canvas_skia_->drawTextBlob(builder.make(), 0, 0, flags_);
+  // TODO(vmpstr): In order to OOP raster this, we would have to plumb PaintFont
+  // here instead of |flags_|.
+  canvas_skia_->drawTextBlob(
+      base::MakeRefCounted<cc::PaintTextBlob>(builder.make(),
+                                              std::vector<cc::PaintTypeface>{}),
+      0, 0, flags_);
 }
 
 void SkiaTextRenderer::DrawUnderline(int x, int y, int width) {
@@ -332,19 +338,31 @@ RenderText::~RenderText() {
 }
 
 // static
-RenderText* RenderText::CreateInstance() {
-#if defined(OS_MACOSX)
-  const bool use_native = !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableHarfBuzzRenderText);
-  if (use_native)
-    return new RenderTextMac;
-#endif  // defined(OS_MACOSX)
-  return new RenderTextHarfBuzz;
+std::unique_ptr<RenderText> RenderText::CreateHarfBuzzInstance() {
+  return std::make_unique<RenderTextHarfBuzz>();
 }
 
 // static
-RenderText* RenderText::CreateInstanceForEditing() {
-  return new RenderTextHarfBuzz;
+std::unique_ptr<RenderText> RenderText::CreateFor(Typesetter typesetter) {
+#if defined(OS_MACOSX)
+  if (typesetter == Typesetter::NATIVE)
+    return std::make_unique<RenderTextMac>();
+
+  if (typesetter == Typesetter::HARFBUZZ)
+    return CreateHarfBuzzInstance();
+
+  static const bool use_native =
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableHarfBuzzRenderText);
+  if (use_native)
+    return std::make_unique<RenderTextMac>();
+#endif  // defined(OS_MACOSX)
+  return CreateHarfBuzzInstance();
+}
+
+// static
+std::unique_ptr<RenderText> RenderText::CreateInstanceDeprecated() {
+  return CreateFor(Typesetter::BROWSER);
 }
 
 std::unique_ptr<RenderText> RenderText::CreateInstanceOfSameStyle(
@@ -828,17 +846,26 @@ Rect RenderText::GetCursorBounds(const SelectionModel& caret,
       insert_mode ? caret.caret_affinity() : CURSOR_FORWARD;
   int x = 0, width = 1;
   Size size = GetStringSize();
-  if (caret_pos == (caret_affinity == CURSOR_BACKWARD ? 0 : text().length())) {
-    // The caret is attached to the boundary. Always return a 1-dip width caret,
-    // since there is nothing to overtype.
-    if ((GetDisplayTextDirection() == base::i18n::RIGHT_TO_LEFT)
-        == (caret_pos == 0)) {
+
+  // Check whether the caret is attached to a boundary. Always return a 1-dip
+  // width caret at the boundary. Avoid calling IndexOfAdjacentGrapheme(), since
+  // it is slow and can impact browser startup here.
+  // In insert mode, index 0 is always a boundary. The end, however, is not at a
+  // boundary when the string ends in RTL text and there is LTR text around it.
+  const bool at_boundary =
+      (insert_mode && caret_pos == 0) ||
+      caret_pos == (caret_affinity == CURSOR_BACKWARD ? 0 : text().length());
+  if (at_boundary) {
+    const bool rtl = GetDisplayTextDirection() == base::i18n::RIGHT_TO_LEFT;
+    if (rtl == (caret_pos == 0))
       x = size.width();
-    }
   } else {
-    size_t grapheme_start = (caret_affinity == CURSOR_FORWARD) ?
-        caret_pos : IndexOfAdjacentGrapheme(caret_pos, CURSOR_BACKWARD);
-    Range xspan(GetGlyphBounds(grapheme_start));
+    // Find the next grapheme continuing in the current direction. This
+    // determines the substring range that should be highlighted.
+    size_t caret_end = IndexOfAdjacentGrapheme(caret_pos, caret_affinity);
+    if (caret_end < caret_pos)
+      std::swap(caret_end, caret_pos);
+    const Range xspan = GetCursorSpan(Range(caret_pos, caret_end));
     if (insert_mode) {
       x = (caret_affinity == CURSOR_BACKWARD) ? xspan.end() : xspan.start();
     } else {  // overtype mode
@@ -1248,6 +1275,11 @@ void RenderText::ApplyFadeEffects(internal::SkiaTextRenderer* renderer) {
     right_part.Inset(solid_part.width() - gradient_width, 0, 0, 0);
     solid_part.Inset(0, 0, gradient_width, 0);
   }
+
+  // CreateFadeShader() expects at least one part to not be empty.
+  // See https://crbug.com/706835.
+  if (left_part.IsEmpty() && right_part.IsEmpty())
+    return;
 
   Rect text_rect = display_rect();
   text_rect.Inset(GetAlignmentOffset(0).x(), 0, 0, 0);

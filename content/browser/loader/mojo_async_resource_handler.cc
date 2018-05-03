@@ -20,13 +20,13 @@
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/loader/resource_scheduler.h"
 #include "content/public/browser/global_request_id.h"
-#include "content/public/common/resource_request_completion_status.h"
-#include "content/public/common/resource_response.h"
 #include "mojo/public/c/system/data_pipe.h"
 #include "mojo/public/cpp/bindings/message.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/redirect_info.h"
+#include "services/network/public/cpp/resource_response.h"
+#include "services/network/public/cpp/url_loader_completion_status.h"
 
 namespace content {
 namespace {
@@ -40,8 +40,8 @@ constexpr size_t kMinAllocationSize = 2 * net::kMaxBytesToSniff;
 
 constexpr size_t kMaxChunkSize = 32 * 1024;
 
-void NotReached(mojom::URLLoaderRequest mojo_request,
-                mojom::URLLoaderClientPtr url_loader_client) {
+void NotReached(network::mojom::URLLoaderRequest mojo_request,
+                network::mojom::URLLoaderClientPtr url_loader_client) {
   NOTREACHED();
 }
 
@@ -95,15 +95,23 @@ class MojoAsyncResourceHandler::WriterIOBuffer final
 MojoAsyncResourceHandler::MojoAsyncResourceHandler(
     net::URLRequest* request,
     ResourceDispatcherHostImpl* rdh,
-    mojom::URLLoaderRequest mojo_request,
-    mojom::URLLoaderClientPtr url_loader_client,
-    ResourceType resource_type)
+    network::mojom::URLLoaderRequest mojo_request,
+    network::mojom::URLLoaderClientPtr url_loader_client,
+    ResourceType resource_type,
+    uint32_t url_loader_options)
     : ResourceHandler(request),
       rdh_(rdh),
       binding_(this, std::move(mojo_request)),
+      url_loader_options_(url_loader_options),
       handle_watcher_(FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::MANUAL),
       url_loader_client_(std::move(url_loader_client)),
       weak_factory_(this) {
+  DCHECK(IsResourceTypeFrame(resource_type) ||
+         !(url_loader_options_ &
+           network::mojom::kURLLoadOptionSendSSLInfoWithResponse));
+  DCHECK(resource_type == RESOURCE_TYPE_MAIN_FRAME ||
+         !(url_loader_options_ &
+           network::mojom::kURLLoadOptionSendSSLInfoForCertificateError));
   DCHECK(url_loader_client_);
   InitializeResourceBufferConstants();
   // This unretained pointer is safe, because |binding_| is owned by |this| and
@@ -135,7 +143,7 @@ void MojoAsyncResourceHandler::InitializeResourceBufferConstants() {
 
 void MojoAsyncResourceHandler::OnRequestRedirected(
     const net::RedirectInfo& redirect_info,
-    ResourceResponse* response,
+    network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
   // Unlike OnResponseStarted, OnRequestRedirected will NOT be preceded by
   // OnWillRead.
@@ -157,7 +165,7 @@ void MojoAsyncResourceHandler::OnRequestRedirected(
 }
 
 void MojoAsyncResourceHandler::OnResponseStarted(
-    ResourceResponse* response,
+    network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
   DCHECK(!has_controller());
 
@@ -174,7 +182,7 @@ void MojoAsyncResourceHandler::OnResponseStarted(
   response->head.response_start = base::TimeTicks::Now();
   sent_received_response_message_ = true;
 
-  mojom::DownloadedTempFilePtr downloaded_file_ptr;
+  network::mojom::DownloadedTempFilePtr downloaded_file_ptr;
   if (!response->head.download_file_path.empty()) {
     downloaded_file_ptr = DownloadedTempFileImpl::Create(info->GetChildID(),
                                                          info->GetRequestID());
@@ -182,7 +190,12 @@ void MojoAsyncResourceHandler::OnResponseStarted(
                                      response->head.download_file_path);
   }
 
-  url_loader_client_->OnReceiveResponse(response->head, base::nullopt,
+  base::Optional<net::SSLInfo> ssl_info;
+  if (url_loader_options_ &
+      network::mojom::kURLLoadOptionSendSSLInfoWithResponse)
+    ssl_info = request()->ssl_info();
+
+  url_loader_client_->OnReceiveResponse(response->head, std::move(ssl_info),
                                         std::move(downloaded_file_ptr));
 
   net::IOBufferWithSize* metadata = GetResponseMetadata(request());
@@ -191,6 +204,15 @@ void MojoAsyncResourceHandler::OnResponseStarted(
 
     url_loader_client_->OnReceiveCachedMetadata(
         std::vector<uint8_t>(data, data + metadata->size()));
+  }
+
+  if (url_loader_options_ &
+      network::mojom::kURLLoadOptionPauseOnResponseStarted) {
+    did_defer_on_response_started_ = true;
+    DCHECK(!has_controller());
+    request()->LogBlockedBy("MojoAsyncResourceHandler");
+    HoldController(std::move(controller));
+    return;
   }
 
   controller->Resume();
@@ -366,10 +388,20 @@ void MojoAsyncResourceHandler::FollowRedirect() {
   Resume();
 }
 
+void MojoAsyncResourceHandler::ProceedWithResponse() {
+  DCHECK(did_defer_on_response_started_);
+  request()->LogUnblocked();
+  Resume();
+}
+
 void MojoAsyncResourceHandler::SetPriority(net::RequestPriority priority,
                                            int32_t intra_priority_value) {
-  ResourceDispatcherHostImpl::Get()->scheduler()->ReprioritizeRequest(
-      request(), priority, intra_priority_value);
+  auto* scheduler = ResourceDispatcherHostImpl::Get()->scheduler();
+  if (intra_priority_value == -1) {
+    scheduler->ReprioritizeRequest(request(), priority);
+  } else {
+    scheduler->ReprioritizeRequest(request(), priority, intra_priority_value);
+  }
 }
 
 void MojoAsyncResourceHandler::PauseReadingBodyFromNet() {
@@ -414,7 +446,7 @@ net::IOBufferWithSize* MojoAsyncResourceHandler::GetResponseMetadata(
 }
 
 void MojoAsyncResourceHandler::OnResponseCompleted(
-    const net::URLRequestStatus& status,
+    const net::URLRequestStatus& request_status,
     std::unique_ptr<ResourceController> controller) {
   // Ensure sending the final upload progress message here, since
   // OnResponseCompleted can be called without OnResponseStarted on cancellation
@@ -433,23 +465,31 @@ void MojoAsyncResourceHandler::OnResponseCompleted(
   // WebURLLoaderImpl::OnCompletedRequest that routes this message to a WebCore
   // ResourceHandleInternal which asserts on its state and crashes. By crashing
   // when the message is sent, we should get better crash reports.
-  CHECK(status.status() != net::URLRequestStatus::SUCCESS ||
+  CHECK(request_status.status() != net::URLRequestStatus::SUCCESS ||
         sent_received_response_message_);
 
-  int error_code = status.error();
+  int error_code = request_status.error();
 
-  DCHECK_NE(status.status(), net::URLRequestStatus::IO_PENDING);
+  DCHECK_NE(request_status.status(), net::URLRequestStatus::IO_PENDING);
 
-  ResourceRequestCompletionStatus request_complete_data;
-  request_complete_data.error_code = error_code;
-  request_complete_data.exists_in_cache = request()->response_info().was_cached;
-  request_complete_data.completion_time = base::TimeTicks::Now();
-  request_complete_data.encoded_data_length =
-      request()->GetTotalReceivedBytes();
-  request_complete_data.encoded_body_length = request()->GetRawBodyBytes();
-  request_complete_data.decoded_body_length = total_written_bytes_;
+  network::URLLoaderCompletionStatus loader_status;
+  loader_status.error_code = error_code;
+  loader_status.exists_in_cache = request()->response_info().was_cached;
+  loader_status.completion_time = base::TimeTicks::Now();
+  loader_status.encoded_data_length = request()->GetTotalReceivedBytes();
+  loader_status.encoded_body_length = request()->GetRawBodyBytes();
+  loader_status.decoded_body_length = total_written_bytes_;
+  loader_status.blocked_cross_site_document =
+      GetRequestInfo()->blocked_cross_site_document();
 
-  url_loader_client_->OnComplete(request_complete_data);
+  if ((url_loader_options_ &
+       network::mojom::kURLLoadOptionSendSSLInfoForCertificateError) &&
+      net::IsCertStatusError(request()->ssl_info().cert_status) &&
+      !net::IsCertStatusMinorError(request()->ssl_info().cert_status)) {
+    loader_status.ssl_info = request()->ssl_info();
+  }
+
+  url_loader_client_->OnComplete(loader_status);
   controller->Resume();
 }
 
@@ -569,13 +609,13 @@ std::unique_ptr<UploadProgressTracker>
 MojoAsyncResourceHandler::CreateUploadProgressTracker(
     const base::Location& from_here,
     UploadProgressTracker::UploadProgressReportCallback callback) {
-  return base::MakeUnique<UploadProgressTracker>(from_here, std::move(callback),
+  return std::make_unique<UploadProgressTracker>(from_here, std::move(callback),
                                                  request());
 }
 
 void MojoAsyncResourceHandler::OnTransfer(
-    mojom::URLLoaderRequest mojo_request,
-    mojom::URLLoaderClientPtr url_loader_client) {
+    network::mojom::URLLoaderRequest mojo_request,
+    network::mojom::URLLoaderClientPtr url_loader_client) {
   binding_.Unbind();
   binding_.Bind(std::move(mojo_request));
   binding_.set_connection_error_handler(base::BindOnce(

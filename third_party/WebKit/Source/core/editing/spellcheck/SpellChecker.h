@@ -26,11 +26,12 @@
 #ifndef SpellChecker_h
 #define SpellChecker_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/editing/Forward.h"
 #include "core/editing/markers/DocumentMarker.h"
+#include "core/editing/spellcheck/TextChecking.h"
 #include "platform/heap/Handle.h"
-#include "platform/text/TextChecking.h"
 
 namespace blink {
 
@@ -39,31 +40,25 @@ class Element;
 class IdleSpellCheckCallback;
 class LocalFrame;
 class HTMLElement;
-class SpellCheckerClient;
 class SpellCheckMarker;
 class SpellCheckRequest;
 class SpellCheckRequester;
-class TextCheckerClient;
 struct TextCheckingResult;
 class WebSpellCheckPanelHostClient;
+class WebTextCheckClient;
 
 class CORE_EXPORT SpellChecker final : public GarbageCollected<SpellChecker> {
-  WTF_MAKE_NONCOPYABLE(SpellChecker);
-
  public:
   static SpellChecker* Create(LocalFrame&);
 
   void Trace(blink::Visitor*);
 
-  SpellCheckerClient& GetSpellCheckerClient() const;
   WebSpellCheckPanelHostClient& SpellCheckPanelHostClient() const;
-  TextCheckerClient& TextChecker() const;
+  WebTextCheckClient* GetTextCheckerClient() const;
 
   static bool IsSpellCheckingEnabledAt(const Position&);
   bool IsSpellCheckingEnabled() const;
-  void ToggleSpellCheckingEnabled();
   void IgnoreSpelling();
-  bool IsSpellCheckingEnabledInFocusedNode() const;
   void MarkAndReplaceFor(SpellCheckRequest*, const Vector<TextCheckingResult>&);
   void AdvanceToNextMisspelling(bool start_before_selection);
   void ShowSpellingGuessPanel();
@@ -122,6 +117,8 @@ class CORE_EXPORT SpellChecker final : public GarbageCollected<SpellChecker> {
 
   const Member<SpellCheckRequester> spell_check_requester_;
   const Member<IdleSpellCheckCallback> idle_spell_check_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(SpellChecker);
 };
 
 }  // namespace blink

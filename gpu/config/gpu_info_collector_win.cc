@@ -16,7 +16,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/command_line.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -24,6 +23,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/scoped_native_library.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -33,8 +33,6 @@
 #include "base/threading/thread.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_com_initializer.h"
-#include "ui/gl/gl_implementation.h"
-#include "ui/gl/gl_surface_egl.h"
 
 namespace gpu {
 
@@ -98,7 +96,7 @@ CollectInfoResult CollectDriverInfoD3D(const std::wstring& device_id,
 
   std::vector<GPUDriver> drivers;
 
-  int primary_device = -1;
+  size_t primary_device = std::numeric_limits<size_t>::max();
   bool found_amd = false;
   bool found_intel = false;
 
@@ -197,7 +195,7 @@ CollectInfoResult CollectDriverInfoD3D(const std::wstring& device_id,
       for (size_t i = 0; i < drivers.size(); ++i) {
         const GPUDriver& driver = drivers[i];
         if (driver.device.vendor_id == 0x1002) {
-          if (static_cast<int>(i) == primary_device)
+          if (i == primary_device)
             amd_is_primary = true;
           gpu_info->gpu = driver.device;
         } else {
@@ -214,7 +212,7 @@ CollectInfoResult CollectDriverInfoD3D(const std::wstring& device_id,
   } else {
     for (size_t i = 0; i < drivers.size(); ++i) {
       const GPUDriver& driver = drivers[i];
-      if (static_cast<int>(i) == primary_device) {
+      if (i == primary_device) {
         found = true;
         gpu_info->gpu = driver.device;
         gpu_info->driver_vendor = driver.driver_vendor;
@@ -233,18 +231,6 @@ CollectInfoResult CollectContextGraphicsInfo(GPUInfo* gpu_info) {
   TRACE_EVENT0("gpu", "CollectGraphicsInfo");
 
   DCHECK(gpu_info);
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL)) {
-    std::string requested_implementation_name =
-        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            switches::kUseGL);
-    if (requested_implementation_name ==
-        gl::kGLImplementationSwiftShaderForWebGLName) {
-      gpu_info->software_rendering = true;
-      gpu_info->context_info_state = kCollectInfoNonFatalFailure;
-      return kCollectInfoNonFatalFailure;
-    }
-  }
 
   CollectInfoResult result = CollectGraphicsInfoGL(gpu_info);
   if (result != kCollectInfoSuccess) {
@@ -351,11 +337,6 @@ CollectInfoResult CollectDriverInfoGL(GPUInfo* gpu_info) {
 void MergeGPUInfo(GPUInfo* basic_gpu_info,
                   const GPUInfo& context_gpu_info) {
   DCHECK(basic_gpu_info);
-
-  if (context_gpu_info.software_rendering) {
-    basic_gpu_info->software_rendering = true;
-    return;
-  }
 
   // Track D3D Shader Model (if available)
   const std::string& shader_version =

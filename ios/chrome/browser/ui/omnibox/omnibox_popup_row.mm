@@ -58,20 +58,17 @@ const CGFloat kAppendButtonSize = 48.0;
 
     _textTruncatingLabel =
         [[OmniboxPopupTruncatingLabel alloc] initWithFrame:CGRectZero];
-    _textTruncatingLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     _textTruncatingLabel.userInteractionEnabled = NO;
     [self.contentView addSubview:_textTruncatingLabel];
 
     _detailTruncatingLabel =
         [[OmniboxPopupTruncatingLabel alloc] initWithFrame:CGRectZero];
-    _detailTruncatingLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     _detailTruncatingLabel.userInteractionEnabled = NO;
     [self.contentView addSubview:_detailTruncatingLabel];
 
     // Answers use a UILabel with NSLineBreakByTruncatingTail to produce a
     // truncation with an ellipse instead of fading on multi-line text.
     _detailAnswerLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    _detailAnswerLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     _detailAnswerLabel.userInteractionEnabled = NO;
     _detailAnswerLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     [self.contentView addSubview:_detailAnswerLabel];
@@ -110,16 +107,17 @@ const CGFloat kAppendButtonSize = 48.0;
 - (void)layoutAccessoryViews {
   LayoutRect imageViewLayout = LayoutRectMake(
       IsCompactTablet() ? kLeadingPaddingIpadCompact : kLeadingPaddingIpad,
-      CGRectGetWidth(self.bounds),
+      CGRectGetWidth(self.contentView.bounds),
       floor((_rowHeight - kImageDimensionLength) / 2), kImageDimensionLength,
       kImageDimensionLength);
   _imageView.frame = LayoutRectGetRect(imageViewLayout);
 
-  LayoutRect trailingAccessoryLayout = LayoutRectMake(
-      CGRectGetWidth(self.bounds) - kAppendButtonSize -
-          kAppendButtonTrailingMargin,
-      CGRectGetWidth(self.bounds), floor((_rowHeight - kAppendButtonSize) / 2),
-      kAppendButtonSize, kAppendButtonSize);
+  LayoutRect trailingAccessoryLayout =
+      LayoutRectMake(CGRectGetWidth(self.contentView.bounds) -
+                         kAppendButtonSize - kAppendButtonTrailingMargin,
+                     CGRectGetWidth(self.contentView.bounds),
+                     floor((_rowHeight - kAppendButtonSize) / 2),
+                     kAppendButtonSize, kAppendButtonSize);
   _appendButton.frame = LayoutRectGetRect(trailingAccessoryLayout);
 }
 

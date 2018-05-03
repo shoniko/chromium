@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">Periode</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 måned}other{# måneder}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB per sek.</translation>
+<translation id="1812519734428420144">Stjernerangering <ph name="RATING_SCORE" /></translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{1 time og }other{# timer og }}</translation>
 <translation id="1842960171412779397">velg</translation>
 <translation id="1860796786778352021">Lukk varsel</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">Åpne mappen</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{for 1 år siden}other{for # år siden}}</translation>
 <translation id="2931838996092594335">klikk</translation>
-<translation id="2983818520079887040">Innstillinger</translation>
 <translation id="3036649622769666520">Åpne filer</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3087734570205094154">Bunn</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">ALLE APPER</translation>
 <translation id="4320177379694898372">Ingen Internett-tilkobling</translation>
 <translation id="4588090240171750605">Rull mot høyre</translation>
+<translation id="4724120544754982507">Varselsenter, <ph name="UNREAD_NOTIFICATION_COUNT" /> uleste varsler</translation>
 <translation id="4730374152663651037">OFTE BRUKT</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{1 måned igjen}other{# måneder igjen}}</translation>
 <translation id="4820616160060340806">Kommando + <ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">Minimer</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 time}other{# timer}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">Alle apper</translation>
 <translation id="6012623610530968780">Side <ph name="SELECTED_PAGE" /> av <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">Fjern teksten i søkefeltet</translation>
 <translation id="6040143037577758943">Lukk</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">Komma</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{For 1 sekund siden}other{For # sekunder siden}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{for 1 sekund siden}other{for # sekunder siden}}</translation>
+<translation id="654149438358937226">Blokkér alle varsler</translation>
 <translation id="6567071839949112727">klikk på et overordnet element</translation>
 <translation id="6612467943526193239">For å lukke kalibreringen, trykk på Esc.</translation>
 <translation id="6620110761915583480">Lagre fil</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">Avbryt</translation>
 <translation id="7781829728241885113">I går</translation>
 <translation id="7814458197256864873">&amp;Kopier</translation>
+<translation id="7879499977785298635">Ikke blokkér</translation>
 <translation id="7907591526440419938">Åpne filen</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{For 1 time siden}other{For # timer siden}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{1 sek igjen}other{# sek igjen}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{1 år}other{# år}}</translation>
 <translation id="8371695176452482769">Snakk nå</translation>
 <translation id="838869780401515933">merk av</translation>
+<translation id="8393700583063109961">Send melding</translation>
 <translation id="8394908167088220973">Media – spill av / pause</translation>
 <translation id="8400147561352026160">Skift+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1 år}other{# år}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> Fil (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> kB per sek</translation>
 <translation id="8725488761726303204">+ <ph name="NUMBER" /> til</translation>
+<translation id="8730621377337864115">Ferdig</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{1 t}other{# t}}</translation>
 <translation id="8806053966018712535">Mappen <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">Kommenter bildet</translation>
@@ -159,5 +163,5 @@
 <translation id="9150735707954472829">Fane</translation>
 <translation id="9161053988251441839">FORESLÅTTE APPER</translation>
 <translation id="9170848237812810038">&amp;Angre</translation>
-<translation id="932327136139879170">Start</translation>
+<translation id="932327136139879170">Gå til startsiden</translation>
 </translationbundle>

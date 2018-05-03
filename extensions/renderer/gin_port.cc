@@ -114,10 +114,11 @@ void GinPort::PostMessageHandler(gin::Arguments* arguments,
     return;
   }
 
+  std::string error;
   std::unique_ptr<Message> message =
-      messaging_util::MessageFromV8(context, v8_message);
+      messaging_util::MessageFromV8(context, v8_message, &error);
   if (!message) {
-    ThrowError(isolate, "Illegal argument to Port.postMessage");
+    ThrowError(isolate, error);
     return;
   }
 
@@ -190,7 +191,7 @@ void GinPort::DispatchEvent(v8::Local<v8::Context> context,
   gin::Converter<EventEmitter*>::FromV8(isolate, on_message, &emitter);
   CHECK(emitter);
 
-  emitter->Fire(context, args, nullptr);
+  emitter->Fire(context, args, nullptr, JSRunner::ResultCallback());
 }
 
 void GinPort::Invalidate(v8::Local<v8::Context> context) {

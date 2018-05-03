@@ -39,8 +39,8 @@ namespace ArenaTestHelpers {
 // been allocated.
 class TrackedAllocator final : public PODArena::FastMallocAllocator {
  public:
-  static RefPtr<TrackedAllocator> Create() {
-    return WTF::AdoptRef(new TrackedAllocator);
+  static scoped_refptr<TrackedAllocator> Create() {
+    return base::AdoptRef(new TrackedAllocator);
   }
 
   void* Allocate(size_t size) override {
@@ -61,7 +61,7 @@ class TrackedAllocator final : public PODArena::FastMallocAllocator {
   int NumRegions() const { return allocated_regions_.size(); }
 
  private:
-  TrackedAllocator() {}
+  TrackedAllocator() = default;
   Vector<void*> allocated_regions_;
 };
 

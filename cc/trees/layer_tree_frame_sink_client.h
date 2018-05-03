@@ -9,7 +9,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "cc/cc_export.h"
-#include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/resources/returned_resource.h"
 #include "gpu/command_buffer/common/texture_in_use_response.h"
 #include "ui/gfx/geometry/rect.h"
@@ -48,6 +47,15 @@ class CC_EXPORT LayerTreeFrameSinkClient {
   // can be submitted. This provides backpressure from the display compositor
   // so that frames are submitted only at the rate it can handle them.
   virtual void DidReceiveCompositorFrameAck() = 0;
+
+  // See ui/gfx/presentation_feedback.h for details on args. |time| is always
+  // non-zero.
+  virtual void DidPresentCompositorFrame(uint32_t presentation_token,
+                                         base::TimeTicks time,
+                                         base::TimeDelta refresh,
+                                         uint32_t flags) = 0;
+
+  virtual void DidDiscardCompositorFrame(uint32_t presentation_token) = 0;
 
   // The LayerTreeFrameSink is lost when the viz::ContextProviders held by it
   // encounter an error. In this case the LayerTreeFrameSink (and the

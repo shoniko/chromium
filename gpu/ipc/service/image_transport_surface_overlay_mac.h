@@ -11,12 +11,11 @@
 
 #import "base/mac/scoped_nsobject.h"
 #include "base/timer/timer.h"
-#include "gpu/ipc/service/gpu_command_buffer_stub.h"
+#include "gpu/ipc/service/command_buffer_stub.h"
 #include "gpu/ipc/service/image_transport_surface.h"
 #include "ui/base/cocoa/remote_layer_api.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gpu_switching_observer.h"
-#include "ui/latency/latency_info.h"
 
 @class CAContext;
 @class CALayer;
@@ -46,8 +45,12 @@ class ImageTransportSurfaceOverlayMac : public gl::GLSurface,
               ColorSpace color_space,
               bool has_alpha) override;
   bool IsOffscreen() override;
-  gfx::SwapResult SwapBuffers() override;
-  gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
+  gfx::SwapResult SwapBuffers(const PresentationCallback& callback) override;
+  gfx::SwapResult PostSubBuffer(int x,
+                                int y,
+                                int width,
+                                int height,
+                                const PresentationCallback& callback) override;
   bool SupportsPostSubBuffer() override;
   gfx::Size GetSize() override;
   void* GetHandle() override;
@@ -69,23 +72,24 @@ class ImageTransportSurfaceOverlayMac : public gl::GLSurface,
  private:
   ~ImageTransportSurfaceOverlayMac() override;
 
-  void SetLatencyInfo(const std::vector<ui::LatencyInfo>& latency_info);
+  void SetSnapshotRequested();
+  bool GetAndResetSnapshotRequested();
+
   gfx::SwapResult SwapBuffersInternal(const gfx::Rect& pixel_damage_rect);
   void ApplyBackpressure(base::TimeTicks* before_flush_time,
                          base::TimeTicks* after_flush_before_commit_time);
 
   base::WeakPtr<ImageTransportSurfaceDelegate> delegate_;
-  std::vector<ui::LatencyInfo> latency_info_;
 
   bool use_remote_layer_api_;
   base::scoped_nsobject<CAContext> ca_context_;
-  base::scoped_nsobject<CAContext> fullscreen_low_power_ca_context_;
   std::unique_ptr<ui::CALayerTreeCoordinator> ca_layer_tree_coordinator_;
 
   gfx::Size pixel_size_;
   float scale_factor_;
 
   std::vector<CALayerInUseQuery> ca_layer_in_use_queries_;
+  uint64_t swap_id_;
 
   // A GLFence marking the end of the previous frame. Must only be accessed
   // while the associated |previous_frame_context_| is bound.

@@ -21,14 +21,14 @@ class WorkletPendingTasks;
 // about the thread WorkletGlobalScope runs on.
 class CORE_EXPORT WorkletGlobalScopeProxy : public GarbageCollectedMixin {
  public:
-  virtual ~WorkletGlobalScopeProxy() {}
+  virtual ~WorkletGlobalScopeProxy() = default;
 
   // Runs the "fetch and invoke a worklet script" algorithm:
   // https://drafts.css-houdini.org/worklets/#fetch-and-invoke-a-worklet-script
   virtual void FetchAndInvokeScript(
       const KURL& module_url_record,
       WorkletModuleResponsesMap*,
-      WebURLRequest::FetchCredentialsMode,
+      network::mojom::FetchCredentialsMode,
       scoped_refptr<WebTaskRunner> outside_settings_task_runner,
       WorkletPendingTasks*) = 0;
 

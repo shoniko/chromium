@@ -22,8 +22,10 @@
 #include "extensions/browser/mock_extension_system.h"
 #include "extensions/browser/test_extensions_browser_client.h"
 #include "extensions/browser/uninstall_ping_sender.h"
+#include "extensions/browser/updater/extension_update_data.h"
 #include "extensions/browser/updater/update_service.h"
 #include "extensions/common/extension_builder.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -53,10 +55,10 @@ class FakeUpdateClient : public update_client::UpdateClient {
   void AddObserver(Observer* observer) override {}
   void RemoveObserver(Observer* observer) override {}
   void Install(const std::string& id,
-               const CrxDataCallback& crx_data_callback,
+               CrxDataCallback crx_data_callback,
                update_client::Callback callback) override {}
   void Update(const std::vector<std::string>& ids,
-              const CrxDataCallback& crx_data_callback,
+              CrxDataCallback crx_data_callback,
               update_client::Callback callback) override;
   bool GetCrxUpdateState(
       const std::string& id,
@@ -86,9 +88,10 @@ class FakeUpdateClient : public update_client::UpdateClient {
 FakeUpdateClient::FakeUpdateClient() {}
 
 void FakeUpdateClient::Update(const std::vector<std::string>& ids,
-                              const CrxDataCallback& crx_data_callback,
+                              CrxDataCallback crx_data_callback,
                               update_client::Callback callback) {
-  crx_data_callback.Run(ids, &data_);
+  std::move(crx_data_callback).Run(ids, &data_);
+  std::move(callback).Run(update_client::Error::NONE);
 }
 
 }  // namespace
@@ -112,6 +115,7 @@ UninstallPingSender::FilterResult ShouldPing(const Extension* extension,
 // versions of an extension.
 class FakeExtensionSystem : public MockExtensionSystem {
  public:
+  using InstallUpdateCallback = MockExtensionSystem::InstallUpdateCallback;
   explicit FakeExtensionSystem(content::BrowserContext* context)
       : MockExtensionSystem(context) {}
   ~FakeExtensionSystem() override {}
@@ -125,28 +129,29 @@ class FakeExtensionSystem : public MockExtensionSystem {
     return &install_requests_;
   }
 
-  void set_install_callback(const base::Closure& callback) {
-    next_install_callback_ = callback;
+  void set_install_callback(base::OnceClosure callback) {
+    next_install_callback_ = std::move(callback);
   }
 
   // ExtensionSystem override
   void InstallUpdate(const std::string& extension_id,
-                     const base::FilePath& temp_dir) override {
+                     const std::string& public_key,
+                     const base::FilePath& temp_dir,
+                     InstallUpdateCallback install_update_callback) override {
     base::DeleteFile(temp_dir, true /*recursive*/);
     InstallUpdateRequest request;
     request.extension_id = extension_id;
     request.temp_dir = temp_dir;
     install_requests_.push_back(request);
     if (!next_install_callback_.is_null()) {
-      base::Closure tmp = next_install_callback_;
-      next_install_callback_.Reset();
-      tmp.Run();
+      std::move(next_install_callback_).Run();
     }
+    std::move(install_update_callback).Run(true);
   }
 
  private:
   std::vector<InstallUpdateRequest> install_requests_;
-  base::Closure next_install_callback_;
+  base::OnceClosure next_install_callback_;
 };
 
 class UpdateServiceTest : public ExtensionsTest {
@@ -173,7 +178,7 @@ class UpdateServiceTest : public ExtensionsTest {
     // We only expect that this will get called once, so consider it an error
     // if our update_client_ is already non-null.
     EXPECT_EQ(nullptr, update_client_.get());
-    update_client_ = new FakeUpdateClient();
+    update_client_ = base::MakeRefCounted<FakeUpdateClient>();
     return update_client_.get();
   }
 
@@ -195,7 +200,7 @@ class UpdateServiceTest : public ExtensionsTest {
   }
 
  private:
-  UpdateService* update_service_;
+  UpdateService* update_service_ = nullptr;
   scoped_refptr<FakeUpdateClient> update_client_;
   MockExtensionSystemFactory<FakeExtensionSystem>
       fake_extension_system_factory_;
@@ -225,17 +230,18 @@ TEST_F(UpdateServiceTest, BasicUpdateOperations) {
   scoped_refptr<Extension> extension1(builder.Build());
 
   ExtensionRegistry::Get(browser_context())->AddEnabled(extension1);
-  std::vector<std::string> ids;
-  ids.push_back(extension1->id());
+
+  ExtensionUpdateCheckParams update_check_params;
+  update_check_params.update_info[extension1->id()] = ExtensionUpdateData();
 
   // Start an update check and verify that the UpdateClient was sent the right
   // data.
-  update_service()->StartUpdateCheck(ids);
+  update_service()->StartUpdateCheck(update_check_params);
   std::vector<update_client::CrxComponent>* data = update_client()->data();
   ASSERT_NE(nullptr, data);
   ASSERT_EQ(1u, data->size());
 
-  ASSERT_EQ(data->at(0).version, *extension1->version());
+  ASSERT_EQ(data->at(0).version, extension1->version());
   update_client::CrxInstaller* installer = data->at(0).installer.get();
   ASSERT_NE(installer, nullptr);
 
@@ -264,15 +270,19 @@ TEST_F(UpdateServiceTest, BasicUpdateOperations) {
   base::ScopedTempDir new_version_dir;
   ASSERT_TRUE(new_version_dir.CreateUniqueTempDir());
 
+  bool done = false;
   installer->Install(
-      new_version_dir.GetPath(),
-      base::Bind([](const update_client::CrxInstaller::Result& result) {
-        EXPECT_EQ(0, result.error);
-        EXPECT_EQ(0, result.extended_error);
-      }));
+      new_version_dir.GetPath(), std::string(),
+      base::BindOnce(
+          [](bool* done, const update_client::CrxInstaller::Result& result) {
+            *done = true;
+            EXPECT_EQ(0, result.error);
+            EXPECT_EQ(0, result.extended_error);
+          },
+          &done));
 
   scoped_refptr<content::MessageLoopRunner> loop_runner =
-      new content::MessageLoopRunner();
+      base::MakeRefCounted<content::MessageLoopRunner>();
   extension_system()->set_install_callback(loop_runner->QuitClosure());
   loop_runner->Run();
 
@@ -280,8 +290,9 @@ TEST_F(UpdateServiceTest, BasicUpdateOperations) {
       extension_system()->install_requests();
   ASSERT_EQ(1u, requests->size());
   EXPECT_EQ(requests->at(0).extension_id, extension1->id());
-  EXPECT_NE(requests->at(0).temp_dir.value(),
+  EXPECT_EQ(requests->at(0).temp_dir.value(),
             new_version_dir.GetPath().value());
+  EXPECT_TRUE(done);
 }
 
 TEST_F(UpdateServiceTest, UninstallPings) {
@@ -337,11 +348,11 @@ TEST_F(UpdateServiceTest, UninstallPings) {
     ASSERT_EQ(2u, pings.size()) << reason;
 
     EXPECT_EQ(extension2->id(), pings[0].id) << reason;
-    EXPECT_EQ(*extension2->version(), pings[0].version) << reason;
+    EXPECT_EQ(extension2->version(), pings[0].version) << reason;
     EXPECT_EQ(reason, pings[0].reason) << reason;
 
     EXPECT_EQ(extension3->id(), pings[1].id) << reason;
-    EXPECT_EQ(*extension3->version(), pings[1].version) << reason;
+    EXPECT_EQ(extension3->version(), pings[1].version) << reason;
     EXPECT_EQ(reason, pings[1].reason) << reason;
 
     pings.clear();

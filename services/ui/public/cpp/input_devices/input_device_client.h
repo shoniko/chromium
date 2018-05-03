@@ -39,11 +39,9 @@ class InputDeviceClient : public mojom::InputDeviceObserverMojo,
       const override;
   const std::vector<ui::InputDevice>& GetMouseDevices() const override;
   const std::vector<ui::InputDevice>& GetTouchpadDevices() const override;
-
   bool AreDeviceListsComplete() const override;
   bool AreTouchscreensEnabled() const override;
   bool AreTouchscreenTargetDisplaysValid() const override;
-
   void AddObserver(ui::InputDeviceEventObserver* observer) override;
   void RemoveObserver(ui::InputDeviceEventObserver* observer) override;
 
@@ -72,6 +70,12 @@ class InputDeviceClient : public mojom::InputDeviceObserverMojo,
   void OnStylusStateChanged(StylusState state) override;
 
  private:
+  friend class InputDeviceClientTestApi;
+
+  void NotifyObserversDeviceListsComplete();
+  void NotifyObserversKeyboardDeviceConfigurationChanged();
+  void NotifyObserversTouchscreenDeviceConfigurationChanged();
+
   mojo::Binding<mojom::InputDeviceObserverMojo> binding_;
 
   bool is_input_device_manager_;

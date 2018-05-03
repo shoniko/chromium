@@ -14,10 +14,8 @@
 #include "base/single_thread_task_runner.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "platform/WebTaskRunner.h"
-#include "platform/scheduler/base/test_time_source.h"
-#include "platform/scheduler/child/scheduler_tqm_delegate_impl.h"
 #include "platform/scheduler/renderer/renderer_scheduler_impl.h"
-#include "public/platform/WebTraceLocation.h"
+#include "platform/scheduler/test/create_task_queue_manager_for_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -41,18 +39,17 @@ class MockTaskObserver : public blink::WebThread::TaskObserver {
 
 class WebThreadImplForRendererSchedulerTest : public ::testing::Test {
  public:
-  WebThreadImplForRendererSchedulerTest() {}
+  WebThreadImplForRendererSchedulerTest() = default;
 
   void SetUp() override {
-    clock_.reset(new base::SimpleTestTickClock());
-    clock_->Advance(base::TimeDelta::FromMicroseconds(5000));
-    scheduler_.reset(new RendererSchedulerImpl(SchedulerTqmDelegateImpl::Create(
-        &message_loop_, std::make_unique<TestTimeSource>(clock_.get()))));
+    clock_.Advance(base::TimeDelta::FromMicroseconds(5000));
+    scheduler_.reset(new RendererSchedulerImpl(CreateTaskQueueManagerForTest(
+        &message_loop_, message_loop_.task_runner(), &clock_)));
     default_task_runner_ = scheduler_->DefaultTaskQueue();
     thread_ = scheduler_->CreateMainThread();
   }
 
-  ~WebThreadImplForRendererSchedulerTest() override {}
+  ~WebThreadImplForRendererSchedulerTest() override = default;
 
   void SetWorkBatchSizeForTesting(size_t work_batch_size) {
     scheduler_->GetSchedulerHelperForTesting()->SetWorkBatchSizeForTesting(
@@ -63,7 +60,7 @@ class WebThreadImplForRendererSchedulerTest : public ::testing::Test {
 
  protected:
   base::MessageLoop message_loop_;
-  std::unique_ptr<base::SimpleTestTickClock> clock_;
+  base::SimpleTestTickClock clock_;
   std::unique_ptr<RendererSchedulerImpl> scheduler_;
   scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
   std::unique_ptr<blink::WebThread> thread_;
@@ -84,7 +81,7 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestTaskObserver) {
   }
 
   thread_->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task)));
+      FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task)));
   base::RunLoop().RunUntilIdle();
   thread_->RemoveTaskObserver(&observer);
 }
@@ -103,7 +100,7 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithOneTask) {
   }
 
   thread_->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task)));
+      FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task)));
   base::RunLoop().RunUntilIdle();
   thread_->RemoveTaskObserver(&observer);
 }
@@ -127,9 +124,9 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithTwoTasks) {
   }
 
   thread_->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task1)));
+      FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task1)));
   thread_->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task2)));
+      FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task2)));
   base::RunLoop().RunUntilIdle();
   thread_->RemoveTaskObserver(&observer);
 }
@@ -158,11 +155,11 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithThreeTasks) {
   }
 
   thread_->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task1)));
+      FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task1)));
   thread_->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task2)));
+      FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task2)));
   thread_->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task3)));
+      FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task3)));
   base::RunLoop().RunUntilIdle();
   thread_->RemoveTaskObserver(&observer);
 }
@@ -172,8 +169,7 @@ void EnterRunLoop(base::MessageLoop* message_loop, blink::WebThread* thread) {
   // run loop directly.
   base::RunLoop run_loop;
   thread->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE,
-      WTF::Bind(&base::RunLoop::Quit, WTF::Unretained(&run_loop)));
+      FROM_HERE, WTF::Bind(&base::RunLoop::Quit, WTF::Unretained(&run_loop)));
   message_loop->SetNestableTasksAllowed(true);
   run_loop.Run();
 }

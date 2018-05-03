@@ -40,7 +40,7 @@ DocumentParser::DocumentParser(Document* document)
   DCHECK(document);
 }
 
-DocumentParser::~DocumentParser() {}
+DocumentParser::~DocumentParser() = default;
 
 void DocumentParser::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
@@ -80,9 +80,9 @@ void DocumentParser::Detach() {
   document_ = nullptr;
 }
 
-void DocumentParser::SuspendScheduledTasks() {}
+void DocumentParser::PauseScheduledTasks() {}
 
-void DocumentParser::ResumeScheduledTasks() {}
+void DocumentParser::UnpauseScheduledTasks() {}
 
 void DocumentParser::AddClient(DocumentParserClient* client) {
   clients_.insert(client);

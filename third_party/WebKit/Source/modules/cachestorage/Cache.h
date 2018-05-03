@@ -7,16 +7,15 @@
 
 #include <memory>
 #include "bindings/core/v8/ScriptPromise.h"
+#include "core/fetch/GlobalFetch.h"
 #include "modules/ModulesExport.h"
 #include "modules/cachestorage/CacheQueryOptions.h"
-#include "modules/fetch/GlobalFetch.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCache.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerCacheError.h"
 
 namespace blink {
 
@@ -49,10 +48,10 @@ class MODULES_EXPORT Cache final : public ScriptWrappable {
   ScriptPromise addAll(ScriptState*,
                        const HeapVector<RequestInfo>&,
                        ExceptionState&);
-  ScriptPromise deleteFunction(ScriptState*,
-                               const RequestInfo&,
-                               const CacheQueryOptions&,
-                               ExceptionState&);
+  ScriptPromise Delete(ScriptState*,
+                       const RequestInfo&,
+                       const CacheQueryOptions&,
+                       ExceptionState&);
   ScriptPromise put(ScriptState*,
                     const RequestInfo&,
                     Response*,
@@ -71,6 +70,7 @@ class MODULES_EXPORT Cache final : public ScriptWrappable {
  private:
   class BarrierCallbackForPut;
   class BlobHandleCallbackForPut;
+  class CodeCacheHandleCallbackForPut;
   class FetchResolvedForAdd;
   friend class FetchResolvedForAdd;
   Cache(GlobalFetch::ScopedFetcher*, std::unique_ptr<WebServiceWorkerCache>);

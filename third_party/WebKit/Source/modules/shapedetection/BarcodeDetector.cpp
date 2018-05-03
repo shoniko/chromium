@@ -21,18 +21,13 @@ BarcodeDetector* BarcodeDetector::Create(ExecutionContext* context) {
 
 BarcodeDetector::BarcodeDetector(ExecutionContext* context) : ShapeDetector() {
   auto request = mojo::MakeRequest(&barcode_service_);
-  if (context->IsDocument()) {
-    LocalFrame* frame = ToDocument(context)->GetFrame();
-    if (frame)
-      frame->GetInterfaceProvider().GetInterface(std::move(request));
-  } else {
-    WorkerThread* thread = ToWorkerGlobalScope(context)->GetThread();
-    thread->GetInterfaceProvider().GetInterface(std::move(request));
+  if (auto* interface_provider = context->GetInterfaceProvider()) {
+    interface_provider->GetInterface(std::move(request));
   }
 
-  barcode_service_.set_connection_error_handler(ConvertToBaseCallback(
+  barcode_service_.set_connection_error_handler(
       WTF::Bind(&BarcodeDetector::OnBarcodeServiceConnectionError,
-                WrapWeakPersistent(this))));
+                WrapWeakPersistent(this)));
 }
 
 ScriptPromise BarcodeDetector::DoDetect(ScriptPromiseResolver* resolver,
@@ -45,9 +40,9 @@ ScriptPromise BarcodeDetector::DoDetect(ScriptPromiseResolver* resolver,
   }
   barcode_service_requests_.insert(resolver);
   barcode_service_->Detect(
-      std::move(bitmap), ConvertToBaseCallback(WTF::Bind(
-                             &BarcodeDetector::OnDetectBarcodes,
-                             WrapPersistent(this), WrapPersistent(resolver))));
+      std::move(bitmap),
+      WTF::Bind(&BarcodeDetector::OnDetectBarcodes, WrapPersistent(this),
+                WrapPersistent(resolver)));
   return promise;
 }
 

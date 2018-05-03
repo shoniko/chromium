@@ -51,25 +51,19 @@ void UiTexture::DrawAndLayout(SkCanvas* canvas, const gfx::Size& texture_size) {
   Draw(canvas, texture_size);
 }
 
-bool UiTexture::HitTest(const gfx::PointF& point) const {
-  return false;
+void UiTexture::MeasureSize() {
+  OnMeasureSize();
+  measured_ = true;
 }
 
-void UiTexture::SetMode(ColorScheme::Mode mode) {
-  if (mode_ == mode)
-    return;
-  mode_ = mode;
-  OnSetMode();
+void UiTexture::OnMeasureSize() {}
+
+bool UiTexture::LocalHitTest(const gfx::PointF& point) const {
+  return false;
 }
 
 void UiTexture::OnInitialized() {
   set_dirty();
-}
-
-void UiTexture::OnSetMode() {}
-
-const ColorScheme& UiTexture::color_scheme() const {
-  return ColorScheme::GetColorScheme(mode());
 }
 
 std::vector<std::unique_ptr<gfx::RenderText>> UiTexture::PrepareDrawStringRect(
@@ -79,12 +73,26 @@ std::vector<std::unique_ptr<gfx::RenderText>> UiTexture::PrepareDrawStringRect(
     gfx::Rect* bounds,
     UiTexture::TextAlignment text_alignment,
     UiTexture::WrappingBehavior wrapping_behavior) {
+  TextRenderParameters parameters;
+  parameters.color = color;
+  parameters.text_alignment = text_alignment;
+  parameters.wrapping_behavior = wrapping_behavior;
+  return PrepareDrawStringRect(text, font_list, bounds, parameters);
+}
+
+std::vector<std::unique_ptr<gfx::RenderText>> UiTexture::PrepareDrawStringRect(
+    const base::string16& text,
+    const gfx::FontList& font_list,
+    gfx::Rect* bounds,
+    const TextRenderParameters& parameters) {
   DCHECK(bounds);
 
   std::vector<std::unique_ptr<gfx::RenderText>> lines;
-  gfx::Rect rect(*bounds);
 
-  if (wrapping_behavior == kWrappingBehaviorWrap) {
+  if (parameters.wrapping_behavior == kWrappingBehaviorWrap) {
+    DCHECK(!parameters.cursor_enabled);
+
+    gfx::Rect rect(*bounds);
     std::vector<base::string16> strings;
     gfx::ElideRectangleText(text, font_list, bounds->width(),
                             bounds->height() ? bounds->height() : INT_MAX,
@@ -94,7 +102,7 @@ std::vector<std::unique_ptr<gfx::RenderText>> UiTexture::PrepareDrawStringRect(
     int line_height = 0;
     for (size_t i = 0; i < strings.size(); i++) {
       std::unique_ptr<gfx::RenderText> render_text = CreateConfiguredRenderText(
-          strings[i], font_list, color, text_alignment);
+          strings[i], font_list, parameters.color, parameters.text_alignment);
 
       if (i == 0) {
         // Measure line and center text vertically.
@@ -117,30 +125,28 @@ std::vector<std::unique_ptr<gfx::RenderText>> UiTexture::PrepareDrawStringRect(
       bounds->set_height(height);
 
   } else {
-    std::unique_ptr<gfx::RenderText> render_text =
-        CreateConfiguredRenderText(text, font_list, color, text_alignment);
-    if (bounds->width() != 0)
+    std::unique_ptr<gfx::RenderText> render_text = CreateConfiguredRenderText(
+        text, font_list, parameters.color, parameters.text_alignment);
+    if (bounds->width() != 0 && !parameters.cursor_enabled)
       render_text->SetElideBehavior(gfx::TRUNCATE);
-    else
-      rect.set_width(INT_MAX);
-
-    render_text->SetDisplayRect(rect);
-
-    if (bounds->width() == 0) {
-      int text_width = render_text->GetStringSize().width();
-      bounds->set_width(text_width);
-      rect.set_width(text_width);
-      render_text->SetDisplayRect(rect);
+    if (parameters.cursor_enabled) {
+      render_text->SetCursorEnabled(true);
+      render_text->SetCursorPosition(parameters.cursor_position);
     }
 
+    if (bounds->width() == 0)
+      bounds->set_width(render_text->GetStringSize().width());
+    if (bounds->height() == 0)
+      bounds->set_height(render_text->GetStringSize().height());
+
+    render_text->SetDisplayRect(*bounds);
     lines.push_back(std::move(render_text));
   }
   return lines;
 }
 
 std::unique_ptr<gfx::RenderText> UiTexture::CreateRenderText() {
-  std::unique_ptr<gfx::RenderText> render_text(
-      gfx::RenderText::CreateInstance());
+  auto render_text = gfx::RenderText::CreateHarfBuzzInstance();
 
   // Subpixel rendering is counterproductive when drawing VR textures.
   render_text->set_subpixel_rendering_suppressed(true);
@@ -185,24 +191,21 @@ bool UiTexture::IsRTL() {
   return base::i18n::IsRTL();
 }
 
-gfx::FontList UiTexture::GetDefaultFontList(int size) {
-  return gfx::FontList(gfx::Font(kDefaultFontFamily, size));
-}
-
-bool UiTexture::GetFontList(int size,
+bool UiTexture::GetFontList(const std::string& preferred_font_name,
+                            int font_size,
                             base::string16 text,
                             gfx::FontList* font_list) {
   if (force_font_fallback_failure_for_testing_)
     return false;
 
-  gfx::Font default_font(kDefaultFontFamily, size);
-  std::vector<gfx::Font> fonts{default_font};
+  gfx::Font preferred_font(preferred_font_name, font_size);
+  std::vector<gfx::Font> fonts{preferred_font};
 
   std::set<std::string> names;
   // TODO(acondor): Query BrowserProcess to obtain the application locale.
   for (UChar32 c : CollectDifferentChars(text)) {
     std::string name;
-    bool found_name = GetFallbackFontNameForChar(default_font, c, "", &name);
+    bool found_name = GetFallbackFontNameForChar(preferred_font, c, "", &name);
     if (!found_name)
       return false;
     if (!name.empty())
@@ -210,10 +213,40 @@ bool UiTexture::GetFontList(int size,
   }
   for (const auto& name : names) {
     DCHECK(!name.empty());
-    fonts.push_back(gfx::Font(name, size));
+    fonts.push_back(gfx::Font(name, font_size));
   }
   *font_list = gfx::FontList(fonts);
   return true;
+}
+
+bool UiTexture::GetDefaultFontList(int font_size,
+                                   base::string16 text,
+                                   gfx::FontList* font_list) {
+  return GetFontList(kDefaultFontFamily, font_size, text, font_list);
+}
+
+SkColor UiTexture::foreground_color() const {
+  DCHECK(foreground_color_);
+  return foreground_color_.value();
+}
+
+SkColor UiTexture::background_color() const {
+  DCHECK(background_color_);
+  return background_color_.value();
+}
+
+void UiTexture::SetForegroundColor(SkColor color) {
+  if (foreground_color_ == color)
+    return;
+  foreground_color_ = color;
+  set_dirty();
+}
+
+void UiTexture::SetBackgroundColor(SkColor color) {
+  if (background_color_ == color)
+    return;
+  background_color_ = color;
+  set_dirty();
 }
 
 void UiTexture::SetForceFontFallbackFailureForTesting(bool force) {

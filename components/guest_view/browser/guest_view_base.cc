@@ -447,10 +447,6 @@ WebContents* GuestViewBase::GetOwnerWebContents() const {
   return owner_web_contents_;
 }
 
-void GuestViewBase::GuestSizeChanged(const gfx::Size& new_size) {
-  UpdateGuestSize(new_size, auto_size_enabled_);
-}
-
 const GURL& GuestViewBase::GetOwnerSiteURL() const {
   return owner_web_contents()->GetLastCommittedURL();
 }
@@ -520,7 +516,16 @@ void GuestViewBase::SetGuestHost(content::GuestHost* guest_host) {
 void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
                                int element_instance_id,
                                bool is_full_page_plugin,
-                               const base::Closure& callback) {
+                               const base::Closure& completion_callback) {
+  WillAttach(embedder_web_contents, element_instance_id, is_full_page_plugin,
+             base::OnceClosure(), completion_callback);
+}
+
+void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
+                               int element_instance_id,
+                               bool is_full_page_plugin,
+                               base::OnceClosure perform_attach,
+                               const base::Closure& completion_callback) {
   // Stop tracking the old embedder's zoom level.
   if (owner_web_contents())
     StopTrackingEmbedderZoomLevel();
@@ -541,9 +546,12 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
 
   WillAttachToEmbedder();
 
+  if (perform_attach)
+    std::move(perform_attach).Run();
+
   // Completing attachment will resume suspended resource loads and then send
   // queued events.
-  SignalWhenReady(callback);
+  SignalWhenReady(completion_callback);
 }
 
 void GuestViewBase::SignalWhenReady(const base::Closure& callback) {
@@ -646,7 +654,7 @@ void GuestViewBase::LoadingStateChanged(WebContents* source,
 content::ColorChooser* GuestViewBase::OpenColorChooser(
     WebContents* web_contents,
     SkColor color,
-    const std::vector<content::ColorSuggestion>& suggestions) {
+    const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
     return nullptr;
 
@@ -656,7 +664,7 @@ content::ColorChooser* GuestViewBase::OpenColorChooser(
 
 void GuestViewBase::ResizeDueToAutoResize(WebContents* web_contents,
                                           const gfx::Size& new_size) {
-  guest_host_->GuestResizeDueToAutoResize(new_size);
+  UpdateGuestSize(new_size, auto_size_enabled_);
 }
 
 void GuestViewBase::RunFileChooser(content::RenderFrameHost* render_frame_host,
@@ -871,14 +879,16 @@ void GuestViewBase::StartTrackingEmbedderZoomLevel() {
 }
 
 void GuestViewBase::StopTrackingEmbedderZoomLevel() {
-  if (!attached() || !ZoomPropagatesFromEmbedderToGuest())
-    return;
+  // TODO(wjmaclean): Remove the observer any time the GuestWebView transitions
+  // from propagating to not-propagating the zoom from the embedder.
 
   auto* embedder_zoom_controller =
       zoom::ZoomController::FromWebContents(owner_web_contents());
   // Chrome Apps do not have a ZoomController.
   if (!embedder_zoom_controller)
     return;
+
+  // It is safe to remove an observer that was never registed.
   embedder_zoom_controller->RemoveObserver(this);
 }
 

@@ -16,9 +16,9 @@ import org.junit.Assert;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.test.ChromeActivityTestRule;
@@ -81,7 +81,8 @@ public class DownloadTestRule extends ChromeActivityTestRule<ChromeActivity> {
             if (fileName.equals(getTitleFromCursor(cursor))) {
                 if (expectedContents != null) {
                     FileInputStream stream = new FileInputStream(new File(fullPath));
-                    byte[] data = new byte[expectedContents.getBytes().length];
+                    byte[] data =
+                            new byte[ApiCompatibilityUtils.getBytesUtf8(expectedContents).length];
                     try {
                         Assert.assertEquals(stream.read(data), data.length);
                         String contents = new String(data);
@@ -111,7 +112,6 @@ public class DownloadTestRule extends ChromeActivityTestRule<ChromeActivity> {
     /**
      * Delete all download entries in DownloadManager and delete the corresponding files.
      */
-    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private void cleanUpAllDownloads() {
         DownloadManager manager =
                 (DownloadManager) getActivity().getSystemService(Context.DOWNLOAD_SERVICE);

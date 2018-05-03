@@ -50,7 +50,7 @@ class ExtensionPreferenceApiTest : public ExtensionApiTest {
     EXPECT_FALSE(prefs->GetBoolean(prefs::kBlockThirdPartyCookies));
     EXPECT_TRUE(prefs->GetBoolean(prefs::kEnableHyperlinkAuditing));
     EXPECT_TRUE(prefs->GetBoolean(prefs::kEnableReferrers));
-    EXPECT_TRUE(prefs->GetBoolean(prefs::kEnableTranslate));
+    EXPECT_TRUE(prefs->GetBoolean(prefs::kOfferTranslateEnabled));
     EXPECT_EQ(chrome_browser_net::NETWORK_PREDICTION_DEFAULT,
               prefs->GetInteger(prefs::kNetworkPredictionOptions));
     EXPECT_TRUE(
@@ -70,7 +70,7 @@ class ExtensionPreferenceApiTest : public ExtensionApiTest {
     EXPECT_TRUE(prefs->GetBoolean(prefs::kBlockThirdPartyCookies));
     EXPECT_FALSE(prefs->GetBoolean(prefs::kEnableHyperlinkAuditing));
     EXPECT_FALSE(prefs->GetBoolean(prefs::kEnableReferrers));
-    EXPECT_FALSE(prefs->GetBoolean(prefs::kEnableTranslate));
+    EXPECT_FALSE(prefs->GetBoolean(prefs::kOfferTranslateEnabled));
     EXPECT_EQ(chrome_browser_net::NETWORK_PREDICTION_NEVER,
               prefs->GetInteger(prefs::kNetworkPredictionOptions));
     EXPECT_FALSE(
@@ -121,7 +121,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, MAYBE_Standard) {
   prefs->SetBoolean(prefs::kBlockThirdPartyCookies, true);
   prefs->SetBoolean(prefs::kEnableHyperlinkAuditing, false);
   prefs->SetBoolean(prefs::kEnableReferrers, false);
-  prefs->SetBoolean(prefs::kEnableTranslate, false);
+  prefs->SetBoolean(prefs::kOfferTranslateEnabled, false);
   prefs->SetInteger(prefs::kNetworkPredictionOptions,
                     chrome_browser_net::NETWORK_PREDICTION_NEVER);
   prefs->SetBoolean(password_manager::prefs::kCredentialsEnableService, false);
@@ -343,7 +343,55 @@ IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, OnChangeSplit) {
   listener_incognito10.Reply("ok");
 
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
-  EXPECT_TRUE(catcher_incognito.GetNextResult()) << catcher.message();
+  EXPECT_TRUE(catcher_incognito.GetNextResult()) << catcher_incognito.message();
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest,
+                       OnChangeSplitWithNoOTRProfile) {
+  PrefService* prefs = profile_->GetPrefs();
+  prefs->SetBoolean(prefs::kBlockThirdPartyCookies, true);
+
+  extensions::ResultCatcher catcher;
+  ExtensionTestMessageListener loaded_incognito_test_listener(
+      "incognito loaded", false);
+
+  ExtensionTestMessageListener change_pref_listener("change pref value", false);
+
+  ASSERT_TRUE(
+      LoadExtensionIncognito(test_data_dir_.AppendASCII("preference")
+                                 .AppendASCII("onchange_split_regular_only")));
+
+  ASSERT_TRUE(change_pref_listener.WaitUntilSatisfied());
+  prefs->SetBoolean(prefs::kBlockThirdPartyCookies, false);
+
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+  EXPECT_FALSE(loaded_incognito_test_listener.was_satisfied());
+  EXPECT_FALSE(profile_->HasOffTheRecordProfile());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest,
+                       OnChangeSplitWithoutIncognitoAccess) {
+  PrefService* prefs = profile_->GetPrefs();
+  prefs->SetBoolean(prefs::kBlockThirdPartyCookies, true);
+
+  // Open an incognito window.
+  OpenURLOffTheRecord(profile_, GURL("chrome://newtab/"));
+  EXPECT_TRUE(profile_->HasOffTheRecordProfile());
+
+  extensions::ResultCatcher catcher;
+  ExtensionTestMessageListener loaded_incognito_test_listener(
+      "incognito loaded", false);
+
+  ExtensionTestMessageListener change_pref_listener("change pref value", false);
+
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("preference")
+                                .AppendASCII("onchange_split_regular_only")));
+
+  ASSERT_TRUE(change_pref_listener.WaitUntilSatisfied());
+  prefs->SetBoolean(prefs::kBlockThirdPartyCookies, false);
+
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+  EXPECT_FALSE(loaded_incognito_test_listener.was_satisfied());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, DataReductionProxy) {

@@ -116,14 +116,12 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // outside of this class.
   void OnPacket() override;
   // Called when the public header has been parsed.
-  bool OnUnauthenticatedPublicHeader(
-      const QuicPacketPublicHeader& header) override;
+  bool OnUnauthenticatedPublicHeader(const QuicPacketHeader& header) override;
   // Called when the private header has been parsed of a data packet that is
   // destined for the time wait manager.
   bool OnUnauthenticatedHeader(const QuicPacketHeader& header) override;
   void OnError(QuicFramer* framer) override;
-  bool OnProtocolVersionMismatch(
-      QuicTransportVersion received_version) override;
+  bool OnProtocolVersionMismatch(ParsedQuicVersion received_version) override;
 
   // The following methods should never get called because
   // OnUnauthenticatedPublicHeader() or OnUnauthenticatedHeader() (whichever
@@ -210,11 +208,17 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // source address token.
   virtual const QuicSocketAddress GetClientAddress() const;
 
+  // Return true if dispatcher wants to destroy session outside of
+  // OnConnectionClosed() call stack.
+  virtual bool ShouldDestroySessionAsynchronously();
+
   QuicTimeWaitListManager* time_wait_list_manager() {
     return time_wait_list_manager_.get();
   }
 
   const QuicTransportVersionVector& GetSupportedTransportVersions();
+
+  const ParsedQuicVersionVector& GetSupportedVersions();
 
   QuicConnectionId current_connection_id() { return current_connection_id_; }
   const QuicSocketAddress& current_server_address() {
@@ -263,7 +267,7 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // looked up, and the session was not found in the active list of sessions.
   // Returns false if processing should stop after this call.
   virtual bool OnUnauthenticatedUnknownPublicHeader(
-      const QuicPacketPublicHeader& header);
+      const QuicPacketHeader& header);
 
   // Called when a new connection starts to be handled by this dispatcher.
   // Either this connection is created or its packets is buffered while waiting
@@ -297,14 +301,14 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
 
   typedef QuicUnorderedSet<QuicConnectionId> QuicConnectionIdSet;
 
-  bool HandlePacketForTimeWait(const QuicPacketPublicHeader& header);
+  bool HandlePacketForTimeWait(const QuicPacketHeader& header);
 
   // Attempts to reject the connection statelessly, if stateless rejects are
   // possible and if the current packet contains a CHLO message.  Determines a
   // fate which describes what subsequent processing should be performed on the
   // packets, like ValidityChecks, and invokes ProcessUnauthenticatedHeaderFate.
   void MaybeRejectStatelessly(QuicConnectionId connection_id,
-                              QuicTransportVersion version);
+                              ParsedQuicVersion version);
 
   // Deliver |packets| to |session| for further processing.
   void DeliverPacketsToSession(
@@ -323,7 +327,7 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
       const QuicSocketAddress& current_client_address,
       const QuicSocketAddress& current_server_address,
       std::unique_ptr<QuicReceivedPacket> current_packet,
-      QuicTransportVersion first_version);
+      ParsedQuicVersion first_version);
 
   // Examine the state of the rejector and decide what to do with the current
   // packet.

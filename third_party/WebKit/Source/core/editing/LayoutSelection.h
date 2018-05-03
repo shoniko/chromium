@@ -25,11 +25,13 @@
 #include "core/CoreExport.h"
 #include "core/editing/Forward.h"
 #include "platform/heap/Handle.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
 class IntRect;
 class LayoutObject;
+class NGPhysicalTextFragment;
 class FrameSelection;
 
 // This class represents a selection range in layout tree for painting and
@@ -67,24 +69,24 @@ class SelectionPaintRange {
 
   SelectionPaintRange() = default;
   SelectionPaintRange(LayoutObject* start_layout_object,
-                      base::Optional<int> start_offset,
+                      WTF::Optional<unsigned> start_offset,
                       LayoutObject* end_layout_object,
-                      base::Optional<int> end_offset);
+                      WTF::Optional<unsigned> end_offset);
 
   bool operator==(const SelectionPaintRange& other) const;
 
   LayoutObject* StartLayoutObject() const;
-  base::Optional<int> StartOffset() const;
+  WTF::Optional<unsigned> StartOffset() const;
   LayoutObject* EndLayoutObject() const;
-  base::Optional<int> EndOffset() const;
+  WTF::Optional<unsigned> EndOffset() const;
 
   bool IsNull() const { return !start_layout_object_; }
 
  private:
   LayoutObject* start_layout_object_ = nullptr;
-  base::Optional<int> start_offset_ = base::nullopt;
+  WTF::Optional<unsigned> start_offset_ = WTF::nullopt;
   LayoutObject* end_layout_object_ = nullptr;
-  base::Optional<int> end_offset_ = base::nullopt;
+  WTF::Optional<unsigned> end_offset_ = WTF::nullopt;
 };
 
 class LayoutSelection final : public GarbageCollected<LayoutSelection> {
@@ -101,8 +103,15 @@ class LayoutSelection final : public GarbageCollected<LayoutSelection> {
   void InvalidatePaintForSelection();
 
   void ClearSelection();
-  base::Optional<int> SelectionStart() const;
-  base::Optional<int> SelectionEnd() const;
+  WTF::Optional<unsigned> SelectionStart() const;
+  WTF::Optional<unsigned> SelectionEnd() const;
+  // This function returns selected part of |text_fragment|.
+  // Returned pair is a partial range of
+  // (text_fragment.StartOffset(), text_fragment.EndOffset()).
+  // If first equals second, it indicates "no selection in fragment".
+  std::pair<unsigned, unsigned> SelectionStartEndForNG(
+      const NGPhysicalTextFragment&);
+
   void OnDocumentShutdown();
 
   void Trace(blink::Visitor*);

@@ -26,6 +26,7 @@
 
 #include "core/html/forms/TextControlInnerElements.h"
 
+#include "core/css/StyleChangeReason.h"
 #include "core/css/resolver/StyleAdjuster.h"
 #include "core/dom/Document.h"
 #include "core/dom/NodeComputedStyle.h"
@@ -39,7 +40,6 @@
 #include "core/html_names.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutTextControlSingleLine.h"
-#include "core/layout/api/LayoutTextControlItem.h"
 
 namespace blink {
 
@@ -103,10 +103,7 @@ inline TextControlInnerEditorElement::TextControlInnerEditorElement(
 
 TextControlInnerEditorElement* TextControlInnerEditorElement::Create(
     Document& document) {
-  TextControlInnerEditorElement* element =
-      new TextControlInnerEditorElement(document);
-  element->setAttribute(idAttr, ShadowElementNames::InnerEditor());
-  return element;
+  return new TextControlInnerEditorElement(document);
 }
 
 void TextControlInnerEditorElement::DefaultEventHandler(Event* event) {
@@ -129,6 +126,15 @@ void TextControlInnerEditorElement::DefaultEventHandler(Event* event) {
     HTMLDivElement::DefaultEventHandler(event);
 }
 
+void TextControlInnerEditorElement::SetVisibility(bool is_visible) {
+  if (is_visible_ != is_visible) {
+    is_visible_ = is_visible;
+    SetNeedsStyleRecalc(
+        kLocalStyleChange,
+        StyleChangeReasonForTracing::Create(StyleChangeReason::kControlValue));
+  }
+}
+
 LayoutObject* TextControlInnerEditorElement::CreateLayoutObject(
     const ComputedStyle&) {
   return new LayoutTextControlInnerEditor(this);
@@ -139,14 +145,14 @@ TextControlInnerEditorElement::CustomStyleForLayoutObject() {
   LayoutObject* parent_layout_object = OwnerShadowHost()->GetLayoutObject();
   if (!parent_layout_object || !parent_layout_object->IsTextControl())
     return OriginalStyleForLayoutObject();
-  LayoutTextControlItem text_control_layout_item =
-      LayoutTextControlItem(ToLayoutTextControl(parent_layout_object));
+  LayoutTextControl* text_control = ToLayoutTextControl(parent_layout_object);
   scoped_refptr<ComputedStyle> inner_editor_style =
-      text_control_layout_item.CreateInnerEditorStyle(
-          text_control_layout_item.StyleRef());
+      text_control->CreateInnerEditorStyle(text_control->StyleRef());
   // Using StyleAdjuster::adjustComputedStyle updates unwanted style. We'd like
   // to apply only editing-related and alignment-related.
   StyleAdjuster::AdjustStyleForEditing(*inner_editor_style);
+  if (!is_visible_)
+    inner_editor_style->SetOpacity(0);
   return inner_editor_style;
 }
 

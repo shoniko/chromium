@@ -40,13 +40,12 @@
 #include "WebFormElement.h"
 #include "WebFrame.h"
 #include "WebFrameOwnerProperties.h"
+#include "WebGlobalObjectReusePolicy.h"
 #include "WebHistoryCommitType.h"
 #include "WebHistoryItem.h"
 #include "WebIconURL.h"
 #include "WebNavigationPolicy.h"
 #include "WebNavigationType.h"
-#include "WebNavigatorContentUtilsClient.h"
-#include "WebSandboxFlags.h"
 #include "WebTextDirection.h"
 #include "WebTriggeringEventInfo.h"
 #include "public/platform/BlameContext.h"
@@ -57,23 +56,23 @@
 #include "public/platform/WebContentSecurityPolicyStruct.h"
 #include "public/platform/WebContentSettingsClient.h"
 #include "public/platform/WebEffectiveConnectionType.h"
-#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebFileSystem.h"
 #include "public/platform/WebFileSystemType.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/platform/WebLoadingBehaviorFlag.h"
-#include "public/platform/WebPageVisibilityState.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebSetSinkIdCallbacks.h"
 #include "public/platform/WebSourceLocation.h"
-#include "public/platform/WebStorageQuotaCallbacks.h"
-#include "public/platform/WebStorageQuotaType.h"
 #include "public/platform/WebSuddenTerminationDisablerType.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLLoaderFactory.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebWorkerFetchContext.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
+#include "third_party/WebKit/common/feature_policy/feature_policy.h"
+#include "third_party/WebKit/common/page/page_visibility_state.mojom-shared.h"
+#include "third_party/WebKit/common/quota/quota_types.mojom-shared.h"
+#include "third_party/WebKit/common/sandbox_flags.h"
 #include "v8/include/v8.h"
 
 namespace service_manager {
@@ -86,10 +85,9 @@ enum class WebFeature : int32_t;
 }  // namespace mojom
 
 enum class WebTreeScopeType;
+class AssociatedInterfaceProvider;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
-class WebColorChooser;
-class WebColorChooserClient;
 class WebContentDecryptionModule;
 class WebCookieJar;
 class WebDocumentLoader;
@@ -115,18 +113,18 @@ class WebString;
 class WebURL;
 class WebURLResponse;
 class WebUserMediaClient;
-struct WebColorSuggestion;
 struct WebConsoleMessage;
 struct WebContextMenuData;
 struct WebPluginParams;
 struct WebPopupMenuInfo;
 struct WebRect;
-struct WebRemoteScrollProperties;
+struct WebResourceTimingInfo;
+struct WebScrollIntoViewParams;
 struct WebURLError;
 
 class BLINK_EXPORT WebFrameClient {
  public:
-  virtual ~WebFrameClient() {}
+  virtual ~WebFrameClient() = default;
 
   // Initialization ------------------------------------------------------
   // Called exactly once during construction to notify the client about the
@@ -172,8 +170,7 @@ class BLINK_EXPORT WebFrameClient {
   }
 
   // Returns a new WebWorkerFetchContext for a dedicated worker. Ownership of
-  // the returned object is transferred to the caller. This is used only when
-  // off-main-thread-fetch is enabled.
+  // the returned object is transferred to the caller.
   virtual std::unique_ptr<WebWorkerFetchContext> CreateWorkerFetchContext() {
     return nullptr;
   }
@@ -199,6 +196,14 @@ class BLINK_EXPORT WebFrameClient {
   // the browser. This method may not return nullptr.
   virtual service_manager::InterfaceProvider* GetInterfaceProvider();
 
+  // Returns an AssociatedInterfaceProvider the frame can use to request
+  // navigation-associated interfaces from the browser. See also
+  // LocalFrame::GetRemoteNavigationAssociatedInterfaces().
+  virtual AssociatedInterfaceProvider*
+  GetRemoteNavigationAssociatedInterfaces() {
+    return nullptr;
+  }
+
   // General notifications -----------------------------------------------
 
   // Indicates if creating a plugin without an associated renderer is supported.
@@ -221,10 +226,15 @@ class BLINK_EXPORT WebFrameClient {
       const WebString& name,
       const WebString& fallback_name,
       WebSandboxFlags sandbox_flags,
-      const WebParsedFeaturePolicy& container_policy,
+      const ParsedFeaturePolicy& container_policy,
       const WebFrameOwnerProperties&) {
     return nullptr;
   }
+
+  // Called when Blink cannot find a frame with the given name in the frame's
+  // browsing instance.  This gives the embedder a chance to return a frame
+  // from outside of the browsing instance.
+  virtual WebFrame* FindFrame(const WebString& name) { return nullptr; }
 
   // This frame has set its opener to another frame, or disowned the opener
   // if opener is null. See http://html.spec.whatwg.org/#dom-opener.
@@ -251,26 +261,21 @@ class BLINK_EXPORT WebFrameClient {
   // This frame has set an insecure request policy.
   virtual void DidEnforceInsecureRequestPolicy(WebInsecureRequestPolicy) {}
 
-  // This frame has been updated to a unique origin, which should be
-  // considered potentially trustworthy if
-  // |isPotentiallyTrustworthyUniqueOrigin| is true. TODO(estark):
-  // this method only exists to support dynamic sandboxing via a CSP
-  // delivered in a <meta> tag. This is not supposed to be allowed per
-  // the CSP spec and should be ripped out. https://crbug.com/594645
-  virtual void DidUpdateToUniqueOrigin(
-      bool is_potentially_trustworthy_unique_origin) {}
+  // This frame has set an upgrade insecure navigations set.
+  virtual void DidEnforceInsecureNavigationsSet(const std::vector<unsigned>&) {}
 
   // The sandbox flags or container policy have changed for a child frame of
   // this frame.
   virtual void DidChangeFramePolicy(
       WebFrame* child_frame,
       WebSandboxFlags flags,
-      const WebParsedFeaturePolicy& container_policy) {}
+      const ParsedFeaturePolicy& container_policy) {}
 
-  // Called when a Feature-Policy HTTP header is encountered while loading the
-  // frame's document.
-  virtual void DidSetFeaturePolicyHeader(
-      const WebParsedFeaturePolicy& parsed_header) {}
+  // Called when a Feature-Policy or Content-Security-Policy HTTP header (for
+  // sandbox flags) is encountered while loading the frame's document.
+  virtual void DidSetFramePolicyHeaders(
+      WebSandboxFlags flags,
+      const ParsedFeaturePolicy& parsed_header) {}
 
   // Called when a new Content Security Policy is added to the frame's
   // document.  This can be triggered by handling of HTTP headers, handling
@@ -292,6 +297,10 @@ class BLINK_EXPORT WebFrameClient {
 
   // Called the first time this frame is the target of a user gesture.
   virtual void SetHasReceivedUserGesture() {}
+
+  // Called if the previous document had a user gesture and is on the same
+  // eTLD+1 as the current document.
+  virtual void SetHasReceivedUserGestureBeforeNavigation(bool value) {}
 
   // Console messages ----------------------------------------------------
 
@@ -336,7 +345,6 @@ class BLINK_EXPORT WebFrameClient {
     bool is_client_redirect;
     WebTriggeringEventInfo triggering_event_info;
     WebFormElement form;
-    bool is_cache_disabled;
     WebSourceLocation source_location;
     WebContentSecurityPolicyDisposition
         should_check_main_world_content_security_policy;
@@ -355,7 +363,6 @@ class BLINK_EXPORT WebFrameClient {
           is_history_navigation_in_new_child_frame(false),
           is_client_redirect(false),
           triggering_event_info(WebTriggeringEventInfo::kUnknown),
-          is_cache_disabled(false),
           should_check_main_world_content_security_policy(
               kWebContentSecurityPolicyDispositionCheck),
           archive_status(ArchiveStatus::Absent) {}
@@ -412,7 +419,8 @@ class BLINK_EXPORT WebFrameClient {
   // response body has been received, and the encoding of the response
   // body is known.
   virtual void DidCommitProvisionalLoad(const WebHistoryItem&,
-                                        WebHistoryCommitType) {}
+                                        WebHistoryCommitType,
+                                        WebGlobalObjectReusePolicy) {}
 
   // The frame's document has just been initialized.
   virtual void DidCreateNewDocument() {}
@@ -479,6 +487,10 @@ class BLINK_EXPORT WebFrameClient {
   // The frame's theme color has changed.
   virtual void DidChangeThemeColor() {}
 
+  // Called to report resource timing information for this frame to the parent.
+  // Only used when the parent frame is remote.
+  virtual void ForwardResourceTimingToParent(const WebResourceTimingInfo&) {}
+
   // Called to dispatch a load event for this frame in the FrameOwner of an
   // out-of-process parent frame.
   virtual void DispatchLoad() {}
@@ -492,14 +504,8 @@ class BLINK_EXPORT WebFrameClient {
   virtual void SetEffectiveConnectionTypeForTesting(
       WebEffectiveConnectionType) {}
 
-  // Returns whether or not Client LoFi is enabled for the frame (and
-  // so any image requests may be replaced with a placeholder).
-  virtual bool IsClientLoFiActiveForFrame() { return false; }
-
-  // Returns whether or not the requested image should be replaced with a
-  // placeholder as part of the Client Lo-Fi previews feature.
-  virtual bool ShouldUseClientLoFiForRequest(const WebURLRequest&) {
-    return false;
+  virtual WebURLRequest::PreviewsState GetPreviewsStateForFrame() const {
+    return WebURLRequest::kPreviewsUnspecified;
   }
 
   // This frame tried to navigate its top level frame to the given url without
@@ -509,7 +515,7 @@ class BLINK_EXPORT WebFrameClient {
   // Returns string to be used as a frame id in the devtools protocol.
   // It is derived from the content's devtools_frame_token, is
   // defined by the browser and passed into Blink upon frame creation.
-  virtual WebString GetInstrumentationToken() { return ""; }
+  virtual WebString GetDevToolsFrameToken() { return WebString(); }
 
   // PlzNavigate
   // Called to abort a navigation that is being handled by the browser process.
@@ -535,6 +541,7 @@ class BLINK_EXPORT WebFrameClient {
   // These methods allow the client to intercept and overrule editing
   // operations.
   virtual void DidChangeSelection(bool is_selection_empty) {}
+  virtual void DidChangeContents() {}
 
   // This method is called in response to handleInputEvent() when the
   // default action for the current keyboard event is not suppressed by the
@@ -546,19 +553,6 @@ class BLINK_EXPORT WebFrameClient {
   virtual bool HandleCurrentKeyboardEvent() { return false; }
 
   // Dialogs -------------------------------------------------------------
-
-  // This method opens the color chooser and returns a new WebColorChooser
-  // instance. If there is a WebColorChooser already from the last time this
-  // was called, it ends the color chooser by calling endChooser, and replaces
-  // it with the new one. The given list of suggestions can be used to show a
-  // simple interface with a limited set of choices.
-
-  virtual WebColorChooser* CreateColorChooser(
-      WebColorChooserClient*,
-      const WebColor&,
-      const WebVector<WebColorSuggestion>&) {
-    return nullptr;
-  }
 
   // Displays a modal alert dialog containing the given message. Returns
   // once the user dismisses the dialog.
@@ -639,10 +633,10 @@ class BLINK_EXPORT WebFrameClient {
 
   // This frame has displayed inactive content (such as an image) from
   // a connection with certificate errors.
-  virtual void DidDisplayContentWithCertificateErrors(const WebURL& url) {}
+  virtual void DidDisplayContentWithCertificateErrors() {}
   // This frame has run active content (such as a script) from a
   // connection with certificate errors.
-  virtual void DidRunContentWithCertificateErrors(const WebURL& url) {}
+  virtual void DidRunContentWithCertificateErrors() {}
 
   // This frame loaded a resource with an otherwise-valid legacy Symantec
   // certificate that is slated for distrust. Returns true and populates
@@ -658,9 +652,14 @@ class BLINK_EXPORT WebFrameClient {
   // A performance timing event (e.g. first paint) occurred
   virtual void DidChangePerformanceTiming() {}
 
+  // UseCounter ----------------------------------------------------------
   // Blink exhibited a certain loading behavior that the browser process will
   // use for segregated histograms.
   virtual void DidObserveLoadingBehavior(WebLoadingBehaviorFlag) {}
+  // Blink UseCounter should only track feature usage for non NTP activities.
+  // ShouldTrackUseCounter checks the url of a page's main frame is not a new
+  // tab page url.
+  virtual bool ShouldTrackUseCounter(const WebURL&) { return true; }
 
   // Blink hit the code path for a certain feature for the first time on this
   // frame. As a performance optimization, features already hit on other frames
@@ -694,7 +693,7 @@ class BLINK_EXPORT WebFrameClient {
   // of a local frame only.
   virtual void ScrollRectToVisibleInParentFrame(
       const WebRect&,
-      const WebRemoteScrollProperties&) {}
+      const WebScrollIntoViewParams&) {}
 
   // Find-in-page notifications ------------------------------------------
 
@@ -718,16 +717,17 @@ class BLINK_EXPORT WebFrameClient {
   // Quota ---------------------------------------------------------
 
   // Requests a new quota size for the origin's storage.
-  // |newQuotaInBytes| indicates how much storage space (in bytes) the
-  // caller expects to need.
-  // WebStorageQuotaCallbacks::didGrantStorageQuota will be called when
-  // a new quota is granted. WebStorageQuotaCallbacks::didFail
-  // is called with an error code otherwise.
-  // Note that the requesting quota size may not always be granted and
-  // a smaller amount of quota than requested might be returned.
-  virtual void RequestStorageQuota(WebStorageQuotaType,
+  // |newQuotaInBytes| indicates how much storage space (in bytes) the caller
+  // expects to need.
+  // The callback will be called when a new quota is granted, with kOk as the
+  // status code if successful or with an error code otherwise.
+  // Note that the requesting quota size may not always be granted and a smaller
+  // amount of quota than requested might be returned.
+  using RequestStorageQuotaCallback =
+      base::OnceCallback<void(mojom::QuotaStatusCode, int64_t, int64_t)>;
+  virtual void RequestStorageQuota(mojom::StorageType,
                                    unsigned long long new_quota_in_bytes,
-                                   WebStorageQuotaCallbacks) {}
+                                   RequestStorageQuotaCallback) {}
 
   // MediaStream -----------------------------------------------------
 
@@ -811,13 +811,6 @@ class BLINK_EXPORT WebFrameClient {
   virtual void UnregisterProtocolHandler(const WebString& scheme,
                                          const WebURL& url) {}
 
-  // Check if a given URL handler is registered for the given protocol.
-  virtual WebCustomHandlersState IsProtocolHandlerRegistered(
-      const WebString& scheme,
-      const WebURL& url) {
-    return kWebCustomHandlersNew;
-  }
-
   // Audio Output Devices API --------------------------------------------
 
   // Checks that the given audio sink exists and is authorized. The result is
@@ -836,8 +829,8 @@ class BLINK_EXPORT WebFrameClient {
   // Visibility ----------------------------------------------------------
 
   // Returns the current visibility of the WebFrame.
-  virtual WebPageVisibilityState VisibilityState() const {
-    return kWebPageVisibilityStateVisible;
+  virtual mojom::PageVisibilityState VisibilityState() const {
+    return mojom::PageVisibilityState::kVisible;
   }
 
   // Overwrites the given URL to use an HTML5 embed if possible.

@@ -44,6 +44,7 @@ class TestSessionControllerClient : public ash::mojom::SessionControllerClient {
   void SetShouldLockScreenAutomatically(bool should_lock);
   void SetAddUserSessionPolicy(AddUserSessionPolicy policy);
   void SetSessionState(session_manager::SessionState state);
+  void SetIsRunningInAppMode(bool app_mode);
 
   // Creates the |count| pre-defined user sessions. The users are named by
   // numbers using "user%d@tray" template. The first user is set as active user
@@ -62,6 +63,9 @@ class TestSessionControllerClient : public ash::mojom::SessionControllerClient {
       bool enable_settings = true,
       bool provide_pref_service = true,
       bool is_new_profile = false);
+
+  // Creates a test PrefService and associates it with the user.
+  void ProvidePrefServiceForUser(const AccountId& account_id);
 
   // Simulates screen unlocking. It is virtual so that test cases can override
   // it. The default implementation sets the session state of SessionController

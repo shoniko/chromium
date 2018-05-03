@@ -5,12 +5,12 @@
 #include "chromeos/cert_loader.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_scheduler/post_task.h"
 #include "crypto/nss_util.h"
@@ -213,15 +213,14 @@ bool CertLoader::IsInitialized() {
   return g_cert_loader;
 }
 
-CertLoader::CertLoader() : pending_initial_load_(true), weak_factory_(this) {
-  system_cert_cache_ = base::MakeUnique<CertCache>(
+CertLoader::CertLoader() : weak_factory_(this) {
+  system_cert_cache_ = std::make_unique<CertCache>(
       base::BindRepeating(&CertLoader::CacheUpdated, base::Unretained(this)));
-  user_cert_cache_ = base::MakeUnique<CertCache>(
+  user_cert_cache_ = std::make_unique<CertCache>(
       base::BindRepeating(&CertLoader::CacheUpdated, base::Unretained(this)));
 }
 
-CertLoader::~CertLoader() {
-}
+CertLoader::~CertLoader() = default;
 
 void CertLoader::SetSystemNSSDB(net::NSSCertDatabase* system_slot_database) {
   system_cert_cache_->SetNSSDB(system_slot_database);
@@ -255,6 +254,10 @@ bool CertLoader::initial_load_of_any_database_running() const {
 bool CertLoader::initial_load_finished() const {
   return system_cert_cache_->initial_load_finished() ||
          user_cert_cache_->initial_load_finished();
+}
+
+bool CertLoader::user_cert_database_load_finished() const {
+  return user_cert_cache_->initial_load_finished();
 }
 
 // static
@@ -333,23 +336,20 @@ void CertLoader::UpdateCertificates(
     net::ScopedCERTCertificateList all_certs,
     net::ScopedCERTCertificateList system_certs) {
   CHECK(thread_checker_.CalledOnValidThread());
-  bool initial_load = pending_initial_load_;
-  pending_initial_load_ = false;
 
   VLOG(1) << "UpdateCertificates: " << all_certs.size() << " ("
-          << system_certs.size() << " on system slot)"
-          << ", initial_load=" << initial_load;
+          << system_certs.size() << " on system slot)";
 
   // Ignore any existing certificates.
   all_certs_ = std::move(all_certs);
   system_certs_ = std::move(system_certs);
 
-  NotifyCertificatesLoaded(initial_load);
+  NotifyCertificatesLoaded();
 }
 
-void CertLoader::NotifyCertificatesLoaded(bool initial_load) {
+void CertLoader::NotifyCertificatesLoaded() {
   for (auto& observer : observers_)
-    observer.OnCertificatesLoaded(all_certs_, initial_load);
+    observer.OnCertificatesLoaded(all_certs_);
 }
 
 }  // namespace chromeos

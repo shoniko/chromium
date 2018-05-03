@@ -43,7 +43,12 @@
 #include "base/threading/thread_local_storage.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_WIN)
+#include "base/win/com_init_util.h"
+#endif  // defined(OS_WIN)
 
 namespace base {
 namespace internal {
@@ -64,11 +69,11 @@ class TaskSchedulerWorkerPoolImplTestBase {
   TaskSchedulerWorkerPoolImplTestBase()
       : service_thread_("TaskSchedulerServiceThread"){};
 
-  void SetUp() {
+  void CommonSetUp() {
     CreateAndStartWorkerPool(TimeDelta::Max(), kNumWorkersInWorkerPool);
   }
 
-  void TearDown() {
+  void CommonTearDown() {
     service_thread_.Stop();
     task_tracker_.Flush();
     worker_pool_->WaitForAllWorkersIdleForTesting();
@@ -80,16 +85,18 @@ class TaskSchedulerWorkerPoolImplTestBase {
     service_thread_.Start();
     delayed_task_manager_.Start(service_thread_.task_runner());
     worker_pool_ = std::make_unique<SchedulerWorkerPoolImpl>(
-        "TestWorkerPool", ThreadPriority::NORMAL, &task_tracker_,
+        "TestWorkerPool", "A", ThreadPriority::NORMAL, &task_tracker_,
         &delayed_task_manager_);
     ASSERT_TRUE(worker_pool_);
   }
 
-  void StartWorkerPool(TimeDelta suggested_reclaim_time, size_t num_workers) {
+  virtual void StartWorkerPool(TimeDelta suggested_reclaim_time,
+                               size_t num_workers) {
     ASSERT_TRUE(worker_pool_);
     worker_pool_->Start(
         SchedulerWorkerPoolParams(num_workers, suggested_reclaim_time),
-        service_thread_.task_runner());
+        service_thread_.task_runner(),
+        SchedulerWorkerPoolImpl::WorkerEnvironment::NONE);
   }
 
   void CreateAndStartWorkerPool(TimeDelta suggested_reclaim_time,
@@ -100,7 +107,7 @@ class TaskSchedulerWorkerPoolImplTestBase {
 
   std::unique_ptr<SchedulerWorkerPoolImpl> worker_pool_;
 
-  TaskTracker task_tracker_;
+  TaskTracker task_tracker_ = {"Test"};
   Thread service_thread_;
 
  private:
@@ -115,9 +122,11 @@ class TaskSchedulerWorkerPoolImplTest
  protected:
   TaskSchedulerWorkerPoolImplTest() = default;
 
-  void SetUp() override { TaskSchedulerWorkerPoolImplTestBase::SetUp(); }
+  void SetUp() override { TaskSchedulerWorkerPoolImplTestBase::CommonSetUp(); }
 
-  void TearDown() override { TaskSchedulerWorkerPoolImplTestBase::TearDown(); }
+  void TearDown() override {
+    TaskSchedulerWorkerPoolImplTestBase::CommonTearDown();
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TaskSchedulerWorkerPoolImplTest);
@@ -129,9 +138,11 @@ class TaskSchedulerWorkerPoolImplTestParam
  protected:
   TaskSchedulerWorkerPoolImplTestParam() = default;
 
-  void SetUp() override { TaskSchedulerWorkerPoolImplTestBase::SetUp(); }
+  void SetUp() override { TaskSchedulerWorkerPoolImplTestBase::CommonSetUp(); }
 
-  void TearDown() override { TaskSchedulerWorkerPoolImplTestBase::TearDown(); }
+  void TearDown() override {
+    TaskSchedulerWorkerPoolImplTestBase::CommonTearDown();
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TaskSchedulerWorkerPoolImplTestParam);
@@ -255,12 +266,95 @@ TEST_P(TaskSchedulerWorkerPoolImplTestParam, Saturate) {
   worker_pool_->WaitForAllWorkersIdleForTesting();
 }
 
+#if defined(OS_WIN)
+TEST_P(TaskSchedulerWorkerPoolImplTestParam, NoEnvironment) {
+  // Verify that COM is not initialized in a SchedulerWorkerPoolImpl initialized
+  // with SchedulerWorkerPoolImpl::WorkerEnvironment::NONE.
+  scoped_refptr<TaskRunner> task_runner =
+      CreateTaskRunnerWithExecutionMode(worker_pool_.get(), GetParam());
+
+  WaitableEvent task_running(WaitableEvent::ResetPolicy::MANUAL,
+                             WaitableEvent::InitialState::NOT_SIGNALED);
+  task_runner->PostTask(
+      FROM_HERE, BindOnce(
+                     [](WaitableEvent* task_running) {
+                       win::AssertComApartmentType(win::ComApartmentType::NONE);
+                       task_running->Signal();
+                     },
+                     &task_running));
+
+  task_running.Wait();
+
+  worker_pool_->WaitForAllWorkersIdleForTesting();
+}
+#endif  // defined(OS_WIN)
+
 INSTANTIATE_TEST_CASE_P(Parallel,
                         TaskSchedulerWorkerPoolImplTestParam,
                         ::testing::Values(test::ExecutionMode::PARALLEL));
 INSTANTIATE_TEST_CASE_P(Sequenced,
                         TaskSchedulerWorkerPoolImplTestParam,
                         ::testing::Values(test::ExecutionMode::SEQUENCED));
+
+#if defined(OS_WIN)
+
+namespace {
+
+class TaskSchedulerWorkerPoolImplTestCOMMTAParam
+    : public TaskSchedulerWorkerPoolImplTestBase,
+      public testing::TestWithParam<test::ExecutionMode> {
+ protected:
+  TaskSchedulerWorkerPoolImplTestCOMMTAParam() = default;
+
+  void SetUp() override { TaskSchedulerWorkerPoolImplTestBase::CommonSetUp(); }
+
+  void TearDown() override {
+    TaskSchedulerWorkerPoolImplTestBase::CommonTearDown();
+  }
+
+ private:
+  void StartWorkerPool(TimeDelta suggested_reclaim_time,
+                       size_t num_workers) override {
+    ASSERT_TRUE(worker_pool_);
+    worker_pool_->Start(
+        SchedulerWorkerPoolParams(num_workers, suggested_reclaim_time),
+        service_thread_.task_runner(),
+        SchedulerWorkerPoolImpl::WorkerEnvironment::COM_MTA);
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(TaskSchedulerWorkerPoolImplTestCOMMTAParam);
+};
+
+}  // namespace
+
+TEST_P(TaskSchedulerWorkerPoolImplTestCOMMTAParam, COMMTAInitialized) {
+  // Verify that SchedulerWorkerPoolImpl workers have a COM MTA available.
+  scoped_refptr<TaskRunner> task_runner =
+      CreateTaskRunnerWithExecutionMode(worker_pool_.get(), GetParam());
+
+  WaitableEvent task_running(WaitableEvent::ResetPolicy::MANUAL,
+                             WaitableEvent::InitialState::NOT_SIGNALED);
+  task_runner->PostTask(
+      FROM_HERE, BindOnce(
+                     [](WaitableEvent* task_running) {
+                       win::AssertComApartmentType(win::ComApartmentType::MTA);
+                       task_running->Signal();
+                     },
+                     &task_running));
+
+  task_running.Wait();
+
+  worker_pool_->WaitForAllWorkersIdleForTesting();
+}
+
+INSTANTIATE_TEST_CASE_P(Parallel,
+                        TaskSchedulerWorkerPoolImplTestCOMMTAParam,
+                        ::testing::Values(test::ExecutionMode::PARALLEL));
+INSTANTIATE_TEST_CASE_P(Sequenced,
+                        TaskSchedulerWorkerPoolImplTestCOMMTAParam,
+                        ::testing::Values(test::ExecutionMode::SEQUENCED));
+
+#endif  // defined(OS_WIN)
 
 namespace {
 
@@ -685,16 +779,17 @@ TEST_F(TaskSchedulerWorkerPoolHistogramTest, NumTasksBeforeCleanup) {
 }
 
 TEST(TaskSchedulerWorkerPoolStandbyPolicyTest, InitOne) {
-  TaskTracker task_tracker;
+  TaskTracker task_tracker("Test");
   DelayedTaskManager delayed_task_manager;
   scoped_refptr<TaskRunner> service_thread_task_runner =
       MakeRefCounted<TestSimpleTaskRunner>();
   delayed_task_manager.Start(service_thread_task_runner);
   auto worker_pool = std::make_unique<SchedulerWorkerPoolImpl>(
-      "OnePolicyWorkerPool", ThreadPriority::NORMAL, &task_tracker,
+      "OnePolicyWorkerPool", "A", ThreadPriority::NORMAL, &task_tracker,
       &delayed_task_manager);
   worker_pool->Start(SchedulerWorkerPoolParams(8U, TimeDelta::Max()),
-                     service_thread_task_runner);
+                     service_thread_task_runner,
+                     SchedulerWorkerPoolImpl::WorkerEnvironment::NONE);
   ASSERT_TRUE(worker_pool);
   EXPECT_EQ(1U, worker_pool->NumberOfWorkersForTesting());
   worker_pool->JoinForTesting();
@@ -705,17 +800,18 @@ TEST(TaskSchedulerWorkerPoolStandbyPolicyTest, InitOne) {
 TEST(TaskSchedulerWorkerPoolStandbyPolicyTest, VerifyStandbyThread) {
   constexpr size_t worker_capacity = 3;
 
-  TaskTracker task_tracker;
+  TaskTracker task_tracker("Test");
   DelayedTaskManager delayed_task_manager;
   scoped_refptr<TaskRunner> service_thread_task_runner =
       MakeRefCounted<TestSimpleTaskRunner>();
   delayed_task_manager.Start(service_thread_task_runner);
   auto worker_pool = std::make_unique<SchedulerWorkerPoolImpl>(
-      "StandbyThreadWorkerPool", ThreadPriority::NORMAL, &task_tracker,
+      "StandbyThreadWorkerPool", "A", ThreadPriority::NORMAL, &task_tracker,
       &delayed_task_manager);
   worker_pool->Start(
       SchedulerWorkerPoolParams(worker_capacity, kReclaimTimeForCleanupTests),
-      service_thread_task_runner);
+      service_thread_task_runner,
+      SchedulerWorkerPoolImpl::WorkerEnvironment::NONE);
   ASSERT_TRUE(worker_pool);
   EXPECT_EQ(1U, worker_pool->NumberOfWorkersForTesting());
 
@@ -819,12 +915,14 @@ class TaskSchedulerWorkerPoolBlockingTest
   }
 
   void SetUp() override {
-    TaskSchedulerWorkerPoolImplTestBase::SetUp();
+    TaskSchedulerWorkerPoolImplTestBase::CommonSetUp();
     task_runner_ =
         worker_pool_->CreateTaskRunnerWithTraits({WithBaseSyncPrimitives()});
   }
 
-  void TearDown() override { TaskSchedulerWorkerPoolImplTestBase::TearDown(); }
+  void TearDown() override {
+    TaskSchedulerWorkerPoolImplTestBase::CommonTearDown();
+  }
 
  protected:
   // Saturates the worker pool with a task that first blocks, waits to be
@@ -870,19 +968,16 @@ class TaskSchedulerWorkerPoolBlockingTest
            TestTimeouts::tiny_timeout();
   }
 
-  // Waits up to some amount of time until |worker_pool_|'s worker capacity
-  // reaches |expected_worker_capacity|.
-  void ExpectWorkerCapacityAfterDelay(size_t expected_worker_capacity) {
-    constexpr int kMaxAttempts = 4;
-    for (int i = 0;
-         i < kMaxAttempts && worker_pool_->GetWorkerCapacityForTesting() !=
-                                 expected_worker_capacity;
-         ++i) {
+  // Waits indefinitely, until |worker_pool_|'s worker capacity increases to
+  // |expected_worker_capacity|.
+  void ExpectWorkerCapacityIncreasesTo(size_t expected_worker_capacity) {
+    size_t capacity = worker_pool_->GetWorkerCapacityForTesting();
+    while (capacity != expected_worker_capacity) {
       PlatformThread::Sleep(GetWorkerCapacityChangeSleepTime());
+      size_t new_capacity = worker_pool_->GetWorkerCapacityForTesting();
+      ASSERT_GE(new_capacity, capacity);
+      capacity = new_capacity;
     }
-
-    EXPECT_EQ(worker_pool_->GetWorkerCapacityForTesting(),
-              expected_worker_capacity);
   }
 
   // Unblocks tasks posted by SaturateWithBlockingTasks().
@@ -906,7 +1001,7 @@ TEST_P(TaskSchedulerWorkerPoolBlockingTest, ThreadBlockedUnblocked) {
 
   SaturateWithBlockingTasks(GetParam());
   if (GetParam().behaves_as == BlockingType::MAY_BLOCK)
-    ExpectWorkerCapacityAfterDelay(2 * kNumWorkersInWorkerPool);
+    ExpectWorkerCapacityIncreasesTo(2 * kNumWorkersInWorkerPool);
   // A range of possible number of workers is accepted because of
   // crbug.com/757897.
   EXPECT_GE(worker_pool_->NumberOfWorkersForTesting(),
@@ -1002,7 +1097,7 @@ TEST_P(TaskSchedulerWorkerPoolBlockingTest, PostBeforeBlocking) {
   // tasks we just posted.
   thread_can_block.Signal();
   if (GetParam().behaves_as == BlockingType::MAY_BLOCK)
-    ExpectWorkerCapacityAfterDelay(2 * kNumWorkersInWorkerPool);
+    ExpectWorkerCapacityIncreasesTo(2 * kNumWorkersInWorkerPool);
 
   // Should not block forever.
   extra_thread_running.Wait();
@@ -1021,7 +1116,7 @@ TEST_P(TaskSchedulerWorkerPoolBlockingTest, WorkersIdleWhenOverCapacity) {
 
   SaturateWithBlockingTasks(GetParam());
   if (GetParam().behaves_as == BlockingType::MAY_BLOCK)
-    ExpectWorkerCapacityAfterDelay(2 * kNumWorkersInWorkerPool);
+    ExpectWorkerCapacityIncreasesTo(2 * kNumWorkersInWorkerPool);
   EXPECT_EQ(worker_pool_->GetWorkerCapacityForTesting(),
             2 * kNumWorkersInWorkerPool);
   // A range of possible number of workers is accepted because of
@@ -1205,7 +1300,7 @@ TEST_F(TaskSchedulerWorkerPoolBlockingTest,
           Unretained(&did_instantiate_will_block), Unretained(&can_return)));
 
   // After a short delay, worker capacity should be incremented.
-  ExpectWorkerCapacityAfterDelay(kNumWorkersInWorkerPool + 1);
+  ExpectWorkerCapacityIncreasesTo(kNumWorkersInWorkerPool + 1);
 
   // Wait until the task instantiates a WILL_BLOCK ScopedBlockingCall.
   can_instantiate_will_block.Signal();
@@ -1227,17 +1322,18 @@ TEST_F(TaskSchedulerWorkerPoolBlockingTest,
 TEST(TaskSchedulerWorkerPoolOverWorkerCapacityTest, VerifyCleanup) {
   constexpr size_t kWorkerCapacity = 3;
 
-  TaskTracker task_tracker;
+  TaskTracker task_tracker("Test");
   DelayedTaskManager delayed_task_manager;
   scoped_refptr<TaskRunner> service_thread_task_runner =
       MakeRefCounted<TestSimpleTaskRunner>();
   delayed_task_manager.Start(service_thread_task_runner);
-  SchedulerWorkerPoolImpl worker_pool("OverWorkerCapacityTestWorkerPool",
+  SchedulerWorkerPoolImpl worker_pool("OverWorkerCapacityTestWorkerPool", "A",
                                       ThreadPriority::NORMAL, &task_tracker,
                                       &delayed_task_manager);
   worker_pool.Start(
       SchedulerWorkerPoolParams(kWorkerCapacity, kReclaimTimeForCleanupTests),
-      service_thread_task_runner);
+      service_thread_task_runner,
+      SchedulerWorkerPoolImpl::WorkerEnvironment::NONE);
 
   scoped_refptr<TaskRunner> task_runner =
       worker_pool.CreateTaskRunnerWithTraits({WithBaseSyncPrimitives()});

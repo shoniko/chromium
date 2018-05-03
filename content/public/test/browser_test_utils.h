@@ -15,6 +15,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
@@ -30,6 +31,7 @@
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/page_type.h"
 #include "ipc/message_filter.h"
+#include "services/network/public/interfaces/network_service.mojom.h"
 #include "storage/common/fileapi/file_system_types.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/platform/WebMouseEvent.h"
@@ -74,6 +76,7 @@ class NavigationHandle;
 class RenderViewHost;
 class RenderWidgetHost;
 class RenderWidgetHostView;
+class UtilityProcessHost;
 class WebContents;
 
 // Navigate a frame with ID |iframe_id| to |url|, blocking until the navigation
@@ -156,6 +159,20 @@ void SimulateMouseWheelEvent(WebContents* web_contents,
                              const gfx::Vector2d& delta,
                              const blink::WebMouseWheelEvent::Phase phase);
 
+#if !defined(OS_MACOSX)
+// Simulate a mouse wheel event with the ctrl modifier set.
+void SimulateMouseWheelCtrlZoomEvent(WebContents* web_contents,
+                                     const gfx::Point& point,
+                                     bool zoom_in,
+                                     blink::WebMouseWheelEvent::Phase phase);
+#endif  // !defined(OS_MACOSX)
+
+// Sends a GesturePinch Begin/Update/End sequence.
+void SimulateGesturePinchSequence(WebContents* web_contents,
+                                  const gfx::Point& point,
+                                  float scale,
+                                  blink::WebGestureDevice source_device);
+
 // Sends a simple, three-event (Begin/Update/End) gesture scroll.
 void SimulateGestureScrollSequence(WebContents* web_contents,
                                    const gfx::Point& point,
@@ -165,12 +182,18 @@ void SimulateGestureFlingSequence(WebContents* web_contents,
                                   const gfx::Point& point,
                                   const gfx::Vector2dF& velocity);
 
+void SimulateGestureEvent(WebContents* web_contents,
+                          const blink::WebGestureEvent& gesture_event,
+                          const ui::LatencyInfo& latency);
+
 // Taps the screen at |point|.
 void SimulateTapAt(WebContents* web_contents, const gfx::Point& point);
 
 #if defined(USE_AURA)
 // Generates a TouchStart at |point|.
 void SimulateTouchPressAt(WebContents* web_contents, const gfx::Point& point);
+
+void SimulateLongPressAt(WebContents* web_contents, const gfx::Point& point);
 #endif
 
 // Taps the screen with modifires at |point|.
@@ -640,6 +663,22 @@ class WebContentsAddedObserver {
   DISALLOW_COPY_AND_ASSIGN(WebContentsAddedObserver);
 };
 
+// Watches a WebContents to check if it was destroyed.
+class WebContentsDestroyedObserver : public WebContentsObserver {
+ public:
+  explicit WebContentsDestroyedObserver(WebContents* web_contents);
+  ~WebContentsDestroyedObserver() override;
+  bool IsDestroyed() { return destroyed_; }
+
+ private:
+  // Overridden WebContentsObserver methods.
+  void WebContentsDestroyed() override;
+
+  bool destroyed_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(WebContentsDestroyedObserver);
+};
+
 // Request a new frame be drawn, returns false if request fails.
 bool RequestFrame(WebContents* web_contents);
 
@@ -678,6 +717,16 @@ class FrameWatcher : public WebContentsObserver {
 
 // This class is intended to synchronize the renderer main thread, renderer impl
 // thread and the browser main thread.
+//
+// This is accomplished by sending an IPC to RenderWidget, then blocking until
+// the ACK is received and processed.
+//
+// When the main thread receives the ACK it is enqueued. The queue is not
+// processed until a new FrameToken is received.
+//
+// So while the ACK can arrive before a CompositorFrame submission occurs. The
+// processing does not occur until after the FrameToken for that frame
+// submission arrives to the main thread.
 class MainThreadFrameObserver : public IPC::Listener {
  public:
   explicit MainThreadFrameObserver(RenderWidgetHost* render_widget_host);
@@ -713,6 +762,10 @@ class InputMsgWatcher : public RenderWidgetHost::InputEventObserver {
   // the message.
   InputEventAckState WaitForAck();
 
+  // Wait for the ack if it hasn't been received, if it has been
+  // received return the result immediately.
+  InputEventAckState GetAckStateWaitIfNecessary();
+
   InputEventAckSource last_event_ack_source() const { return ack_source_; }
 
  private:
@@ -728,6 +781,41 @@ class InputMsgWatcher : public RenderWidgetHost::InputEventObserver {
   base::Closure quit_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMsgWatcher);
+};
+
+// Used to wait for a desired input event ack.
+class InputEventAckWaiter : public RenderWidgetHost::InputEventObserver {
+ public:
+  // A function determining if a given |event| and its ack are what we're
+  // waiting for.
+  using InputEventAckPredicate =
+      base::RepeatingCallback<bool(InputEventAckSource source,
+                                   InputEventAckState state,
+                                   const blink::WebInputEvent& event)>;
+
+  // Wait for an event satisfying |predicate|.
+  InputEventAckWaiter(RenderWidgetHost* render_widget_host,
+                      InputEventAckPredicate predicate);
+  // Wait for any event of the given |type|.
+  InputEventAckWaiter(RenderWidgetHost* render_widget_host,
+                      blink::WebInputEvent::Type type);
+  ~InputEventAckWaiter() override;
+
+  void Wait();
+  void Reset();
+
+  // RenderWidgetHost::InputEventObserver:
+  void OnInputEventAck(InputEventAckSource source,
+                       InputEventAckState state,
+                       const blink::WebInputEvent& event) override;
+
+ private:
+  RenderWidgetHost* render_widget_host_;
+  InputEventAckPredicate predicate_;
+  bool event_received_;
+  base::Closure quit_;
+
+  DISALLOW_COPY_AND_ASSIGN(InputEventAckWaiter);
 };
 
 // Sets up a ui::TestClipboard for use in browser tests. On Windows,
@@ -746,6 +834,9 @@ class BrowserTestClipboardScope {
 
   // Puts plain text |text| on the clipboard.
   void SetText(const std::string& text);
+
+  // Gets plain text from the clipboard, if any.
+  void GetText(std::string* text);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserTestClipboardScope);
@@ -775,7 +866,7 @@ class FrameFocusedObserver {
 // resumed automatically if a Wait method is called for a future event.
 // Note: This class is one time use only! After it successfully tracks a
 // navigation it will ignore all subsequent navigations. Explicitly create
-// mutliple instances of this class if you want to pause multiple navigations.
+// multiple instances of this class if you want to pause multiple navigations.
 class TestNavigationManager : public WebContentsObserver {
  public:
   // Monitors any frame in WebContents.
@@ -799,6 +890,10 @@ class TestNavigationManager : public WebContentsObserver {
   // * Called after |WaitForRequestStart|, it causes the request to be sent.
   // * Called after |WaitForResponse|, it causes the response to be committed.
   void ResumeNavigation();
+
+  // Returns the NavigationHandle associated with the navigation. It is non-null
+  // only in between DidStartNavigation(...) and DidFinishNavigation(...).
+  NavigationHandle* GetNavigationHandle();
 
  protected:
   // Derived classes can override if they want to filter out navigations. This
@@ -899,13 +994,6 @@ class ConsoleObserverDelegate : public WebContentsDelegate {
 // came from |process|. Used to simulate a compromised renderer.
 class PwnMessageHelper {
  public:
-  // Sends BlobStorageMsg_RegisterBlob
-  static void CreateBlobWithPayload(RenderProcessHost* process,
-                                    std::string uuid,
-                                    std::string content_type,
-                                    std::string content_disposition,
-                                    std::string payload);
-
   // Sends BlobHostMsg_RegisterPublicURL
   static void RegisterBlobURL(RenderProcessHost* process,
                               GURL url,
@@ -980,6 +1068,25 @@ class ContextMenuFilter : public content::BrowserMessageFilter {
 
   DISALLOW_COPY_AND_ASSIGN(ContextMenuFilter);
 };
+
+WebContents* GetEmbedderForGuest(content::WebContents* guest);
+
+// Returns true if the network service is enabled and it's running in the
+// browser process.
+bool IsNetworkServiceRunningInProcess();
+
+// Crash the Network Service process. Should only be called when out-of-process
+// Network Service is enabled.
+void SimulateNetworkServiceCrash();
+
+// Load the given |url| with |network_context| and return the |net::Error| code.
+int LoadBasicRequest(network::mojom::NetworkContext* network_context,
+                     const GURL& url,
+                     int process_id = 0,
+                     int render_frame_id = 0);
+
+std::map<std::string, base::WeakPtr<UtilityProcessHost>>*
+GetServiceManagerProcessGroups();
 
 }  // namespace content
 

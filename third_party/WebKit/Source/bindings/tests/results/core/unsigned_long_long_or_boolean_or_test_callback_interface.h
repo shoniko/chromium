@@ -14,13 +14,14 @@
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/NativeValueTraits.h"
+#include "bindings/core/v8/Nullable.h"
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class TestCallbackInterface;
+class V8TestCallbackInterface;
 
 class CORE_EXPORT UnsignedLongLongOrBooleanOrTestCallbackInterface final {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
@@ -34,9 +35,9 @@ class CORE_EXPORT UnsignedLongLongOrBooleanOrTestCallbackInterface final {
   static UnsignedLongLongOrBooleanOrTestCallbackInterface FromBoolean(bool);
 
   bool IsTestCallbackInterface() const { return type_ == SpecificType::kTestCallbackInterface; }
-  TestCallbackInterface* GetAsTestCallbackInterface() const;
-  void SetTestCallbackInterface(TestCallbackInterface*);
-  static UnsignedLongLongOrBooleanOrTestCallbackInterface FromTestCallbackInterface(TestCallbackInterface*);
+  V8TestCallbackInterface* GetAsTestCallbackInterface() const;
+  void SetTestCallbackInterface(V8TestCallbackInterface*);
+  static UnsignedLongLongOrBooleanOrTestCallbackInterface FromTestCallbackInterface(V8TestCallbackInterface*);
 
   bool IsUnsignedLongLong() const { return type_ == SpecificType::kUnsignedLongLong; }
   uint64_t GetAsUnsignedLongLong() const;
@@ -58,7 +59,7 @@ class CORE_EXPORT UnsignedLongLongOrBooleanOrTestCallbackInterface final {
   SpecificType type_;
 
   bool boolean_;
-  Member<TestCallbackInterface> test_callback_interface_;
+  Member<V8TestCallbackInterface> test_callback_interface_;
   uint64_t unsigned_long_long_;
 
   friend CORE_EXPORT v8::Local<v8::Value> ToV8(const UnsignedLongLongOrBooleanOrTestCallbackInterface&, v8::Local<v8::Object>, v8::Isolate*);
@@ -84,6 +85,7 @@ inline void V8SetReturnValue(const CallbackInfo& callbackInfo, UnsignedLongLongO
 template <>
 struct NativeValueTraits<UnsignedLongLongOrBooleanOrTestCallbackInterface> : public NativeValueTraitsBase<UnsignedLongLongOrBooleanOrTestCallbackInterface> {
   CORE_EXPORT static UnsignedLongLongOrBooleanOrTestCallbackInterface NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+  CORE_EXPORT static UnsignedLongLongOrBooleanOrTestCallbackInterface NullValue() { return UnsignedLongLongOrBooleanOrTestCallbackInterface(); }
 };
 
 template <>

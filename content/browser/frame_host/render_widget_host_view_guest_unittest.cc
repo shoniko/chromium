@@ -14,10 +14,11 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/surface_sequence.h"
+#include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
-#include "content/browser/compositor/test/no_transport_image_transport_factory.h"
+#include "content/browser/compositor/test/test_image_transport_factory.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -26,8 +27,8 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/test/dummy_render_widget_host_delegate.h"
 #include "content/test/fake_renderer_compositor_frame_sink.h"
+#include "content/test/mock_render_widget_host_delegate.h"
 #include "content/test/mock_widget_impl.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
@@ -46,19 +47,19 @@ class RenderWidgetHostViewGuestTest : public testing::Test {
   void SetUp() override {
 #if !defined(OS_ANDROID)
     ImageTransportFactory::SetFactory(
-        std::make_unique<NoTransportImageTransportFactory>());
+        std::make_unique<TestImageTransportFactory>());
 #endif
     browser_context_.reset(new TestBrowserContext);
     MockRenderProcessHost* process_host =
         new MockRenderProcessHost(browser_context_.get());
     int32_t routing_id = process_host->GetNextRoutingID();
     mojom::WidgetPtr widget;
-    widget_impl_ = base::MakeUnique<MockWidgetImpl>(mojo::MakeRequest(&widget));
+    widget_impl_ = std::make_unique<MockWidgetImpl>(mojo::MakeRequest(&widget));
 
     widget_host_ = new RenderWidgetHostImpl(
         &delegate_, process_host, routing_id, std::move(widget), false);
     view_ = RenderWidgetHostViewGuest::Create(
-        widget_host_, NULL,
+        widget_host_, nullptr,
         (new TestRenderWidgetHostView(widget_host_))->GetWeakPtr());
   }
 
@@ -82,7 +83,7 @@ class RenderWidgetHostViewGuestTest : public testing::Test {
   base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   std::unique_ptr<BrowserContext> browser_context_;
-  DummyRenderWidgetHostDelegate delegate_;
+  MockRenderWidgetHostDelegate delegate_;
 
   // Tests should set these to NULL if they've already triggered their
   // destruction.
@@ -144,7 +145,7 @@ class RenderWidgetHostViewGuestSurfaceTest
   void SetUp() override {
 #if !defined(OS_ANDROID)
     ImageTransportFactory::SetFactory(
-        std::make_unique<NoTransportImageTransportFactory>());
+        std::make_unique<TestImageTransportFactory>());
 #endif
     browser_context_.reset(new TestBrowserContext);
     MockRenderProcessHost* process_host =
@@ -157,7 +158,7 @@ class RenderWidgetHostViewGuestSurfaceTest
 
     int32_t routing_id = process_host->GetNextRoutingID();
     mojom::WidgetPtr widget;
-    widget_impl_ = base::MakeUnique<MockWidgetImpl>(mojo::MakeRequest(&widget));
+    widget_impl_ = std::make_unique<MockWidgetImpl>(mojo::MakeRequest(&widget));
 
     widget_host_ = new RenderWidgetHostImpl(
         &delegate_, process_host, routing_id, std::move(widget), false);
@@ -170,7 +171,7 @@ class RenderWidgetHostViewGuestSurfaceTest
     viz::mojom::CompositorFrameSinkClientRequest client_request =
         mojo::MakeRequest(&renderer_compositor_frame_sink_ptr_);
     renderer_compositor_frame_sink_ =
-        base::MakeUnique<FakeRendererCompositorFrameSink>(
+        std::make_unique<FakeRendererCompositorFrameSink>(
             std::move(sink), std::move(client_request));
     view_->DidCreateNewRendererCompositorFrameSink(
         renderer_compositor_frame_sink_ptr_.get());
@@ -203,7 +204,7 @@ class RenderWidgetHostViewGuestSurfaceTest
  protected:
   TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<BrowserContext> browser_context_;
-  DummyRenderWidgetHostDelegate delegate_;
+  MockRenderWidgetHostDelegate delegate_;
   BrowserPluginGuestDelegate browser_plugin_guest_delegate_;
   std::unique_ptr<TestWebContents> web_contents_;
   TestBrowserPluginGuest* browser_plugin_guest_;
@@ -250,7 +251,7 @@ TEST_F(RenderWidgetHostViewGuestSurfaceTest, TestGuestSurface) {
   browser_plugin_guest_->set_attached(true);
   view_->SubmitCompositorFrame(
       local_surface_id,
-      CreateDelegatedFrame(scale_factor, view_size, view_rect));
+      CreateDelegatedFrame(scale_factor, view_size, view_rect), nullptr);
 
   viz::SurfaceId id = GetSurfaceId();
 
@@ -274,7 +275,7 @@ TEST_F(RenderWidgetHostViewGuestSurfaceTest, TestGuestSurface) {
 
   view_->SubmitCompositorFrame(
       local_surface_id,
-      CreateDelegatedFrame(scale_factor, view_size, view_rect));
+      CreateDelegatedFrame(scale_factor, view_size, view_rect), nullptr);
 
   // Since we have not changed the frame size and scale factor, the same surface
   // id must be used.
@@ -294,7 +295,7 @@ TEST_F(RenderWidgetHostViewGuestSurfaceTest, TestGuestSurface) {
 
   view_->SubmitCompositorFrame(
       local_surface_id,
-      CreateDelegatedFrame(scale_factor, view_size, view_rect));
+      CreateDelegatedFrame(scale_factor, view_size, view_rect), nullptr);
   // Since guest is not attached, the CompositorFrame must be processed but the
   // frame must be evicted to return the resources immediately.
   EXPECT_FALSE(view_->has_frame());

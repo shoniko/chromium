@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.vr_shell;
 
+import static org.chromium.chrome.browser.vr_shell.VrTestFramework.NATIVE_URLS_OF_INTEREST;
 import static org.chromium.chrome.browser.vr_shell.VrTestFramework.PAGE_LOAD_TIMEOUT_S;
 import static org.chromium.chrome.browser.vr_shell.VrTestFramework.POLL_TIMEOUT_LONG_MS;
 import static org.chromium.chrome.browser.vr_shell.VrTestFramework.POLL_TIMEOUT_SHORT_MS;
@@ -47,9 +48,7 @@ import java.util.concurrent.TimeoutException;
  * "VR Shell".
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG, "enable-features=VrShell",
-        "enable-webvr"})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, "enable-webvr"})
 @Restriction(RESTRICTION_TYPE_DEVICE_DAYDREAM)
 public class VrShellNavigationTest {
     // We explicitly instantiate a rule here instead of using parameterization since this class
@@ -324,19 +323,27 @@ public class VrShellNavigationTest {
         Assert.assertFalse("Back button isn't disabled.", VrTransitionUtils.isBackButtonEnabled());
         Assert.assertFalse(
                 "Forward button isn't disabled.", VrTransitionUtils.isForwardButtonEnabled());
+        // Opening a new tab shouldn't enable the back button
         mVrTestRule.loadUrlInNewTab(getUrl(Page.PAGE_2D), false, TabLaunchType.FROM_CHROME_UI);
         Assert.assertFalse("Back button isn't disabled.", VrTransitionUtils.isBackButtonEnabled());
         Assert.assertFalse(
                 "Forward button isn't disabled.", VrTransitionUtils.isForwardButtonEnabled());
+        // Navigating to a new page should enable the back button
         mVrTestRule.loadUrl(getUrl(Page.PAGE_WEBVR));
         Assert.assertTrue("Back button isn't enabled.", VrTransitionUtils.isBackButtonEnabled());
         Assert.assertFalse(
                 "Forward button isn't disabled.", VrTransitionUtils.isForwardButtonEnabled());
+        // Navigating back should disable the back button and enable the forward button
         VrTransitionUtils.navigateBack();
+        ChromeTabUtils.waitForTabPageLoaded(
+                mVrTestRule.getActivity().getActivityTab(), getUrl(Page.PAGE_2D));
         Assert.assertFalse("Back button isn't disabled.", VrTransitionUtils.isBackButtonEnabled());
         Assert.assertTrue(
                 "Forward button isn't enabled.", VrTransitionUtils.isForwardButtonEnabled());
+        // Navigating forward should disable the forward button and enable the back button
         VrTransitionUtils.navigateForward();
+        ChromeTabUtils.waitForTabPageLoaded(
+                mVrTestRule.getActivity().getActivityTab(), getUrl(Page.PAGE_WEBVR));
         Assert.assertTrue("Back button isn't enabled.", VrTransitionUtils.isBackButtonEnabled());
         Assert.assertFalse(
                 "Forward button isn't disabled.", VrTransitionUtils.isForwardButtonEnabled());
@@ -351,10 +358,7 @@ public class VrShellNavigationTest {
     @Restriction(RESTRICTION_TYPE_VIEWER_DAYDREAM)
     public void testNativeNavigationAndInteraction()
             throws IllegalArgumentException, InterruptedException {
-        String[] nativeUrls = {UrlConstants.NTP_URL, UrlConstants.BOOKMARKS_URL,
-                UrlConstants.DOWNLOADS_URL, UrlConstants.RECENT_TABS_URL,
-                UrlConstants.NATIVE_HISTORY_URL};
-        for (String url : nativeUrls) {
+        for (String url : NATIVE_URLS_OF_INTEREST) {
             mVrTestRule.loadUrl(TEST_PAGE_2D_URL, PAGE_LOAD_TIMEOUT_S);
             mVrTestRule.loadUrl(url, PAGE_LOAD_TIMEOUT_S);
             ClickUtils.mouseSingleClickView(InstrumentationRegistry.getInstrumentation(),

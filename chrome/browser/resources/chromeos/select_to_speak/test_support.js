@@ -24,6 +24,17 @@ chrome.automation.RoleType = {
   INLINE_TEXT_BOX: 'inlineTextBox',
   PARAGRAPH: 'paragraph'
 };
+
 chrome.automation.StateType = {
   INVISIBLE: 'invisible'
+};
+
+chrome.metricsPrivate = {
+  recordUserAction: function() {},
+  recordValue: function() {},
+  MetricTypeType: {HISTOGRAM_LINEAR: 1}
+};
+
+chrome.commandLinePrivate = {
+  hasSwitch: function() {}
 };

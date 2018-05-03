@@ -25,9 +25,9 @@
 #include "ui/gfx/geometry/vector2d_conversions.h"
 
 #if defined(USE_X11)
-#include <X11/Xlib.h>
 #include "ui/events/test/events_test_utils_x11.h"
 #include "ui/events/x/events_x_utils.h"
+#include "ui/gfx/x/x11.h"
 #endif
 
 #if defined(OS_WIN)
@@ -714,7 +714,7 @@ void EventGenerator::DoDispatchEvent(ui::Event* event, bool async) {
   if (event->IsTouchEvent()) {
     ui::TouchEvent* touch_event = static_cast<ui::TouchEvent*>(event);
     touch_pointer_details_.id = touch_event->pointer_details().id;
-    touch_event->set_pointer_details(touch_pointer_details_);
+    touch_event->SetPointerDetailsForTest(touch_pointer_details_);
   }
 
   if (async) {

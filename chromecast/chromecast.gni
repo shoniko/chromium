@@ -4,6 +4,7 @@
 
 import("//build/config/chromecast_build.gni")
 import("//build/config/locales.gni")
+import("//extensions/features/features.gni")
 
 # This args block should contain arguments used within the //chromecast
 # directory. Arguments which are used in other Chrome components should
@@ -50,12 +51,16 @@ declare_args() {
 
   # Set to true to start music apps in headless mode.
   enable_headless_music_mode = false
+
+  # Set to true to keep Android activities alive when they are moved to the
+  # background.
+  enable_background_activities = false
+
+  # Set the number of lines for LogcatExtractor to send.
+  logcat_extractor_size = 512
 }
 
 declare_args() {
-  # Currently android things libraries live in internal.
-  # TODO(njeff): change this when Android Things API is moved to public.
-  enable_athings_loopback = is_android_things && chromecast_branding != "public"
   enable_volume_tables_access =
       is_android_things && chromecast_branding != "public"
 }
@@ -80,6 +85,9 @@ if (chromecast_branding == "public") {
 # in //build/config/locales.gni.
 cast_locales = locales
 
+# Currently extensions require use_dbus=true if it is a linux build.
+enable_chromecast_extensions = enable_extensions && (!is_linux || use_dbus)
+
 # These templates are a temporary fix fo link libc++ into shared libraries and
 # executables. These should be removed as soon as crbug.com/746091 is resolved.
 foreach(target_type,
@@ -87,14 +95,21 @@ foreach(target_type,
           "executable",
           "shared_library",
           "loadable_module",
+          "source_set",
         ]) {
   template("cast_${target_type}") {
     target(target_type, target_name) {
       forward_variables_from(invoker, "*")
+
+      configs += [ "//chromecast:cast_config" ]
+
       if (!defined(deps)) {
         deps = []
       }
-      deps += [ "//build/config:exe_and_shlib_deps" ]
+
+      if (target_type != "source_set") {
+        deps += [ "//build/config:exe_and_shlib_deps" ]
+      }
     }
   }
 }
@@ -118,4 +133,8 @@ set_defaults("cast_loadable_module") {
   if (is_android) {
     configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
   }
+}
+
+set_defaults("cast_source_set") {
+  configs = default_compiler_configs
 }

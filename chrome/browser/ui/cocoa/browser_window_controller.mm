@@ -13,7 +13,6 @@
 #import "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #import "base/mac/sdk_forward_declarations.h"
-#include "base/memory/ptr_util.h"
 #include "base/scoped_observer.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -61,7 +60,6 @@
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_visibility_lock_controller.h"
-#include "chrome/browser/ui/cocoa/fullscreen_low_power_coordinator.h"
 #include "chrome/browser/ui/cocoa/fullscreen_placeholder_view.h"
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
@@ -69,7 +67,6 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/location_bar/star_decoration.h"
-#include "chrome/browser/ui/cocoa/permission_bubble/permission_bubble_cocoa.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_icon_controller.h"
@@ -98,7 +95,7 @@
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/omnibox/browser/omnibox_popup_model_observer.h"
-#include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_ui_delegate.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -367,7 +364,7 @@ bool IsTabDetachingInFullscreenEnabled() {
     // registering for the appropriate command state changes from the back-end.
     // Adds the toolbar to the content area.
     toolbarController_.reset([[ToolbarController alloc]
-        initWithCommands:browser->command_controller()->command_updater()
+        initWithCommands:browser->command_controller()
                  profile:browser->profile()
                  browser:browser]);
     [[toolbarController_ toolbarView] setResizeDelegate:self];
@@ -438,7 +435,7 @@ bool IsTabDetachingInFullscreenEnabled() {
             windowShim_.get()));
 
     omniboxPopupModelObserverBridge_ =
-        base::MakeUnique<OmniboxPopupModelObserverBridge>(self);
+        std::make_unique<OmniboxPopupModelObserverBridge>(self);
 
     blockLayoutSubviews_ = NO;
 
@@ -1523,11 +1520,10 @@ bool IsTabDetachingInFullscreenEnabled() {
                                         withProfile:browser_->profile()];
 }
 
-- (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
-        withContents:(WebContents*)contents {
+- (void)onTabChanged:(TabChangeType)change withContents:(WebContents*)contents {
   // Update titles if this is the currently selected tab and if it isn't just
   // the loading state which changed.
-  if (change != TabStripModelObserver::LOADING_ONLY)
+  if (change != TabChangeType::kLoadingOnly)
     windowShim_->UpdateTitleBar();
 
   // Update the bookmark bar if this is the currently selected tab and if it
@@ -1535,7 +1531,7 @@ bool IsTabDetachingInFullscreenEnabled() {
   // (showing its floating bookmark bar) and normal web pages (showing no
   // bookmark bar).
   // TODO(viettrungluu): perhaps update to not terminate running animations?
-  if (change != TabStripModelObserver::TITLE_NOT_LOADING) {
+  if (change != TabChangeType::kTitleNotLoading) {
     windowShim_->BookmarkBarStateChanged(
         BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
   }
@@ -1555,7 +1551,7 @@ bool IsTabDetachingInFullscreenEnabled() {
   if (inForeground) {
     AppToolbarButton* appMenuButton =
         static_cast<AppToolbarButton*>([toolbarController_ appMenuButton]);
-    [appMenuButton animateIfPossible];
+    [appMenuButton animateIfPossibleWithDelay:YES];
   }
 }
 

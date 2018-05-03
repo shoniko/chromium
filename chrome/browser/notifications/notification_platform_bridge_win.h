@@ -7,13 +7,15 @@
 
 #include <windows.ui.notifications.h>
 #include <string>
-#include <unordered_map>
 
+#include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "base/sequenced_task_runner.h"
 #include "chrome/browser/notifications/notification_platform_bridge.h"
-#include "url/gurl.h"
 
-struct NotificationData;
+class NotificationPlatformBridgeWinImpl;
+class NotificationTemplateBuilder;
 
 // Implementation of the NotificationPlatformBridge for Windows 10 Anniversary
 // Edition and beyond, delegating display of notifications to the Action Center.
@@ -23,8 +25,7 @@ class NotificationPlatformBridgeWin : public NotificationPlatformBridge {
   ~NotificationPlatformBridgeWin() override;
 
   // NotificationPlatformBridge implementation.
-  void Display(NotificationCommon::Type notification_type,
-               const std::string& notification_id,
+  void Display(NotificationHandler::Type notification_type,
                const std::string& profile_id,
                bool incognito,
                const message_center::Notification& notification,
@@ -38,32 +39,56 @@ class NotificationPlatformBridgeWin : public NotificationPlatformBridge {
   void SetReadyCallback(NotificationBridgeReadyCallback callback) override;
 
  private:
-  // Callbacks for toast events from Windows.
-  HRESULT OnActivated(
+  friend class NotificationPlatformBridgeWinImpl;
+  friend class NotificationPlatformBridgeWinTest;
+  FRIEND_TEST_ALL_PREFIXES(NotificationPlatformBridgeWinTest, EncodeDecode);
+  FRIEND_TEST_ALL_PREFIXES(NotificationPlatformBridgeWinTest, Suppress);
+  FRIEND_TEST_ALL_PREFIXES(NotificationPlatformBridgeWinUITest, GetDisplayed);
+  FRIEND_TEST_ALL_PREFIXES(NotificationPlatformBridgeWinUITest, HandleEvent);
+
+  // Simulates a click/dismiss event. Only for use in testing.
+  // Note: Ownership of |notification| and |args| is retained by the caller.
+  void ForwardHandleEventForTesting(
+      NotificationCommon::Operation operation,
       ABI::Windows::UI::Notifications::IToastNotification* notification,
-      IInspectable* inspectable);
-  HRESULT OnDismissed(
-      ABI::Windows::UI::Notifications::IToastNotification* notification,
-      ABI::Windows::UI::Notifications::IToastDismissedEventArgs* args);
+      ABI::Windows::UI::Notifications::IToastActivatedEventArgs* args,
+      const base::Optional<bool>& by_user);
 
-  // Returns a notification with properties |notification_id|, |profile_id|,
-  // |origin_url| and |incognito| if found in notifications_. Returns nullptr if
-  // not found.
-  NotificationData* FindNotificationData(const std::string& notification_id,
-                                         const std::string& profile_id,
-                                         const GURL& origin_url,
-                                         bool incognito);
+  // Initializes the displayed notification vector. Only for use in testing.
+  void SetDisplayedNotificationsForTesting(
+      std::vector<ABI::Windows::UI::Notifications::IToastNotification*>*
+          notifications);
 
-  // Whether the required functions from combase.dll have been loaded.
-  bool com_functions_initialized_;
+  // Takes an |encoded| string as input and decodes it, returning the values in
+  // the out parameters. |encoded| and |notifiation_id| must be provided. Other
+  // pointers can be nullptr. Returns true if successful, but false otherwise.
+  static bool DecodeTemplateId(const std::string& encoded,
+                               NotificationHandler::Type* notification_type,
+                               std::string* notification_id,
+                               std::string* profile_id,
+                               bool* incognito,
+                               GURL* origin_url) WARN_UNUSED_RESULT;
 
-  // Stores the set of Notifications in a session.
-  // A std::set<std::unique_ptr<T>> doesn't work well because e.g.,
-  // std::set::erase(T) would require a std::unique_ptr<T> argument, so the data
-  // would get double-destructed.
-  template <typename T>
-  using UnorderedUniqueSet = std::unordered_map<T*, std::unique_ptr<T>>;
-  UnorderedUniqueSet<NotificationData> notifications_;
+  // Encodes a template ID string given the input parameters.
+  static std::string EncodeTemplateId(
+      NotificationHandler::Type notification_type,
+      const std::string& notification_id,
+      const std::string& profile_id,
+      bool incognito,
+      const GURL& origin_url);
+
+  // Obtain an IToastNotification interface from a given XML (provided by the
+  // NotificationTemplateBuilder). For testing use only.
+  HRESULT GetToastNotificationForTesting(
+      const message_center::Notification& notification,
+      const NotificationTemplateBuilder& notification_template_builder,
+      ABI::Windows::UI::Notifications::IToastNotification** toast_notification);
+
+  void PostTaskToTaskRunnerThread(base::OnceClosure closure) const;
+
+  scoped_refptr<NotificationPlatformBridgeWinImpl> impl_;
+
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationPlatformBridgeWin);
 };

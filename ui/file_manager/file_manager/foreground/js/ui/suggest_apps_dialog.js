@@ -181,18 +181,22 @@ SuggestAppsDialog.prototype.createWidgetPlatformDelegate_ = function() {
      *     argument is a list of installed item ids (null on error).
      */
     getInstalledItems: function(callback) {
-      // Return only installed providers. Returning other extensions/apps is
-      // redundant, as the suggest app for non-providers is executed only when
-      // there is no extension/app matching a file task. Hence, none of the
-      // suggested extensions/apps can be already installed.
-      this.providersModel_.getInstalledProviders().then(function(extensions) {
-        callback(extensions.map(function(extension) {
-          return extension.extensionId;
-        }));
-      }).catch(function(error) {
-        console.error(error.stack || error);
-        callback(null);
-      });
+      // Return only installed provided extensions. Returning other
+      // extensions/apps is redundant, as the suggest app for non-providers is
+      // executed only when there is no extension/app matching a file task.
+      // Hence, none of the suggested extensions/apps can be already installed.
+      this.providersModel_.getInstalledProviders()
+          .then(function(providers) {
+            callback(providers.map(function(provider) {
+              // Assume that the provider is an extension backed provider. In
+              // such case the providerId is the same as extensionId.
+              return provider.providerId;
+            }));
+          })
+          .catch(function(error) {
+            console.error(error.stack || error);
+            callback(null);
+          });
     }.bind(this),
 
     /**
@@ -238,27 +242,24 @@ SuggestAppsDialog.prototype.showInternal_ =
   var tokenObtained = false;
 
   this.widget_.ready()
-      .then(
-          (/** @return {!Promise} */
-          function() {
-            tokenObtained = true;
-            return this.showDialog_(title);
-          }).bind(this))
-      .then(
-          (/** @return {!Promise.<CWSWidgetContainer.ResolveReason>} */
-          function() {
-            dialogShown = true;
-            // This is not set before so it doesn't polute state if the previous
-            // dialog hasn't finished hiding.
-            this.onDialogClosed_ = onDialogClosed;
-            return this.widget_.start(options, webStoreUrl);
-          }).bind(this))
-      .then(
-          (/** @param {CWSWidgetContainer.ResolveReason} reason */
-          function(reason) {
-            if (reason !== CWSWidgetContainer.ResolveReason.RESET)
-              this.hide();
-          }).bind(this))
+      .then((/** @return {!Promise} */
+             function() {
+               tokenObtained = true;
+               return this.showDialog_(title);
+             }).bind(this))
+      .then((/** @return {!Promise<CWSWidgetContainer.ResolveReason>} */
+             function() {
+               dialogShown = true;
+               // This is not set before so it doesn't polute state if the
+               // previous dialog hasn't finished hiding.
+               this.onDialogClosed_ = onDialogClosed;
+               return this.widget_.start(options, webStoreUrl);
+             }).bind(this))
+      .then((/** @param {CWSWidgetContainer.ResolveReason} reason */
+             function(reason) {
+               if (reason !== CWSWidgetContainer.ResolveReason.RESET)
+                 this.hide();
+             }).bind(this))
       .catch(
           function(error) {
             console.error('Failed to start CWS widget: ' + error);

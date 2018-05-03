@@ -13,9 +13,8 @@
 #include "components/viz/test/ordered_simple_task_runner.h"
 #include "platform/scheduler/base/lazy_now.h"
 #include "platform/scheduler/base/task_queue.h"
-#include "platform/scheduler/base/test_time_source.h"
-#include "platform/scheduler/child/scheduler_tqm_delegate_for_test.h"
 #include "platform/scheduler/child/worker_scheduler_helper.h"
+#include "platform/scheduler/test/create_task_queue_manager_for_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -52,17 +51,15 @@ void AppendToVectorReentrantTask(base::SingleThreadTaskRunner* task_runner,
 class SchedulerHelperTest : public ::testing::Test {
  public:
   SchedulerHelperTest()
-      : clock_(new base::SimpleTestTickClock()),
-        mock_task_runner_(new cc::OrderedSimpleTaskRunner(clock_.get(), false)),
-        main_task_runner_(SchedulerTqmDelegateForTest::Create(
-            mock_task_runner_,
-            base::WrapUnique(new TestTimeSource(clock_.get())))),
-        scheduler_helper_(new WorkerSchedulerHelper(main_task_runner_)),
+      : mock_task_runner_(new cc::OrderedSimpleTaskRunner(&clock_, false)),
+        scheduler_helper_(new WorkerSchedulerHelper(
+            CreateTaskQueueManagerForTest(nullptr, mock_task_runner_, &clock_),
+            nullptr)),
         default_task_runner_(scheduler_helper_->DefaultWorkerTaskQueue()) {
-    clock_->Advance(base::TimeDelta::FromMicroseconds(5000));
+    clock_.Advance(base::TimeDelta::FromMicroseconds(5000));
   }
 
-  ~SchedulerHelperTest() override {}
+  ~SchedulerHelperTest() override = default;
 
   void TearDown() override {
     // Check that all tests stop posting tasks.
@@ -84,10 +81,9 @@ class SchedulerHelperTest : public ::testing::Test {
   }
 
  protected:
-  std::unique_ptr<base::SimpleTestTickClock> clock_;
+  base::SimpleTestTickClock clock_;
   scoped_refptr<cc::OrderedSimpleTaskRunner> mock_task_runner_;
 
-  scoped_refptr<SchedulerTqmDelegateForTest> main_task_runner_;
   std::unique_ptr<WorkerSchedulerHelper> scheduler_helper_;
   scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
 
@@ -128,13 +124,6 @@ TEST_F(SchedulerHelperTest, IsShutdown) {
 
   scheduler_helper_->Shutdown();
   EXPECT_TRUE(scheduler_helper_->IsShutdown());
-}
-
-TEST_F(SchedulerHelperTest, DefaultTaskRunnerRegistration) {
-  EXPECT_EQ(main_task_runner_->default_task_runner(),
-            scheduler_helper_->DefaultWorkerTaskQueue());
-  scheduler_helper_->Shutdown();
-  EXPECT_EQ(nullptr, main_task_runner_->default_task_runner());
 }
 
 TEST_F(SchedulerHelperTest, GetNumberOfPendingTasks) {
@@ -215,7 +204,7 @@ TEST_F(SchedulerHelperTest, OnTriedToExecuteBlockedTask) {
   RunUntilIdle();
 
   scheduler_helper_->SetObserver(nullptr);
-  task_queue->UnregisterTaskQueue();
+  task_queue->ShutdownTaskQueue();
 }
 }  // namespace scheduler_helper_unittest
 }  // namespace scheduler

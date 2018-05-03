@@ -32,12 +32,15 @@
 
 #include <memory>
 #include <utility>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/SourceLocation.h"
 #include "bindings/core/v8/WorkerOrWorkletScriptController.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/MessagePort.h"
+#include "core/fetch/Headers.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/messaging/MessagePort.h"
 #include "core/origin_trials/origin_trials.h"
 #include "core/workers/ParentFrameTaskRunners.h"
 #include "core/workers/WorkerGlobalScope.h"
@@ -52,7 +55,6 @@
 #include "modules/background_fetch/BackgroundFetchedEventInit.h"
 #include "modules/background_sync/SyncEvent.h"
 #include "modules/exported/WebEmbeddedWorkerImpl.h"
-#include "modules/fetch/Headers.h"
 #include "modules/notifications/Notification.h"
 #include "modules/notifications/NotificationEvent.h"
 #include "modules/notifications/NotificationEventInit.h"
@@ -69,7 +71,7 @@
 #include "modules/serviceworkers/ExtendableEvent.h"
 #include "modules/serviceworkers/ExtendableMessageEvent.h"
 #include "modules/serviceworkers/FetchEvent.h"
-#include "modules/serviceworkers/ForeignFetchEvent.h"
+#include "modules/serviceworkers/FetchRespondWithObserver.h"
 #include "modules/serviceworkers/InstallEvent.h"
 #include "modules/serviceworkers/ServiceWorkerClient.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
@@ -81,12 +83,12 @@
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/Functional.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/modules/notifications/WebNotificationData.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerRequest.h"
-#include "public/platform/modules/serviceworker/service_worker_event_status.mojom-blink.h"
 #include "public/web/WebSerializedScriptValue.h"
 #include "public/web/modules/serviceworker/WebServiceWorkerContextClient.h"
+#include "third_party/WebKit/common/service_worker/service_worker_client.mojom-blink.h"
+#include "third_party/WebKit/common/service_worker/service_worker_event_status.mojom-blink.h"
 
 namespace blink {
 
@@ -244,7 +246,7 @@ void ServiceWorkerGlobalScopeProxy::DispatchExtendableMessageEvent(
   if (!source_origin.IsUnique())
     origin = source_origin.ToString();
   ServiceWorkerClient* source = nullptr;
-  if (client.client_type == kWebServiceWorkerClientTypeWindow)
+  if (client.client_type == mojom::ServiceWorkerClientType::kWindow)
     source = ServiceWorkerWindowClient::Create(client);
   else
     source = ServiceWorkerClient::Create(client);
@@ -272,7 +274,7 @@ void ServiceWorkerGlobalScopeProxy::DispatchExtendableMessageEvent(
     origin = source_origin.ToString();
   ServiceWorker* source =
       ServiceWorker::From(worker_global_scope_->GetExecutionContext(),
-                          WTF::WrapUnique(handle.release()));
+                          base::WrapUnique(handle.release()));
   WaitUntilObserver* observer = WaitUntilObserver::Create(
       WorkerGlobalScope(), WaitUntilObserver::kMessage, event_id);
 
@@ -366,58 +368,13 @@ void ServiceWorkerGlobalScopeProxy::OnNavigationPreloadComplete(
       encoded_body_length, decoded_body_length);
 }
 
-void ServiceWorkerGlobalScopeProxy::DispatchForeignFetchEvent(
-    int fetch_event_id,
-    const WebServiceWorkerRequest& web_request) {
-  DCHECK(WorkerGlobalScope()->IsContextThread());
-  if (!OriginTrials::foreignFetchEnabled(WorkerGlobalScope())) {
-    // If origin trial tokens have expired, or are otherwise no longer valid
-    // no events should be dispatched.
-    // TODO(mek): Ideally the browser wouldn't even start the service worker
-    // if its tokens have expired.
-    ServiceWorkerGlobalScopeClient::From(WorkerGlobalScope())
-        ->RespondToFetchEventWithNoResponse(fetch_event_id, WTF::CurrentTime());
-    ServiceWorkerGlobalScopeClient::From(WorkerGlobalScope())
-        ->DidHandleFetchEvent(fetch_event_id,
-                              mojom::ServiceWorkerEventStatus::COMPLETED,
-                              WTF::CurrentTime());
-    return;
-  }
-
-  ScriptState::Scope scope(
-      WorkerGlobalScope()->ScriptController()->GetScriptState());
-  scoped_refptr<SecurityOrigin> origin =
-      SecurityOrigin::Create(web_request.ReferrerUrl());
-  WaitUntilObserver* wait_until_observer = WaitUntilObserver::Create(
-      WorkerGlobalScope(), WaitUntilObserver::kFetch, fetch_event_id);
-  ForeignFetchRespondWithObserver* respond_with_observer =
-      ForeignFetchRespondWithObserver::Create(
-          WorkerGlobalScope(), fetch_event_id, web_request.Url(),
-          web_request.Mode(), web_request.RedirectMode(),
-          web_request.GetFrameType(), web_request.GetRequestContext(), origin,
-          wait_until_observer);
-  Request* request = Request::Create(
-      WorkerGlobalScope()->ScriptController()->GetScriptState(), web_request);
-  request->getHeaders()->SetGuard(Headers::kImmutableGuard);
-  ForeignFetchEventInit event_init;
-  event_init.setCancelable(true);
-  event_init.setRequest(request);
-  event_init.setOrigin(origin->ToString());
-  ForeignFetchEvent* fetch_event = ForeignFetchEvent::Create(
-      WorkerGlobalScope()->ScriptController()->GetScriptState(),
-      EventTypeNames::foreignfetch, event_init, respond_with_observer,
-      wait_until_observer);
-
-  WorkerGlobalScope()->DispatchExtendableEventWithRespondWith(
-      fetch_event, wait_until_observer, respond_with_observer);
-}
-
 void ServiceWorkerGlobalScopeProxy::DispatchInstallEvent(int event_id) {
   DCHECK(WorkerGlobalScope()->IsContextThread());
   WaitUntilObserver* observer = WaitUntilObserver::Create(
       WorkerGlobalScope(), WaitUntilObserver::kInstall, event_id);
   Event* event = InstallEvent::Create(
       EventTypeNames::install, ExtendableEventInit(), event_id, observer);
+  WorkerGlobalScope()->SetIsInstalling(true);
   WorkerGlobalScope()->DispatchExtendableEvent(event, observer);
 }
 
@@ -467,15 +424,14 @@ void ServiceWorkerGlobalScopeProxy::DispatchPushEvent(int event_id,
   WorkerGlobalScope()->DispatchExtendableEvent(event, observer);
 }
 
-void ServiceWorkerGlobalScopeProxy::DispatchSyncEvent(
-    int event_id,
-    const WebString& id,
-    LastChanceOption last_chance) {
+void ServiceWorkerGlobalScopeProxy::DispatchSyncEvent(int event_id,
+                                                      const WebString& id,
+                                                      bool last_chance) {
   DCHECK(WorkerGlobalScope()->IsContextThread());
   WaitUntilObserver* observer = WaitUntilObserver::Create(
       WorkerGlobalScope(), WaitUntilObserver::kSync, event_id);
-  Event* event = SyncEvent::Create(EventTypeNames::sync, id,
-                                   last_chance == kIsLastChance, observer);
+  Event* event =
+      SyncEvent::Create(EventTypeNames::sync, id, last_chance, observer);
   WorkerGlobalScope()->DispatchExtendableEvent(event, observer);
 }
 
@@ -576,12 +532,11 @@ void ServiceWorkerGlobalScopeProxy::PostMessageToPageInspector(
   DCHECK(embedded_worker_);
   // The TaskType of Inspector tasks need to be Unthrottled because they need to
   // run even on a suspended page.
-  parent_frame_task_runners_->Get(TaskType::kUnthrottled)
-      ->PostTask(
-          BLINK_FROM_HERE,
-          CrossThreadBind(&WebEmbeddedWorkerImpl::PostMessageToPageInspector,
-                          CrossThreadUnretained(embedded_worker_), session_id,
-                          message));
+  PostCrossThreadTask(
+      *parent_frame_task_runners_->Get(TaskType::kUnthrottled), FROM_HERE,
+      CrossThreadBind(&WebEmbeddedWorkerImpl::PostMessageToPageInspector,
+                      CrossThreadUnretained(embedded_worker_), session_id,
+                      message));
 }
 
 void ServiceWorkerGlobalScopeProxy::DidCreateWorkerGlobalScope(
@@ -607,14 +562,13 @@ void ServiceWorkerGlobalScopeProxy::DidLoadInstalledScript(
   // page.
   DCHECK(embedded_worker_);
   WaitableEvent waitable_event;
-  parent_frame_task_runners_->Get(TaskType::kUnthrottled)
-      ->PostTask(
-          BLINK_FROM_HERE,
-          CrossThreadBind(
-              &SetContentSecurityPolicyAndReferrerPolicyOnMainThread,
-              CrossThreadUnretained(embedded_worker_),
-              csp_headers_on_worker_thread, referrer_policy_on_worker_thread,
-              CrossThreadUnretained(&waitable_event)));
+  PostCrossThreadTask(
+      *parent_frame_task_runners_->Get(TaskType::kUnthrottled), FROM_HERE,
+      CrossThreadBind(&SetContentSecurityPolicyAndReferrerPolicyOnMainThread,
+                      CrossThreadUnretained(embedded_worker_),
+                      csp_headers_on_worker_thread,
+                      referrer_policy_on_worker_thread,
+                      CrossThreadUnretained(&waitable_event)));
   Client().WorkerScriptLoaded();
 
   // Wait for the task to complete before returning. This ensures that worker
@@ -681,6 +635,10 @@ void ServiceWorkerGlobalScopeProxy::Detach() {
   DCHECK(IsMainThread());
   embedded_worker_ = nullptr;
   client_ = nullptr;
+}
+
+void ServiceWorkerGlobalScopeProxy::TerminateWorkerContext() {
+  embedded_worker_->TerminateWorkerContext();
 }
 
 WebServiceWorkerContextClient& ServiceWorkerGlobalScopeProxy::Client() const {

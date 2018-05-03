@@ -10,17 +10,19 @@
 #include <string>
 #include <utility>
 
+#include "ash/message_center/message_center_controller.h"
 #include "ash/message_center/message_center_style.h"
 #include "ash/message_center/message_center_view.h"
 #include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -32,7 +34,6 @@
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/vector_icons.h"
-#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/checkbox.h"
@@ -53,13 +54,12 @@
 namespace ash {
 
 using message_center::MessageCenter;
-using message_center::Notifier;
+using mojom::NotifierUiData;
 using message_center::NotifierId;
-using message_center::NotifierSettingsProvider;
 
 namespace {
 
-const int kEntryHeight = 48;
+const int kNotifierButtonWrapperHeight = 48;
 const int kHorizontalMargin = 12;
 const int kEntryIconSize = 20;
 const int kInternalHorizontalSpacing = 16;
@@ -68,15 +68,6 @@ const int kCheckboxSizeWithPadding = 28;
 
 // The width of the settings pane in pixels.
 const int kWidth = 360;
-
-// The width of the learn more icon in pixels.
-const int kLearnMoreSize = 12;
-
-// The width of the click target that contains the learn more button in pixels.
-const int kLearnMoreTargetWidth = 28;
-
-// The height of the click target that contains the learn more button in pixels.
-const int kLearnMoreTargetHeight = 40;
 
 // The minimum height of the settings pane in pixels.
 const int kMinimumHeight = 480;
@@ -97,24 +88,32 @@ std::unique_ptr<views::Painter> CreateFocusPainter() {
 }
 
 // TODO(tetsui): Give more general names and remove kEntryHeight, etc.
-constexpr gfx::Insets kTopLabelPadding(16, 18, 15, 0);
+constexpr gfx::Insets kTopLabelPadding(16, 18, 15, 18);
 const int kQuietModeViewSpacing = 18;
 
-constexpr gfx::Insets kHeaderViewPadding(4, 0, 4, 0);
-constexpr gfx::Insets kQuietModeViewPadding(16, 18, 15, 14);
-constexpr SkColor kQuietModeIconColor = SkColorSetARGB(0x8A, 0x5A, 0x5A, 0x5A);
-constexpr SkColor kTopLabelColor = SkColorSetRGB(0x42, 0x85, 0xF4);
-constexpr SkColor kLabelColor = SkColorSetARGB(0xDE, 0x0, 0x0, 0x0);
-const int kLabelFontSize = 13;
+constexpr gfx::Insets kHeaderViewPadding(4, 0);
+constexpr gfx::Insets kQuietModeViewPadding(0, 18, 0, 0);
+constexpr gfx::Insets kQuietModeLabelPadding(16, 0, 15, 0);
+constexpr gfx::Insets kQuietModeTogglePadding(0, 14);
+constexpr SkColor kTopLabelColor = gfx::kGoogleBlue500;
+constexpr SkColor kLabelColor = SkColorSetA(SK_ColorBLACK, 0xDE);
+constexpr SkColor kTopBorderColor = SkColorSetA(SK_ColorBLACK, 0x1F);
+constexpr SkColor kDisabledNotifierFilterColor =
+    SkColorSetA(SK_ColorWHITE, 0xB8);
+const int kLabelFontSizeDelta = 1;
 
-// EntryView ------------------------------------------------------------------
+// NotifierButtonWrapperView ---------------------------------------------------
 
-// The view to guarantee the 48px height and place the contents at the
-// middle. It also guarantee the left margin.
-class EntryView : public views::View {
+// A wrapper view of NotifierButton to guarantee the fixed height
+// |kNotifierButtonWrapperHeight|. The button is placed in the middle of
+// the wrapper view by giving padding to the top and the bottom.
+// The view is focusable and provides focus painter. When the button is disabled
+// (NotifierUiData.enforced), it also applies filter to make the color of the
+// button dim.
+class NotifierButtonWrapperView : public views::View {
  public:
-  explicit EntryView(views::View* contents);
-  ~EntryView() override;
+  explicit NotifierButtonWrapperView(views::View* contents);
+  ~NotifierButtonWrapperView() override;
 
   // views::View:
   void Layout() override;
@@ -127,60 +126,94 @@ class EntryView : public views::View {
   void OnBlur() override;
 
  private:
+  // Initialize |disabled_filter_|. Should be called once.
+  void CreateDisabledFilter();
+
   std::unique_ptr<views::Painter> focus_painter_;
 
-  DISALLOW_COPY_AND_ASSIGN(EntryView);
+  // NotifierButton to wrap.
+  views::View* contents_;
+
+  // A view to add semi-transparent filter on top of |contents_|.
+  // It is only visible when NotifierButton is disabled (e.g. the setting is
+  // enforced by administrator.) The color of the NotifierButton would be dim
+  // and users notice they can't change the setting.
+  views::View* disabled_filter_ = nullptr;
+
+  DISALLOW_COPY_AND_ASSIGN(NotifierButtonWrapperView);
 };
 
-EntryView::EntryView(views::View* contents)
-    : focus_painter_(CreateFocusPainter()) {
+NotifierButtonWrapperView::NotifierButtonWrapperView(views::View* contents)
+    : focus_painter_(CreateFocusPainter()), contents_(contents) {
   AddChildView(contents);
 }
 
-EntryView::~EntryView() {}
+NotifierButtonWrapperView::~NotifierButtonWrapperView() = default;
 
-void EntryView::Layout() {
-  DCHECK_EQ(1, child_count());
-  views::View* content = child_at(0);
-  int content_width = width();
-  int content_height = content->GetHeightForWidth(content_width);
-  int y = std::max((height() - content_height) / 2, 0);
-  content->SetBounds(0, y, content_width, content_height);
+void NotifierButtonWrapperView::Layout() {
+  int contents_width = width();
+  int contents_height = contents_->GetHeightForWidth(contents_width);
+  int y = std::max((height() - contents_height) / 2, 0);
+  contents_->SetBounds(0, y, contents_width, contents_height);
+
+  // Since normally we don't show |disabled_filter_|, initialize it lazily.
+  if (!contents_->enabled()) {
+    if (!disabled_filter_)
+      CreateDisabledFilter();
+    disabled_filter_->SetVisible(true);
+    gfx::Rect filter_bounds = GetContentsBounds();
+    filter_bounds.set_width(filter_bounds.width() - kEntryIconSize);
+    disabled_filter_->SetBoundsRect(filter_bounds);
+  } else if (disabled_filter_) {
+    disabled_filter_->SetVisible(false);
+  }
+
+  SetFocusBehavior(contents_->enabled() ? FocusBehavior::ALWAYS
+                                        : FocusBehavior::NEVER);
 }
 
-gfx::Size EntryView::CalculatePreferredSize() const {
-  return gfx::Size(kWidth, kEntryHeight);
+gfx::Size NotifierButtonWrapperView::CalculatePreferredSize() const {
+  return gfx::Size(kWidth, kNotifierButtonWrapperHeight);
 }
 
-void EntryView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  DCHECK_EQ(1, child_count());
-  child_at(0)->GetAccessibleNodeData(node_data);
+void NotifierButtonWrapperView::GetAccessibleNodeData(
+    ui::AXNodeData* node_data) {
+  contents_->GetAccessibleNodeData(node_data);
 }
 
-void EntryView::OnFocus() {
+void NotifierButtonWrapperView::OnFocus() {
   views::View::OnFocus();
   ScrollRectToVisible(GetLocalBounds());
   // We render differently when focused.
   SchedulePaint();
 }
 
-bool EntryView::OnKeyPressed(const ui::KeyEvent& event) {
-  return child_at(0)->OnKeyPressed(event);
+bool NotifierButtonWrapperView::OnKeyPressed(const ui::KeyEvent& event) {
+  return contents_->OnKeyPressed(event);
 }
 
-bool EntryView::OnKeyReleased(const ui::KeyEvent& event) {
-  return child_at(0)->OnKeyReleased(event);
+bool NotifierButtonWrapperView::OnKeyReleased(const ui::KeyEvent& event) {
+  return contents_->OnKeyReleased(event);
 }
 
-void EntryView::OnPaint(gfx::Canvas* canvas) {
+void NotifierButtonWrapperView::OnPaint(gfx::Canvas* canvas) {
   View::OnPaint(canvas);
   views::Painter::PaintFocusPainter(this, canvas, focus_painter_.get());
 }
 
-void EntryView::OnBlur() {
+void NotifierButtonWrapperView::OnBlur() {
   View::OnBlur();
   // We render differently when focused.
   SchedulePaint();
+}
+
+void NotifierButtonWrapperView::CreateDisabledFilter() {
+  DCHECK(!disabled_filter_);
+  disabled_filter_ = new views::View;
+  disabled_filter_->SetBackground(
+      views::CreateSolidBackground(kDisabledNotifierFilterColor));
+  disabled_filter_->set_can_process_events_within_subtree(false);
+  AddChildView(disabled_filter_);
 }
 
 // ScrollContentsView ----------------------------------------------------------
@@ -222,13 +255,13 @@ class ScrollContentsView : public views::View {
 class EmptyNotifierView : public views::View {
  public:
   EmptyNotifierView() {
-    views::BoxLayout* layout =
-        new views::BoxLayout(views::BoxLayout::kVertical, gfx::Insets(), 0);
+    auto layout = std::make_unique<views::BoxLayout>(
+        views::BoxLayout::kVertical, gfx::Insets(), 0);
     layout->set_main_axis_alignment(
         views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
     layout->set_cross_axis_alignment(
         views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
-    SetLayoutManager(layout);
+    SetLayoutManager(std::move(layout));
 
     views::ImageView* icon = new views::ImageView();
     icon->SetImage(gfx::CreateVectorIcon(
@@ -242,8 +275,8 @@ class EmptyNotifierView : public views::View {
         l10n_util::GetStringUTF16(IDS_ASH_MESSAGE_CENTER_NO_NOTIFIERS));
     label->SetEnabledColor(message_center_style::kEmptyViewColor);
     // "Roboto-Medium, 12sp" is specified in the mock.
-    label->SetFontList(message_center_style::GetFontListForSizeAndWeight(
-        message_center_style::kEmptyLabelSize, gfx::Font::Weight::MEDIUM));
+    label->SetFontList(
+        gfx::FontList().DeriveWithWeight(gfx::Font::Weight::MEDIUM));
     AddChildView(label);
   }
 
@@ -258,118 +291,63 @@ class EmptyNotifierView : public views::View {
 // We do not use views::Checkbox class directly because it doesn't support
 // showing 'icon'.
 NotifierSettingsView::NotifierButton::NotifierButton(
-    NotifierSettingsProvider* provider,
-    std::unique_ptr<Notifier> notifier,
+    const mojom::NotifierUiData& notifier_ui_data,
     views::ButtonListener* listener)
     : views::Button(listener),
-      provider_(provider),
-      notifier_(std::move(notifier)),
+      notifier_id_(notifier_ui_data.notifier_id),
       icon_view_(new views::ImageView()),
-      name_view_(new views::Label(notifier_->name)),
-      checkbox_(new views::Checkbox(base::string16(), true /* force_md */)),
-      learn_more_(nullptr) {
-  DCHECK(provider_);
-  DCHECK(notifier_);
-
+      name_view_(new views::Label(notifier_ui_data.name)),
+      checkbox_(new views::Checkbox(base::string16(), true /* force_md */)) {
   name_view_->SetAutoColorReadabilityEnabled(false);
   name_view_->SetEnabledColor(kLabelColor);
   // "Roboto-Regular, 13sp" is specified in the mock.
-  name_view_->SetFontList(message_center_style::GetFontListForSizeAndWeight(
-      kLabelFontSize, gfx::Font::Weight::NORMAL));
+  name_view_->SetFontList(
+      gfx::FontList().DeriveWithSizeDelta(kLabelFontSizeDelta));
 
-  checkbox_->SetChecked(notifier_->enabled);
+  checkbox_->SetChecked(notifier_ui_data.enabled);
   checkbox_->set_listener(this);
   checkbox_->SetFocusBehavior(FocusBehavior::NEVER);
-  checkbox_->SetAccessibleName(notifier_->name);
+  checkbox_->SetAccessibleName(notifier_ui_data.name);
 
-  if (ShouldHaveLearnMoreButton()) {
-    // Create a more-info button that will be right-aligned.
-    learn_more_ = new views::ImageButton(this);
-    learn_more_->SetFocusPainter(CreateFocusPainter());
-    learn_more_->SetFocusForPlatform();
-
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    learn_more_->SetImage(
-        views::Button::STATE_NORMAL,
-        rb.GetImageSkiaNamed(IDR_NOTIFICATION_ADVANCED_SETTINGS));
-    learn_more_->SetImage(
-        views::Button::STATE_HOVERED,
-        rb.GetImageSkiaNamed(IDR_NOTIFICATION_ADVANCED_SETTINGS_HOVER));
-    learn_more_->SetImage(
-        views::Button::STATE_PRESSED,
-        rb.GetImageSkiaNamed(IDR_NOTIFICATION_ADVANCED_SETTINGS_PRESSED));
-    learn_more_->SetState(views::Button::STATE_NORMAL);
-    int learn_more_border_width = (kLearnMoreTargetWidth - kLearnMoreSize) / 2;
-    int learn_more_border_height =
-        (kLearnMoreTargetHeight - kLearnMoreSize) / 2;
-    // The image itself is quite small, this large invisible border creates a
-    // much bigger click target.
-    learn_more_->SetBorder(views::CreateEmptyBorder(
-        learn_more_border_height, learn_more_border_width,
-        learn_more_border_height, learn_more_border_width));
-    learn_more_->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
-                                   views::ImageButton::ALIGN_MIDDLE);
+  if (notifier_ui_data.enforced) {
+    Button::SetEnabled(false);
+    checkbox_->SetEnabled(false);
   }
 
-  UpdateIconImage(notifier_->icon);
+  UpdateIconImage(notifier_ui_data.icon);
 }
 
-NotifierSettingsView::NotifierButton::~NotifierButton() {}
+NotifierSettingsView::NotifierButton::~NotifierButton() = default;
 
 void NotifierSettingsView::NotifierButton::UpdateIconImage(
-    const gfx::Image& icon) {
-  notifier_->icon = icon;
-  if (icon.IsEmpty()) {
+    const gfx::ImageSkia& icon) {
+  if (icon.isNull()) {
     icon_view_->SetImage(gfx::CreateVectorIcon(
         message_center::kProductIcon, kEntryIconSize, gfx::kChromeIconGrey));
   } else {
-    icon_view_->SetImage(icon.ToImageSkia());
+    icon_view_->SetImage(icon);
     icon_view_->SetImageSize(gfx::Size(kEntryIconSize, kEntryIconSize));
   }
-  GridChanged(ShouldHaveLearnMoreButton());
+  GridChanged();
 }
 
 void NotifierSettingsView::NotifierButton::SetChecked(bool checked) {
   checkbox_->SetChecked(checked);
-  notifier_->enabled = checked;
 }
 
 bool NotifierSettingsView::NotifierButton::checked() const {
   return checkbox_->checked();
 }
 
-bool NotifierSettingsView::NotifierButton::has_learn_more() const {
-  return learn_more_ != nullptr;
-}
-
-const Notifier& NotifierSettingsView::NotifierButton::notifier() const {
-  return *notifier_.get();
-}
-
-void NotifierSettingsView::NotifierButton::SendLearnMorePressedForTest() {
-  if (learn_more_ == nullptr)
-    return;
-  gfx::Point point(110, 120);
-  ui::MouseEvent pressed(ui::ET_MOUSE_PRESSED, point, point,
-                         ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
-                         ui::EF_LEFT_MOUSE_BUTTON);
-  ButtonPressed(learn_more_, pressed);
-}
-
 void NotifierSettingsView::NotifierButton::ButtonPressed(
     views::Button* button,
     const ui::Event& event) {
-  if (button == checkbox_) {
-    // The checkbox state has already changed at this point, but we'll update
-    // the state on NotifierSettingsView::ButtonPressed() too, so here change
-    // back to the previous state.
-    checkbox_->SetChecked(!checkbox_->checked());
-    Button::NotifyClick(event);
-  } else if (button == learn_more_) {
-    DCHECK(provider_);
-    provider_->OnNotifierAdvancedSettingsRequested(notifier_->notifier_id,
-                                                   nullptr);
-  }
+  DCHECK_EQ(button, checkbox_);
+  // The checkbox state has already changed at this point, but we'll update
+  // the state on NotifierSettingsView::ButtonPressed() too, so here change
+  // back to the previous state.
+  checkbox_->SetChecked(!checkbox_->checked());
+  Button::NotifyClick(event);
 }
 
 void NotifierSettingsView::NotifierButton::GetAccessibleNodeData(
@@ -377,18 +355,11 @@ void NotifierSettingsView::NotifierButton::GetAccessibleNodeData(
   static_cast<views::View*>(checkbox_)->GetAccessibleNodeData(node_data);
 }
 
-bool NotifierSettingsView::NotifierButton::ShouldHaveLearnMoreButton() const {
-  if (!provider_)
-    return false;
-
-  return provider_->NotifierHasAdvancedSettings(notifier_->notifier_id);
-}
-
-void NotifierSettingsView::NotifierButton::GridChanged(bool has_learn_more) {
+void NotifierSettingsView::NotifierButton::GridChanged() {
   using views::ColumnSet;
   using views::GridLayout;
 
-  GridLayout* layout = GridLayout::CreateAndInstall(this);
+  GridLayout* layout = SetLayoutManager(std::make_unique<GridLayout>(this));
   ColumnSet* cs = layout->AddColumnSet(0);
   // Add a column for the checkbox.
   cs->AddPaddingColumn(0, kInnateCheckboxRightPadding);
@@ -408,71 +379,73 @@ void NotifierSettingsView::NotifierButton::GridChanged(bool has_learn_more) {
   // Add a padding column which contains expandable blank space.
   cs->AddPaddingColumn(1, 0);
 
-  // Add a column for the learn more button if necessary.
-  if (has_learn_more) {
-    cs->AddPaddingColumn(0, kInternalHorizontalSpacing);
-    cs->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
-                  GridLayout::USE_PREF, 0, 0);
-  }
-
   layout->StartRow(0, 0);
   layout->AddView(checkbox_);
   layout->AddView(icon_view_);
   layout->AddView(name_view_);
-  if (has_learn_more)
-    layout->AddView(learn_more_);
+
+  if (!enabled()) {
+    views::ImageView* policy_enforced_icon = new views::ImageView();
+    policy_enforced_icon->SetImage(gfx::CreateVectorIcon(
+        kSystemMenuBusinessIcon, kEntryIconSize, gfx::kChromeIconGrey));
+    cs->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0, GridLayout::FIXED,
+                  kEntryIconSize, 0);
+    layout->AddView(policy_enforced_icon);
+  }
 
   Layout();
 }
 
 // NotifierSettingsView -------------------------------------------------------
 
-NotifierSettingsView::NotifierSettingsView(NotifierSettingsProvider* provider)
+NotifierSettingsView::NotifierSettingsView()
     : title_arrow_(nullptr),
+      quiet_mode_icon_(nullptr),
+      quiet_mode_toggle_(nullptr),
       header_view_(nullptr),
       top_label_(nullptr),
       scroller_(nullptr),
-      no_notifiers_view_(nullptr),
-      provider_(provider) {
-  // |provider_| may be null in tests.
-  if (provider_)
-    provider_->AddObserver(this);
-
-  SetFocusBehavior(FocusBehavior::ALWAYS);
+      no_notifiers_view_(nullptr) {
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
   SetBackground(
       views::CreateSolidBackground(message_center_style::kBackgroundColor));
   SetPaintToLayer();
 
   header_view_ = new views::View;
-  header_view_->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical, kHeaderViewPadding, 0));
+  header_view_->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kVertical, kHeaderViewPadding, 0));
+  header_view_->SetBorder(
+      views::CreateSolidSidedBorder(1, 0, 0, 0, kTopBorderColor));
 
   views::View* quiet_mode_view = new views::View;
 
-  views::BoxLayout* quiet_mode_layout =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, kQuietModeViewPadding,
-                           kQuietModeViewSpacing);
-  quiet_mode_view->SetLayoutManager(quiet_mode_layout);
+  auto* quiet_mode_layout =
+      quiet_mode_view->SetLayoutManager(std::make_unique<views::BoxLayout>(
+          views::BoxLayout::kHorizontal, kQuietModeViewPadding,
+          kQuietModeViewSpacing));
 
-  views::ImageView* quiet_mode_icon = new views::ImageView();
-  quiet_mode_icon->SetImage(gfx::CreateVectorIcon(
-      kNotificationCenterDoNotDisturbOffIcon,
-      message_center_style::kActionIconSize, kQuietModeIconColor));
-  quiet_mode_view->AddChildView(quiet_mode_icon);
+  quiet_mode_icon_ = new views::ImageView();
+  quiet_mode_icon_->SetBorder(views::CreateEmptyBorder(kQuietModeLabelPadding));
+  quiet_mode_view->AddChildView(quiet_mode_icon_);
 
   views::Label* quiet_mode_label = new views::Label(l10n_util::GetStringUTF16(
       IDS_ASH_MESSAGE_CENTER_QUIET_MODE_BUTTON_TOOLTIP));
   quiet_mode_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   // "Roboto-Regular, 13sp" is specified in the mock.
   quiet_mode_label->SetFontList(
-      message_center_style::GetFontListForSizeAndWeight(
-          kLabelFontSize, gfx::Font::Weight::NORMAL));
+      gfx::FontList().DeriveWithSizeDelta(kLabelFontSizeDelta));
   quiet_mode_label->SetAutoColorReadabilityEnabled(false);
   quiet_mode_label->SetEnabledColor(kLabelColor);
+  quiet_mode_label->SetBorder(views::CreateEmptyBorder(kQuietModeLabelPadding));
   quiet_mode_view->AddChildView(quiet_mode_label);
   quiet_mode_layout->SetFlexForView(quiet_mode_label, 1);
 
   quiet_mode_toggle_ = new views::ToggleButton(this);
+  quiet_mode_toggle_->SetAccessibleName(l10n_util::GetStringUTF16(
+      IDS_ASH_MESSAGE_CENTER_QUIET_MODE_BUTTON_TOOLTIP));
+  quiet_mode_toggle_->SetBorder(
+      views::CreateEmptyBorder(kQuietModeTogglePadding));
+  quiet_mode_toggle_->EnableCanvasFlippingForRTLUI(true);
   SetQuietModeState(MessageCenter::Get()->IsQuietMode());
   quiet_mode_view->AddChildView(quiet_mode_toggle_);
   header_view_->AddChildView(quiet_mode_view);
@@ -481,8 +454,8 @@ NotifierSettingsView::NotifierSettingsView(NotifierSettingsProvider* provider)
       IDS_ASH_MESSAGE_CENTER_SETTINGS_DIALOG_DESCRIPTION));
   top_label_->SetBorder(views::CreateEmptyBorder(kTopLabelPadding));
   // "Roboto-Medium, 13sp" is specified in the mock.
-  top_label_->SetFontList(message_center_style::GetFontListForSizeAndWeight(
-      kLabelFontSize, gfx::Font::Weight::MEDIUM));
+  top_label_->SetFontList(gfx::FontList().Derive(
+      kLabelFontSizeDelta, gfx::Font::NORMAL, gfx::Font::Weight::MEDIUM));
   top_label_->SetAutoColorReadabilityEnabled(false);
   top_label_->SetEnabledColor(kTopLabelColor);
   top_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -501,17 +474,13 @@ NotifierSettingsView::NotifierSettingsView(NotifierSettingsProvider* provider)
   no_notifiers_view_ = new EmptyNotifierView();
   AddChildView(no_notifiers_view_);
 
-  std::vector<std::unique_ptr<Notifier>> notifiers;
-  if (provider_)
-    provider_->GetNotifierList(&notifiers);
-
-  UpdateContentsView(std::move(notifiers));
+  SetNotifierList({});
+  Shell::Get()->message_center_controller()->SetNotifierSettingsListener(this);
 }
 
 NotifierSettingsView::~NotifierSettingsView() {
-  // |provider_| may be null in tests.
-  if (provider_)
-    provider_->RemoveObserver(this);
+  Shell::Get()->message_center_controller()->SetNotifierSettingsListener(
+      nullptr);
 }
 
 bool NotifierSettingsView::IsScrollable() {
@@ -520,35 +489,40 @@ bool NotifierSettingsView::IsScrollable() {
 
 void NotifierSettingsView::SetQuietModeState(bool is_quiet_mode) {
   quiet_mode_toggle_->SetIsOn(is_quiet_mode, false /* animate */);
-}
-
-void NotifierSettingsView::UpdateIconImage(const NotifierId& notifier_id,
-                                           const gfx::Image& icon) {
-  for (std::set<NotifierButton*>::iterator iter = buttons_.begin();
-       iter != buttons_.end(); ++iter) {
-    if ((*iter)->notifier().notifier_id == notifier_id) {
-      (*iter)->UpdateIconImage(icon);
-      return;
-    }
+  if (is_quiet_mode) {
+    quiet_mode_icon_->SetImage(
+        gfx::CreateVectorIcon(kNotificationCenterDoNotDisturbOnIcon,
+                              message_center_style::kActionIconSize,
+                              message_center_style::kActiveButtonColor));
+  } else {
+    quiet_mode_icon_->SetImage(
+        gfx::CreateVectorIcon(kNotificationCenterDoNotDisturbOffIcon,
+                              message_center_style::kActionIconSize,
+                              message_center_style::kInactiveButtonColor));
   }
 }
 
-void NotifierSettingsView::UpdateContentsView(
-    std::vector<std::unique_ptr<Notifier>> notifiers) {
+void NotifierSettingsView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  node_data->role = ui::AX_ROLE_LIST;
+  node_data->SetName(l10n_util::GetStringUTF16(
+      IDS_ASH_MESSAGE_CENTER_SETTINGS_DIALOG_DESCRIPTION));
+}
+
+void NotifierSettingsView::SetNotifierList(
+    const std::vector<mojom::NotifierUiDataPtr>& ui_data) {
   buttons_.clear();
 
   views::View* contents_view = new ScrollContentsView();
-  contents_view->SetLayoutManager(new views::BoxLayout(
+  contents_view->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical, gfx::Insets(0, kHorizontalMargin)));
 
-  size_t notifier_count = notifiers.size();
+  size_t notifier_count = ui_data.size();
   for (size_t i = 0; i < notifier_count; ++i) {
-    NotifierButton* button =
-        new NotifierButton(provider_, std::move(notifiers[i]), this);
-    EntryView* entry = new EntryView(button);
+    NotifierButton* button = new NotifierButton(*ui_data[i], this);
+    NotifierButtonWrapperView* wrapper = new NotifierButtonWrapperView(button);
 
-    entry->SetFocusBehavior(FocusBehavior::ALWAYS);
-    contents_view->AddChildView(entry);
+    wrapper->SetFocusBehavior(FocusBehavior::ALWAYS);
+    contents_view->AddChildView(wrapper);
     buttons_.insert(button);
   }
 
@@ -559,6 +533,16 @@ void NotifierSettingsView::UpdateContentsView(
 
   contents_view->SetBoundsRect(gfx::Rect(contents_view->GetPreferredSize()));
   InvalidateLayout();
+}
+
+void NotifierSettingsView::UpdateNotifierIcon(const NotifierId& notifier_id,
+                                              const gfx::ImageSkia& icon) {
+  for (auto* button : buttons_) {
+    if (button->notifier_id() == notifier_id) {
+      button->UpdateIconImage(icon);
+      return;
+    }
+  }
 }
 
 void NotifierSettingsView::Layout() {
@@ -588,7 +572,6 @@ gfx::Size NotifierSettingsView::GetMinimumSize() const {
 }
 
 gfx::Size NotifierSettingsView::CalculatePreferredSize() const {
-  gfx::Size preferred_size;
   gfx::Size header_size = header_view_->GetPreferredSize();
   gfx::Size content_size = scroller_->contents()->GetPreferredSize();
   int no_notifiers_height = 0;
@@ -626,16 +609,14 @@ void NotifierSettingsView::ButtonPressed(views::Button* sender,
     return;
   }
 
-  std::set<NotifierButton*>::iterator iter =
-      buttons_.find(static_cast<NotifierButton*>(sender));
-
+  auto iter = buttons_.find(static_cast<NotifierButton*>(sender));
   if (iter == buttons_.end())
     return;
 
-  (*iter)->SetChecked(!(*iter)->checked());
-  if (provider_)
-    provider_->SetNotifierEnabled((*iter)->notifier().notifier_id,
-                                  (*iter)->checked());
+  NotifierButton* button = *iter;
+  button->SetChecked(!button->checked());
+  Shell::Get()->message_center_controller()->SetNotifierEnabled(
+      button->notifier_id(), button->checked());
 }
 
 }  // namespace ash

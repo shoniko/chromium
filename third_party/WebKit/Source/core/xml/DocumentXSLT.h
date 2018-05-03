@@ -5,9 +5,10 @@
 #ifndef DocumentXSLT_h
 #define DocumentXSLT_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "core/dom/Document.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -16,7 +17,6 @@ class ProcessingInstruction;
 
 class DocumentXSLT final : public GarbageCollected<DocumentXSLT>,
                            public Supplement<Document> {
-  WTF_MAKE_NONCOPYABLE(DocumentXSLT);
   USING_GARBAGE_COLLECTED_MIXIN(DocumentXSLT);
 
  public:
@@ -49,6 +49,7 @@ class DocumentXSLT final : public GarbageCollected<DocumentXSLT>,
   explicit DocumentXSLT(Document&);
 
   Member<Document> transform_source_document_;
+  DISALLOW_COPY_AND_ASSIGN(DocumentXSLT);
 };
 
 }  // namespace blink

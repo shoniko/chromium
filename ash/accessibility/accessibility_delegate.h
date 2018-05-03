@@ -5,8 +5,8 @@
 #ifndef ASH_ACCESSIBILITY_ACCESSIBILITY_DELEGATE_H_
 #define ASH_ACCESSIBILITY_ACCESSIBILITY_DELEGATE_H_
 
-#include "ash/accessibility_types.h"
 #include "ash/ash_export.h"
+#include "ash/public/cpp/accessibility_types.h"
 #include "base/time/time.h"
 #include "ui/accessibility/ax_enums.h"
 
@@ -21,36 +21,17 @@ class ASH_EXPORT AccessibilityDelegate {
  public:
   virtual ~AccessibilityDelegate() {}
 
-  // Invoked to toggle spoken feedback for accessibility
-  virtual void ToggleSpokenFeedback(
-      AccessibilityNotificationVisibility notify) = 0;
-
-  // Returns true if spoken feedback is enabled.
-  virtual bool IsSpokenFeedbackEnabled() const = 0;
-
   // Invoked to enable the screen magnifier.
   virtual void SetMagnifierEnabled(bool enabled) = 0;
 
   // Returns true if the screen magnifier is enabled.
   virtual bool IsMagnifierEnabled() const = 0;
 
-  // Invoked to enable autoclick.
-  virtual void SetAutoclickEnabled(bool enabled) = 0;
-
-  // Returns if autoclick is enabled or not.
-  virtual bool IsAutoclickEnabled() const = 0;
-
   // Invoked to enable or disable the a11y on-screen keyboard.
   virtual void SetVirtualKeyboardEnabled(bool enabled) = 0;
 
   // Returns if the a11y virtual keyboard is enabled.
   virtual bool IsVirtualKeyboardEnabled() const = 0;
-
-  // Invoked to enable or disable the mono audio output.
-  virtual void SetMonoAudioEnabled(bool enabled) = 0;
-
-  // Returns if the mono audio output is enabled.
-  virtual bool IsMonoAudioEnabled() const = 0;
 
   // Invoked to enable or disable caret highlighting.
   virtual void SetCaretHighlightEnabled(bool enabled) = 0;
@@ -110,12 +91,6 @@ class ASH_EXPORT AccessibilityDelegate {
   // is not saved, return a negative value.
   virtual double GetSavedScreenMagnifierScale() = 0;
 
-  // Triggers an accessibility alert to give the user feedback.
-  virtual void TriggerAccessibilityAlert(AccessibilityAlert alert) = 0;
-
-  // Gets the last accessibility alert that was triggered.
-  virtual AccessibilityAlert GetLastAccessibilityAlert() = 0;
-
   // Called when we first detect two fingers are held down, which can be
   // used to toggle spoken feedback on some touch-only devices.
   virtual void OnTwoFingerTouchStart() {}
@@ -130,18 +105,6 @@ class ASH_EXPORT AccessibilityDelegate {
 
   // Play tick sound indicating spoken feedback will be toggled after countdown.
   virtual void PlaySpokenFeedbackToggleCountdown(int tick_count) = 0;
-
-  // Plays an earcon. Earcons are brief and distinctive sounds that indicate
-  // when their mapped event has occurred. The sound key enums can be found in
-  // chromeos/audio/chromeos_sounds.h.
-  virtual void PlayEarcon(int sound_key) = 0;
-
-  // Initiates play of shutdown sound and returns it's duration.
-  virtual base::TimeDelta PlayShutdownSound() const = 0;
-
-  // Forward an accessibility gesture from the touch exploration controller to
-  // ChromeVox.
-  virtual void HandleAccessibilityGesture(ui::AXGesture gesture) = 0;
 
   // NOTE: Prefer adding methods to AccessibilityController, see class comment.
 };

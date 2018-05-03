@@ -76,7 +76,7 @@ class AudioLowLatencyInputOutputTest : public testing::Test {
  protected:
   AudioLowLatencyInputOutputTest() {
     audio_manager_ =
-        AudioManager::CreateForTesting(base::MakeUnique<TestAudioThread>());
+        AudioManager::CreateForTesting(std::make_unique<TestAudioThread>());
   }
 
   ~AudioLowLatencyInputOutputTest() override { audio_manager_->Shutdown(); }
@@ -298,7 +298,7 @@ class StreamWrapper {
     samples_per_packet_ = params.frames_per_buffer();
   }
 
-  virtual ~StreamWrapper() {}
+  virtual ~StreamWrapper() = default;
 
   // Creates an Audio[Input|Output]Stream stream object using default
   // parameters.

@@ -13,7 +13,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/sha1.h"
@@ -85,7 +84,7 @@ std::unique_ptr<SBChunkData> BuildChunk(
     raw_data->add_add_numbers(add_chunk_numbers[i]);
   }
 
-  return base::MakeUnique<SBChunkData>(std::move(raw_data));
+  return std::make_unique<SBChunkData>(std::move(raw_data));
 }
 
 // Create add chunk with a single prefix.
@@ -1504,79 +1503,6 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
               kGoodString));
     }
 
-    // The malware kill switch is for the CSD whitelist only.
-    if (test_case.test_list_name == kCsdWhiteList) {
-      // The CSD whitelist killswitch is not present.
-      EXPECT_FALSE(database_->IsCsdWhitelistKillSwitchOn());
-
-      // Test only add the malware IP killswitch
-      chunks.clear();
-      chunks.push_back(AddChunkFullHashValue(
-          15, "sb-ssl.google.com/safebrowsing/csd/killswitch_malware"));
-
-      ASSERT_TRUE(database_->UpdateStarted(&lists));
-      database_->InsertChunks(kCsdWhiteList, chunks);
-      database_->UpdateFinished(true);
-
-      EXPECT_TRUE(database_->IsMalwareIPMatchKillSwitchOn());
-      // The CSD whitelist killswitch is not present.
-      EXPECT_FALSE(database_->IsCsdWhitelistKillSwitchOn());
-    }
-
-    // Test that the generic whitelist kill-switch works as intended.
-    chunks.clear();
-    lists.clear();
-    chunks.push_back(AddChunkFullHashValue(
-        5, "sb-ssl.google.com/safebrowsing/csd/killswitch"));
-
-    ASSERT_TRUE(database_->UpdateStarted(&lists));
-    database_->InsertChunks(test_case.test_list_name, chunks);
-    database_->UpdateFinished(true);
-
-    // Test CSD whitelist specific methods.
-    if (test_case.test_list_name == kCsdWhiteList) {
-      // The CSD whitelist killswitch is present.
-      EXPECT_TRUE(database_->IsCsdWhitelistKillSwitchOn());
-      EXPECT_TRUE(database_->IsMalwareIPMatchKillSwitchOn());
-    }
-
-    EXPECT_TRUE(
-        (database_.get()->*test_case.test_list_contains_whitelisted_url)(
-            GURL(std::string("https://") + kGood1Url2 + "/c.html")));
-    EXPECT_TRUE(
-        (database_.get()->*test_case.test_list_contains_whitelisted_url)(
-            GURL(std::string("http://www.google.com/"))));
-    EXPECT_TRUE(
-        (database_.get()->*test_case.test_list_contains_whitelisted_url)(
-            GURL(std::string("http://www.phishing_url.com/"))));
-
-    if (test_case.TestStrings()) {
-      EXPECT_TRUE(
-          (database_.get()->*test_case.test_list_contains_whitelisted_string)(
-              "asdf"));
-      EXPECT_TRUE(
-          (database_.get()->*test_case.test_list_contains_whitelisted_string)(
-              kGoodString));
-    }
-
-    // Remove the kill-switch and verify that we can recover.
-    chunks.clear();
-    lists.clear();
-    chunks.push_back(SubChunkFullHashValue(
-        1, "sb-ssl.google.com/safebrowsing/csd/killswitch", 5));
-    if (test_case.test_list_name == kCsdWhiteList) {
-      chunks.push_back(SubChunkFullHashValue(
-          10, "sb-ssl.google.com/safebrowsing/csd/killswitch_malware", 15));
-    }
-
-    ASSERT_TRUE(database_->UpdateStarted(&lists));
-    database_->InsertChunks(test_case.test_list_name, chunks);
-    database_->UpdateFinished(true);
-
-    if (test_case.test_list_name == kCsdWhiteList) {
-      EXPECT_FALSE(database_->IsMalwareIPMatchKillSwitchOn());
-      EXPECT_FALSE(database_->IsCsdWhitelistKillSwitchOn());
-    }
     EXPECT_TRUE(
         (database_.get()->*test_case.test_list_contains_whitelisted_url)(
             GURL(std::string("https://") + kGood1Url2 + "/c.html")));

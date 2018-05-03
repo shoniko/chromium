@@ -5,7 +5,8 @@
 #include "modules/mediacapturefromelement/TimedCanvasDrawListener.h"
 
 #include <memory>
-#include "core/dom/TaskRunnerHelper.h"
+#include "core/dom/ExecutionContext.h"
+#include "public/platform/TaskType.h"
 #include "third_party/skia/include/core/SkImage.h"
 
 namespace blink {
@@ -15,13 +16,12 @@ TimedCanvasDrawListener::TimedCanvasDrawListener(
     double frame_rate,
     ExecutionContext* context)
     : CanvasDrawListener(std::move(handler)),
-      frame_interval_(1 / frame_rate),
-      request_frame_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, context),
-          this,
-          &TimedCanvasDrawListener::RequestFrameTimerFired) {}
+      frame_interval_(TimeDelta::FromSecondsD(1 / frame_rate)),
+      request_frame_timer_(context->GetTaskRunner(TaskType::kUnthrottled),
+                           this,
+                           &TimedCanvasDrawListener::RequestFrameTimerFired) {}
 
-TimedCanvasDrawListener::~TimedCanvasDrawListener() {}
+TimedCanvasDrawListener::~TimedCanvasDrawListener() = default;
 
 // static
 TimedCanvasDrawListener* TimedCanvasDrawListener::Create(
@@ -31,13 +31,15 @@ TimedCanvasDrawListener* TimedCanvasDrawListener::Create(
   TimedCanvasDrawListener* listener =
       new TimedCanvasDrawListener(std::move(handler), frame_rate, context);
   listener->request_frame_timer_.StartRepeating(listener->frame_interval_,
-                                                BLINK_FROM_HERE);
+                                                FROM_HERE);
   return listener;
 }
 
-void TimedCanvasDrawListener::SendNewFrame(sk_sp<SkImage> image) {
+void TimedCanvasDrawListener::SendNewFrame(
+    sk_sp<SkImage> image,
+    base::WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider) {
   frame_capture_requested_ = false;
-  CanvasDrawListener::SendNewFrame(std::move(image));
+  CanvasDrawListener::SendNewFrame(image, context_provider);
 }
 
 void TimedCanvasDrawListener::RequestFrameTimerFired(TimerBase*) {

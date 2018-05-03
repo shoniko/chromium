@@ -6,6 +6,8 @@
 #define COMPONENTS_CRONET_IOS_TEST_CRONET_TEST_BASE_H_
 
 #include <Cronet/Cronet.h>
+
+#include "base/bind.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/x509_certificate.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -13,9 +15,14 @@
 #pragma mark
 
 namespace base {
+class Location;
 class SingleThreadTaskRunner;
 class Thread;
 }
+
+namespace {
+typedef void (^BlockType)(void);
+}  // namespace
 
 // Exposes private test-only methods of the Cronet class.
 @interface Cronet (ExposedForTesting)
@@ -24,6 +31,7 @@ class Thread;
     (std::unique_ptr<net::CertVerifier>)certVerifier;
 + (void)setEnablePublicKeyPinningBypassForLocalTrustAnchors:(BOOL)enable;
 + (base::SingleThreadTaskRunner*)getFileThreadRunnerForTesting;
++ (base::SingleThreadTaskRunner*)getNetworkThreadRunnerForTesting;
 @end
 
 // NSURLSessionDataDelegate delegate implementation used by the tests to
@@ -31,21 +39,42 @@ class Thread;
 @interface TestDelegate : NSObject<NSURLSessionDataDelegate>
 
 // Error the request this delegate is attached to failed with, if any.
-@property(retain, atomic) NSError* error;
+@property(retain, atomic)
+    NSMutableDictionary<NSURLSessionTask*, NSError*>* errorPerTask;
 
 // Contains total amount of received data.
-@property(readonly) long totalBytesReceived;
+@property(readonly) NSMutableDictionary<NSURLSessionDataTask*, NSNumber*>*
+    totalBytesReceivedPerTask;
+
+// Contains the expected amount of received data.
+@property(readonly) NSMutableDictionary<NSURLSessionDataTask*, NSNumber*>*
+    expectedContentLengthPerTask;
+
+// Contains metrics data.
+@property(readonly) NSURLSessionTaskMetrics* taskMetrics NS_AVAILABLE_IOS(10.0);
+
+// Contains NSHTTPURLResponses for the tasks.
+@property(readonly)
+    NSMutableDictionary<NSURLSessionDataTask*, NSHTTPURLResponse*>*
+        responsePerTask;
 
 // Resets the delegate, so it can be used again for another request.
 - (void)reset;
 
 // Contains the response body.
-- (NSString*)responseBody;
+- (NSString*)responseBody:(NSURLSessionDataTask*)task;
 
-/// Waits for request to complete.
+/// Waits for a single request to complete.
 
 /// @return  |NO| if the request didn't complete and the method timed-out.
-- (BOOL)waitForDone;
+- (BOOL)waitForDone:(NSURLSessionDataTask*)task
+        withTimeout:(int64_t)deadline_ns;
+
+// Convenience functions for single-task delegates
+- (NSError*)error;
+- (long)totalBytesReceived;
+- (long)expectedContentLength;
+- (NSString*)responseBody;
 
 @end
 
@@ -65,14 +94,25 @@ class CronetTestBase : public ::testing::Test {
 
   void SetUp() override;
   void TearDown() override;
-  void StartDataTaskAndWaitForCompletion(NSURLSessionDataTask* task);
+  bool StartDataTaskAndWaitForCompletion(NSURLSessionDataTask* task,
+                                         int64_t deadline_ns = 15 *
+                                                               NSEC_PER_SEC);
   std::unique_ptr<net::MockCertVerifier> CreateMockCertVerifier(
       const std::vector<std::string>& certs,
       bool known_root);
 
-  ::testing::AssertionResult IsResponseSuccessful();
+  void PostBlockToFileThread(const base::Location& from_here, BlockType block);
+  void PostBlockToNetworkThread(const base::Location& from_here,
+                                BlockType block);
+
+  ::testing::AssertionResult IsResponseSuccessful(NSURLSessionDataTask* task);
+  ::testing::AssertionResult IsResponseCanceled(NSURLSessionDataTask* task);
 
   TestDelegate* delegate_;
+
+ private:
+  void ExecuteBlock(BlockType block);
+
 };  // class CronetTestBase
 
 }  // namespace cronet

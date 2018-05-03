@@ -16,6 +16,7 @@
 @class Tab;
 @class TabModel;
 @protocol TabSwitcher;
+@protocol ToolbarCommands;
 @protocol ToolbarOwner;
 
 // This delegate is used to drive the TabSwitcher dismissal and execute code
@@ -49,6 +50,9 @@
 // Informs the delegate that a TabSwitcher presentation animation has completed.
 - (void)tabSwitcherPresentationAnimationDidEnd:(id<TabSwitcher>)tabSwitcher;
 
+// Informs the delegate that a TabSwitcher dismissal animation has completed.
+- (void)tabSwitcherDismissalAnimationDidEnd:(id<TabSwitcher>)tabSwitcher;
+
 @end
 
 // This protocol describes the common interface between the two implementations
@@ -62,8 +66,9 @@
 @property(nonatomic, assign) id<TabSwitcherAnimationDelegate> animationDelegate;
 
 // Dispatcher for anything that acts in a "browser" role.
-@property(nonatomic, readonly) id<ApplicationCommands, BrowserCommands>
-    dispatcher;
+@property(nonatomic, readonly)
+    id<ApplicationCommands, BrowserCommands, ToolbarCommands>
+        dispatcher;
 
 // Restores the internal state of the tab switcher with the given tab models,
 // which must not be nil. |activeTabModel| is the model which starts active,
@@ -75,6 +80,9 @@
 
 // Returns the root view of the tab switcher.
 - (UIView*)view;
+
+// Tells the tab switcher to prepare to be displayed at |size|.
+- (void)prepareForDisplayAtSize:(CGSize)size;
 
 // Performs an animation of the selected tab from its presented state to its
 // place in the tab switcher. Should be called after the tab switcher's view has

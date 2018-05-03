@@ -24,6 +24,9 @@
 #include <unicode/rbbi.h>
 #include <unicode/ubrk.h>
 #include <memory>
+
+#include "base/macros.h"
+#include "platform/text/ICUError.h"
 #include "platform/text/TextBreakIteratorInternalICU.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/HashMap.h"
@@ -36,7 +39,6 @@ namespace blink {
 
 class LineBreakIteratorPool final {
   USING_FAST_MALLOC(LineBreakIteratorPool);
-  WTF_MAKE_NONCOPYABLE(LineBreakIteratorPool);
 
  public:
   static LineBreakIteratorPool& SharedPool() {
@@ -98,7 +100,7 @@ class LineBreakIteratorPool final {
   }
 
  private:
-  LineBreakIteratorPool() {}
+  LineBreakIteratorPool() = default;
 
   static const size_t kCapacity = 4;
 
@@ -109,6 +111,8 @@ class LineBreakIteratorPool final {
 
   friend WTF::ThreadSpecific<LineBreakIteratorPool>::
   operator LineBreakIteratorPool*();
+
+  DISALLOW_COPY_AND_ASSIGN(LineBreakIteratorPool);
 };
 
 enum TextContext { kNoContext, kPriorContext, kPrimaryContext };
@@ -777,12 +781,14 @@ void NonSharedCharacterBreakIterator::CreateIteratorForBuffer(
       iterator_ &&
       CompareAndSwapNonSharedCharacterBreakIterator(iterator_, nullptr);
   if (!created_iterator) {
-    UErrorCode error_code = U_ZERO_ERROR;
+    ICUError error_code;
     iterator_ = icu::BreakIterator::createCharacterInstance(
         icu::Locale(CurrentTextBreakLocaleID()), error_code);
-    DCHECK(U_SUCCESS(error_code))
+    CHECK(U_SUCCESS(error_code) && iterator_)
         << "ICU could not open a break iterator: " << u_errorName(error_code)
         << " (" << error_code << ")";
+  } else {
+    CHECK(iterator_);
   }
 
   SetText16(iterator_, buffer, length);

@@ -37,8 +37,7 @@ import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
  * Unit tests for {@link InstantAppsHandler}.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class InstantAppsHandlerTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -247,7 +246,7 @@ public class InstantAppsHandlerTest {
 
         @Override
         protected void maybeShowInstantAppBanner(
-                Context context, String url, Uri referrer, Tab tab) {
+                Context context, String url, Uri referrer, Tab tab, boolean instantAppIsDefault) {
             mStartedAsyncCall = true;
         }
     }

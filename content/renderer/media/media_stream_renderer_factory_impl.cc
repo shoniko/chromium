@@ -34,17 +34,9 @@ PeerConnectionDependencyFactory* GetPeerConnectionDependencyFactory() {
 int GetSessionIdForWebRtcAudioRenderer() {
   WebRtcAudioDeviceImpl* audio_device =
       GetPeerConnectionDependencyFactory()->GetWebRtcAudioDevice();
-  if (!audio_device)
-    return 0;
-
-  int session_id = 0;
-  int sample_rate;        // ignored, read from output device
-  int frames_per_buffer;  // ignored, read from output device
-  if (!audio_device->GetAuthorizedDeviceInfoForAudioRenderer(
-          &session_id, &sample_rate, &frames_per_buffer)) {
-    session_id = 0;
-  }
-  return session_id;
+  return audio_device
+             ? audio_device->GetAuthorizedDeviceSessionIdForAudioRenderer()
+             : 0;
 }
 
 }  // namespace
@@ -74,7 +66,7 @@ MediaStreamRendererFactoryImpl::GetVideoRenderer(
   web_stream.VideoTracks(video_tracks);
   if (video_tracks.IsEmpty() ||
       !MediaStreamVideoTrack::GetTrack(video_tracks[0])) {
-    return NULL;
+    return nullptr;
   }
 
   return new MediaStreamVideoRendererSink(video_tracks[0], error_cb, repaint_cb,

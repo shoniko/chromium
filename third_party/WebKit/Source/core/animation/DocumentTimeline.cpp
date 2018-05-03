@@ -31,6 +31,7 @@
 #include "core/animation/DocumentTimeline.h"
 
 #include <algorithm>
+#include "core/animation/Animation.h"
 #include "core/animation/AnimationClock.h"
 #include "core/animation/DocumentTimelineOptions.h"
 #include "core/animation/ElementAnimations.h"
@@ -177,7 +178,7 @@ void DocumentTimeline::ScheduleNextService() {
 void DocumentTimeline::DocumentTimelineTiming::WakeAfter(double duration) {
   if (timer_.IsActive() && timer_.NextFireInterval() < duration)
     return;
-  timer_.StartOneShot(duration, BLINK_FROM_HERE);
+  timer_.StartOneShot(duration, FROM_HERE);
 }
 
 void DocumentTimeline::DocumentTimelineTiming::ServiceOnNextFrame() {
@@ -188,6 +189,12 @@ void DocumentTimeline::DocumentTimelineTiming::ServiceOnNextFrame() {
 void DocumentTimeline::DocumentTimelineTiming::Trace(blink::Visitor* visitor) {
   visitor->Trace(timeline_);
   DocumentTimeline::PlatformTiming::Trace(visitor);
+}
+
+size_t DocumentTimeline::MainThreadCompositableAnimationsCount() const {
+  size_t main_thread_compositable_animations_count = 0;
+  // TODO(crbug.com/781305): Restore the calculation here.
+  return main_thread_compositable_animations_count;
 }
 
 double DocumentTimeline::ZeroTime() {

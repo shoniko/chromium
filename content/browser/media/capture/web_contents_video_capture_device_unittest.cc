@@ -22,6 +22,7 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
+#include "content/browser/renderer_host/render_widget_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_frame_subscriber.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -32,6 +33,7 @@
 #include "content/public/test/test_utils.h"
 #include "content/test/test_render_frame_host_factory.h"
 #include "content/test/test_render_view_host.h"
+#include "content/test/test_render_widget_host_factory.h"
 #include "content/test/test_web_contents.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
@@ -187,11 +189,10 @@ class CaptureTestRenderViewHost : public TestRenderViewHost {
                             int32_t main_frame_routing_id,
                             bool swapped_out)
       : TestRenderViewHost(instance,
-                           base::MakeUnique<RenderWidgetHostImpl>(
+                           TestRenderWidgetHost::Create(
                                widget_delegate,
                                instance->GetProcess(),
                                routing_id,
-                               nullptr,
                                false /* This means: "Is not hidden." */),
                            delegate,
                            main_frame_routing_id,
@@ -240,7 +241,7 @@ class StubClient : public media::VideoCaptureDevice::Client {
       : report_callback_(report_callback),
         error_callback_(error_callback) {
     buffer_pool_ = new media::VideoCaptureBufferPoolImpl(
-        base::MakeUnique<media::VideoCaptureBufferTrackerFactoryImpl>(), 2);
+        std::make_unique<media::VideoCaptureBufferTrackerFactoryImpl>(), 2);
   }
   ~StubClient() override {}
 
@@ -469,11 +470,15 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
     // CopyFromSurfaceToVideoFrame functionality into TestRenderWidgetHostView
     // itself.
 
-    render_process_host_factory_.reset(new MockRenderProcessHostFactory());
+    render_process_host_factory_ =
+        std::make_unique<MockRenderProcessHostFactory>();
     // Create our (self-registering) RVH factory, so that when we create a
     // WebContents, it in turn creates CaptureTestRenderViewHosts.
-    render_view_host_factory_.reset(new CaptureTestRenderViewHostFactory());
-    render_frame_host_factory_.reset(new TestRenderFrameHostFactory());
+    render_view_host_factory_ =
+        std::make_unique<CaptureTestRenderViewHostFactory>();
+    render_frame_host_factory_ = std::make_unique<TestRenderFrameHostFactory>();
+    render_widget_host_factory_ =
+        std::make_unique<TestRenderWidgetHostFactory>();
 
     browser_context_.reset(new TestBrowserContext());
 
@@ -507,7 +512,7 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
 
     base::RunLoop().RunUntilIdle();
 
-    RenderProcessHostImpl::set_render_process_host_factory(NULL);
+    RenderProcessHostImpl::set_render_process_host_factory(nullptr);
     render_frame_host_factory_.reset();
     render_view_host_factory_.reset();
     render_process_host_factory_.reset();
@@ -631,6 +636,9 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
 
   // Self-registering RenderFrameHostFactory.
   std::unique_ptr<TestRenderFrameHostFactory> render_frame_host_factory_;
+
+  // Self-registering RenderWidgetHostFactory.
+  std::unique_ptr<TestRenderWidgetHostFactory> render_widget_host_factory_;
 
   // A mocked-out browser and tab.
   std::unique_ptr<TestBrowserContext> browser_context_;
@@ -787,7 +795,7 @@ TEST_F(WebContentsVideoCaptureDeviceTest, GoesThroughAllTheMotions) {
 TEST_F(WebContentsVideoCaptureDeviceTest, VariableResolution_FixedAspectRatio) {
   media::VideoCaptureParams capture_params = DefaultCaptureParams();
   capture_params.resolution_change_policy =
-      media::RESOLUTION_POLICY_FIXED_ASPECT_RATIO;
+      media::ResolutionChangePolicy::FIXED_ASPECT_RATIO;
   std::unique_ptr<StubClient> client = client_observer()->PassClient();
   EXPECT_CALL(*client, OnStarted());
   device()->AllocateAndStart(capture_params, std::move(client));
@@ -835,7 +843,7 @@ TEST_F(WebContentsVideoCaptureDeviceTest, VariableResolution_FixedAspectRatio) {
 TEST_F(WebContentsVideoCaptureDeviceTest, VariableResolution_AnyWithinLimits) {
   media::VideoCaptureParams capture_params = DefaultCaptureParams();
   capture_params.resolution_change_policy =
-      media::RESOLUTION_POLICY_ANY_WITHIN_LIMIT;
+      media::ResolutionChangePolicy::ANY_WITHIN_LIMIT;
   std::unique_ptr<StubClient> client = client_observer()->PassClient();
   EXPECT_CALL(*client, OnStarted());
   device()->AllocateAndStart(capture_params, std::move(client));
@@ -885,12 +893,11 @@ TEST_F(WebContentsVideoCaptureDeviceTest,
        ComputesStandardResolutionsForPreferredSize) {
   // Helper function to run the same testing procedure for multiple combinations
   // of |policy|, |standard_size| and |oddball_size|.
-  const auto RunTestForPreferredSize =
-      [=](media::ResolutionChangePolicy policy,
-          const gfx::Size& oddball_size,
-          const gfx::Size& standard_size) {
+  const auto RunTestForPreferredSize = [=](media::ResolutionChangePolicy policy,
+                                           const gfx::Size& oddball_size,
+                                           const gfx::Size& standard_size) {
     SCOPED_TRACE(::testing::Message()
-                 << "policy=" << policy
+                 << "policy=" << static_cast<int>(policy)
                  << ", oddball_size=" << oddball_size.ToString()
                  << ", standard_size=" << standard_size.ToString());
 
@@ -899,8 +906,9 @@ TEST_F(WebContentsVideoCaptureDeviceTest,
     // variable-resolution cases, the |standard_size| is the expected size.
     // Also, adjust to account for the device scale factor.
     gfx::Size capture_preferred_size = gfx::ScaleToFlooredSize(
-        policy == media::RESOLUTION_POLICY_FIXED_RESOLUTION ? oddball_size
-                                                            : standard_size,
+        policy == media::ResolutionChangePolicy::FIXED_RESOLUTION
+            ? oddball_size
+            : standard_size,
         1.0f / GetDeviceScaleFactor());
     ASSERT_NE(capture_preferred_size, web_contents()->GetPreferredSize());
 
@@ -924,9 +932,9 @@ TEST_F(WebContentsVideoCaptureDeviceTest,
   };
 
   const media::ResolutionChangePolicy policies[3] = {
-    media::RESOLUTION_POLICY_FIXED_RESOLUTION,
-    media::RESOLUTION_POLICY_FIXED_ASPECT_RATIO,
-    media::RESOLUTION_POLICY_ANY_WITHIN_LIMIT,
+      media::ResolutionChangePolicy::FIXED_RESOLUTION,
+      media::ResolutionChangePolicy::FIXED_ASPECT_RATIO,
+      media::ResolutionChangePolicy::ANY_WITHIN_LIMIT,
   };
 
   for (size_t i = 0; i < arraysize(policies); ++i) {

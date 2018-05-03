@@ -10,26 +10,37 @@
 #include "base/callback.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "platform/scheduler/base/task_queue.h"
 #include "platform/scheduler/child/scheduler_helper.h"
-#include "platform/scheduler/child/scheduler_tqm_delegate.h"
 
 namespace blink {
 namespace scheduler {
 
 CompositorWorkerScheduler::CompositorWorkerScheduler(
     base::Thread* thread,
-    scoped_refptr<SchedulerTqmDelegate> main_task_runner)
+    std::unique_ptr<TaskQueueManager> task_queue_manager)
     : WorkerScheduler(
-          std::make_unique<WorkerSchedulerHelper>(main_task_runner)),
+          std::make_unique<WorkerSchedulerHelper>(std::move(task_queue_manager),
+                                                  this)),
       thread_(thread) {}
 
-CompositorWorkerScheduler::~CompositorWorkerScheduler() {}
-
-void CompositorWorkerScheduler::Init() {}
+CompositorWorkerScheduler::~CompositorWorkerScheduler() = default;
 
 scoped_refptr<WorkerTaskQueue> CompositorWorkerScheduler::DefaultTaskQueue() {
   return helper_->DefaultWorkerTaskQueue();
+}
+
+void CompositorWorkerScheduler::Init() {}
+
+void CompositorWorkerScheduler::OnTaskCompleted(
+    WorkerTaskQueue* worker_task_queue,
+    const TaskQueue::Task& task,
+    base::TimeTicks start,
+    base::TimeTicks end,
+    base::Optional<base::TimeDelta> thread_time) {
+  compositor_metrics_helper_.RecordTaskMetrics(worker_task_queue, task, start,
+                                               end, thread_time);
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
@@ -45,6 +56,11 @@ CompositorWorkerScheduler::IdleTaskRunner() {
   // vsync. https://crbug.com/609532
   return base::MakeRefCounted<SingleThreadIdleTaskRunner>(
       thread_->task_runner(), this);
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+CompositorWorkerScheduler::IPCTaskRunner() {
+  return base::ThreadTaskRunnerHandle::Get();
 }
 
 bool CompositorWorkerScheduler::CanExceedIdleDeadlineIfRequired() const {
@@ -81,6 +97,8 @@ void CompositorWorkerScheduler::DidProcessIdleTask() {}
 base::TimeTicks CompositorWorkerScheduler::NowTicks() {
   return base::TimeTicks::Now();
 }
+
+void CompositorWorkerScheduler::SetThreadType(ThreadType thread_type) {}
 
 }  // namespace scheduler
 }  // namespace blink

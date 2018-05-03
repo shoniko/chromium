@@ -31,9 +31,9 @@
 #ifndef WebHelperPluginImpl_h
 #define WebHelperPluginImpl_h
 
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/web/WebHelperPlugin.h"
 
@@ -47,7 +47,6 @@ class WebPluginContainerImpl;
 // detached HTMLPluginElement to host the plugin and uses
 // LocalFrameClient::createPlugin() to instantiate the requested plugin.
 class WebHelperPluginImpl final : public WebHelperPlugin {
-  WTF_MAKE_NONCOPYABLE(WebHelperPluginImpl);
   USING_FAST_MALLOC(WebHelperPluginImpl);
 
  public:
@@ -58,13 +57,15 @@ class WebHelperPluginImpl final : public WebHelperPlugin {
  private:
   friend class WebHelperPlugin;
 
-  WebHelperPluginImpl() {}
+  WebHelperPluginImpl() = default;
 
   bool Initialize(const String& plugin_type, WebLocalFrameImpl*);
   void ReallyDestroy();
 
   Persistent<HTMLObjectElement> object_element_;
   Persistent<WebPluginContainerImpl> plugin_container_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebHelperPluginImpl);
 };
 
 }  // namespace blink

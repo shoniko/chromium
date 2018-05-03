@@ -16,7 +16,10 @@ import org.junit.Assert;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content.browser.ContentViewCoreImpl;
+import org.chromium.content.browser.RenderCoordinates;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
+import org.chromium.content_public.browser.JavascriptInjector;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.WebContents;
@@ -86,8 +89,8 @@ public class ContentShellActivityTestRule extends ActivityTestRule<ContentShellA
     /**
      * Returns the current ContentViewCore or null if there is no ContentView.
      */
-    public ContentViewCore getContentViewCore() {
-        return mDelegate.getContentViewCore();
+    public ContentViewCoreImpl getContentViewCore() {
+        return (ContentViewCoreImpl) mDelegate.getContentViewCore();
     }
 
     /**
@@ -95,6 +98,17 @@ public class ContentShellActivityTestRule extends ActivityTestRule<ContentShellA
      */
     public WebContents getWebContents() {
         return mDelegate.getWebContents();
+    }
+
+    /**
+     * Returns the RenderCoordinates of the WebContents.
+     */
+    public RenderCoordinates getRenderCoordinates() {
+        return mDelegate.getRenderCoordinates();
+    }
+
+    public JavascriptInjector getJavascriptInjector() {
+        return JavascriptInjector.fromWebContents(getWebContents());
     }
 
     /**

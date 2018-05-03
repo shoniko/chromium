@@ -13,6 +13,8 @@
 
 namespace blink {
 
+class CallbackFunctionBase;
+
 // Boolean
 template <>
 struct CORE_EXPORT NativeValueTraits<IDLBoolean>
@@ -175,6 +177,8 @@ struct CORE_EXPORT NativeValueTraits<IDLByteString>
                             ExceptionState& exception_state) {
     return ToByteString(isolate, value, exception_state);
   }
+
+  static String NullValue() { return String(); }
 };
 
 template <>
@@ -196,6 +200,8 @@ struct CORE_EXPORT NativeValueTraits<IDLString>
       return String();
     return string;
   }
+
+  static String NullValue() { return String(); }
 };
 
 template <>
@@ -206,6 +212,8 @@ struct CORE_EXPORT NativeValueTraits<IDLUSVString>
                             ExceptionState& exception_state) {
     return ToUSVString(isolate, value, exception_state);
   }
+
+  static String NullValue() { return String(); }
 };
 
 // Floats and doubles
@@ -525,6 +533,43 @@ struct NativeValueTraits<IDLRecord<K, V>>
     }
     // "5. Return result."
     return result;
+  }
+};
+
+// Callback functions
+template <typename T>
+struct NativeValueTraits<
+    T,
+    typename std::enable_if<
+        std::is_base_of<CallbackFunctionBase, T>::value>::type>
+    : public NativeValueTraitsBase<T> {
+  static T* NativeValue(v8::Isolate* isolate,
+                        v8::Local<v8::Value> value,
+                        ExceptionState& exception_state) {
+    // Not implemented because of no use case so far.
+    CHECK(false)
+        // Emit a message so that NativeValueTraitsImplTest.IDLCallbackFunction
+        // test can confirm that it's hitting this specific failure. i.e.
+        // the template resolution is working as expected.
+        << "NativeValueTraits<CallbackFunctionBase>::NativeValue "
+        << "is not yet implemented.";
+    return nullptr;
+  }
+};
+
+// Nullable
+template <typename InnerType>
+struct NativeValueTraits<IDLNullable<InnerType>>
+    : public NativeValueTraitsBase<IDLNullable<InnerType>> {
+  // https://heycam.github.io/webidl/#es-nullable-type
+  static typename IDLNullable<InnerType>::ResultType NativeValue(
+      v8::Isolate* isolate,
+      v8::Local<v8::Value> v8_value,
+      ExceptionState& exception_state) {
+    if (v8_value->IsNullOrUndefined())
+      return IDLNullable<InnerType>::NullValue();
+    return NativeValueTraits<InnerType>::NativeValue(isolate, v8_value,
+                                                     exception_state);
   }
 };
 

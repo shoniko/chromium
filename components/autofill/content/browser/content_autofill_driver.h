@@ -74,12 +74,17 @@ class ContentAutofillDriver : public AutofillDriver,
   // mojom::AutofillDriver:
   void FormsSeen(const std::vector<FormData>& forms,
                  base::TimeTicks timestamp) override;
-  void WillSubmitForm(const FormData& form, base::TimeTicks timestamp) override;
-  void FormSubmitted(const FormData& form) override;
+  void FormSubmitted(const FormData& form,
+                     bool known_success,
+                     SubmissionSource source,
+                     base::TimeTicks timestamp) override;
   void TextFieldDidChange(const FormData& form,
                           const FormFieldData& field,
                           const gfx::RectF& bounding_box,
                           base::TimeTicks timestamp) override;
+  void TextFieldDidScroll(const FormData& form,
+                          const FormFieldData& field,
+                          const gfx::RectF& bounding_box) override;
   void QueryFormFieldAutofill(int32_t id,
                               const FormData& form,
                               const FormFieldData& field,

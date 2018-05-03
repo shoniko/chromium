@@ -39,7 +39,7 @@ namespace blink {
 NavigatorVibration::NavigatorVibration(Navigator& navigator)
     : ContextLifecycleObserver(navigator.GetFrame()->GetDocument()) {}
 
-NavigatorVibration::~NavigatorVibration() {}
+NavigatorVibration::~NavigatorVibration() = default;
 
 // static
 NavigatorVibration& NavigatorVibration::From(Navigator& navigator) {
@@ -82,8 +82,8 @@ bool NavigatorVibration::vibrate(Navigator& navigator,
   if (!frame->GetPage()->IsPageVisible())
     return false;
 
-  if (IsSupportedInFeaturePolicy(blink::WebFeaturePolicyFeature::kVibrate) &&
-      !frame->IsFeatureEnabled(blink::WebFeaturePolicyFeature::kVibrate)) {
+  if (IsSupportedInFeaturePolicy(blink::FeaturePolicyFeature::kVibrate) &&
+      !frame->IsFeatureEnabled(blink::FeaturePolicyFeature::kVibrate)) {
     frame->DomWindow()->PrintErrorMessage(
         "Navigator.vibrate() is not enabled in feature policy for this "
         "frame.");

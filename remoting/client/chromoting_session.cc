@@ -12,11 +12,11 @@
 #include "base/callback_helpers.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "net/socket/client_socket_factory.h"
 #include "remoting/base/chromium_url_request.h"
 #include "remoting/base/chromoting_event.h"
+#include "remoting/base/service_urls.h"
 #include "remoting/client/audio/audio_player.h"
 #include "remoting/client/chromoting_client_runtime.h"
 #include "remoting/client/client_telemetry_logger.h"
@@ -99,9 +99,7 @@ ChromotingSession::ChromotingSession(
 
 ChromotingSession::~ChromotingSession() {
   DCHECK(runtime_->network_task_runner()->BelongsToCurrentThread());
-  if (client_) {
-    ReleaseResources();
-  }
+  ReleaseResources();
 }
 
 void ChromotingSession::Connect() {
@@ -115,21 +113,37 @@ void ChromotingSession::Connect() {
 }
 
 void ChromotingSession::Disconnect() {
+  DisconnectForReason(protocol::ErrorCode::OK);
+}
+
+void ChromotingSession::DisconnectForReason(protocol::ErrorCode error) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::Disconnect, GetWeakPtr()));
+        FROM_HERE, base::BindOnce(&ChromotingSession::DisconnectForReason,
+                                  GetWeakPtr(), error));
     return;
   }
 
-  stats_logging_enabled_ = false;
+  EnableStatsLogging(false);
 
-  // User disconnection will not trigger OnConnectionState(Closed, OK).
-  // Remote disconnection will trigger OnConnectionState(...) and later trigger
-  // Disconnect().
-  if (connected_) {
-    logger_->LogSessionStateChange(ChromotingEvent::SessionState::CLOSED,
-                                   ChromotingEvent::ConnectionError::NONE);
-    connected_ = false;
+  // Do not log session state change if the connection is never started or is
+  // already closed.
+  if (session_state_ != protocol::ConnectionToHost::INITIALIZING &&
+      session_state_ != protocol::ConnectionToHost::FAILED &&
+      session_state_ != protocol::ConnectionToHost::CLOSED) {
+    ChromotingEvent::SessionState session_state_to_log;
+    if (error != protocol::ErrorCode::OK) {
+      session_state_to_log = ChromotingEvent::SessionState::CONNECTION_FAILED;
+    } else if (session_state_ == protocol::ConnectionToHost::CONNECTED) {
+      session_state_to_log = ChromotingEvent::SessionState::CLOSED;
+    } else {
+      session_state_to_log = ChromotingEvent::SessionState::CONNECTION_CANCELED;
+    }
+    logger_->LogSessionStateChange(
+        session_state_to_log, ClientTelemetryLogger::TranslateError(error));
+    session_state_ = (error == protocol::ErrorCode::OK)
+                         ? protocol::ConnectionToHost::CLOSED
+                         : protocol::ConnectionToHost::FAILED;
   }
 
   ReleaseResources();
@@ -318,8 +332,8 @@ void ChromotingSession::OnConnectionState(
 
   // This code assumes no intermediate connection state between CONNECTED and
   // CLOSED/FAILED.
-  connected_ = state == protocol::ConnectionToHost::CONNECTED;
-  EnableStatsLogging(connected_);
+  session_state_ = state;
+  EnableStatsLogging(session_state_ == protocol::ConnectionToHost::CONNECTED);
 
   logger_->LogSessionStateChange(ClientTelemetryLogger::TranslateState(state),
                                  ClientTelemetryLogger::TranslateError(error));
@@ -334,6 +348,11 @@ void ChromotingSession::OnConnectionState(
   runtime_->ui_task_runner()->PostTask(
       FROM_HERE, base::Bind(&ChromotingSession::Delegate::OnConnectionState,
                             delegate_, state, error));
+
+  if (state == protocol::ConnectionToHost::CLOSED ||
+      state == protocol::ConnectionToHost::FAILED) {
+    ReleaseResources();
+  }
 }
 
 void ChromotingSession::OnConnectionReady(bool ready) {
@@ -423,12 +442,14 @@ void ChromotingSession::ConnectToHostOnNetworkThread() {
   scoped_refptr<protocol::TransportContext> transport_context =
       new protocol::TransportContext(
           signaling_.get(),
-          base::MakeUnique<protocol::ChromiumPortAllocatorFactory>(),
-          base::MakeUnique<ChromiumUrlRequestFactory>(
+          std::make_unique<protocol::ChromiumPortAllocatorFactory>(),
+          std::make_unique<ChromiumUrlRequestFactory>(
               runtime_->url_requester()),
           protocol::NetworkSettings(
               protocol::NetworkSettings::NAT_TRAVERSAL_FULL),
           protocol::TransportRole::CLIENT);
+  transport_context->set_ice_config_url(
+      ServiceUrls::GetInstance()->ice_config_url(), runtime_->token_getter());
 
 #if defined(ENABLE_WEBRTC_REMOTING_CLIENT)
   if (connection_info_.flags.find("useWebrtc") != std::string::npos) {
@@ -506,7 +527,13 @@ void ChromotingSession::ReleaseResources() {
   client_context_.reset();
   cursor_shape_stub_.reset();
 
-  weak_factory_.InvalidateWeakPtrs();
+  // Weak factory can only be invalidated once (due to DCHECK in it). After that
+  // the instance will no longer be usable. This is a design flaw that makes the
+  // instance no longer reusable after the caller calls Disconnect. Ideally we
+  // should factor out a Core that lives between (Connect, Disconnect).
+  if (weak_ptr_) {
+    weak_factory_.InvalidateWeakPtrs();
+  }
 }
 
 }  // namespace remoting

@@ -164,7 +164,7 @@ void handleOnLoad(content::WebContents* webContents) {
       frameHost->ExecuteJavaScriptInIsolatedWorld(
         base::UTF8ToUTF16(js),
         content::RenderFrameHost::JavaScriptResultCallback(),
-        chrome::ISOLATED_WORLD_ID_ADBLOCK);
+        ISOLATED_WORLD_ID_ADBLOCK);
 
       LOG(WARNING) << "Adblock: element hiding - called JS";
     }
@@ -344,7 +344,7 @@ void ReleaseAdblock() {
   ReleaseTaskRunner();
 }
 
-static void SetFilterEngineNativePtr(
+static void JNI_AdblockBridge_SetFilterEngineNativePtr(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jcaller,
     jlong ptr)
@@ -379,9 +379,9 @@ static void SetFilterEngineNativePtr(
   }
 }
 
-static jlong GetIsolateProviderNativePtr(
-	JNIEnv* env,
-	const base::android::JavaParamRef<jobject>& jcaller)
+static jlong JNI_AdblockBridge_GetIsolateProviderNativePtr(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& jcaller)
 {
   // v8 init
   LOG(WARNING) << "Adblock: creating isolate holder ...";

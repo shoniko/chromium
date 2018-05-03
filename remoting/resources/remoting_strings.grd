@@ -638,6 +638,9 @@
         <message name="IDS_MOBILE_NETWORK_WARNING" desc="Message shown in an alert dialog that warns the user that they are trying to connect to a device over mobile network.">
           Data charges may apply when connecting to a device over mobile network. Do you want to continue?
         </message>
+        <message name="IDS_THIRD_PARTY_AUTH_NOT_SUPPORTED" desc="Error message shown when the user attempts to connect to a remote device under third party authentication, which is currently unsupported by the client.">
+          This device is not supported by this client because it requires third party authentication.
+        </message>
 
 <!-- Play Store listings text. These Android-specific strings are not marked
      with formatter_data="android_java" since they are used only for the Play
@@ -1312,10 +1315,7 @@ Securely access your computer from your iOS device. It's fast, simple and free.
       <message desc="Message displayed before sharing computer in 'It2Me' mode when the email of the remote user attempting to connect is known." name="IDS_SHARE_CONFIRM_DIALOG_MESSAGE_WITH_USERNAME" >
         Would you like to allow <ph name="CLIENT_USERNAME">{0}<ex>client@email.com</ex></ph> to see and control your computer?
       </message>
-      <message desc="Label for the button to accept sharing the computer in 'It2Me' mode." name="IDS_SHARE_CONFIRM_DIALOG_CONFIRM" >
-        Share
-      </message>
-      <message desc="Label for the button to accept sharing the computer in 'It2Me' mode." meaning="Accept share request." name="IDS_SHARE_CONFIRM_DIALOG_CONFIRM_TEMP" >
+      <message desc="Label for the button to accept sharing the computer in 'It2Me' mode." meaning="Accept share request." name="IDS_SHARE_CONFIRM_DIALOG_CONFIRM" >
         Share
       </message>
       <message desc="Label for the button to decline sharing the computer in 'It2Me' mode." name="IDS_SHARE_CONFIRM_DIALOG_DECLINE" >

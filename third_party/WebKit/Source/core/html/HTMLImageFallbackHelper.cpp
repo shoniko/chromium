@@ -23,8 +23,9 @@ namespace blink {
 using namespace HTMLNames;
 
 static bool NoImageSourceSpecified(const Element& element) {
-  bool no_src_specified =
-      !element.hasAttribute(srcAttr) || element.getAttribute(srcAttr).IsNull();
+  bool no_src_specified = !element.hasAttribute(srcAttr) ||
+                          element.getAttribute(srcAttr).IsNull() ||
+                          element.getAttribute(srcAttr).IsEmpty();
   bool no_srcset_specified = !element.hasAttribute(srcsetAttr) ||
                              element.getAttribute(srcsetAttr).IsNull();
   return no_src_specified && no_srcset_specified;
@@ -52,7 +53,7 @@ static bool ImageSmallerThanAltImage(int pixels_for_alt_image,
 }
 
 void HTMLImageFallbackHelper::CreateAltTextShadowTree(Element& element) {
-  ShadowRoot& root = element.EnsureUserAgentShadowRoot();
+  ShadowRoot& root = element.EnsureUserAgentShadowRootV1();
 
   HTMLSpanElement* container = HTMLSpanElement::Create(element.GetDocument());
   root.AppendChild(container);

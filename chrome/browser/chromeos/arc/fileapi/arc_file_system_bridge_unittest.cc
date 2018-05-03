@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/chromeos/arc/fileapi/arc_file_system_bridge.h"
+
 #include <utility>
 #include <vector>
 
-#include "chrome/browser/chromeos/arc/fileapi/arc_file_system_bridge.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/run_loop.h"
 #include "chrome/browser/chromeos/arc/fileapi/chrome_content_provider_url_util.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -17,6 +19,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_virtual_file_provider_client.h"
 #include "components/arc/arc_bridge_service.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_file_system_instance.h"
 #include "components/drive/chromeos/fake_file_system.h"
 #include "components/drive/service/fake_drive_service.h"
@@ -54,9 +57,10 @@ class ArcFileSystemBridgeTest : public testing::Test {
     Profile* profile =
         profile_manager_->CreateTestingProfile(kTestingProfileName);
 
-    arc_bridge_service_.file_system()->SetInstance(&fake_file_system_);
     arc_file_system_bridge_ =
         std::make_unique<ArcFileSystemBridge>(profile, &arc_bridge_service_);
+    arc_bridge_service_.file_system()->SetInstance(&fake_file_system_);
+    WaitForInstanceReady(arc_bridge_service_.file_system());
 
     // Create the drive integration service for the profile.
     integration_service_factory_callback_ =
@@ -70,6 +74,7 @@ class ArcFileSystemBridgeTest : public testing::Test {
 
   void TearDown() override {
     integration_service_factory_scope_.reset();
+    arc_bridge_service_.file_system()->CloseInstance(&fake_file_system_);
     arc_file_system_bridge_.reset();
     profile_manager_.reset();
     chromeos::DBusThreadManager::Shutdown();

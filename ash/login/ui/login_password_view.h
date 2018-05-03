@@ -19,13 +19,13 @@
 namespace views {
 class Button;
 class ButtonListener;
-class ImageButton;
 class ImageView;
 class Separator;
 class Textfield;
 }  // namespace views
 
 namespace ash {
+class LoginButton;
 
 // Contains a textfield instance with a submit button. The user can type a
 // password into the textfield and hit enter to submit.
@@ -48,7 +48,7 @@ class ASH_EXPORT LoginPasswordView
     explicit TestApi(LoginPasswordView* view);
     ~TestApi();
 
-    views::View* textfield() const;
+    views::Textfield* textfield() const;
     views::View* submit_button() const;
     views::View* easy_unlock_icon() const;
     void set_immediately_hover_easy_unlock_icon();
@@ -59,7 +59,7 @@ class ASH_EXPORT LoginPasswordView
 
   using OnPasswordSubmit =
       base::RepeatingCallback<void(const base::string16& password)>;
-  using OnPasswordTextChanged = base::RepeatingCallback<void(bool)>;
+  using OnPasswordTextChanged = base::RepeatingCallback<void(bool is_empty)>;
   using OnEasyUnlockIconHovered = base::RepeatingClosure;
   using OnEasyUnlockIconTapped = base::RepeatingClosure;
 
@@ -89,18 +89,19 @@ class ASH_EXPORT LoginPasswordView
   // Clear all currently entered text.
   void Clear();
 
-  // Add the given numeric value to the textfield.
-  void AppendNumber(int value);
+  // Inserts the given numeric value to the textfield at the current cursor
+  // position (most likely the end).
+  void InsertNumber(int value);
 
   // Erase the last entered value.
   void Backspace();
 
-  // Dispatch a submit event.
-  void Submit();
-
   // Set password field placeholder. The password view cannot set the text by
   // itself because it doesn't know which auth methods are enabled.
   void SetPlaceholderText(const base::string16& placeholder_text);
+
+  // Makes the textfield read-only and enables/disables submitting.
+  void SetReadOnly(bool read_only);
 
   // views::View:
   const char* GetClassName() const override;
@@ -123,6 +124,10 @@ class ASH_EXPORT LoginPasswordView
   class EasyUnlockIcon;
   friend class TestApi;
 
+  // Enables/disables the submit button and changes the color of the separator
+  // based on if the view is enabled.
+  void UpdateUiState();
+
   // Submits the current password field text to mojo call and resets the text
   // field.
   void SubmitPassword();
@@ -133,7 +138,7 @@ class ASH_EXPORT LoginPasswordView
   views::View* password_row_ = nullptr;
 
   views::Textfield* textfield_ = nullptr;
-  views::ImageButton* submit_button_ = nullptr;
+  LoginButton* submit_button_ = nullptr;
   views::ImageView* capslock_icon_ = nullptr;
   views::Separator* separator_ = nullptr;
   EasyUnlockIcon* easy_unlock_icon_ = nullptr;

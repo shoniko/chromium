@@ -22,19 +22,16 @@ const char kSRTPromptSeedParam[] = "Seed";
 const char kSRTElevationTrial[] = "SRTElevation";
 const char kSRTElevationAsNeededGroup[] = "AsNeeded";
 
-const char kSRTReporterTrial[] = "srt_reporter";
-const char kSRTReporterOffGroup[] = "Off";
-
 const char kDownloadRootPath[] =
     "https://dl.google.com/dl/softwareremovaltool/win/";
 
 // The download links of the Software Removal Tool.
 const char kMainSRTDownloadURL[] =
     "https://dl.google.com/dl"
-    "/softwareremovaltool/win/chrome_cleanup_tool.exe?chrome-prompt=1";
+    "/softwareremovaltool/win/chrome_cleanup_tool.exe";
 const char kCanarySRTDownloadURL[] =
     "https://dl.google.com/dl"
-    "/softwareremovaltool/win/c/chrome_cleanup_tool.exe?chrome-prompt=1";
+    "/softwareremovaltool/win/c/chrome_cleanup_tool.exe";
 
 }  // namespace
 
@@ -42,14 +39,14 @@ namespace safe_browsing {
 
 const char kSRTPromptTrial[] = "SRTPromptFieldTrial";
 
-// TODO(crbug.com/774623): Delete the code from the old prompt and remove this
-//                         feature.
-const base::Feature kInBrowserCleanerUIFeature{
-    "InBrowserCleanerUI", base::FEATURE_ENABLED_BY_DEFAULT};
-
-extern const base::Feature kRebootPromptDialogFeature{
+const base::Feature kRebootPromptDialogFeature{
     "RebootPromptDialog", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kUserInitiatedChromeCleanupsFeature{
+    "UserInitiatedChromeCleanups", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// TODO(b/786964): Rename this to remove ByBitness from the feature name once
+// all test scripts have been updated.
 const base::Feature kCleanerDownloadFeature{"DownloadCleanupToolByBitness",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -64,10 +61,8 @@ bool SRTPromptNeedsElevationIcon() {
       kSRTElevationAsNeededGroup, base::CompareCase::SENSITIVE);
 }
 
-bool IsSwReporterEnabled() {
-  return !base::StartsWith(
-      base::FieldTrialList::FindFullName(kSRTReporterTrial),
-      kSRTReporterOffGroup, base::CompareCase::SENSITIVE);
+bool UserInitiatedCleanupsEnabled() {
+  return base::FeatureList::IsEnabled(kUserInitiatedChromeCleanupsFeature);
 }
 
 GURL GetLegacyDownloadURL() {
@@ -94,7 +89,7 @@ GURL GetSRTDownloadURL() {
   // https://dl.google.com/.../win/{arch}/{group}/chrome_cleanup_tool.exe
   std::string download_url_str = std::string(kDownloadRootPath) + architecture +
                                  "/" + download_group +
-                                 "/chrome_cleanup_tool.exe?chrome-prompt=1";
+                                 "/chrome_cleanup_tool.exe";
   GURL download_url(download_url_str);
 
   // Ensure URL construction didn't change origin.
@@ -122,11 +117,6 @@ bool IsRebootPromptModal() {
          base::GetFieldTrialParamByFeatureAsBool(kRebootPromptDialogFeature,
                                                  kIsModalParam,
                                                  /*default_value=*/false);
-}
-
-void RecordSRTPromptHistogram(SRTPromptHistogramValue value) {
-  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.PromptUsage", value,
-                            SRT_PROMPT_MAX);
 }
 
 void RecordPromptShownWithTypeHistogram(PromptTypeHistogramValue value) {

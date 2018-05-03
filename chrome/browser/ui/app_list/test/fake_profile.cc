@@ -123,6 +123,10 @@ Profile* FakeProfile::GetOriginalProfile() {
   return this;
 }
 
+const Profile* FakeProfile::GetOriginalProfile() const {
+  return this;
+}
+
 bool FakeProfile::IsSupervised() const {
   return false;
 }
@@ -181,10 +185,6 @@ void FakeProfile::ChangeAppLocale(
     const std::string& locale, AppLocaleChangedVia via) {}
 void FakeProfile::OnLogin() {}
 void FakeProfile::InitChromeOSPreferences() {}
-
-PrefProxyConfigTracker* FakeProfile::GetProxyConfigTracker() {
-  return nullptr;
-}
 
 chrome_browser_net::Predictor* FakeProfile::GetNetworkPredictor() {
   return nullptr;

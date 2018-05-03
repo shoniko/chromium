@@ -36,7 +36,7 @@ scoped_refptr<NGLayoutResult> NGPageLayoutAlgorithm::Layout() {
       CreateConstraintSpaceForPages(page_size);
   container_builder_.SetInlineSize(border_box_size.inline_size);
 
-  NGWritingMode writing_mode = ConstraintSpace().WritingMode();
+  WritingMode writing_mode = ConstraintSpace().GetWritingMode();
   scoped_refptr<NGBlockBreakToken> break_token = BreakToken();
   LayoutUnit intrinsic_block_size;
   NGLogicalOffset page_offset(border_scrollbar_padding.StartOffset());
@@ -56,7 +56,7 @@ scoped_refptr<NGLayoutResult> NGPageLayoutAlgorithm::Layout() {
     scoped_refptr<NGPhysicalBoxFragment> page(
         ToNGPhysicalBoxFragment(result->PhysicalFragment().get()));
 
-    container_builder_.AddChild(page, page_offset);
+    container_builder_.AddChild(result, page_offset);
 
     NGBoxFragment logical_fragment(writing_mode, *page);
     intrinsic_block_size =
@@ -73,7 +73,9 @@ scoped_refptr<NGLayoutResult> NGPageLayoutAlgorithm::Layout() {
       ConstraintSpace(), Style(), intrinsic_block_size);
   container_builder_.SetBlockSize(border_box_size.block_size);
 
-  NGOutOfFlowLayoutPart(Node(), ConstraintSpace(), Style(), &container_builder_)
+  NGOutOfFlowLayoutPart(&container_builder_, Node().IsAbsoluteContainer(),
+                        Node().IsFixedContainer(), Node().GetScrollbarSizes(),
+                        ConstraintSpace(), Style())
       .Run();
 
   // TODO(mstensho): Propagate baselines.
@@ -106,8 +108,7 @@ NGPageLayoutAlgorithm::CreateConstraintSpaceForPages(
   space_builder.SetIsNewFormattingContext(true);
   space_builder.SetIsAnonymous(true);
 
-  return space_builder.ToConstraintSpace(
-      FromPlatformWritingMode(Style().GetWritingMode()));
+  return space_builder.ToConstraintSpace(Style().GetWritingMode());
 }
 
 }  // namespace blink

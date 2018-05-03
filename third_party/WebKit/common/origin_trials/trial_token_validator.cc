@@ -15,15 +15,17 @@
 namespace blink {
 
 TrialTokenValidator::TrialTokenValidator(std::unique_ptr<TrialPolicy> policy)
-    : policy_(std::move(policy)) {}
-TrialTokenValidator::~TrialTokenValidator() {}
+    : policy_(std::move(policy)) {
+  DCHECK(policy_.get());
+}
+TrialTokenValidator::~TrialTokenValidator() = default;
 
 OriginTrialTokenStatus TrialTokenValidator::ValidateToken(
     const std::string& token,
     const url::Origin& origin,
     std::string* feature_name,
     base::Time current_time) const {
-  if (!policy_ || !policy_->IsOriginTrialsSupported())
+  if (!policy_->IsOriginTrialsSupported())
     return OriginTrialTokenStatus::kNotSupported;
 
   // TODO(iclelland): Allow for multiple signing keys, and iterate over all

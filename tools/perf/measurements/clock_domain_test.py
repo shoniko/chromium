@@ -25,7 +25,8 @@ class ClockDomainTest(tab_test_case.TabTestCase):
     options.enable_chrome_trace = True
     tracing_controller.StartTracing(options)
 
-    full_trace = tracing_controller.StopTracing()
+    full_trace = tracing_controller.StopTracing()[0]
+
     chrome_sync = GetSyncEvents(
         full_trace.GetTraceFor(trace_data.CHROME_TRACE_PART)['traceEvents'])
     telemetry_sync = GetSyncEvents(

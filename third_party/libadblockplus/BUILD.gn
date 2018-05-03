@@ -31,7 +31,7 @@ action("make") {
     "--envSKIP_DEPENDENCY_UPDATES=true",
 
     # Android NDK
-    "--envANDROID_NDK_ROOT=${_cwd}/third_party/android-ndk-r12b",
+    "--envANDROID_NDK_ROOT=${_cwd}/third_party/android-ndk-r16b",
 
     # required to set output dir to subdirectory of ${target_out_dir}
     "--envBUILD_DIR=${_abs_build_dir}",

@@ -12,7 +12,7 @@
  * All possible actions in the menu.
  * @enum {string}
  */
-var MenuActions = {
+const MenuActions = {
   SET_DEFAULT: 'SetDefault',
   REMOVE: 'Remove',
 };
@@ -22,7 +22,7 @@ var MenuActions = {
  *            protocol: string,
  *            spec: string}}
  */
-var HandlerEntry;
+let HandlerEntry;
 
 /**
  * @typedef {{default_handler: number,
@@ -31,7 +31,7 @@ var HandlerEntry;
  *            is_default_handler_set_by_user: boolean,
  *            protocol: string}}
  */
-var ProtocolEntry;
+let ProtocolEntry;
 
 Polymer({
   is: 'protocol-handlers',
@@ -59,6 +59,14 @@ Polymer({
     /* Labels for the toggle on/off positions. */
     toggleOffLabel: String,
     toggleOnLabel: String,
+
+    // <if expr="chromeos">
+    /** @private */
+    settingsAppAvailable_: {
+      type: Boolean,
+      value: false,
+    },
+    // </if>
   },
 
   /** @override */
@@ -72,6 +80,29 @@ Polymer({
         this.setIgnoredProtocolHandlers_.bind(this));
     this.browserProxy.observeProtocolHandlers();
   },
+
+  // <if expr="chromeos">
+  /** @override */
+  attached: function() {
+    if (settings.AndroidAppsBrowserProxyImpl) {
+      cr.addWebUIListener(
+          'android-apps-info-update', this.androidAppsInfoUpdate_.bind(this));
+      settings.AndroidAppsBrowserProxyImpl.getInstance()
+          .requestAndroidAppsInfo();
+    }
+  },
+  // </if>
+
+  // <if expr="chromeos">
+  /**
+   * Receives updates on whether or not ARC settings app is available.
+   * @param {AndroidAppsInfo} info
+   * @private
+   */
+  androidAppsInfoUpdate_: function(info) {
+    this.settingsAppAvailable_ = info.settingsAppAvailable;
+  },
+  // </if>
 
   /**
    * Obtains the description for the main toggle.
@@ -135,7 +166,7 @@ Polymer({
    * @private
    */
   onDefaultTap_: function() {
-    var item = this.actionMenuModel_.item;
+    const item = this.actionMenuModel_.item;
 
     this.$$('dialog[is=cr-action-menu]').close();
     this.actionMenuModel_ = null;
@@ -147,7 +178,7 @@ Polymer({
    * @private
    */
   onRemoveTap_: function() {
-    var item = this.actionMenuModel_.item;
+    const item = this.actionMenuModel_.item;
 
     this.$$('dialog[is=cr-action-menu]').close();
     this.actionMenuModel_ = null;
@@ -177,5 +208,15 @@ Polymer({
         .showAt(
             /** @type {!Element} */ (
                 Polymer.dom(/** @type {!Event} */ (event)).localTarget));
-  }
+  },
+
+  // <if expr="chromeos">
+  /**
+   * Opens an activity to handle App links (preferred apps).
+   * @private
+   */
+  onManageAndroidAppsTap_: function() {
+    this.browserProxy.showAndroidManageAppLinks();
+  },
+  // </if>
 });

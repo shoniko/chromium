@@ -9,19 +9,20 @@
 #include "core/dom/SandboxFlags.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollTypes.h"
-#include "public/platform/WebFeaturePolicy.h"
-#include "public/platform/WebVector.h"
+#include "third_party/WebKit/common/feature_policy/feature_policy.h"
 
 namespace blink {
 
 class Frame;
+class ResourceTimingInfo;
 
 // Oilpan: all FrameOwner instances are GCed objects. FrameOwner additionally
 // derives from GarbageCollectedMixin so that Member<FrameOwner> references can
 // be kept (e.g., Frame::m_owner.)
 class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
  public:
-  virtual ~FrameOwner() {}
+  virtual ~FrameOwner() = default;
+
   virtual void Trace(blink::Visitor* visitor) {}
 
   virtual bool IsLocal() const = 0;
@@ -32,12 +33,20 @@ class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
   virtual void ClearContentFrame() = 0;
 
   virtual SandboxFlags GetSandboxFlags() const = 0;
+  // Note: there is a subtle ordering dependency here: if a page load needs to
+  // report resource timing information, it *must* do so before calling
+  // DispatchLoad().
+  virtual void AddResourceTiming(const ResourceTimingInfo&) = 0;
   virtual void DispatchLoad() = 0;
 
   // On load failure, a frame can ask its owner to render fallback content
   // which replaces the frame contents.
   virtual bool CanRenderFallbackContent() const = 0;
   virtual void RenderFallbackContent() = 0;
+
+  // The intrinsic dimensions of the embedded object changed. This is relevant
+  // for SVG documents that are embedded via <object> or <embed>.
+  virtual void IntrinsicDimensionsChanged() = 0;
 
   // Returns the 'name' content attribute value of the browsing context
   // container.
@@ -50,13 +59,13 @@ class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
   virtual bool AllowPaymentRequest() const = 0;
   virtual bool IsDisplayNone() const = 0;
   virtual AtomicString Csp() const = 0;
-  virtual const WebParsedFeaturePolicy& ContainerPolicy() const = 0;
+  virtual const ParsedFeaturePolicy& ContainerPolicy() const = 0;
 };
 
 // TODO(dcheng): This class is an internal implementation detail of provisional
 // frames. Move this into WebLocalFrameImpl.cpp and remove existing dependencies
 // on it.
-class CORE_EXPORT DummyFrameOwner
+class CORE_EXPORT DummyFrameOwner final
     : public GarbageCollectedFinalized<DummyFrameOwner>,
       public FrameOwner {
   USING_GARBAGE_COLLECTED_MIXIN(DummyFrameOwner);
@@ -71,9 +80,11 @@ class CORE_EXPORT DummyFrameOwner
   void SetContentFrame(Frame&) override {}
   void ClearContentFrame() override {}
   SandboxFlags GetSandboxFlags() const override { return kSandboxNone; }
+  void AddResourceTiming(const ResourceTimingInfo&) override {}
   void DispatchLoad() override {}
   bool CanRenderFallbackContent() const override { return false; }
   void RenderFallbackContent() override {}
+  void IntrinsicDimensionsChanged() override {}
   AtomicString BrowsingContextContainerName() const override {
     return AtomicString();
   }
@@ -84,8 +95,8 @@ class CORE_EXPORT DummyFrameOwner
   bool AllowPaymentRequest() const override { return false; }
   bool IsDisplayNone() const override { return false; }
   AtomicString Csp() const override { return g_null_atom; }
-  const WebParsedFeaturePolicy& ContainerPolicy() const override {
-    DEFINE_STATIC_LOCAL(WebParsedFeaturePolicy, container_policy, ());
+  const ParsedFeaturePolicy& ContainerPolicy() const override {
+    DEFINE_STATIC_LOCAL(ParsedFeaturePolicy, container_policy, ());
     return container_policy;
   }
 

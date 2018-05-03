@@ -8,6 +8,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import android.support.annotation.Nullable;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 import android.text.TextUtils;
@@ -43,6 +44,7 @@ import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.MenuUtils;
 import org.chromium.components.feature_engagement.FeatureConstants;
 import org.chromium.components.feature_engagement.Tracker;
+import org.chromium.components.feature_engagement.TriggerState;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -76,14 +78,26 @@ public class ChromeHomeAppMenuTest {
         }
 
         @Override
+        public boolean wouldTriggerHelpUI(String feature) {
+            return TextUtils.equals(mEnabledFeature, feature);
+        }
+
+        @Override
         public int getTriggerState(String feature) {
-            return 0;
+            return TextUtils.equals(mEnabledFeature, feature) ? TriggerState.HAS_NOT_BEEN_DISPLAYED
+                                                              : TriggerState.HAS_BEEN_DISPLAYED;
         }
 
         @Override
         public void dismissed(String feature) {
             Assert.assertEquals("Wrong feature dismissed.", mEnabledFeature, feature);
             mDimissedCallbackHelper.notifyCalled();
+        }
+
+        @Nullable
+        @Override
+        public DisplayLockHandle acquireDisplayLock() {
+            return null;
         }
 
         @Override
@@ -380,9 +394,7 @@ public class ChromeHomeAppMenuTest {
     @CommandLineFlags.Add({
         "disable-features=IPH_ChromeHomeMenuHeader," + ChromeFeatureList.CHROME_HOME_PROMO,
         "enable-features=" + ChromeFeatureList.DATA_REDUCTION_MAIN_MENU})
-    public void testDataSaverAppMenuHeader() throws InterruptedException {
-        // Load a test page and show the app menu. The header is only shown on the page menu.
-        loadTestPage();
+    public void testDataSaverAppMenuHeader() {
         showAppMenuAndAssertMenuShown();
 
         // There should currently be no headers.

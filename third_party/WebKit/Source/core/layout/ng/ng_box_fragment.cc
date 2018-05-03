@@ -5,6 +5,7 @@
 #include "core/layout/ng/ng_box_fragment.h"
 
 #include "core/layout/LayoutBox.h"
+#include "core/layout/LayoutTheme.h"
 #include "core/layout/ng/geometry/ng_logical_size.h"
 #include "core/layout/ng/inline/ng_line_height_metrics.h"
 #include "core/layout/ng/ng_constraint_space.h"
@@ -19,7 +20,7 @@ NGLineHeightMetrics NGBoxFragment::BaselineMetrics(
 
   LayoutBox* layout_box = ToLayoutBox(physical_fragment_.GetLayoutObject());
   bool is_parallel_writing_mode =
-      IsHorizontalWritingMode(constraint_space.WritingMode()) ==
+      IsHorizontalWritingMode(constraint_space.GetWritingMode()) ==
       layout_box->IsHorizontalWritingMode();
 
   if (is_parallel_writing_mode) {
@@ -44,6 +45,15 @@ NGLineHeightMetrics NGBoxFragment::BaselineMetrics(
   // box-baseline without propagating from children, or caller forgot to add
   // baseline requests to constraint space when it called Layout().
   LayoutUnit block_size = BlockSize();
+
+  const ComputedStyle& style = physical_fragment.Style();
+  if (style.HasAppearance() &&
+      !LayoutTheme::GetTheme().IsControlContainer(style.Appearance())) {
+    return NGLineHeightMetrics(
+        block_size + layout_box->MarginOver() +
+            LayoutTheme::GetTheme().BaselinePositionAdjustment(style),
+        layout_box->MarginUnder());
+  }
 
   // If atomic inline, use the margin box. See above.
   if (layout_box->IsAtomicInlineLevel()) {

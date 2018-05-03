@@ -11,8 +11,9 @@
 #include "cc/animation/animation_ticker.h"
 #include "cc/animation/animation_timeline.h"
 #include "cc/animation/element_animations.h"
-#include "cc/base/filter_operation.h"
-#include "cc/base/filter_operations.h"
+#include "cc/paint/filter_operation.h"
+#include "cc/paint/filter_operations.h"
+#include "cc/trees/property_tree.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
@@ -25,7 +26,7 @@ TestLayer::TestLayer() {
   ClearMutatedProperties();
 }
 
-TestLayer::~TestLayer() {}
+TestLayer::~TestLayer() = default;
 
 void TestLayer::ClearMutatedProperties() {
   transform_ = gfx::Transform();
@@ -359,8 +360,7 @@ AnimationTimelinesTest::AnimationTimelinesTest()
   element_id_ = ElementId(NextTestLayerId());
 }
 
-AnimationTimelinesTest::~AnimationTimelinesTest() {
-}
+AnimationTimelinesTest::~AnimationTimelinesTest() = default;
 
 void AnimationTimelinesTest::SetUp() {
   timeline_ = AnimationTimeline::Create(timeline_id_);
@@ -430,13 +430,15 @@ void AnimationTimelinesTest::TickAnimationsTransferEvents(
     unsigned expect_events) {
   std::unique_ptr<MutatorEvents> events = host_->CreateEvents();
 
-  host_impl_->TickAnimations(time);
+  // TODO(smcgruer): Construct a proper ScrollTree for the tests.
+  ScrollTree scroll_tree;
+  host_impl_->TickAnimations(time, scroll_tree);
   host_impl_->UpdateAnimationState(true, events.get());
 
   auto* animation_events = static_cast<const AnimationEvents*>(events.get());
   EXPECT_EQ(expect_events, animation_events->events_.size());
 
-  host_->TickAnimations(time);
+  host_->TickAnimations(time, scroll_tree);
   host_->UpdateAnimationState(true, nullptr);
   host_->SetAnimationEvents(std::move(events));
 }

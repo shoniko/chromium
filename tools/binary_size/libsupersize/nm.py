@@ -55,8 +55,12 @@ import signal
 import subprocess
 import sys
 import threading
+import traceback
 
 import concurrent
+import demangle
+import models
+import path_util
 
 _MSG_ANALYZE_PATHS = 1
 _MSG_SORT_PATHS = 2
@@ -85,9 +89,9 @@ def _MakeToolPrefixAbsolute(tool_prefix):
 def _IsRelevantNmName(name):
   # Skip lines like:
   # 00000000 t $t
-  # 00000000 r $d
+  # 00000000 r $d.23
   # 00000344 N
-  return name and not (len(name) == 2 and name.startswith('$'))
+  return name and not name.startswith('$')
 
 
 def _IsRelevantObjectFileName(name):
@@ -135,26 +139,29 @@ def CollectAliasesByAddress(elf_path, tool_prefix):
 
   # About 60mb of output, but piping takes ~30s, and loading it into RAM
   # directly takes 3s.
-  args = [tool_prefix + 'nm', '--no-sort', '--defined-only', '--demangle',
+  args = [path_util.GetNmPath(tool_prefix), '--no-sort', '--defined-only',
           elf_path]
   output = subprocess.check_output(args)
   for line in output.splitlines():
     space_idx = line.find(' ')
     address_str = line[:space_idx]
     section = line[space_idx + 1]
-    name = line[space_idx + 3:]
+    mangled_name = line[space_idx + 3:]
 
     # To verify that rodata does not have aliases:
     #   nm --no-sort --defined-only libchrome.so > nm.out
     #   grep -v '\$' nm.out | grep ' r ' | sort | cut -d' ' -f1 > addrs
     #   wc -l < addrs; uniq < addrs | wc -l
-    if section not in 'tT' or not _IsRelevantNmName(name):
+    if section not in 'tTW' or not _IsRelevantNmName(mangled_name):
       continue
 
     address = int(address_str, 16)
     if not address:
       continue
-    names_by_address[address].add(name)
+    names_by_address[address].add(mangled_name)
+
+  # Demangle all names.
+  names_by_address = demangle.DemangleSetsInDicts(names_by_address, tool_prefix)
 
   # Since this is run in a separate process, minimize data passing by returning
   # only aliased symbols.
@@ -183,7 +190,7 @@ def _LookupStringSectionPositions(target, tool_prefix, output_directory):
     target: An archive path string (e.g., "foo.a") or a list of object paths.
   """
   is_archive = isinstance(target, basestring)
-  args = [tool_prefix + 'readelf', '-S', '--wide']
+  args = [path_util.GetReadElfPath(tool_prefix), '-S', '--wide']
   if is_archive:
     args.append(target)
   else:
@@ -228,14 +235,14 @@ def _LookupStringSectionPositions(target, tool_prefix, output_directory):
 
 def LookupElfRodataInfo(elf_path, tool_prefix):
   """Returns (address, offset, size) for the .rodata section."""
-  args = [tool_prefix + 'readelf', '-S', '--wide', elf_path]
+  args = [path_util.GetReadElfPath(tool_prefix), '-S', '--wide', elf_path]
   output = subprocess.check_output(args)
   lines = output.splitlines()
   for line in lines:
     # [Nr] Name           Type        Addr     Off     Size   ES Flg Lk Inf Al
     # [07] .rodata        PROGBITS    025e7000 237c000 5ec4f6 00   A  0   0 256
     if '.rodata ' in line:
-      fields = line[line.index('.rodata'):].split()
+      fields = line[line.index(models.SECTION_RODATA):].split()
       return int(fields[2], 16), int(fields[3], 16), int(fields[4], 16)
   raise AssertionError('No .rodata for command: ' + repr(args))
 
@@ -302,16 +309,16 @@ def _ParseOneObjectFileNmOutput(lines):
       break
     space_idx = line.find(' ')  # Skip over address.
     section = line[space_idx + 1]
-    name = line[space_idx + 3:]
-    if _IsRelevantNmName(name):
+    mangled_name = line[space_idx + 3:]
+    if _IsRelevantNmName(mangled_name):
       # Refer to _IsRelevantObjectFileName() for examples of names.
       if section == 'r' and (
-          name.startswith('.L.str') or
-          name.startswith('.L__') and name.find('.', 3) != -1):
+          mangled_name.startswith('.L.str') or
+          mangled_name.startswith('.L__') and mangled_name.find('.', 3) != -1):
         # Leave as a string for easier marshalling.
         string_addresses.append(line[:space_idx].lstrip('0') or '0')
-      elif _IsRelevantObjectFileName(name):
-        symbol_names.add(name)
+      elif _IsRelevantObjectFileName(mangled_name):
+        symbol_names.add(mangled_name)
   return string_addresses, symbol_names
 
 
@@ -460,7 +467,7 @@ def _RunNmOnIntermediates(target, tool_prefix, output_directory):
     target: Either a single path to a .a (as a string), or a list of .o paths.
   """
   is_archive = isinstance(target, basestring)
-  args = [tool_prefix + 'nm', '--no-sort', '--defined-only', '--demangle']
+  args = [path_util.GetNmPath(tool_prefix), '--no-sort', '--defined-only']
   if is_archive:
     args.append(target)
   else:
@@ -486,8 +493,8 @@ def _RunNmOnIntermediates(target, tool_prefix, output_directory):
       # E.g. foo/bar.a(baz.o)
       path = '%s(%s)' % (target, path)
 
-    string_addresses, symbol_names = _ParseOneObjectFileNmOutput(lines)
-    symbol_names_by_path[path] = symbol_names
+    string_addresses, mangled_symbol_names = _ParseOneObjectFileNmOutput(lines)
+    symbol_names_by_path[path] = mangled_symbol_names
     if string_addresses:
       string_addresses_by_path[path] = string_addresses
     path = next(lines, ':')[:-1]
@@ -528,6 +535,7 @@ class _BulkObjectFileAnalyzerWorker(object):
     # and our output is a dict where paths are the key.
     results = concurrent.BulkForkAndCall(_RunNmOnIntermediates, params)
 
+    # Names are still mangled.
     all_paths_by_name = self._paths_by_name
     for encoded_syms, encoded_strs in results:
       symbol_names_by_path = concurrent.DecodeDictOfLists(encoded_syms)
@@ -540,8 +548,12 @@ class _BulkObjectFileAnalyzerWorker(object):
     logging.debug('worker: AnalyzePaths() completed.')
 
   def SortPaths(self):
-    for paths in self._paths_by_name.itervalues():
-      paths.sort()
+    # Finally, demangle all names, which can result in some merging of lists.
+    self._paths_by_name = demangle.DemangleKeysAndMergeLists(
+        self._paths_by_name, self._tool_prefix)
+    # Sort and uniquefy.
+    for key in self._paths_by_name.iterkeys():
+      self._paths_by_name[key] = sorted(set(self._paths_by_name[key]))
 
   def AnalyzeStringLiterals(self, elf_path, elf_string_positions):
     logging.debug('worker: AnalyzeStringLiterals() started.')
@@ -666,8 +678,12 @@ class _BulkObjectFileAnalyzerSlave(object):
 
   def _WorkerThreadMain(self):
     while True:
-      func = self._job_queue.get()
-      func()
+      # Handle exceptions so test failure will be explicit and not block.
+      try:
+        func = self._job_queue.get()
+        func()
+      except Exception:
+        traceback.print_exc()
       self._job_queue.task_done()
 
   def _WaitForAnalyzePathJobs(self):

@@ -34,8 +34,10 @@
 #include "core/layout/line/AbstractInlineTextBox.h"
 #include "core/layout/line/EllipsisBox.h"
 #include "core/paint/InlineTextBoxPainter.h"
+#include "core/paint/PaintInfo.h"
 #include "platform/fonts/CharacterRange.h"
 #include "platform/fonts/FontCache.h"
+#include "platform/graphics/paint/PaintController.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/StringBuilder.h"
 
@@ -117,9 +119,10 @@ LayoutUnit InlineTextBox::BaselinePosition(FontBaseline baseline_type) const {
 LayoutUnit InlineTextBox::LineHeight() const {
   if (!IsText() || !GetLineLayoutItem().Parent())
     return LayoutUnit();
-  if (GetLineLayoutItem().IsBR())
+  if (GetLineLayoutItem().IsBR()) {
     return LayoutUnit(
         LineLayoutBR(GetLineLayoutItem()).LineHeight(IsFirstLineStyle()));
+  }
   if (Parent()->GetLineLayoutItem() == GetLineLayoutItem().Parent())
     return Parent()->LineHeight();
   return LineLayoutBoxModel(GetLineLayoutItem().Parent())
@@ -196,12 +199,15 @@ SelectionState InlineTextBox::GetSelectionState() const {
     // kStartAndEnd is invalid operation.
     bool start =
         (state != SelectionState::kEnd &&
-         selection.LayoutSelectionStart().value_or(0) >= start_ &&
-         selection.LayoutSelectionStart().value_or(0) <=
+         static_cast<int>(selection.LayoutSelectionStart().value_or(0)) >=
+             start_ &&
+         static_cast<int>(selection.LayoutSelectionStart().value_or(0)) <=
              start_ + len_ + end_of_line_adjustment_for_css_line_break);
     bool end = (state != SelectionState::kStart &&
-                selection.LayoutSelectionEnd().value_or(0) > start_ &&
-                selection.LayoutSelectionEnd().value_or(0) <= last_selectable);
+                static_cast<int>(selection.LayoutSelectionEnd().value_or(0)) >
+                    start_ &&
+                static_cast<int>(selection.LayoutSelectionEnd().value_or(0)) <=
+                    last_selectable);
     if (start && end)
       state = SelectionState::kStartAndEnd;
     else if (start)
@@ -209,17 +215,18 @@ SelectionState InlineTextBox::GetSelectionState() const {
     else if (end)
       state = SelectionState::kEnd;
     else if ((state == SelectionState::kEnd ||
-              selection.LayoutSelectionStart().value_or(0) < start_) &&
+              static_cast<int>(selection.LayoutSelectionStart().value_or(0)) <
+                  start_) &&
              (state == SelectionState::kStart ||
-              selection.LayoutSelectionEnd().value_or(0) > last_selectable))
+              static_cast<int>(selection.LayoutSelectionEnd().value_or(0)) >
+                  last_selectable))
       state = SelectionState::kInside;
     else if (state == SelectionState::kStartAndEnd)
       state = SelectionState::kNone;
   }
 
   // If there are ellipsis following, make sure their selection is updated.
-  if (truncation_ != kCNoTruncation && Root().GetEllipsisBox()) {
-    EllipsisBox* ellipsis = Root().GetEllipsisBox();
+  if (EllipsisBox* ellipsis = Root().GetEllipsisBox()) {
     if (state != SelectionState::kNone) {
       int start, end;
       SelectionStartEnd(start, end);
@@ -511,12 +518,7 @@ bool InlineTextBox::GetEmphasisMarkPosition(
 
   emphasis_position = style.GetTextEmphasisPosition();
   // Ruby text is always over, so it cannot suppress emphasis marks under.
-  if ((IsHorizontal() &&
-       (emphasis_position == TextEmphasisPosition::kUnderRight ||
-        emphasis_position == TextEmphasisPosition::kUnderLeft)) ||
-      (!IsHorizontal() &&
-       (emphasis_position == TextEmphasisPosition::kOverLeft ||
-        emphasis_position == TextEmphasisPosition::kUnderLeft)))
+  if (style.GetTextEmphasisLineLogicalSide() != LineLogicalSide::kOver)
     return true;
 
   LineLayoutBox containing_block = GetLineLayoutItem().ContainingBlock();
@@ -541,6 +543,10 @@ void InlineTextBox::Paint(const PaintInfo& paint_info,
                           LayoutUnit /*lineTop*/,
                           LayoutUnit /*lineBottom*/) const {
   InlineTextBoxPainter(*this).Paint(paint_info, paint_offset);
+  if (GetLineLayoutItem().ContainsOnlyWhitespaceOrNbsp() !=
+      OnlyWhitespaceOrNbsp::kYes) {
+    paint_info.context.GetPaintController().SetTextPainted();
+  }
 }
 
 void InlineTextBox::SelectionStartEnd(int& s_pos, int& e_pos) const {
@@ -592,6 +598,10 @@ void InlineTextBox::PaintTextMatchMarkerForeground(
     const Font& font) const {
   InlineTextBoxPainter(*this).PaintTextMatchMarkerForeground(
       paint_info, box_origin, marker, style, font);
+  if (GetLineLayoutItem().ContainsOnlyWhitespaceOrNbsp() !=
+      OnlyWhitespaceOrNbsp::kYes) {
+    paint_info.context.GetPaintController().SetTextPainted();
+  }
 }
 
 void InlineTextBox::PaintTextMatchMarkerBackground(
@@ -769,22 +779,21 @@ String InlineTextBox::GetText() const {
 
 #ifndef NDEBUG
 
-void InlineTextBox::ShowBox(int printed_characters) const {
+void InlineTextBox::DumpBox(StringBuilder& string_inlinetextbox) const {
   String value = GetText();
   value.Replace('\\', "\\\\");
   value.Replace('\n', "\\n");
-  printed_characters += fprintf(stderr, "%s %p", BoxName(), this);
-  for (; printed_characters < kShowTreeCharacterOffset; printed_characters++)
-    fputc(' ', stderr);
+  string_inlinetextbox.Append(String::Format("%s %p", BoxName(), this));
+  while (string_inlinetextbox.length() < kShowTreeCharacterOffset)
+    string_inlinetextbox.Append(" ");
   const LineLayoutText obj = GetLineLayoutItem();
-  printed_characters =
-      fprintf(stderr, "\t%s %p", obj.GetName(), obj.DebugPointer());
+  string_inlinetextbox.Append(
+      String::Format("\t%s %p", obj.GetName(), obj.DebugPointer()));
   const int kLayoutObjectCharacterOffset = 75;
-  for (; printed_characters < kLayoutObjectCharacterOffset;
-       printed_characters++)
-    fputc(' ', stderr);
-  fprintf(stderr, "(%d,%d) \"%s\"\n", Start(), Start() + Len(),
-          value.Utf8().data());
+  while (string_inlinetextbox.length() < kLayoutObjectCharacterOffset)
+    string_inlinetextbox.Append(" ");
+  string_inlinetextbox.Append(String::Format(
+      "(%d,%d) \"%s\"", Start(), Start() + Len(), value.Utf8().data()));
 }
 
 #endif

@@ -48,12 +48,11 @@ SMILTimeContainer::SMILTimeContainer(SVGSVGElement& owner)
       started_(false),
       paused_(false),
       document_order_indexes_dirty_(false),
-      wakeup_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &owner.GetDocument()),
-          this,
-          &SMILTimeContainer::WakeupTimerFired),
+      wakeup_timer_(owner.GetDocument().GetTaskRunner(TaskType::kUnspecedTimer),
+                    this,
+                    &SMILTimeContainer::WakeupTimerFired),
       animation_policy_once_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &owner.GetDocument()),
+          owner.GetDocument().GetTaskRunner(TaskType::kUnspecedTimer),
           this,
           &SMILTimeContainer::AnimationPolicyTimerFired),
       owner_svg_element_(&owner) {}
@@ -195,7 +194,7 @@ void SMILTimeContainer::Pause() {
   paused_ = true;
 }
 
-void SMILTimeContainer::Resume() {
+void SMILTimeContainer::Unpause() {
   if (!HandleAnimationPolicy(kRestartOnceTimer))
     return;
   DCHECK(IsPaused());
@@ -266,7 +265,7 @@ void SMILTimeContainer::ScheduleWakeUp(
     FrameSchedulingState frame_scheduling_state) {
   DCHECK(frame_scheduling_state == kSynchronizeAnimations ||
          frame_scheduling_state == kFutureAnimationFrame);
-  wakeup_timer_.StartOneShot(delay_time, BLINK_FROM_HERE);
+  wakeup_timer_.StartOneShot(delay_time, FROM_HERE);
   frame_scheduling_state_ = frame_scheduling_state;
 }
 
@@ -285,7 +284,7 @@ void SMILTimeContainer::WakeupTimerFired(TimerBase*) {
 
 void SMILTimeContainer::ScheduleAnimationPolicyTimer() {
   animation_policy_once_timer_.StartOneShot(kAnimationPolicyOnceDuration,
-                                            BLINK_FROM_HERE);
+                                            FROM_HERE);
 }
 
 void SMILTimeContainer::CancelAnimationPolicyTimer() {

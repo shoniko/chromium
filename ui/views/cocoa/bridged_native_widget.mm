@@ -15,6 +15,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "components/viz/common/features.h"
+#include "components/viz/common/surfaces/local_surface_id.h"
 #include "ui/accelerated_widget_mac/window_resize_helper_mac.h"
 #import "ui/base/cocoa/constrained_window/constrained_window_animation.h"
 #include "ui/base/hit_test.h"
@@ -39,6 +41,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_aura_utils.h"
 #include "ui/views/widget/widget_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 
 extern "C" {
 
@@ -490,6 +493,9 @@ void BridgedNativeWidget::Init(base::scoped_nsobject<NSWindow> window,
       [window_ setHasShadow:NO];
       break;
     case Widget::InitParams::SHADOW_TYPE_DEFAULT:
+      // Controls should get views shadows instead of native shadows.
+      [window_ setHasShadow:params.type != Widget::InitParams::TYPE_CONTROL];
+      break;
     case Widget::InitParams::SHADOW_TYPE_DROP:
       [window_ setHasShadow:YES];
       break;
@@ -527,6 +533,13 @@ void BridgedNativeWidget::Init(base::scoped_nsobject<NSWindow> window,
   // native on Mac, so nothing should ever want one in Widget form.
   DCHECK_NE(params.type, Widget::InitParams::TYPE_TOOLTIP);
   tooltip_manager_.reset(new TooltipManagerMac(this));
+}
+
+void BridgedNativeWidget::OnWidgetInitDone() {
+  DialogDelegate* dialog =
+      native_widget_mac_->GetWidget()->widget_delegate()->AsDialogDelegate();
+  if (dialog)
+    dialog->AddObserver(this);
 }
 
 void BridgedNativeWidget::SetFocusManager(FocusManager* focus_manager) {
@@ -767,7 +780,10 @@ void BridgedNativeWidget::SetCursor(NSCursor* cursor) {
 }
 
 void BridgedNativeWidget::OnWindowWillClose() {
-  native_widget_mac_->GetWidget()->OnNativeWidgetDestroying();
+  Widget* widget = native_widget_mac_->GetWidget();
+  if (DialogDelegate* dialog = widget->widget_delegate()->AsDialogDelegate())
+    dialog->RemoveObserver(this);
+  widget->OnNativeWidgetDestroying();
 
   // Ensure BridgedNativeWidget does not have capture, otherwise
   // OnMouseCaptureLost() may reference a deleted |native_widget_mac_| when
@@ -1049,7 +1065,7 @@ void BridgedNativeWidget::OnShowAnimationComplete() {
 
 ui::InputMethod* BridgedNativeWidget::GetInputMethod() {
   if (!input_method_) {
-    input_method_ = ui::CreateInputMethod(this, nil);
+    input_method_ = ui::CreateInputMethod(this, gfx::kNullAcceleratedWidget);
     // For now, use always-focused mode on Mac for the input method.
     // TODO(tapted): Move this to OnWindowKeyStatusChangedTo() and balance.
     input_method_->OnFocus();
@@ -1223,11 +1239,6 @@ void BridgedNativeWidget::OnPaintLayer(const ui::PaintContext& context) {
   native_widget_mac_->GetWidget()->OnNativeWidgetPaint(context);
 }
 
-void BridgedNativeWidget::OnDelegatedFrameDamage(
-    const gfx::Rect& damage_rect_in_dip) {
-  NOTIMPLEMENTED();
-}
-
 void BridgedNativeWidget::OnDeviceScaleFactorChanged(
     float old_device_scale_factor,
     float new_device_scale_factor) {
@@ -1293,6 +1304,18 @@ void BridgedNativeWidget::RemoveChildWindow(BridgedNativeWidget* child) {
   // version, and possibly some unpredictable reference counting. Removing it
   // here should be safe regardless.
   [window_ removeChildWindow:child->window_];
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// BridgedNativeWidget, DialogObserver:
+
+void BridgedNativeWidget::OnDialogModelChanged() {
+  // Note it's only necessary to clear the TouchBar. If the OS needs it again,
+  // a new one will be created.
+  if (@available(macOS 10.12.2, *)) {
+    if ([bridged_view_ respondsToSelector:@selector(setTouchBar:)])
+      [bridged_view_ setTouchBar:nil];
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1381,7 +1404,7 @@ void BridgedNativeWidget::CreateCompositor() {
   compositor_.reset(new ui::Compositor(
       context_factory_private->AllocateFrameSinkId(), context_factory,
       context_factory_private, GetCompositorTaskRunner(),
-      false /* enable_surface_synchronization */,
+      features::IsSurfaceSynchronizationEnabled(),
       ui::IsPixelCanvasRecordingEnabled()));
   compositor_->SetAcceleratedWidget(compositor_widget_->accelerated_widget());
   compositor_widget_->SetNSView(this);
@@ -1391,8 +1414,11 @@ void BridgedNativeWidget::InitCompositor() {
   DCHECK(layer());
   float scale_factor = GetDeviceScaleFactorFromView(compositor_superview_);
   gfx::Size size_in_dip = GetClientAreaSize();
+  // TODO(fsamuel): A valid viz::LocalSurfaceId() likely needs to be plumbed
+  // here to properly enable surface synchronization.
   compositor_->SetScaleAndSize(scale_factor,
-                               ConvertSizeToPixel(scale_factor, size_in_dip));
+                               ConvertSizeToPixel(scale_factor, size_in_dip),
+                               viz::LocalSurfaceId());
   compositor_->SetRootLayer(layer());
 }
 
@@ -1469,8 +1495,11 @@ void BridgedNativeWidget::UpdateLayerProperties() {
   layer()->SetBounds(gfx::Rect(size_in_dip));
 
   float scale_factor = GetDeviceScaleFactorFromView(compositor_superview_);
+  // TODO(fsamuel): A valid viz::LocalSurfaceId() likely needs to be plumbed
+  // here to properly enable surface synchronization.
   compositor_->SetScaleAndSize(scale_factor,
-                               ConvertSizeToPixel(scale_factor, size_in_dip));
+                               ConvertSizeToPixel(scale_factor, size_in_dip),
+                               viz::LocalSurfaceId());
 
   // For a translucent window, the shadow calculation needs to be carried out
   // after the frame from the compositor arrives.

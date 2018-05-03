@@ -55,7 +55,7 @@ MediaStreamCenter& MediaStreamCenter::Instance() {
 MediaStreamCenter::MediaStreamCenter()
     : private_(Platform::Current()->CreateMediaStreamCenter(this)) {}
 
-MediaStreamCenter::~MediaStreamCenter() {}
+MediaStreamCenter::~MediaStreamCenter() = default;
 
 void MediaStreamCenter::DidSetMediaStreamTrackEnabled(
     MediaStreamComponent* component) {
@@ -66,15 +66,6 @@ void MediaStreamCenter::DidSetMediaStreamTrackEnabled(
       private_->DidDisableMediaStreamTrack(component);
     }
   }
-}
-
-void MediaStreamCenter::DidStopLocalMediaStream(MediaStreamDescriptor* stream) {
-  if (private_)
-    private_->DidStopLocalMediaStream(stream);
-}
-
-bool MediaStreamCenter::DidStopMediaStreamTrack(MediaStreamComponent* track) {
-  return private_ && private_->DidStopMediaStreamTrack(track);
 }
 
 void MediaStreamCenter::DidCreateMediaStreamAndTracks(

@@ -6,12 +6,14 @@
 
 #include <stddef.h>
 
+#include <memory>
+
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -208,6 +210,16 @@ struct I18nContentToMessage {
     {"keyboardOverlayMaximizeWindow", IDS_KEYBOARD_OVERLAY_MAXIMIZE_WINDOW},
     {"keyboardOverlayMinimizeWindow", IDS_KEYBOARD_OVERLAY_MINIMIZE_WINDOW},
     {"keyboardOverlayMirrorMonitors", IDS_KEYBOARD_OVERLAY_MIRROR_MONITORS},
+    // TODO(warx): keyboard overlay name for move window between displays
+    // shortcuts need to be updated when new keyboard shortcuts helper is there.
+    {"keyboardOverlayMoveWindowToAboveDisplay",
+     IDS_KEYBOARD_OVERLAY_MOVE_WINDOW_TO_ABOVE_DISPLAY},
+    {"keyboardOverlayMoveWindowToBelowDisplay",
+     IDS_KEYBOARD_OVERLAY_MOVE_WINDOW_TO_BELOW_DISPLAY},
+    {"keyboardOverlayMoveWindowToLeftDisplay",
+     IDS_KEYBOARD_OVERLAY_MOVE_WINDOW_TO_LEFT_DISPLAY},
+    {"keyboardOverlayMoveWindowToRightDisplay",
+     IDS_KEYBOARD_OVERLAY_MOVE_WINDOW_TO_RIGHT_DISPLAY},
     {"keyboardOverlayNewIncognitoWindow",
      IDS_KEYBOARD_OVERLAY_NEW_INCOGNITO_WINDOW},
     {"keyboardOverlayNewTab", IDS_KEYBOARD_OVERLAY_NEW_TAB},
@@ -329,6 +341,8 @@ content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource(Profile* profile) {
                      TopRowKeysAreFunctionKeys(profile));
   source->AddBoolean("voiceInteractionEnabled",
                      chromeos::switches::IsVoiceInteractionEnabled());
+  source->AddBoolean("displayMoveWindowAccelsEnabled",
+                     ash::switches::IsDisplayMoveWindowAccelsEnabled());
   source->AddBoolean("keyboardOverlayUsesLayout2",
                      ui::DeviceUsesKeyboardLayout2());
   ash::Shell* shell = ash::Shell::Get();
@@ -444,7 +458,7 @@ void KeyboardOverlayHandler::OpenLearnMorePage(const base::ListValue* args) {
 KeyboardOverlayUI::KeyboardOverlayUI(content::WebUI* web_ui)
     : WebDialogUI(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
-  web_ui->AddMessageHandler(base::MakeUnique<KeyboardOverlayHandler>(profile));
+  web_ui->AddMessageHandler(std::make_unique<KeyboardOverlayHandler>(profile));
 
   // Set up the chrome://keyboardoverlay/ source.
   content::WebUIDataSource::Add(profile,

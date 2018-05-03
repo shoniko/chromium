@@ -47,7 +47,7 @@ class PipelineControllerTest : public ::testing::Test, public Pipeline::Client {
                              base::Bind(&PipelineControllerTest::OnError,
                                         base::Unretained(this))) {}
 
-  ~PipelineControllerTest() override {}
+  ~PipelineControllerTest() override = default;
 
   PipelineStatusCB StartPipeline(bool is_streaming, bool is_static) {
     EXPECT_FALSE(pipeline_controller_.IsStable());
@@ -140,6 +140,8 @@ class PipelineControllerTest : public ::testing::Test, public Pipeline::Client {
   void OnVideoConfigChange(const VideoDecoderConfig& config) {}
   void OnVideoOpacityChange(bool opaque) override {}
   void OnVideoAverageKeyframeDistanceUpdate() override {}
+  void OnAudioDecoderChange(const std::string& name) override {}
+  void OnVideoDecoderChange(const std::string& name) override {}
 
   base::MessageLoop message_loop_;
 

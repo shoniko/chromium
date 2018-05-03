@@ -8,8 +8,8 @@
 #include "core/CoreExport.h"
 #include "core/layout/ng/geometry/ng_box_strut.h"
 #include "core/layout/ng/geometry/ng_logical_offset.h"
-#include "core/layout/ng/ng_writing_mode.h"
 #include "platform/LayoutUnit.h"
+#include "platform/text/WritingMode.h"
 
 namespace blink {
 
@@ -20,14 +20,14 @@ struct NGPhysicalSize;
 // NGLogicalSize is the size of rect (typically a fragment) in the logical
 // coordinate system.
 struct CORE_EXPORT NGLogicalSize {
-  NGLogicalSize() {}
+  NGLogicalSize() = default;
   NGLogicalSize(LayoutUnit inline_size, LayoutUnit block_size)
       : inline_size(inline_size), block_size(block_size) {}
 
   LayoutUnit inline_size;
   LayoutUnit block_size;
 
-  NGPhysicalSize ConvertToPhysical(NGWritingMode mode) const;
+  NGPhysicalSize ConvertToPhysical(WritingMode mode) const;
   bool operator==(const NGLogicalSize& other) const;
 
   bool IsEmpty() const {

@@ -29,7 +29,6 @@ import android.widget.RemoteViews;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import org.chromium.base.BaseChromiumApplication;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
@@ -37,7 +36,6 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.TimeUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.metrics.RecordHistogram;
@@ -47,6 +45,7 @@ import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.browserservices.BrowserSessionContentUtils;
 import org.chromium.chrome.browser.browserservices.PostMessageHandler;
@@ -75,7 +74,6 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Implementation of the ICustomTabsConnectionService interface.
@@ -137,7 +135,8 @@ public class CustomTabsConnection {
     @VisibleForTesting
     static final String REDIRECT_ENDPOINT_KEY = "android.support.customtabs.REDIRECT_ENDPOINT";
 
-    private static AtomicReference<CustomTabsConnection> sInstance = new AtomicReference<>();
+    private static final CustomTabsConnection sInstance =
+            AppHooks.get().createCustomTabsConnection();
 
     /** Holds the parameters for the current speculation. */
     @VisibleForTesting
@@ -219,7 +218,7 @@ public class CustomTabsConnection {
         super();
         mContext = ContextUtils.getApplicationContext();
         // Command line switch values are used below.
-        BaseChromiumApplication.initCommandLine(mContext);
+        ((ChromeApplication) mContext).initCommandLine();
         mClientManager = new ClientManager(mContext);
         mLogRequests = CommandLine.getInstance().hasSwitch(LOG_SERVICE_REQUESTS);
     }
@@ -228,10 +227,7 @@ public class CustomTabsConnection {
      * @return The unique instance of ChromeCustomTabsConnection.
      */
     public static CustomTabsConnection getInstance() {
-        if (sInstance.get() == null) {
-            sInstance.compareAndSet(null, AppHooks.get().createCustomTabsConnection());
-        }
-        return sInstance.get();
+        return sInstance;
     }
 
     /**
@@ -336,7 +332,6 @@ public class CustomTabsConnection {
     }
 
     /** Warmup activities that should only happen once. */
-    @SuppressFBWarnings("DM_EXIT")
     private static void initializeBrowser(final Context context) {
         ThreadUtils.assertOnUiThread();
         try {
@@ -362,7 +357,7 @@ public class CustomTabsConnection {
      * @return Whether {@link CustomTabsConnection#warmup(long)} has been called.
      */
     public static boolean hasWarmUpBeenFinished() {
-        return getInstance().mWarmupHasBeenFinished.get();
+        return sInstance.mWarmupHasBeenFinished.get();
     }
 
     /**
@@ -409,6 +404,13 @@ public class CustomTabsConnection {
             tasks.add(new Runnable() {
                 @Override
                 public void run() {
+                    // Temporary fix for https://crbug.com/797832.
+                    // TODO(lizeb): Properly fix instead of papering over the bug, this code should
+                    // not be scheduled unless startup is done. See https://crbug.com/797832.
+                    if (!BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
+                                    .isStartupSuccessfullyCompleted()) {
+                        return;
+                    }
                     try (TraceEvent e = TraceEvent.scoped("CreateSpareWebContents")) {
                         WarmupManager.getInstance().createSpareWebContents();
                     }
@@ -464,7 +466,8 @@ public class CustomTabsConnection {
         // Don't do anything for unknown schemes. Not having a scheme is allowed, as we allow
         // "www.example.com".
         String scheme = uri.normalizeScheme().getScheme();
-        boolean allowedScheme = scheme == null || scheme.equals("http") || scheme.equals("https");
+        boolean allowedScheme = scheme == null || scheme.equals(UrlConstants.HTTP_SCHEME)
+                || scheme.equals(UrlConstants.HTTPS_SCHEME);
         if (!allowedScheme) return false;
         return true;
     }
@@ -697,7 +700,7 @@ public class CustomTabsConnection {
     /**
      * See {@link ClientManager#canSessionLaunchInTrustedWebActivity(CustomTabsSessionToken, Uri)}
      */
-    protected boolean canSessionLaunchInTrustedWebActivity(
+    public boolean canSessionLaunchInTrustedWebActivity(
             CustomTabsSessionToken session, Uri origin) {
         return mClientManager.canSessionLaunchInTrustedWebActivity(session, origin);
     }
@@ -717,6 +720,9 @@ public class CustomTabsConnection {
 
     public boolean validateRelationship(
             CustomTabsSessionToken sessionToken, int relation, Uri origin, Bundle extras) {
+        // Essential parts of the verification will depend on native code and will be run sync on UI
+        // thread. Make sure the client has called warmup() beforehand.
+        if (!mWarmupHasBeenCalled.get()) return false;
         return mClientManager.validateRelationship(sessionToken, relation, origin, extras);
     }
 
@@ -1401,7 +1407,7 @@ public class CustomTabsConnection {
         String referrer = getReferrer(session, extrasIntent);
         if (referrer != null && !referrer.isEmpty()) {
             loadParams.setReferrer(
-                    new Referrer(referrer, WebReferrerPolicy.WEB_REFERRER_POLICY_DEFAULT));
+                    new Referrer(referrer, WebReferrerPolicy.DEFAULT));
         }
         mSpeculation = SpeculationParams.forHiddenTab(session, url, tab, referrer, extras);
         mSpeculation.tab.loadUrl(loadParams);

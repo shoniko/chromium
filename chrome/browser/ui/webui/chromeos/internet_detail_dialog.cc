@@ -22,6 +22,9 @@ namespace chromeos {
 
 namespace {
 
+// Matches the width of the Settings content.
+constexpr int kInternetDetailDialogWidth = 640;
+
 int s_internet_detail_dialog_count = 0;
 
 void AddInternetStrings(content::WebUIDataSource* html_source) {
@@ -34,6 +37,8 @@ void AddInternetStrings(content::WebUIDataSource* html_source) {
     const char* name;
     int id;
   } localized_strings[] = {
+      {"cancel", IDS_CANCEL},
+      {"close", IDS_CLOSE},
       {"networkButtonConnect", IDS_SETTINGS_INTERNET_BUTTON_CONNECT},
       {"networkButtonDisconnect", IDS_SETTINGS_INTERNET_BUTTON_DISCONNECT},
       {"networkIPAddress", IDS_SETTINGS_INTERNET_NETWORK_IP_ADDRESS},
@@ -49,12 +54,20 @@ void AddInternetStrings(content::WebUIDataSource* html_source) {
     html_source->AddLocalizedString(entry.name, entry.id);
 }
 
+base::string16 GetNetworkName(const NetworkState& network) {
+  return network.Matches(NetworkTypePattern::Ethernet())
+             ? l10n_util::GetStringUTF16(IDS_NETWORK_TYPE_ETHERNET)
+             : base::UTF8ToUTF16(network.name());
+}
+
 }  // namespace
 
+// static
 bool InternetDetailDialog::IsShown() {
   return s_internet_detail_dialog_count > 0;
 }
 
+// static
 void InternetDetailDialog::ShowDialog(const std::string& network_id) {
   auto* network_state_handler = NetworkHandler::Get()->network_state_handler();
   const NetworkState* network;
@@ -72,16 +85,18 @@ void InternetDetailDialog::ShowDialog(const std::string& network_id) {
 
 InternetDetailDialog::InternetDetailDialog(const NetworkState& network)
     : SystemWebDialogDelegate(GURL(chrome::kChromeUIIntenetDetailDialogURL),
-                              base::string16()),
+                              GetNetworkName(network)),
       guid_(network.guid()) {
-  title_ = network.Matches(NetworkTypePattern::Ethernet())
-               ? l10n_util::GetStringUTF16(IDS_NETWORK_TYPE_ETHERNET)
-               : base::UTF8ToUTF16(network.name());
   ++s_internet_detail_dialog_count;
 }
 
 InternetDetailDialog::~InternetDetailDialog() {
   --s_internet_detail_dialog_count;
+}
+
+void InternetDetailDialog::GetDialogSize(gfx::Size* size) const {
+  size->SetSize(kInternetDetailDialogWidth,
+                SystemWebDialogDelegate::kDialogHeight);
 }
 
 std::string InternetDetailDialog::GetDialogArgs() const {
@@ -96,14 +111,17 @@ InternetDetailDialogUI::InternetDetailDialogUI(content::WebUI* web_ui)
       chrome::kChromeUIInternetDetailDialogHost);
 
   AddInternetStrings(source);
-
+  source->AddLocalizedString("title", IDS_SETTINGS_INTERNET_DETAIL);
   source->SetJsonPath("strings.js");
+#if BUILDFLAG(OPTIMIZE_WEBUI)
+  source->UseGzip();
+  source->SetDefaultResource(IDR_INTERNET_DETAIL_DIALOG_VULCANIZED_HTML);
+  source->AddResourcePath("crisper.js", IDR_INTERNET_DETAIL_DIALOG_CRISPER_JS);
+#else
   source->SetDefaultResource(IDR_INTERNET_DETAIL_DIALOG_HTML);
-  source->DisableContentSecurityPolicy();
-
   source->AddResourcePath("internet_detail_dialog.js",
                           IDR_INTERNET_DETAIL_DIALOG_JS);
-
+#endif
   content::WebUIDataSource::Add(Profile::FromWebUI(web_ui), source);
 }
 

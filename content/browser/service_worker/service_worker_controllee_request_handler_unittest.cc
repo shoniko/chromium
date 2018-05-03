@@ -23,9 +23,7 @@
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/resource_context.h"
-#include "content/public/common/request_context_frame_type.h"
 #include "content/public/common/request_context_type.h"
-#include "content/public/common/resource_request_body.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/common/service_worker_modes.h"
 #include "content/public/test/mock_resource_context.h"
@@ -34,16 +32,15 @@
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/resource_request_body.h"
+#include "services/network/public/interfaces/request_context_frame_type.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
-
-namespace {
+namespace service_worker_controllee_request_handler_unittest {
 
 int kMockProviderId = 1;
-
-}
 
 class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
  public:
@@ -53,7 +50,8 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
         ServiceWorkerControlleeRequestHandlerTest* test,
         const GURL& url,
         ResourceType type,
-        FetchRequestMode fetch_type = FETCH_REQUEST_MODE_NO_CORS)
+        network::mojom::FetchRequestMode fetch_type =
+            network::mojom::FetchRequestMode::kNoCORS)
         : test_(test),
           request_(test->url_request_context_.CreateRequest(
               url,
@@ -65,13 +63,14 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
               test->provider_host_,
               base::WeakPtr<storage::BlobStorageContext>(),
               fetch_type,
-              FETCH_CREDENTIALS_MODE_OMIT,
-              FetchRedirectMode::FOLLOW_MODE,
+              network::mojom::FetchCredentialsMode::kOmit,
+              network::mojom::FetchRedirectMode::kFollow,
               std::string() /* integrity */,
+              false /* keepalive */,
               type,
               REQUEST_CONTEXT_TYPE_HYPERLINK,
-              REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL,
-              scoped_refptr<ResourceRequestBody>())),
+              network::mojom::RequestContextFrameType::kTopLevel,
+              scoped_refptr<network::ResourceRequestBody>())),
           job_(nullptr) {}
 
     ServiceWorkerURLRequestJob* MaybeCreateJob() {
@@ -104,9 +103,10 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
     // A new unstored registration/version.
     scope_ = GURL("https://host/scope/");
     script_url_ = GURL("https://host/script.js");
-    registration_ = new ServiceWorkerRegistration(
-        blink::mojom::ServiceWorkerRegistrationOptions(scope_), 1L,
-        context()->AsWeakPtr());
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = scope_;
+    registration_ =
+        new ServiceWorkerRegistration(options, 1L, context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(
         registration_.get(), script_url_, 1L, context()->AsWeakPtr());
 
@@ -135,8 +135,8 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
   }
 
   void TearDown() override {
-    version_ = NULL;
-    registration_ = NULL;
+    version_ = nullptr;
+    registration_ = nullptr;
     helper_.reset();
   }
 
@@ -275,8 +275,8 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, DeletedProviderHost) {
       version_.get(),
       base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
   base::RunLoop().RunUntilIdle();
-  version_ = NULL;
-  registration_ = NULL;
+  version_ = nullptr;
+  registration_ = nullptr;
 
   // Conduct a main resource load.
   ServiceWorkerRequestTestResources test_resources(
@@ -373,7 +373,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, FallbackWithNoFetchHandler) {
   // CORS request should be returned to renderer for CORS checking.
   ServiceWorkerRequestTestResources sub_test_resources_cors(
       this, GURL("https://host/scope/doc/subresource"), RESOURCE_TYPE_SCRIPT,
-      FETCH_REQUEST_MODE_CORS);
+      network::mojom::FetchRequestMode::kCORS);
   ServiceWorkerURLRequestJob* sub_cors_job =
       sub_test_resources_cors.MaybeCreateJob();
 
@@ -433,4 +433,5 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, FallbackWithNoOfflineHeader) {
 }
 #endif  // BUILDFLAG(ENABLE_OFFLINE_PAGE
 
+}  // namespace service_worker_controllee_request_handler_unittest
 }  // namespace content

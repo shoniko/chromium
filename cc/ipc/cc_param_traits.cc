@@ -11,7 +11,11 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/unguessable_token.h"
-#include "cc/base/filter_operations.h"
+#include "cc/paint/filter_operations.h"
+#include "cc/paint/paint_filter.h"
+#include "cc/paint/paint_op_buffer.h"
+#include "cc/paint/paint_op_reader.h"
+#include "cc/paint/paint_op_writer.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/quads/debug_border_draw_quad.h"
 #include "components/viz/common/quads/draw_quad.h"
@@ -22,12 +26,6 @@
 #include "components/viz/common/quads/tile_draw_quad.h"
 #include "components/viz/common/quads/yuv_video_draw_quad.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "skia/ext/skia_utils_base.h"
-#include "third_party/skia/include/core/SkData.h"
-#include "third_party/skia/include/core/SkFlattenableSerialization.h"
-#include "third_party/skia/include/core/SkImageFilter.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
-#include "third_party/skia/include/effects/SkBlurImageFilter.h"
 #include "ui/gfx/ipc/geometry/gfx_param_traits.h"
 #include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 
@@ -151,7 +149,7 @@ bool ParamTraits<cc::FilterOperation>::Read(const base::Pickle* m,
       }
       break;
     case cc::FilterOperation::REFERENCE: {
-      sk_sp<SkImageFilter> filter;
+      sk_sp<cc::PaintFilter> filter;
       if (!ReadParam(m, iter, &filter)) {
         success = false;
         break;
@@ -269,43 +267,53 @@ void ParamTraits<cc::FilterOperations>::Log(const param_type& p,
   l->append(")");
 }
 
-void ParamTraits<sk_sp<SkImageFilter>>::Write(base::Pickle* m,
-                                              const param_type& p) {
+void ParamTraits<sk_sp<cc::PaintFilter>>::Write(base::Pickle* m,
+                                                const param_type& p) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
-               "ParamTraits::SkImageFilter::Write");
-  SkImageFilter* filter = p.get();
-  if (filter) {
-    sk_sp<SkData> data(skia::ValidatingSerializeFlattenable(filter));
-    m->WriteData(static_cast<const char*>(data->data()),
-                 base::checked_cast<int>(data->size()));
-  } else {
-    m->WriteData(0, 0);
-  }
+               "ParamTraits::PaintFilter::Write");
+  std::vector<uint8_t> memory;
+  memory.resize(cc::PaintOpWriter::HeaderBytes() +
+                cc::PaintFilter::GetFilterSize(p.get()));
+  cc::PaintOpWriter writer(memory.data(), memory.size(), nullptr, nullptr,
+                           true /* enable_security_constraints */);
+  writer.Write(p.get());
+  if (writer.size() == 0u)
+    m->WriteData(nullptr, 0);
+  else
+    m->WriteData(reinterpret_cast<const char*>(memory.data()), writer.size());
 }
 
-bool ParamTraits<sk_sp<SkImageFilter>>::Read(const base::Pickle* m,
-                                             base::PickleIterator* iter,
-                                             param_type* r) {
+bool ParamTraits<sk_sp<cc::PaintFilter>>::Read(const base::Pickle* m,
+                                               base::PickleIterator* iter,
+                                               param_type* r) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.ipc"),
-               "ParamTraits::SkImageFilter::Read");
-  const char* data = 0;
+               "ParamTraits::PaintFilter::Read");
+  const char* data = nullptr;
   int length = 0;
   if (!iter->ReadData(&data, &length))
     return false;
-  if (length > 0) {
-    SkFlattenable* flattenable = skia::ValidatingDeserializeFlattenable(
-        data, length, SkImageFilter::GetFlattenableType());
-    *r = sk_sp<SkImageFilter>(static_cast<SkImageFilter*>(flattenable));
-  } else {
+
+  if (length <= 0) {
     r->reset();
+    return true;
   }
+
+  cc::PaintOpReader reader(data, length, nullptr,
+                           true /* enable_security_constraints */);
+  sk_sp<cc::PaintFilter> filter;
+  reader.Read(&filter);
+  if (!filter)
+    return false;
+
+  *r = std::move(filter);
   return true;
 }
 
-void ParamTraits<sk_sp<SkImageFilter>>::Log(const param_type& p,
-                                            std::string* l) {
+void ParamTraits<sk_sp<cc::PaintFilter>>::Log(const param_type& p,
+                                              std::string* l) {
   l->append("(");
-  LogParam(p.get() ? p->countInputs() : 0, l);
+  auto type = p ? p->type() : cc::PaintFilter::Type::kNullFilter;
+  LogParam(cc::PaintFilter::TypeToString(type), l);
   l->append(")");
 }
 
@@ -590,6 +598,7 @@ void ParamTraits<viz::RenderPass>::Log(const param_type& p, std::string* l) {
 
 void ParamTraits<viz::FrameSinkId>::Write(base::Pickle* m,
                                           const param_type& p) {
+  DCHECK(p.is_valid());
   WriteParam(m, p.client_id());
   WriteParam(m, p.sink_id());
 }
@@ -606,7 +615,7 @@ bool ParamTraits<viz::FrameSinkId>::Read(const base::Pickle* m,
     return false;
 
   *p = viz::FrameSinkId(client_id, sink_id);
-  return true;
+  return p->is_valid();
 }
 
 void ParamTraits<viz::FrameSinkId>::Log(const param_type& p, std::string* l) {
@@ -619,29 +628,38 @@ void ParamTraits<viz::FrameSinkId>::Log(const param_type& p, std::string* l) {
 
 void ParamTraits<viz::LocalSurfaceId>::Write(base::Pickle* m,
                                              const param_type& p) {
-  WriteParam(m, p.local_id());
+  DCHECK(p.is_valid());
+  WriteParam(m, p.parent_sequence_number());
+  WriteParam(m, p.child_sequence_number());
   WriteParam(m, p.nonce());
 }
 
 bool ParamTraits<viz::LocalSurfaceId>::Read(const base::Pickle* m,
                                             base::PickleIterator* iter,
                                             param_type* p) {
-  uint32_t local_id;
-  if (!ReadParam(m, iter, &local_id))
+  uint32_t parent_sequence_number;
+  if (!ReadParam(m, iter, &parent_sequence_number))
+    return false;
+
+  uint32_t child_sequence_number;
+  if (!ReadParam(m, iter, &child_sequence_number))
     return false;
 
   base::UnguessableToken nonce;
   if (!ReadParam(m, iter, &nonce))
     return false;
 
-  *p = viz::LocalSurfaceId(local_id, nonce);
-  return true;
+  *p =
+      viz::LocalSurfaceId(parent_sequence_number, child_sequence_number, nonce);
+  return p->is_valid();
 }
 
 void ParamTraits<viz::LocalSurfaceId>::Log(const param_type& p,
                                            std::string* l) {
   l->append("viz::LocalSurfaceId(");
-  LogParam(p.local_id(), l);
+  LogParam(p.parent_sequence_number(), l);
+  l->append(", ");
+  LogParam(p.child_sequence_number(), l);
   l->append(", ");
   LogParam(p.nonce(), l);
   l->append(")");
@@ -849,7 +867,6 @@ void ParamTraits<viz::YUVVideoDrawQuad>::Write(base::Pickle* m,
   WriteParam(m, p.uv_tex_coord_rect);
   WriteParam(m, p.ya_tex_size);
   WriteParam(m, p.uv_tex_size);
-  WriteParam(m, p.color_space);
   WriteParam(m, p.video_color_space);
   WriteParam(m, p.resource_offset);
   WriteParam(m, p.resource_multiplier);
@@ -864,7 +881,6 @@ bool ParamTraits<viz::YUVVideoDrawQuad>::Read(const base::Pickle* m,
          ReadParam(m, iter, &p->uv_tex_coord_rect) &&
          ReadParam(m, iter, &p->ya_tex_size) &&
          ReadParam(m, iter, &p->uv_tex_size) &&
-         ReadParam(m, iter, &p->color_space) &&
          ReadParam(m, iter, &p->video_color_space) &&
          ReadParam(m, iter, &p->resource_offset) &&
          ReadParam(m, iter, &p->resource_multiplier) &&
@@ -886,8 +902,6 @@ void ParamTraits<viz::YUVVideoDrawQuad>::Log(const param_type& p,
   l->append(", ");
   LogParam(p.uv_tex_size, l);
   l->append(", ");
-  LogParam(p.color_space, l);
-  l->append(", ");
   LogParam(p.video_color_space, l);
   l->append(", ");
   LogParam(p.resource_offset, l);
@@ -901,7 +915,7 @@ void ParamTraits<viz::YUVVideoDrawQuad>::Log(const param_type& p,
 void ParamTraits<viz::BeginFrameAck>::Write(base::Pickle* m,
                                             const param_type& p) {
   m->WriteUInt64(p.sequence_number);
-  m->WriteUInt32(p.source_id);
+  m->WriteUInt64(p.source_id);
   // |has_damage| is implicit through IPC message name, so not transmitted.
 }
 
@@ -910,7 +924,7 @@ bool ParamTraits<viz::BeginFrameAck>::Read(const base::Pickle* m,
                                            param_type* p) {
   return iter->ReadUInt64(&p->sequence_number) &&
          p->sequence_number >= viz::BeginFrameArgs::kStartingFrameNumber &&
-         iter->ReadUInt32(&p->source_id);
+         iter->ReadUInt64(&p->source_id);
 }
 
 void ParamTraits<viz::BeginFrameAck>::Log(const param_type& p, std::string* l) {

@@ -142,12 +142,6 @@ const char kForceVideoOverlays[] = "force-video-overlays";
 const char kMSEAudioBufferSizeLimit[] = "mse-audio-buffer-size-limit";
 const char kMSEVideoBufferSizeLimit[] = "mse-video-buffer-size-limit";
 
-// Ignores all autoplay restrictions. It will ignore the current autoplay policy
-// and all restrictions such as playback in a background tab. It should only be
-// enabled for testing.
-const char kIgnoreAutoplayRestrictionsForTests[] =
-    "ignore-autoplay-restrictions";
-
 // Specifies the path to the Clear Key CDM for testing, which is necessary to
 // support External Clear Key key system when library CDM is enabled. Note that
 // External Clear Key key system support is also controlled by feature
@@ -191,6 +185,10 @@ const base::Feature kNewAudioRenderingMixingStrategy{
 const base::Feature kOverlayFullscreenVideo{"overlay-fullscreen-video",
                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Enable Picture in Picture.
+const base::Feature kPictureInPicture{"PictureInPicture",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Let videos be resumed via remote controls (for example, the notification)
 // when in background.
 const base::Feature kResumeBackgroundVideo {
@@ -215,6 +213,10 @@ const base::Feature kUseAndroidOverlay{"UseAndroidOverlay",
 const base::Feature kUseAndroidOverlayAggressively{
     "UseAndroidOverlayAggressively", base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Enables playback of AV1 video files.
+const base::Feature kAv1Decoder{"Av1Decoder",
+                                base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Let video track be unselected when video is playing in the background.
 const base::Feature kBackgroundVideoTrackOptimization{
     "BackgroundVideoTrackOptimization", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -237,6 +239,10 @@ const base::Feature kMemoryPressureBasedSourceBufferGC{
 // still missing and this feature should only be enabled for testing.
 const base::Feature kMojoCdm{"MojoCdm", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Enable MojoVideoDecoder.  Has no effect except on Android currently.
+const base::Feature kMojoVideoDecoder{"MojoVideoDecoder",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Manage and report MSE buffered ranges by PTS intervals, not DTS intervals.
 const base::Feature kMseBufferByPts{"MseBufferByPts",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
@@ -249,10 +255,6 @@ const base::Feature kMseFlacInIsobmff{"MseFlacInIsobmff",
 const base::Feature kNewRemotePlaybackPipeline{
     "NewRemotePlaybackPipeline", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Set preload to "metadata" by default for <video> and <audio>.
-const base::Feature kPreloadDefaultIsMetadata{
-    "PreloadDefaultIsMetadata", base::FEATURE_DISABLED_BY_DEFAULT};
-
 // CanPlayThrough issued according to standard.
 const base::Feature kSpecCompliantCanPlayThrough{
     "SpecCompliantCanPlayThrough", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -264,6 +266,11 @@ const base::Feature kUseNewMediaCache{"use-new-media-cache",
 // Use R16 texture for 9-16 bit channel instead of half-float conversion by CPU.
 const base::Feature kUseR16Texture{"use-r16-texture",
                                    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables the Unified Autoplay policy by overriding the platform's default
+// autoplay policy.
+const base::Feature kUnifiedAutoplay{"UnifiedAutoplay",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Use SurfaceLayer instead of VideoLayer.
 const base::Feature kUseSurfaceLayerForVideo{"UseSurfaceLayerForVideo",
@@ -334,22 +341,13 @@ const base::Feature kMediaFoundationH264Encoding{
     "MediaFoundationH264Encoding", base::FEATURE_ENABLED_BY_DEFAULT};
 #endif  // defined(OS_WIN)
 
-#if defined(OS_MACOSX)
-// Enables a workaround for a CoreAudio issue. The workaround ensures that
-// CoreAudio's pause and resume operations are serialized. These operations are
-// executed when the system is suspended and when it resumes.
-const base::Feature kSerializeCoreAudioPauseResume{
-    "SerializeCoreAudioPauseResume", base::FEATURE_DISABLED_BY_DEFAULT};
-#endif  // defined(OS_MACOSX)
-
 std::string GetEffectiveAutoplayPolicy(const base::CommandLine& command_line) {
-  // |kIgnoreAutoplayRestrictionsForTests| overrides all other settings.
-  if (command_line.HasSwitch(switches::kIgnoreAutoplayRestrictionsForTests))
-    return switches::autoplay::kNoUserGestureRequiredPolicy;
-
   // Return the autoplay policy set in the command line, if any.
   if (command_line.HasSwitch(switches::kAutoplayPolicy))
     return command_line.GetSwitchValueASCII(switches::kAutoplayPolicy);
+
+  if (base::FeatureList::IsEnabled(media::kUnifiedAutoplay))
+    return switches::autoplay::kDocumentUserActivationRequiredPolicy;
 
 // The default value is platform dependent.
 #if defined(OS_ANDROID)
@@ -375,5 +373,10 @@ const base::Feature kOverflowIconsForMediaControls{
 // Enables the new redesigned media controls.
 const base::Feature kUseModernMediaControls{"UseModernMediaControls",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Allows Media Engagement to use preloaded data to decide whether an origin has
+// a high media engagement.
+const base::Feature kPreloadMediaEngagementData{
+    "PreloadMediaEngagementData", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace media

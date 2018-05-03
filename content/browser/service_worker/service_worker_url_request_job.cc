@@ -27,7 +27,6 @@
 #include "content/browser/service_worker/embedded_worker_instance.h"
 #include "content/browser/service_worker/service_worker_blob_reader.h"
 #include "content/browser/service_worker/service_worker_data_pipe_reader.h"
-#include "content/browser/service_worker/service_worker_fetch_dispatcher.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
 #include "content/browser/service_worker/service_worker_response_info.h"
 #include "content/common/service_worker/service_worker_types.h"
@@ -38,7 +37,6 @@
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/referrer.h"
-#include "content/public/common/resource_request_body.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
@@ -47,6 +45,7 @@
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_with_source.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "storage/browser/blob/blob_impl.h"
@@ -58,8 +57,9 @@ namespace content {
 namespace {
 
 net::URLRequestStatus ServiceWorkerResponseErrorToNetStatus(
-    blink::WebServiceWorkerResponseError error) {
-  if (error == blink::kWebServiceWorkerResponseErrorDataPipeCreationFailed) {
+    blink::mojom::ServiceWorkerResponseError error) {
+  if (error ==
+      blink::mojom::ServiceWorkerResponseError::kDataPipeCreationFailed) {
     return net::URLRequestStatus::FromError(net::ERR_INSUFFICIENT_RESOURCES);
   }
 
@@ -165,9 +165,9 @@ class ServiceWorkerURLRequestJob::FileSizeResolver {
     callback_ = std::move(callback);
 
     std::vector<base::FilePath> file_paths;
-    for (ResourceRequestBody::Element& element : *body_->elements_mutable()) {
-      if (element.type() == ResourceRequestBody::Element::TYPE_FILE &&
-          element.length() == ResourceRequestBody::Element::kUnknownSize) {
+    for (network::DataElement& element : *body_->elements_mutable()) {
+      if (element.type() == network::DataElement::TYPE_FILE &&
+          element.length() == network::DataElement::kUnknownSize) {
         file_elements_.push_back(&element);
         file_paths.push_back(element.path());
       }
@@ -195,7 +195,7 @@ class ServiceWorkerURLRequestJob::FileSizeResolver {
       DCHECK_EQ(sizes.size(), file_elements_.size());
       size_t num_elements = file_elements_.size();
       for (size_t i = 0; i < num_elements; i++) {
-        ResourceRequestBody::Element* element = file_elements_[i];
+        network::DataElement* element = file_elements_[i];
         element->SetToFilePathRange(element->path(), element->offset(),
                                     base::checked_cast<uint64_t>(sizes[i]),
                                     element->expected_modification_time());
@@ -215,8 +215,8 @@ class ServiceWorkerURLRequestJob::FileSizeResolver {
   // Owns and must outlive |this|.
   ServiceWorkerURLRequestJob* owner_;
 
-  scoped_refptr<ResourceRequestBody> body_;
-  std::vector<ResourceRequestBody::Element*> file_elements_;
+  scoped_refptr<network::ResourceRequestBody> body_;
+  std::vector<network::DataElement*> file_elements_;
   base::OnceCallback<void(bool /* success */)> callback_;
   Phase phase_ = Phase::INITIAL;
   base::WeakPtrFactory<FileSizeResolver> weak_factory_;
@@ -321,16 +321,16 @@ ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
     const std::string& client_id,
     base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
     const ResourceContext* resource_context,
-    FetchRequestMode request_mode,
-    FetchCredentialsMode credentials_mode,
-    FetchRedirectMode redirect_mode,
+    network::mojom::FetchRequestMode request_mode,
+    network::mojom::FetchCredentialsMode credentials_mode,
+    network::mojom::FetchRedirectMode redirect_mode,
     const std::string& integrity,
+    bool keepalive,
     ResourceType resource_type,
     RequestContextType request_context_type,
-    RequestContextFrameType frame_type,
-    scoped_refptr<ResourceRequestBody> body,
+    network::mojom::RequestContextFrameType frame_type,
+    scoped_refptr<network::ResourceRequestBody> body,
     ServiceWorkerFetchType fetch_type,
-    const base::Optional<base::TimeDelta>& timeout,
     Delegate* delegate)
     : net::URLRequestJob(request, network_delegate),
       delegate_(delegate),
@@ -344,13 +344,13 @@ ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
       credentials_mode_(credentials_mode),
       redirect_mode_(redirect_mode),
       integrity_(integrity),
+      keepalive_(keepalive),
       resource_type_(resource_type),
       request_context_type_(request_context_type),
       frame_type_(frame_type),
       fall_back_required_(false),
       body_(body),
       fetch_type_(fetch_type),
-      timeout_(timeout),
       weak_factory_(this) {
   DCHECK(delegate_) << "ServiceWorkerURLRequestJob requires a delegate";
 }
@@ -379,7 +379,6 @@ void ServiceWorkerURLRequestJob::FallbackToNetwork() {
 
 void ServiceWorkerURLRequestJob::FallbackToNetworkOrRenderer() {
   DCHECK_EQ(ResponseType::NOT_DETERMINED, response_type_);
-  DCHECK_NE(ServiceWorkerFetchType::FOREIGN_FETCH, fetch_type_);
   if (IsFallbackToRendererNeeded()) {
     response_type_ = ResponseType::FALLBACK_TO_RENDERER;
   } else {
@@ -561,8 +560,7 @@ ServiceWorkerURLRequestJob::CreateFetchRequest() {
   uint64_t blob_size = 0;
   if (HasRequestBody())
     CreateRequestBodyBlob(&blob_uuid, &blob_size);
-  std::unique_ptr<ServiceWorkerFetchRequest> request(
-      new ServiceWorkerFetchRequest());
+  auto request = std::make_unique<ServiceWorkerFetchRequest>();
   request->mode = request_mode_;
   request->is_main_resource_load = IsMainResourceLoad();
   request->request_context_type = request_context_type_;
@@ -579,8 +577,11 @@ ServiceWorkerURLRequestJob::CreateFetchRequest() {
   request->blob_size = blob_size;
   request->blob = request_body_blob_handle_;
   request->credentials_mode = credentials_mode_;
+  request->cache_mode = ServiceWorkerFetchRequest::GetCacheModeFromLoadFlags(
+      request_->load_flags());
   request->redirect_mode = redirect_mode_;
   request->integrity = integrity_;
+  request->keepalive = keepalive_;
   request->client_id = client_id_;
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request_);
   if (info) {
@@ -603,8 +604,8 @@ void ServiceWorkerURLRequestJob::CreateRequestBodyBlob(std::string* blob_uuid,
                                                        uint64_t* blob_size) {
   DCHECK(HasRequestBody());
   storage::BlobDataBuilder blob_builder(base::GenerateGUID());
-  for (const ResourceRequestBody::Element& element : (*body_->elements())) {
-    blob_builder.AppendIPCDataElement(element);
+  for (const network::DataElement& element : (*body_->elements())) {
+    blob_builder.AppendIPCDataElement(element, nullptr);  // TODO
   }
 
   request_body_blob_data_handle_ =
@@ -612,14 +613,12 @@ void ServiceWorkerURLRequestJob::CreateRequestBodyBlob(std::string* blob_uuid,
   *blob_uuid = blob_builder.uuid();
   *blob_size = request_body_blob_data_handle_->size();
 
-  if (features::IsMojoBlobsEnabled()) {
-    blink::mojom::BlobPtr blob_ptr;
-    storage::BlobImpl::Create(base::MakeUnique<storage::BlobDataHandle>(
-                                  *request_body_blob_data_handle_),
-                              MakeRequest(&blob_ptr));
-    request_body_blob_handle_ =
-        base::MakeRefCounted<storage::BlobHandle>(std::move(blob_ptr));
-  }
+  blink::mojom::BlobPtr blob_ptr;
+  storage::BlobImpl::Create(std::make_unique<storage::BlobDataHandle>(
+                                *request_body_blob_data_handle_),
+                            MakeRequest(&blob_ptr));
+  request_body_blob_handle_ =
+      base::MakeRefCounted<storage::BlobHandle>(std::move(blob_ptr));
 }
 
 bool ServiceWorkerURLRequestJob::ShouldRecordNavigationMetrics(
@@ -677,15 +676,15 @@ void ServiceWorkerURLRequestJob::DidPrepareFetchEvent(
 
 void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
     ServiceWorkerStatusCode status,
-    ServiceWorkerFetchEventResult fetch_result,
+    ServiceWorkerFetchDispatcher::FetchEventResult fetch_result,
     const ServiceWorkerResponse& response,
     blink::mojom::ServiceWorkerStreamHandlePtr body_as_stream,
     blink::mojom::BlobPtr body_as_blob,
-    const scoped_refptr<ServiceWorkerVersion>& version) {
+    scoped_refptr<ServiceWorkerVersion> version) {
   // Do not clear |fetch_dispatcher_| if it has dispatched a navigation preload
-  // request to keep the mojom::URLLoader related objects in it, because the
-  // preload response might still need to be streamed even after calling
-  // respondWith().
+  // request to keep the network::mojom::URLLoader related objects in it,
+  // because the preload response might still need to be streamed even after
+  // calling respondWith().
   if (!did_navigation_preload_) {
     fetch_dispatcher_.reset();
   }
@@ -711,7 +710,8 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
     return;
   }
 
-  if (fetch_result == SERVICE_WORKER_FETCH_EVENT_RESULT_FALLBACK) {
+  if (fetch_result ==
+      ServiceWorkerFetchDispatcher::FetchEventResult::kShouldFallback) {
     ServiceWorkerMetrics::RecordFallbackedRequestMode(request_mode_);
     if (IsFallbackToRendererNeeded()) {
       FinalizeFallbackToRenderer();
@@ -722,7 +722,8 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   }
 
   // We should have a response now.
-  DCHECK_EQ(SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE, fetch_result);
+  DCHECK_EQ(ServiceWorkerFetchDispatcher::FetchEventResult::kGotResponse,
+            fetch_result);
 
   // A response with status code 0 is Blink telling us to respond with network
   // error.
@@ -843,9 +844,6 @@ void ServiceWorkerURLRequestJob::FinalizeFallbackToNetwork() {
 }
 
 void ServiceWorkerURLRequestJob::FinalizeFallbackToRenderer() {
-  // TODO(mek): http://crbug.com/604084 Figure out what to do about CORS
-  // preflight and fallbacks for foreign fetch events.
-  DCHECK_NE(fetch_type_, ServiceWorkerFetchType::FOREIGN_FETCH);
   fall_back_required_ = true;
   if (ShouldRecordResult())
     RecordResult(ServiceWorkerMetrics::REQUEST_JOB_FALLBACK_FOR_CORS);
@@ -861,14 +859,10 @@ bool ServiceWorkerURLRequestJob::IsFallbackToRendererNeeded() const {
   // document, we can't simply fallback to the network in the browser process.
   // It is because the CORS preflight logic is implemented in the renderer. So
   // we return a fall_back_required response to the renderer.
-  // If fetch_type is |FOREIGN_FETCH| any required CORS checks will have already
-  // been done in the renderer (and if a preflight was necesary the request
-  // would never have reached foreign fetch), so such requests can always
-  // fallback to the network directly.
   return !IsMainResourceLoad() &&
-         fetch_type_ != ServiceWorkerFetchType::FOREIGN_FETCH &&
-         (request_mode_ == FETCH_REQUEST_MODE_CORS ||
-          request_mode_ == FETCH_REQUEST_MODE_CORS_WITH_FORCED_PREFLIGHT) &&
+         (request_mode_ == network::mojom::FetchRequestMode::kCORS ||
+          request_mode_ ==
+              network::mojom::FetchRequestMode::kCORSWithForcedPreflight) &&
          (!request()->initiator().has_value() ||
           !request()->initiator()->IsSameOriginWith(
               url::Origin::Create(request()->url())));
@@ -886,7 +880,7 @@ bool ServiceWorkerURLRequestJob::ShouldRecordResult() {
 }
 
 void ServiceWorkerURLRequestJob::RecordStatusZeroResponseError(
-    blink::WebServiceWorkerResponseError error) {
+    blink::mojom::ServiceWorkerResponseError error) {
   // It violates style guidelines to handle a NOTREACHED() failure but if there
   // is a bug don't let it corrupt UMA results by double-counting.
   if (!ShouldRecordResult()) {
@@ -928,7 +922,6 @@ void ServiceWorkerURLRequestJob::OnStartCompleted() const {
       ServiceWorkerResponseInfo::ForRequest(request_, true)
           ->OnStartCompleted(
               false /* was_fetched_via_service_worker */,
-              false /* was_fetched_via_foreign_fetch */,
               false /* was_fallback_required */,
               std::vector<GURL>() /* url_list_via_service_worker */,
               network::mojom::FetchResponseType::kDefault,
@@ -947,7 +940,6 @@ void ServiceWorkerURLRequestJob::OnStartCompleted() const {
       ServiceWorkerResponseInfo::ForRequest(request_, true)
           ->OnStartCompleted(
               true /* was_fetched_via_service_worker */,
-              fetch_type_ == ServiceWorkerFetchType::FOREIGN_FETCH,
               fall_back_required_, response_url_list_, fetch_response_type_,
               worker_start_time_, worker_ready_time_,
               response_is_in_cache_storage_, response_cache_storage_cache_name_,
@@ -994,16 +986,16 @@ void ServiceWorkerURLRequestJob::RequestBodyFileSizesResolved(bool success) {
   initial_worker_status_ = active_worker->running_status();
 
   DCHECK(!fetch_dispatcher_);
-  fetch_dispatcher_.reset(new ServiceWorkerFetchDispatcher(
-      CreateFetchRequest(), active_worker, resource_type_, timeout_,
+  fetch_dispatcher_ = std::make_unique<ServiceWorkerFetchDispatcher>(
+      CreateFetchRequest(), base::WrapRefCounted(active_worker), resource_type_,
       request()->net_log(),
-      base::Bind(&ServiceWorkerURLRequestJob::DidPrepareFetchEvent,
-                 weak_factory_.GetWeakPtr(),
-                 base::WrapRefCounted(active_worker)),
-      base::Bind(&ServiceWorkerURLRequestJob::DidDispatchFetchEvent,
-                 weak_factory_.GetWeakPtr())));
+      base::BindOnce(&ServiceWorkerURLRequestJob::DidPrepareFetchEvent,
+                     weak_factory_.GetWeakPtr(),
+                     base::WrapRefCounted(active_worker)),
+      base::BindOnce(&ServiceWorkerURLRequestJob::DidDispatchFetchEvent,
+                     weak_factory_.GetWeakPtr()));
   worker_start_time_ = base::TimeTicks::Now();
-  nav_preload_metrics_ = base::MakeUnique<NavigationPreloadMetrics>(this);
+  nav_preload_metrics_ = std::make_unique<NavigationPreloadMetrics>(this);
   if (simulate_navigation_preload_for_test_) {
     did_navigation_preload_ = true;
   } else {

@@ -82,7 +82,6 @@ const char kChromeUIHistoryURL[] = "chrome://history/";
 const char kChromeUIIdentityInternalsHost[] = "identity-internals";
 const char kChromeUIInspectHost[] = "inspect";
 const char kChromeUIInspectURL[] = "chrome://inspect/";
-const char kChromeUIInstantHost[] = "instant";
 const char kChromeUIInterstitialHost[] = "interstitials";
 const char kChromeUIInterstitialURL[] = "chrome://interstitials/";
 const char kChromeUIInterventionsInternalsHost[] = "interventions-internals";
@@ -196,7 +195,6 @@ const char kChromeUIInternetConfigDialogHost[] = "internet-config-dialog";
 const char kChromeUIInternetDetailDialogHost[] = "internet-detail-dialog";
 const char kChromeUIKeyboardOverlayHost[] = "keyboardoverlay";
 const char kChromeUIKeyboardOverlayURL[] = "chrome://keyboardoverlay/";
-const char kChromeUIMdCupsSettingsURL[] = "chrome://settings/cupsPrinters";
 const char kChromeUIMobileSetupHost[] = "mobilesetup";
 const char kChromeUIMobileSetupURL[] = "chrome://mobilesetup/";
 const char kChromeUINetworkHost[] = "network";
@@ -209,8 +207,6 @@ const char kChromeUIScreenlockIconHost[] = "screenlock-icon";
 const char kChromeUIScreenlockIconURL[] = "chrome://screenlock-icon/";
 const char kChromeUISetTimeHost[] = "set-time";
 const char kChromeUISetTimeURL[] = "chrome://set-time/";
-const char kChromeUISimUnlockHost[] = "sim-unlock";
-const char kChromeUISimUnlockURL[] = "chrome://sim-unlock/";
 const char kChromeUISlowHost[] = "slow";
 const char kChromeUISlowTraceHost[] = "slow_trace";
 const char kChromeUISlowURL[] = "chrome://slow/";
@@ -218,7 +214,6 @@ const char kChromeUISysInternalsHost[] = "sys-internals";
 const char kChromeUITermsOemURL[] = "chrome://terms/oem";
 const char kChromeUIUserImageHost[] = "userimage";
 const char kChromeUIUserImageURL[] = "chrome://userimage/";
-const char kChromeUIVoiceSearchHost[] = "voicesearch";
 #endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
@@ -270,6 +265,7 @@ const char kHandlerSettingsSubPage[] = "handlers";
 const char kImportDataSubPage[] = "importData";
 const char kLanguageOptionsSubPage[] = "languages";
 const char kPasswordManagerSubPage[] = "passwords";
+const char kPrintingSettingsSubPage[] = "printing";
 const char kResetProfileSettingsSubPage[] = "resetProfileSettings";
 const char kSearchEnginesSubPage[] = "searchEngines";
 const char kSignOutSubPage[] = "signOut";
@@ -289,7 +285,10 @@ const char kStylusSubPage[] = "stylus";
 #else
 const char kCreateProfileSubPage[] = "createProfile";
 const char kManageProfileSubPage[] = "manageProfile";
-#endif
+#endif  // defined(OS_CHROMEOS)
+#if defined(OS_WIN)
+const char kCleanupSubPage[] = "cleanup";
+#endif  // defined(OS_WIN)
 
 // Extension sub pages.
 const char kExtensionConfigureCommandsSubPage[] = "configureCommands";
@@ -383,9 +382,8 @@ const char* const kChromeHostURLs[] = {
     kChromeUIPowerHost,
     kChromeUIInternetConfigDialogHost,
     kChromeUIInternetDetailDialogHost,
-    kChromeUIVoiceSearchHost,
 #endif
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
     kChromeUIDiscardsHost,
 #endif
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)

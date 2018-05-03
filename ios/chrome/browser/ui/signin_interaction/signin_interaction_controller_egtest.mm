@@ -9,7 +9,6 @@
 #import "base/test/ios/wait_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "ios/chrome/browser/bookmarks/bookmark_new_generation_features.h"
 #include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
 #import "ios/chrome/browser/ui/authentication/signin_earlgrey_utils.h"
@@ -18,7 +17,6 @@
 #import "ios/chrome/browser/ui/commands/open_url_command.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_controller.h"
-#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
@@ -462,42 +460,17 @@ void WaitForMatcher(id<GREYMatcher> matcher) {
   [SigninEarlGreyUtils assertSignedOut];
 }
 
-// Opens the sign in screen from the bookmarks and then cancel it by opening a
-// new tab. Ensures that the sign in screen is correctly dismissed.
+// Opens the sign in screen from the bookmarks and then cancel it by tapping on
+// done. Ensures that the sign in screen is correctly dismissed.
 // Regression test for crbug.com/596029.
-// TODO(crbug.com/695749): Check if we need to rewrite this test for the new
-// Bookmarks UI.
 - (void)testSignInCancelFromBookmarks {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndDisableFeature(kBookmarkNewGeneration);
-
   ChromeIdentity* identity = [SigninEarlGreyUtils fakeIdentity1];
   ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()->AddIdentity(
       identity);
 
   // Open Bookmarks and tap on Sign In promo button.
-  const CGFloat scroll_displacement = 50.0;
   [ChromeEarlGreyUI openToolsMenu];
-  [[[EarlGrey
-      selectElementWithMatcher:grey_accessibilityID(kToolsMenuBookmarksId)]
-         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown,
-                                                  scroll_displacement)
-      onElementWithMatcher:chrome_test_util::ToolsMenuView()]
-      performAction:grey_tap()];
-
-  if (!IsIPadIdiom()) {
-    // Opens the bookmark manager sidebar on handsets.
-    [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Menu")]
-        performAction:grey_tap()];
-  }
-
-  // Selects the top level folder (Sign In promo is only shown there).
-  NSString* topLevelFolderTitle = @"Mobile Bookmarks";
-  id<GREYMatcher> all_bookmarks_matcher =
-      grey_allOf(grey_kindOfClass(NSClassFromString(@"BookmarkMenuCell")),
-                 grey_descendant(grey_text(topLevelFolderTitle)), nil);
-  [[EarlGrey selectElementWithMatcher:all_bookmarks_matcher]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI tapToolsMenuButton:chrome_test_util::BookmarksMenuButton()];
   [ChromeEarlGreyUI tapSettingsMenuButton:SecondarySignInButton()];
 
   // Assert sign-in screen was shown.
@@ -515,35 +488,15 @@ void WaitForMatcher(id<GREYMatcher> matcher) {
   // Re-open the sign-in screen. If it wasn't correctly dismissed previously,
   // this will fail.
   [ChromeEarlGreyUI openToolsMenu];
-  [[[EarlGrey
-      selectElementWithMatcher:grey_accessibilityID(kToolsMenuBookmarksId)]
-         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown,
-                                                  scroll_displacement)
-      onElementWithMatcher:chrome_test_util::ToolsMenuView()]
-      performAction:grey_tap()];
-  if (!IsIPadIdiom()) {
-    [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Menu")]
-        performAction:grey_tap()];
-  }
-  [[EarlGrey selectElementWithMatcher:all_bookmarks_matcher]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI tapToolsMenuButton:chrome_test_util::BookmarksMenuButton()];
   [ChromeEarlGreyUI tapSettingsMenuButton:SecondarySignInButton()];
   [[EarlGrey selectElementWithMatcher:signin_matcher]
       assertWithMatcher:grey_sufficientlyVisible()];
 
   // Close sign-in screen and Bookmarks.
   TapButtonWithLabelId(IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON);
-  if (IsIPadIdiom()) {
-    // Switch back to the Home Panel.  This is to prevent Bookmarks Panel, which
-    // has an infinite spinner, from appearing in the coming tests and causing
-    // timeouts.
-    [chrome_test_util::GetCurrentNewTabPageController()
-        selectPanel:ntp_home::HOME_PANEL];
-    [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
-  } else {
-    [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
-        performAction:grey_tap()];
-  }
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 }
 
 @end

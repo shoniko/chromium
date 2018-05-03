@@ -63,7 +63,7 @@ static bool InContainingBlockChain(const PaintLayer* start_layer,
 void LayerClipRecorder::CollectRoundedRectClips(
     const PaintLayer& paint_layer,
     const PaintLayer* clip_root,
-    const LayoutPoint& offset_within_layer,
+    const LayoutPoint& fragment_offset,
     bool cross_composited_scrollers,
     BorderRadiusClippingRule rule,
     Vector<FloatRoundedRect>& rounded_rect_clips) {
@@ -84,10 +84,18 @@ void LayerClipRecorder::CollectRoundedRectClips(
     if (!cross_composited_scrollers && layer->NeedsCompositedScrolling())
       break;
 
-    if (layer->GetLayoutObject().HasOverflowClip() &&
+    // Collect clips for embedded content despite their lack of overflow,
+    // because in practice they do need to clip. However, the clip is only
+    // used when painting child clipping masks to avoid clipping out border
+    // decorations.
+    if ((layer->GetLayoutObject().HasOverflowClip() ||
+         layer->GetLayoutObject().IsLayoutEmbeddedContent()) &&
         layer->GetLayoutObject().Style()->HasBorderRadius() &&
         InContainingBlockChain(&paint_layer, layer)) {
-      LayoutPoint delta(offset_within_layer);
+      LayoutPoint delta;
+      if (layer->EnclosingPaginationLayer() ==
+          paint_layer.EnclosingPaginationLayer())
+        delta.MoveBy(fragment_offset);
       layer->ConvertToLayerCoords(clip_root, delta);
 
       // The PaintLayer's size is pixel-snapped if it is a LayoutBox. We can't

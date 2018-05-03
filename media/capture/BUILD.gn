@@ -107,6 +107,7 @@ component("capture_lib") {
     "video/mac/video_capture_device_factory_mac.mm",
     "video/mac/video_capture_device_mac.h",
     "video/mac/video_capture_device_mac.mm",
+    "video/scoped_buffer_pool_reservation.h",
     "video/shared_memory_buffer_tracker.cc",
     "video/shared_memory_buffer_tracker.h",
     "video/shared_memory_handle_provider.cc",
@@ -142,6 +143,8 @@ component("capture_lib") {
     "video/win/video_capture_device_factory_win.h",
     "video/win/video_capture_device_mf_win.cc",
     "video/win/video_capture_device_mf_win.h",
+    "video/win/video_capture_device_utils_win.cc",
+    "video/win/video_capture_device_utils_win.h",
     "video/win/video_capture_device_win.cc",
     "video/win/video_capture_device_win.h",
     "video_capturer_source.cc",
@@ -229,11 +232,30 @@ component("capture_lib") {
       "video/chromeos/video_capture_device_factory_chromeos.cc",
     ]
     deps += [
+      "//chromeos:chromeos",
       "//media/capture/video/chromeos/mojo:arc_camera3",
       "//mojo/edk/system",
       "//third_party/libsync",
     ]
   }
+}
+
+source_set("test_support") {
+  sources = [
+    "video/mock_video_frame_receiver.cc",
+    "video/mock_video_frame_receiver.h",
+  ]
+
+  deps = [
+    ":capture_lib",
+    "//base/test:test_support",
+    "//media:test_support",
+    "//media/capture/mojo:image_capture",
+    "//testing/gmock",
+    "//ui/gfx:test_support",
+  ]
+
+  testonly = true
 }
 
 test("capture_unittests") {
@@ -242,10 +264,12 @@ test("capture_unittests") {
     "content/capture_resolution_chooser_unittest.cc",
     "content/smooth_event_sampler_unittest.cc",
     "content/video_capture_oracle_unittest.cc",
+    "run_all_unittests.cc",
     "video/fake_video_capture_device_unittest.cc",
     "video/linux/camera_config_chromeos_unittest.cc",
     "video/linux/v4l2_capture_delegate_unittest.cc",
     "video/mac/video_capture_device_factory_mac_unittest.mm",
+    "video/shared_memory_handle_provider_unittest.cc",
     "video/video_capture_device_client_unittest.cc",
     "video/video_capture_device_unittest.cc",
     "video_capture_types_unittest.cc",
@@ -253,7 +277,7 @@ test("capture_unittests") {
 
   deps = [
     ":capture",
-    "//base/test:run_all_unittests",
+    ":test_support",
     "//base/test:test_support",
     "//media:test_support",
     "//media/capture/mojo:image_capture",
@@ -287,6 +311,7 @@ test("capture_unittests") {
       "video/chromeos/stream_buffer_manager_unittest.cc",
     ]
     deps += [
+      "//chromeos:chromeos",
       "//media/capture/video/chromeos/mojo:arc_camera3",
       "//mojo/edk/system",
       "//third_party/libdrm",

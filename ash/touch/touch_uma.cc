@@ -35,7 +35,7 @@ DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(WindowTouchDetails,
                                    NULL);
 }
 
-DECLARE_UI_CLASS_PROPERTY_TYPE(WindowTouchDetails*);
+DEFINE_UI_CLASS_PROPERTY_TYPE(WindowTouchDetails*);
 
 namespace ash {
 
@@ -130,9 +130,9 @@ void TouchUMA::RecordTouchEvent(aura::Window* target,
   }
 }
 
-TouchUMA::TouchUMA() {}
+TouchUMA::TouchUMA() = default;
 
-TouchUMA::~TouchUMA() {}
+TouchUMA::~TouchUMA() = default;
 
 GestureActionType TouchUMA::FindGestureActionType(
     aura::Window* window,

@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -46,6 +45,7 @@ web::WebUIIOSDataSource* CreateNetExportHTMLSource() {
   source->SetJsonPath("strings.js");
   source->AddResourcePath(net_log::kNetExportUIJS, IDR_NET_LOG_NET_EXPORT_JS);
   source->SetDefaultResource(IDR_NET_LOG_NET_EXPORT_HTML);
+  source->UseGzip();
   return source;
 }
 
@@ -211,7 +211,7 @@ void NetExportMessageHandler::NotifyUIWithState(
 
 NetExportUI::NetExportUI(web::WebUIIOS* web_ui)
     : web::WebUIIOSController(web_ui) {
-  web_ui->AddMessageHandler(base::MakeUnique<NetExportMessageHandler>());
+  web_ui->AddMessageHandler(std::make_unique<NetExportMessageHandler>());
   web::WebUIIOSDataSource::Add(ios::ChromeBrowserState::FromWebUIIOS(web_ui),
                                CreateNetExportHTMLSource());
 }

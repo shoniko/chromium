@@ -4,6 +4,7 @@
 
 #include "platform/loader/SubresourceIntegrity.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/Crypto.h"
 #include "platform/loader/fetch/IntegrityMetadata.h"
 #include "platform/loader/fetch/RawResource.h"
@@ -17,7 +18,6 @@
 #include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/dtoa/utils.h"
 #include "platform/wtf/text/StringBuilder.h"
@@ -241,12 +241,11 @@ class SubresourceIntegrityTest : public ::testing::Test {
     ResourceRequest request;
     request.SetURL(url);
 
-    ResourceResponse response;
+    ResourceResponse response(url);
     response.SetHTTPStatusCode(200);
-    response.SetURL(url);
 
     if (allow_origin_url) {
-      request.SetFetchRequestMode(WebURLRequest::kFetchRequestModeCORS);
+      request.SetFetchRequestMode(network::mojom::FetchRequestMode::kCORS);
       resource->MutableOptions().cors_handling_by_resource_fetcher =
           kEnableCORSHandlingByResourceFetcher;
       response.SetHTTPHeaderField(

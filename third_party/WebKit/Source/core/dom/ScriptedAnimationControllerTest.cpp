@@ -44,8 +44,9 @@ namespace {
 
 class TaskOrderObserver {
  public:
-  WTF::Closure CreateTask(int id) {
-    return WTF::Bind(&TaskOrderObserver::RunTask, WTF::Unretained(this), id);
+  base::RepeatingClosure CreateTask(int id) {
+    return WTF::BindRepeating(&TaskOrderObserver::RunTask,
+                              WTF::Unretained(this), id);
   }
   const Vector<int>& Order() const { return order_; }
 
@@ -118,15 +119,15 @@ namespace {
 
 class RunTaskEventListener final : public EventListener {
  public:
-  RunTaskEventListener(WTF::Closure task)
+  RunTaskEventListener(base::RepeatingClosure task)
       : EventListener(kCPPEventListenerType), task_(std::move(task)) {}
-  void handleEvent(ExecutionContext*, Event*) override { task_(); }
+  void handleEvent(ExecutionContext*, Event*) override { task_.Run(); }
   bool operator==(const EventListener& other) const override {
     return this == &other;
   }
 
  private:
-  WTF::Closure task_;
+  base::RepeatingClosure task_;
 };
 
 }  // anonymous namespace
@@ -155,11 +156,11 @@ namespace {
 class RunTaskCallback final
     : public FrameRequestCallbackCollection::FrameCallback {
  public:
-  RunTaskCallback(WTF::Closure task) : task_(std::move(task)) {}
-  void Invoke(double) override { task_(); }
+  RunTaskCallback(base::RepeatingClosure task) : task_(std::move(task)) {}
+  void Invoke(double) override { task_.Run(); }
 
  private:
-  WTF::Closure task_;
+  base::RepeatingClosure task_;
 };
 
 }  // anonymous namespace

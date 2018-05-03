@@ -31,19 +31,21 @@
 #ifndef FontFace_h
 #define FontFace_h
 
+#include "base/macros.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseProperty.h"
-#include "core/CSSPropertyNames.h"
 #include "core/css/CSSValue.h"
+#include "core/css/parser/AtRuleDescriptors.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMException.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/fonts/FontSelectionTypes.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
+class AtRuleDescriptorValueSet;
 class CSSFontFace;
 class CSSValue;
 class DOMArrayBuffer;
@@ -52,7 +54,6 @@ class Document;
 class ExceptionState;
 class FontFaceDescriptors;
 class StringOrArrayBufferOrArrayBufferView;
-class StylePropertySet;
 class StyleRuleFontFace;
 
 class CORE_EXPORT FontFace : public ScriptWrappable,
@@ -60,7 +61,6 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
                              public ContextClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(FontFace);
-  WTF_MAKE_NONCOPYABLE(FontFace);
 
  public:
   enum LoadStatusType { kUnloaded, kLoading, kLoaded, kError };
@@ -115,7 +115,7 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
 
   class CORE_EXPORT LoadFontCallback : public GarbageCollectedMixin {
    public:
-    virtual ~LoadFontCallback() {}
+    virtual ~LoadFontCallback() = default;
     virtual void NotifyLoaded(FontFace*) = 0;
     virtual void NotifyError(FontFace*) = 0;
     virtual void Trace(blink::Visitor* visitor) {}
@@ -149,10 +149,11 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
   void InitCSSFontFace(const unsigned char* data, size_t);
   void SetPropertyFromString(const ExecutionContext*,
                              const String&,
-                             CSSPropertyID,
+                             AtRuleDescriptorID,
                              ExceptionState* = nullptr);
-  bool SetPropertyFromStyle(const StylePropertySet&, CSSPropertyID);
-  bool SetPropertyValue(const CSSValue*, CSSPropertyID);
+  bool SetPropertyFromStyle(const AtRuleDescriptorValueSet&,
+                            AtRuleDescriptorID);
+  bool SetPropertyValue(const CSSValue*, AtRuleDescriptorID);
   bool SetFamilyValue(const CSSValue&);
   ScriptPromise FontStatusPromise(ScriptState*);
   void RunCallbacks();
@@ -176,6 +177,7 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
   Member<LoadedProperty> loaded_property_;
   Member<CSSFontFace> css_font_face_;
   HeapVector<Member<LoadFontCallback>> callbacks_;
+  DISALLOW_COPY_AND_ASSIGN(FontFace);
 };
 
 using FontFaceArray = HeapVector<Member<FontFace>>;

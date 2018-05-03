@@ -44,6 +44,10 @@ class LayerTreeFrameSinkLocal : public cc::LayerTreeFrameSink,
 
   base::WeakPtr<LayerTreeFrameSinkLocal> GetWeakPtr();
 
+  const viz::LocalSurfaceId& local_surface_id() const {
+    return local_surface_id_;
+  }
+
   // cc::LayerTreeFrameSink:
   bool BindToClient(cc::LayerTreeFrameSinkClient* client) override;
   void DetachFromClient() override;
@@ -54,6 +58,11 @@ class LayerTreeFrameSinkLocal : public cc::LayerTreeFrameSink,
   // viz::mojom::CompositorFrameSinkClient:
   void DidReceiveCompositorFrameAck(
       const std::vector<viz::ReturnedResource>& resources) override;
+  void DidPresentCompositorFrame(uint32_t presentation_token,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags) override;
+  void DidDiscardCompositorFrame(uint32_t presentation_token) override;
   void OnBeginFrame(const viz::BeginFrameArgs& args) override;
   void ReclaimResources(
       const std::vector<viz::ReturnedResource>& resources) override;
@@ -65,6 +74,7 @@ class LayerTreeFrameSinkLocal : public cc::LayerTreeFrameSink,
  private:
   // public viz::HostFrameSinkClient:
   void OnFirstSurfaceActivation(const viz::SurfaceInfo& surface_info) override;
+  void OnFrameTokenChanged(uint32_t frame_token) override;
 
   const viz::FrameSinkId frame_sink_id_;
   viz::HostFrameSinkManager* const host_frame_sink_manager_;

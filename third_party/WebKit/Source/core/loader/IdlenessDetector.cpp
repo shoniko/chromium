@@ -5,12 +5,13 @@
 #include "core/loader/IdlenessDetector.h"
 
 #include "core/dom/Document.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/LocalFrame.h"
 #include "core/probe/CoreProbes.h"
 #include "platform/instrumentation/resource_coordinator/FrameResourceCoordinator.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
+#include "services/resource_coordinator/public/cpp/resource_coordinator_features.h"
 
 namespace blink {
 
@@ -20,6 +21,8 @@ void IdlenessDetector::Shutdown() {
 }
 
 void IdlenessDetector::WillCommitLoad() {
+  network_2_quiet_ = -1;
+  network_0_quiet_ = -1;
   network_2_quiet_start_time_ = 0;
   network_0_quiet_start_time_ = 0;
 }
@@ -36,10 +39,11 @@ void IdlenessDetector::DomContentLoadedEventFired() {
   network_2_quiet_ = 0;
   network_0_quiet_ = 0;
 
-  if (auto* frame_resource_coordinator =
-          local_frame_->GetFrameResourceCoordinator()) {
-    frame_resource_coordinator->SetProperty(
-        resource_coordinator::mojom::PropertyType::kNetworkAlmostIdle, false);
+  if (::resource_coordinator::IsPageAlmostIdleSignalEnabled()) {
+    if (auto* frame_resource_coordinator =
+            local_frame_->GetFrameResourceCoordinator()) {
+      frame_resource_coordinator->SetNetworkAlmostIdle(false);
+    }
   }
   OnDidLoadResource();
 }
@@ -82,7 +86,7 @@ void IdlenessDetector::OnDidLoadResource() {
   if (request_count > 2)
     return;
 
-  double timestamp = MonotonicallyIncreasingTime();
+  double timestamp = CurrentTimeTicksInSeconds();
   // Arriving at =2 updates the quiet_2 base timestamp.
   // Arriving at <2 sets the quiet_2 base timestamp only if
   // it was not already set.
@@ -100,8 +104,7 @@ void IdlenessDetector::OnDidLoadResource() {
   }
 
   if (!network_quiet_timer_.IsActive()) {
-    network_quiet_timer_.StartOneShot(kNetworkQuietWatchdogSeconds,
-                                      BLINK_FROM_HERE);
+    network_quiet_timer_.StartOneShot(kNetworkQuietWatchdogSeconds, FROM_HERE);
   }
 }
 
@@ -116,14 +119,16 @@ double IdlenessDetector::GetNetworkIdleTime() {
 void IdlenessDetector::WillProcessTask(double start_time) {
   // If we have idle time and we are kNetworkQuietWindowSeconds seconds past it,
   // emit idle signals.
+  DocumentLoader* loader = local_frame_->Loader().GetDocumentLoader();
   if (network_2_quiet_ > 0 &&
       start_time - network_2_quiet_ > kNetworkQuietWindowSeconds) {
-    probe::lifecycleEvent(local_frame_, "networkAlmostIdle",
+    probe::lifecycleEvent(local_frame_, loader, "networkAlmostIdle",
                           network_2_quiet_start_time_);
-    if (auto* frame_resource_coordinator =
-            local_frame_->GetFrameResourceCoordinator()) {
-      frame_resource_coordinator->SetProperty(
-          resource_coordinator::mojom::PropertyType::kNetworkAlmostIdle, true);
+    if (::resource_coordinator::IsPageAlmostIdleSignalEnabled()) {
+      if (auto* frame_resource_coordinator =
+              local_frame_->GetFrameResourceCoordinator()) {
+        frame_resource_coordinator->SetNetworkAlmostIdle(true);
+      }
     }
     local_frame_->GetDocument()->Fetcher()->OnNetworkQuiet();
     network_2_quiet_ = -1;
@@ -131,7 +136,7 @@ void IdlenessDetector::WillProcessTask(double start_time) {
 
   if (network_0_quiet_ > 0 &&
       start_time - network_0_quiet_ > kNetworkQuietWindowSeconds) {
-    probe::lifecycleEvent(local_frame_, "networkIdle",
+    probe::lifecycleEvent(local_frame_, loader, "networkIdle",
                           network_0_quiet_start_time_);
     network_0_quiet_ = -1;
   }
@@ -151,10 +156,9 @@ void IdlenessDetector::DidProcessTask(double start_time, double end_time) {
 IdlenessDetector::IdlenessDetector(LocalFrame* local_frame)
     : local_frame_(local_frame),
       task_observer_added_(false),
-      network_quiet_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, local_frame),
-          this,
-          &IdlenessDetector::NetworkQuietTimerFired) {}
+      network_quiet_timer_(local_frame->GetTaskRunner(TaskType::kUnthrottled),
+                           this,
+                           &IdlenessDetector::NetworkQuietTimerFired) {}
 
 void IdlenessDetector::Stop() {
   network_quiet_timer_.Stop();
@@ -167,8 +171,7 @@ void IdlenessDetector::Stop() {
 void IdlenessDetector::NetworkQuietTimerFired(TimerBase*) {
   // TODO(lpy) Reduce the number of timers.
   if (network_0_quiet_ > 0 || network_2_quiet_ > 0) {
-    network_quiet_timer_.StartOneShot(kNetworkQuietWatchdogSeconds,
-                                      BLINK_FROM_HERE);
+    network_quiet_timer_.StartOneShot(kNetworkQuietWatchdogSeconds, FROM_HERE);
   }
 }
 

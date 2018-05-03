@@ -32,10 +32,10 @@ class XDGSurfaceWrapper {
   virtual void UnSetMaximized() = 0;
 
   // Sets a native window to fullscreen state.
-  virtual void SetFullScreen() = 0;
+  virtual void SetFullscreen() = 0;
 
   // Unsets a native window from fullscreen state.
-  virtual void UnSetFullScreen() = 0;
+  virtual void UnSetFullscreen() = 0;
 
   // Sets a native window to minimized state.
   virtual void SetMinimized() = 0;
@@ -56,6 +56,8 @@ class XDGSurfaceWrapper {
   // Sets a desired window geometry once wayland requests client to do so.
   virtual void SetWindowGeometry(const gfx::Rect& bounds) = 0;
 };
+
+bool CheckIfWlArrayHasValue(struct wl_array* wl_array, uint32_t value);
 
 }  // namespace ui
 

@@ -4,19 +4,19 @@
 
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
 
+#include "ios/web/public/web_state/form_activity_params.h"
+#import "ios/web/public/web_state/web_state.h"
+
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace web {
 
-WebStateObserverBridge::WebStateObserverBridge(web::WebState* webState,
-                                               id<CRWWebStateObserver> observer)
-    : web::WebStateObserver(webState), observer_(observer) {
-}
+WebStateObserverBridge::WebStateObserverBridge(id<CRWWebStateObserver> observer)
+    : observer_(observer) {}
 
-WebStateObserverBridge::~WebStateObserverBridge() {
-}
+WebStateObserverBridge::~WebStateObserverBridge() = default;
 
 void WebStateObserverBridge::WasShown(web::WebState* web_state) {
   if ([observer_ respondsToSelector:@selector(webStateWasShown:)]) {
@@ -96,68 +96,54 @@ void WebStateObserverBridge::PageLoaded(
   }
 }
 
-void WebStateObserverBridge::InterstitialDismissed(web::WebState* web_state) {
-  SEL selector = @selector(webStateDidDismissInterstitial:);
-  if ([observer_ respondsToSelector:selector])
-    [observer_ webStateDidDismissInterstitial:web_state];
-}
-
 void WebStateObserverBridge::LoadProgressChanged(web::WebState* web_state,
                                                  double progress) {
   SEL selector = @selector(webState:didChangeLoadingProgress:);
-  if ([observer_ respondsToSelector:selector])
+  if ([observer_ respondsToSelector:selector]) {
     [observer_ webState:web_state didChangeLoadingProgress:progress];
+  }
 }
 
 void WebStateObserverBridge::TitleWasSet(web::WebState* web_state) {
-  if ([observer_ respondsToSelector:@selector(webStateDidChangeTitle:)])
+  if ([observer_ respondsToSelector:@selector(webStateDidChangeTitle:)]) {
     [observer_ webStateDidChangeTitle:web_state];
+  }
 }
 
 void WebStateObserverBridge::DidChangeVisibleSecurityState(
     web::WebState* web_state) {
   SEL selector = @selector(webStateDidChangeVisibleSecurityState:);
-  if ([observer_ respondsToSelector:selector])
+  if ([observer_ respondsToSelector:selector]) {
     [observer_ webStateDidChangeVisibleSecurityState:web_state];
+  }
 }
 
 void WebStateObserverBridge::DidSuppressDialog(web::WebState* web_state) {
-  if ([observer_ respondsToSelector:@selector(webStateDidSuppressDialog:)])
+  if ([observer_ respondsToSelector:@selector(webStateDidSuppressDialog:)]) {
     [observer_ webStateDidSuppressDialog:web_state];
+  }
 }
 
 void WebStateObserverBridge::DocumentSubmitted(web::WebState* web_state,
                                                const std::string& form_name,
-                                               bool user_initiated) {
-  SEL selector =
-      @selector(webState:didSubmitDocumentWithFormNamed:userInitiated:);
+                                               bool user_initiated,
+                                               bool is_main_frame) {
+  SEL selector = @selector
+      (webState:didSubmitDocumentWithFormNamed:userInitiated:isMainFrame:);
   if ([observer_ respondsToSelector:selector]) {
     [observer_ webState:web_state
         didSubmitDocumentWithFormNamed:form_name
-                         userInitiated:user_initiated];
+                         userInitiated:user_initiated
+                           isMainFrame:is_main_frame];
   }
 }
 
 void WebStateObserverBridge::FormActivityRegistered(
     web::WebState* web_state,
-    const std::string& form_name,
-    const std::string& field_name,
-    const std::string& type,
-    const std::string& value,
-    bool input_missing) {
-  SEL selector = @selector(webState:
-      didRegisterFormActivityWithFormNamed:
-                                 fieldName:
-                                      type:
-                                     value:
-                              inputMissing:);
+    const FormActivityParams& params) {
+  SEL selector = @selector(webState:didRegisterFormActivity:);
   if ([observer_ respondsToSelector:selector]) {
-    [observer_ webState:web_state
-        didRegisterFormActivityWithFormNamed:form_name
-                                   fieldName:field_name
-                                        type:type
-                                       value:value
-                                inputMissing:input_missing];
+    [observer_ webState:web_state didRegisterFormActivity:params];
   }
 }
 
@@ -165,13 +151,15 @@ void WebStateObserverBridge::FaviconUrlUpdated(
     web::WebState* web_state,
     const std::vector<FaviconURL>& candidates) {
   SEL selector = @selector(webState:didUpdateFaviconURLCandidates:);
-  if ([observer_ respondsToSelector:selector])
+  if ([observer_ respondsToSelector:selector]) {
     [observer_ webState:web_state didUpdateFaviconURLCandidates:candidates];
+  }
 }
 
 void WebStateObserverBridge::RenderProcessGone(web::WebState* web_state) {
-  if ([observer_ respondsToSelector:@selector(renderProcessGoneForWebState:)])
+  if ([observer_ respondsToSelector:@selector(renderProcessGoneForWebState:)]) {
     [observer_ renderProcessGoneForWebState:web_state];
+  }
 }
 
 void WebStateObserverBridge::WebStateDestroyed(web::WebState* web_state) {

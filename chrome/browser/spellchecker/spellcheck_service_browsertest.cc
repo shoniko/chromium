@@ -19,7 +19,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/spellchecker/spell_check_host_impl.h"
+#include "chrome/browser/spellchecker/spell_check_host_chrome_impl.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/ui/browser.h"
@@ -65,8 +65,7 @@ class SpellcheckServiceBrowserTest : public InProcessBrowserTest,
   void InitSpellcheck(bool enable_spellcheck,
                       const std::string& single_dictionary,
                       const std::string& multiple_dictionaries) {
-    prefs_->SetBoolean(spellcheck::prefs::kEnableSpellcheck,
-                       enable_spellcheck);
+    prefs_->SetBoolean(spellcheck::prefs::kSpellCheckEnable, enable_spellcheck);
     prefs_->SetString(spellcheck::prefs::kSpellCheckDictionary,
                       single_dictionary);
     base::ListValue dictionaries_value;
@@ -76,25 +75,24 @@ class SpellcheckServiceBrowserTest : public InProcessBrowserTest,
     prefs_->Set(spellcheck::prefs::kSpellCheckDictionaries, dictionaries_value);
 
     SpellcheckService* spellcheck =
-        SpellcheckServiceFactory::GetForRenderProcessId(renderer_->GetID());
+        SpellcheckServiceFactory::GetForRenderer(renderer_->GetChildIdentity());
     ASSERT_NE(nullptr, spellcheck);
 
     // Override |renderer_| requests for the spellcheck::mojom::SpellChecker
     // interface so we can test the SpellChecker request flow.
     renderer_->OverrideBinderForTesting(
         spellcheck::mojom::SpellChecker::Name_,
-        base::Bind(&SpellcheckServiceBrowserTest::Bind,
-                   base::Unretained(this)));
+        base::BindRepeating(&SpellcheckServiceBrowserTest::Bind,
+                            base::Unretained(this)));
   }
 
   void EnableSpellcheck(bool enable_spellcheck) {
-    prefs_->SetBoolean(spellcheck::prefs::kEnableSpellcheck,
-                       enable_spellcheck);
+    prefs_->SetBoolean(spellcheck::prefs::kSpellCheckEnable, enable_spellcheck);
   }
 
   void ChangeCustomDictionary() {
     SpellcheckService* spellcheck =
-        SpellcheckServiceFactory::GetForRenderProcessId(renderer_->GetID());
+        SpellcheckServiceFactory::GetForRenderer(renderer_->GetChildIdentity());
     ASSERT_NE(nullptr, spellcheck);
 
     SpellcheckCustomDictionary::Change change;
@@ -256,8 +254,9 @@ class SpellcheckServiceHostBrowserTest : public SpellcheckServiceBrowserTest {
 
  private:
   void RequestSpellCheckHost(spellcheck::mojom::SpellCheckHostPtr* interface) {
-    SpellCheckHostImpl::Create(GetRenderer()->GetID(),
-                               mojo::MakeRequest(interface));
+    service_manager::BindSourceInfo source_info;
+    source_info.identity = GetRenderer()->GetChildIdentity();
+    SpellCheckHostChromeImpl::Create(mojo::MakeRequest(interface), source_info);
   }
 
   void SpellingServiceDone(bool success,
@@ -517,13 +516,12 @@ IN_PROC_BROWSER_TEST_F(SpellcheckServiceBrowserTest,
   base::ListValue dictionaries;
   dictionaries.AppendString("en-US");
   GetPrefs()->Set(spellcheck::prefs::kSpellCheckDictionaries, dictionaries);
-  GetPrefs()->SetBoolean(spellcheck::prefs::kEnableSpellcheck, false);
+  GetPrefs()->SetBoolean(spellcheck::prefs::kSpellCheckEnable, false);
 
   // Migrate the preferences.
   SpellcheckServiceFactory::GetForContext(GetContext());
 
-  EXPECT_FALSE(
-      GetPrefs()->GetBoolean(spellcheck::prefs::kEnableSpellcheck));
+  EXPECT_FALSE(GetPrefs()->GetBoolean(spellcheck::prefs::kSpellCheckEnable));
   EXPECT_EQ(1U, GetPrefs()
                     ->GetList(spellcheck::prefs::kSpellCheckDictionaries)
                     ->GetSize());
@@ -536,13 +534,12 @@ IN_PROC_BROWSER_TEST_F(SpellcheckServiceBrowserTest,
   dictionaries.AppendString("en-US");
   dictionaries.AppendString("fr");
   GetPrefs()->Set(spellcheck::prefs::kSpellCheckDictionaries, dictionaries);
-  GetPrefs()->SetBoolean(spellcheck::prefs::kEnableSpellcheck, true);
+  GetPrefs()->SetBoolean(spellcheck::prefs::kSpellCheckEnable, true);
 
   // Should not migrate any preferences.
   SpellcheckServiceFactory::GetForContext(GetContext());
 
-  EXPECT_TRUE(
-      GetPrefs()->GetBoolean(spellcheck::prefs::kEnableSpellcheck));
+  EXPECT_TRUE(GetPrefs()->GetBoolean(spellcheck::prefs::kSpellCheckEnable));
   EXPECT_EQ(2U, GetPrefs()
                     ->GetList(spellcheck::prefs::kSpellCheckDictionaries)
                     ->GetSize());

@@ -37,8 +37,8 @@
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/CString.h"
 #include "public/web/WebSettings.h"
 
@@ -54,7 +54,6 @@ static const double kProgressNotificationInterval = 0.02;
 static const double kProgressNotificationTimeInterval = 0.1;
 
 struct ProgressItem {
-  WTF_MAKE_NONCOPYABLE(ProgressItem);
   USING_FAST_MALLOC(ProgressItem);
 
  public:
@@ -63,6 +62,8 @@ struct ProgressItem {
 
   long long bytes_received;
   long long estimated_length;
+
+  DISALLOW_COPY_AND_ASSIGN(ProgressItem);
 };
 
 ProgressTracker* ProgressTracker::Create(LocalFrame* frame) {
@@ -77,7 +78,7 @@ ProgressTracker::ProgressTracker(LocalFrame* frame)
       did_first_contentful_paint_(false),
       progress_value_(0) {}
 
-ProgressTracker::~ProgressTracker() {}
+ProgressTracker::~ProgressTracker() = default;
 
 void ProgressTracker::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
@@ -152,9 +153,9 @@ void ProgressTracker::WillStartLoading(unsigned long identifier,
   // finishes.
   if (frame_->GetSettings()->GetProgressBarCompletion() !=
           ProgressBarCompletion::kLoadEvent &&
-      (HaveParsedAndPainted() || priority < kResourceLoadPriorityHigh))
+      (HaveParsedAndPainted() || priority < ResourceLoadPriority::kHigh))
     return;
-  progress_items_.Set(identifier, WTF::MakeUnique<ProgressItem>(
+  progress_items_.Set(identifier, std::make_unique<ProgressItem>(
                                       kProgressItemDefaultEstimatedLength));
 }
 

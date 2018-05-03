@@ -47,7 +47,7 @@ StatusAreaWidget::StatusAreaWidget(aura::Window* status_container, Shelf* shelf)
   SetContentsView(status_area_widget_delegate_);
 }
 
-StatusAreaWidget::~StatusAreaWidget() {}
+StatusAreaWidget::~StatusAreaWidget() = default;
 
 void StatusAreaWidget::CreateTrayViews() {
   AddOverviewButtonTray();
@@ -123,12 +123,32 @@ void StatusAreaWidget::UpdateAfterLoginStatusChange(LoginStatus login_status) {
   login_status_ = login_status;
   if (system_tray_)
     system_tray_->UpdateAfterLoginStatusChange(login_status);
-  if (web_notification_tray_)
-    web_notification_tray_->UpdateAfterLoginStatusChange(login_status);
   if (logout_button_tray_)
     logout_button_tray_->UpdateAfterLoginStatusChange();
   if (overview_button_tray_)
     overview_button_tray_->UpdateAfterLoginStatusChange(login_status);
+}
+
+void StatusAreaWidget::SetSystemTrayVisibility(bool visible) {
+  if (!system_tray_)
+    return;
+
+  system_tray_->SetVisible(visible);
+  // Opacity is set to prevent flakiness in kiosk browser tests. See
+  // https://crbug.com/624584.
+  SetOpacity(visible ? 1.f : 0.f);
+  if (visible) {
+    Show();
+  } else {
+    system_tray_->CloseBubble();
+    Hide();
+  }
+}
+
+TrayBackgroundView* StatusAreaWidget::GetSystemTrayAnchor() const {
+  if (overview_button_tray_->visible())
+    return overview_button_tray_;
+  return system_tray_;
 }
 
 bool StatusAreaWidget::ShouldShowShelf() const {
@@ -144,7 +164,7 @@ bool StatusAreaWidget::ShouldShowShelf() const {
 bool StatusAreaWidget::IsMessageBubbleShown() const {
   return ((system_tray_ && system_tray_->IsSystemBubbleVisible()) ||
           (web_notification_tray_ &&
-           web_notification_tray_->IsMessageCenterBubbleVisible()));
+           web_notification_tray_->IsMessageCenterVisible()));
 }
 
 void StatusAreaWidget::SchedulePaint() {

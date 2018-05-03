@@ -7,8 +7,10 @@ package org.chromium.chrome.browser.firstrun;
 import android.app.Activity;
 import android.app.Fragment;
 import android.os.Bundle;
+import android.support.annotation.CallSuper;
 import android.support.annotation.StringRes;
 import android.text.TextUtils;
+import android.view.View;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
@@ -25,12 +27,10 @@ import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.searchwidget.SearchWidgetProvider;
 import org.chromium.ui.base.LocalizationUtils;
 
-import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.Callable;
 
 /**
  * Handles the First Run Experience sequences shown to the user launching Chrome for the first time.
@@ -93,7 +93,7 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
     private boolean mFlowIsKnown;
     private boolean mPostNativePageSequenceCreated;
     private boolean mNativeSideIsInitialized;
-    private Set<FirstRunPage> mPagesToNotifyOfNativeInit;
+    private Set<FirstRunFragment> mPagesToNotifyOfNativeInit;
     private boolean mDeferredCompleteFRE;
 
     private FirstRunViewPager mPager;
@@ -108,9 +108,8 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
      */
     private boolean mLaunchedFromChromeIcon;
 
-    private List<Callable<FirstRunPage>> mPages;
-
-    private List<Integer> mFreProgressStates;
+    private final List<FirstRunPage> mPages = new ArrayList<>();
+    private final List<Integer> mFreProgressStates = new ArrayList<>();
 
     /**
      * The pager adapter, which provides the pages to the view pager widget.
@@ -121,12 +120,9 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
      * Defines a sequence of pages to be shown (depending on parameters etc).
      */
     private void createPageSequence() {
-        mPages = new ArrayList<Callable<FirstRunPage>>();
-        mFreProgressStates = new ArrayList<Integer>();
-
         // An optional welcome page.
         if (mShowWelcomePage) {
-            mPages.add(pageOf(ToSAndUMAFirstRunFragment.class));
+            mPages.add(new ToSAndUMAFirstRunFragment.Page());
             mFreProgressStates.add(FRE_PROGRESS_WELCOME_SHOWN);
         }
 
@@ -144,21 +140,21 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         boolean notifyAdapter = false;
         // An optional Data Saver page.
         if (mFreProperties.getBoolean(SHOW_DATA_REDUCTION_PAGE)) {
-            mPages.add(pageOf(DataReductionProxyFirstRunFragment.class));
+            mPages.add(new DataReductionProxyFirstRunFragment.Page());
             mFreProgressStates.add(FRE_PROGRESS_DATA_SAVER_SHOWN);
             notifyAdapter = true;
         }
 
         // An optional page to select a default search engine.
         if (mFreProperties.getBoolean(SHOW_SEARCH_ENGINE_PAGE)) {
-            mPages.add(pageOf(DefaultSearchEngineFirstRunFragment.class));
+            mPages.add(new DefaultSearchEngineFirstRunFragment.Page());
             mFreProgressStates.add(FRE_PROGRESS_DEFAULT_SEARCH_ENGINE_SHOWN);
             notifyAdapter = true;
         }
 
         // An optional sign-in page.
         if (mFreProperties.getBoolean(SHOW_SIGNIN_PAGE)) {
-            mPages.add(pageOf(AccountFirstRunFragment.class));
+            mPages.add(new AccountFirstRunFragment.Page());
             mFreProgressStates.add(FRE_PROGRESS_SIGNIN_SHOWN);
             notifyAdapter = true;
         }
@@ -179,16 +175,26 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         return null;
     }
 
+    /**
+     * Creates the content view for this activity.
+     * The only thing subclasses can do is wrapping the view returned by super implementation
+     * in some extra layout.
+     */
+    @CallSuper
+    protected View createContentView() {
+        mPager = new FirstRunViewPager(this);
+        mPager.setId(R.id.fre_pager);
+        mPager.setOffscreenPageLimit(3);
+        return mPager;
+    }
+
     @Override
     public void setContentView() {
         initializeStateFromLaunchData();
 
         setFinishOnTouchOutside(true);
 
-        mPager = new FirstRunViewPager(this);
-        mPager.setId(R.id.fre_pager);
-        mPager.setOffscreenPageLimit(3);
-        setContentView(mPager);
+        setContentView(createContentView());
 
         mFirstRunFlowSequencer = new FirstRunFlowSequencer(this) {
             @Override
@@ -216,8 +222,7 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
                     return;
                 }
 
-                mPagerAdapter =
-                        new FirstRunPagerAdapter(getFragmentManager(), mPages, mFreProperties);
+                mPagerAdapter = new FirstRunPagerAdapter(getFragmentManager(), mPages);
                 stopProgressionIfNotAcceptedTermsOfService();
                 mPager.setAdapter(mPagerAdapter);
 
@@ -259,7 +264,7 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
             // sequence - in that case this will be done when onFlowIsKnown() gets called.
             createPostNativePageSequence();
             if (mPagesToNotifyOfNativeInit != null) {
-                for (FirstRunPage page : mPagesToNotifyOfNativeInit) {
+                for (FirstRunFragment page : mPagesToNotifyOfNativeInit) {
                     page.onNativeInitialized();
                 }
             }
@@ -272,24 +277,18 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
 
     @Override
     public void onAttachFragment(Fragment fragment) {
-        if (!(fragment instanceof FirstRunPage)) return;
+        if (!(fragment instanceof FirstRunFragment)) return;
 
-        FirstRunPage page = (FirstRunPage) fragment;
+        FirstRunFragment page = (FirstRunFragment) fragment;
         if (mNativeSideIsInitialized) {
             page.onNativeInitialized();
             return;
         }
 
         if (mPagesToNotifyOfNativeInit == null) {
-            mPagesToNotifyOfNativeInit = new HashSet<FirstRunPage>();
+            mPagesToNotifyOfNativeInit = new HashSet<>();
         }
         mPagesToNotifyOfNativeInit.add(page);
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        outState.putBoolean(EXTRA_COMING_FROM_CHROME_ICON, mLaunchedFromChromeIcon);
     }
 
     @Override
@@ -318,8 +317,8 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         }
 
         Object currentItem = mPagerAdapter.instantiateItem(mPager, mPager.getCurrentItem());
-        if (currentItem instanceof FirstRunPage) {
-            FirstRunPage page = (FirstRunPage) currentItem;
+        if (currentItem instanceof FirstRunFragment) {
+            FirstRunFragment page = (FirstRunFragment) currentItem;
             if (page.interceptBackPressed()) return;
         }
 
@@ -332,13 +331,13 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
 
     // FirstRunPageDelegate:
     @Override
-    public void advanceToNextPage() {
-        jumpToPage(mPager.getCurrentItem() + 1);
+    public Bundle getProperties() {
+        return mFreProperties;
     }
 
     @Override
-    public void recreateCurrentPage() {
-        mPagerAdapter.notifyDataSetChanged();
+    public void advanceToNextPage() {
+        jumpToPage(mPager.getCurrentItem() + 1);
     }
 
     @Override
@@ -442,13 +441,10 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
 
     /** Initialize local state from launch intent and from saved instance state. */
     private void initializeStateFromLaunchData() {
-        Bundle readFrom = new Bundle();
-        if (getSavedInstanceState() != null) {
-            readFrom = getSavedInstanceState();
-        } else if (getIntent() != null) {
-            readFrom = getIntent().getExtras();
+        if (getIntent() != null) {
+            mLaunchedFromChromeIcon =
+                    getIntent().getBooleanExtra(EXTRA_COMING_FROM_CHROME_ICON, false);
         }
-        mLaunchedFromChromeIcon = readFrom.getBoolean(EXTRA_COMING_FROM_CHROME_ICON);
     }
 
     /**
@@ -479,12 +475,10 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
     private void skipPagesIfNecessary() {
         if (mPagerAdapter == null) return;
 
-        int currentPageIndex = mPager.getCurrentItem();
-        while (currentPageIndex < mPagerAdapter.getCount()) {
-            FirstRunPage currentPage = (FirstRunPage) mPagerAdapter.getItem(currentPageIndex);
-            if (!currentPage.shouldSkipPageOnCreate(getApplicationContext())) return;
-            if (!jumpToPage(currentPageIndex + 1)) return;
-            currentPageIndex = mPager.getCurrentItem();
+        boolean shouldSkip = mPages.get(mPager.getCurrentItem()).shouldSkipPageOnCreate();
+        while (shouldSkip) {
+            if (!jumpToPage(mPager.getCurrentItem() + 1)) return;
+            shouldSkip = mPages.get(mPager.getCurrentItem()).shouldSkipPageOnCreate();
         }
     }
 
@@ -494,21 +488,6 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         } else {
             sMobileFreProgressViewIntentHistogram.record(state);
         }
-    }
-
-    /**
-     * Creates a trivial page constructor for a given page type.
-     * @param clazz The .class of the page type.
-     * @return The simple constructor for a given page type (no parameters, no tuning).
-     */
-    public static Callable<FirstRunPage> pageOf(final Class<? extends FirstRunPage> clazz) {
-        return new Callable<FirstRunPage>() {
-            @Override
-            public FirstRunPage call() throws Exception {
-                Constructor<? extends FirstRunPage> constructor = clazz.getDeclaredConstructor();
-                return constructor.newInstance();
-            }
-        };
     }
 
     @Override

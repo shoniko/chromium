@@ -13,10 +13,11 @@ NGPhysicalBoxFragment::NGPhysicalBoxFragment(
     LayoutObject* layout_object,
     const ComputedStyle& style,
     NGPhysicalSize size,
-    const NGPhysicalOffsetRect& contents_visual_rect,
     Vector<scoped_refptr<NGPhysicalFragment>>& children,
+    const NGPhysicalOffsetRect& contents_visual_rect,
     Vector<NGBaseline>& baselines,
     NGBoxType box_type,
+    bool is_old_layout_root,
     unsigned border_edges,  // NGBorderEdges::Physical
     scoped_refptr<NGBreakToken> break_token)
     : NGPhysicalContainerFragment(layout_object,
@@ -24,11 +25,12 @@ NGPhysicalBoxFragment::NGPhysicalBoxFragment(
                                   size,
                                   kFragmentBox,
                                   children,
+                                  contents_visual_rect,
                                   std::move(break_token)),
-      contents_visual_rect_(contents_visual_rect),
       baselines_(std::move(baselines)) {
   DCHECK(baselines.IsEmpty());  // Ensure move semantics is used.
   box_type_ = box_type;
+  is_old_layout_root_ = is_old_layout_root;
   border_edge_ = border_edges;
 }
 
@@ -41,7 +43,35 @@ const NGBaseline* NGPhysicalBoxFragment::Baseline(
   return nullptr;
 }
 
-const NGPhysicalOffsetRect NGPhysicalBoxFragment::LocalVisualRect() const {
+bool NGPhysicalBoxFragment::HasSelfPaintingLayer() const {
+  const LayoutObject* layout_object = GetLayoutObject();
+  DCHECK(layout_object);
+  DCHECK(layout_object->IsBoxModelObject());
+  return ToLayoutBoxModelObject(layout_object)->HasSelfPaintingLayer() &&
+         BoxType() != kAnonymousBox;
+}
+
+bool NGPhysicalBoxFragment::ChildrenInline() const {
+  const LayoutObject* layout_object = GetLayoutObject();
+  DCHECK(layout_object);
+  return layout_object->ChildrenInline();
+}
+
+bool NGPhysicalBoxFragment::HasOverflowClip() const {
+  const LayoutObject* layout_object = GetLayoutObject();
+  DCHECK(layout_object);
+  return layout_object->HasOverflowClip() && BoxType() != kAnonymousBox;
+}
+
+bool NGPhysicalBoxFragment::ShouldClipOverflow() const {
+  const LayoutObject* layout_object = GetLayoutObject();
+  DCHECK(layout_object);
+  return layout_object->IsBox() &&
+         ToLayoutBox(layout_object)->ShouldClipOverflow() &&
+         BoxType() != kAnonymousBox;
+}
+
+NGPhysicalOffsetRect NGPhysicalBoxFragment::SelfVisualRect() const {
   const ComputedStyle& style = Style();
   if (!style.HasVisualOverflowingEffect())
     return {{}, Size()};
@@ -60,14 +90,24 @@ const NGPhysicalOffsetRect NGPhysicalBoxFragment::LocalVisualRect() const {
   return {{}, Size()};
 }
 
+NGPhysicalOffsetRect NGPhysicalBoxFragment::VisualRectWithContents() const {
+  if (HasOverflowClip() || Style().HasMask())
+    return SelfVisualRect();
+
+  NGPhysicalOffsetRect visual_rect = SelfVisualRect();
+  visual_rect.Unite(ContentsVisualRect());
+  return visual_rect;
+}
+
 scoped_refptr<NGPhysicalFragment> NGPhysicalBoxFragment::CloneWithoutOffset()
     const {
   Vector<scoped_refptr<NGPhysicalFragment>> children_copy(children_);
   Vector<NGBaseline> baselines_copy(baselines_);
   scoped_refptr<NGPhysicalFragment> physical_fragment =
-      WTF::AdoptRef(new NGPhysicalBoxFragment(
-          layout_object_, Style(), size_, contents_visual_rect_, children_copy,
-          baselines_copy, BoxType(), border_edge_, break_token_));
+      base::AdoptRef(new NGPhysicalBoxFragment(
+          layout_object_, Style(), size_, children_copy, contents_visual_rect_,
+          baselines_copy, BoxType(), is_old_layout_root_, border_edge_,
+          break_token_));
   return physical_fragment;
 }
 

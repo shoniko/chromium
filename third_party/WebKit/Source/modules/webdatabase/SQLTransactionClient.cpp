@@ -30,8 +30,8 @@
 
 #include "modules/webdatabase/SQLTransactionClient.h"
 
+#include "base/location.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseContext.h"
 #include "platform/CrossThreadFunctional.h"
@@ -39,9 +39,9 @@
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/Functional.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebDatabaseObserver.h"
 #include "public/platform/WebSecurityOrigin.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 

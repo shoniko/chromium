@@ -25,7 +25,7 @@ class LineLayoutText : public LineLayoutItem {
 
   explicit LineLayoutText(std::nullptr_t) : LineLayoutItem(nullptr) {}
 
-  LineLayoutText() {}
+  LineLayoutText() = default;
 
   InlineTextBox* FirstTextBox() const { return ToText()->FirstTextBox(); }
 
@@ -51,6 +51,10 @@ class LineLayoutText : public LineLayoutItem {
 
   bool IsAllCollapsibleWhitespace() const {
     return ToText()->IsAllCollapsibleWhitespace();
+  }
+
+  OnlyWhitespaceOrNbsp ContainsOnlyWhitespaceOrNbsp() const {
+    return ToText()->ContainsOnlyWhitespaceOrNbsp();
   }
 
   UChar CharacterAt(unsigned offset) const {

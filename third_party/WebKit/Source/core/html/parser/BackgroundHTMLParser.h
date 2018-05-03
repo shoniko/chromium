@@ -27,6 +27,9 @@
 #define BackgroundHTMLParser_h
 
 #include <memory>
+
+#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "core/dom/DocumentEncodingData.h"
 #include "core/html/parser/BackgroundHTMLInputStream.h"
 #include "core/html/parser/CompactHTMLToken.h"
@@ -37,7 +40,6 @@
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/html/parser/TokenizedChunkQueue.h"
 #include "core/html/parser/XSSAuditorDelegate.h"
-#include "platform/wtf/WeakPtr.h"
 
 namespace blink {
 
@@ -47,7 +49,6 @@ class WebTaskRunner;
 
 class BackgroundHTMLParser {
   USING_FAST_MALLOC(BackgroundHTMLParser);
-  WTF_MAKE_NONCOPYABLE(BackgroundHTMLParser);
 
  public:
   struct Configuration {
@@ -56,7 +57,7 @@ class BackgroundHTMLParser {
    public:
     Configuration();
     HTMLParserOptions options;
-    WeakPtr<HTMLDocumentParser> parser;
+    base::WeakPtr<HTMLDocumentParser> parser;
     std::unique_ptr<XSSAuditor> xss_auditor;
     std::unique_ptr<TextResourceDecoder> decoder;
     scoped_refptr<TokenizedChunkQueue> tokenized_chunk_queue;
@@ -70,8 +71,9 @@ class BackgroundHTMLParser {
   // The returned BackgroundHTMLParser should only be used on the parser
   // thread: it must first be initialized by calling init(), and free by
   // calling stop().
-  static WeakPtr<BackgroundHTMLParser> Create(std::unique_ptr<Configuration>,
-                                              scoped_refptr<WebTaskRunner>);
+  static base::WeakPtr<BackgroundHTMLParser> Create(
+      std::unique_ptr<Configuration>,
+      scoped_refptr<WebTaskRunner>);
   void Init(const KURL& document_url,
             std::unique_ptr<CachedDocumentParameters>,
             const MediaValuesCached::MediaValuesCachedData&);
@@ -80,7 +82,7 @@ class BackgroundHTMLParser {
     USING_FAST_MALLOC(Checkpoint);
 
    public:
-    WeakPtr<HTMLDocumentParser> parser;
+    base::WeakPtr<HTMLDocumentParser> parser;
     std::unique_ptr<HTMLToken> token;
     std::unique_ptr<HTMLTokenizer> tokenizer;
     HTMLTreeBuilderSimulator::State tree_builder_state;
@@ -117,7 +119,7 @@ class BackgroundHTMLParser {
   template <typename FunctionType, typename... Ps>
   void RunOnMainThread(FunctionType, Ps&&...);
 
-  WeakPtrFactory<BackgroundHTMLParser> weak_factory_;
+  base::WeakPtrFactory<BackgroundHTMLParser> weak_factory_;
   BackgroundHTMLInputStream input_;
   HTMLSourceTracker source_tracker_;
   std::unique_ptr<HTMLToken> token_;
@@ -125,7 +127,7 @@ class BackgroundHTMLParser {
   HTMLTreeBuilderSimulator tree_builder_simulator_;
   HTMLParserOptions options_;
   const size_t outstanding_token_limit_;
-  WeakPtr<HTMLDocumentParser> parser_;
+  base::WeakPtr<HTMLDocumentParser> parser_;
 
   std::unique_ptr<CompactHTMLTokenStream> pending_tokens_;
   const size_t pending_token_limit_;
@@ -146,6 +148,8 @@ class BackgroundHTMLParser {
 
   bool starting_script_;
   bool should_coalesce_chunks_;
+
+  DISALLOW_COPY_AND_ASSIGN(BackgroundHTMLParser);
 };
 
 }  // namespace blink

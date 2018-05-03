@@ -84,6 +84,8 @@ public class AwAutofillProvider extends AutofillProvider {
                 child.setHtmlInfo(child.newHtmlInfoBuilder("input")
                                           .addAttribute("name", field.mName)
                                           .addAttribute("type", field.mType)
+                                          .addAttribute("label", field.mLabel)
+                                          .addAttribute("id", field.mId)
                                           .build());
                 switch (field.getControlType()) {
                     case FormFieldData.TYPE_LIST:
@@ -152,8 +154,18 @@ public class AwAutofillProvider extends AutofillProvider {
         public AutofillValue getFieldNewValue(int index) {
             FormFieldData field = mFormData.mFields.get(index);
             if (field == null) return null;
-            String value = field.getValue();
-            return AutofillValue.forText(value);
+            switch (field.getControlType()) {
+                case FormFieldData.TYPE_LIST:
+                    int i = findIndex(field.mOptionValues, field.getValue());
+                    if (i == -1) return null;
+                    return AutofillValue.forList(i);
+                case FormFieldData.TYPE_TOGGLE:
+                    return AutofillValue.forToggle(field.isChecked());
+                case FormFieldData.TYPE_TEXT:
+                    return AutofillValue.forText(field.getValue());
+                default:
+                    return null;
+            }
         }
 
         public int getVirtualId(short index) {
@@ -224,7 +236,7 @@ public class AwAutofillProvider extends AutofillProvider {
 
     @Override
     public void autofill(final SparseArray<AutofillValue> values) {
-        if (mNativeAutofillProvider != 0 && mRequest.autofill((values))) {
+        if (mNativeAutofillProvider != 0 && mRequest != null && mRequest.autofill((values))) {
             autofill(mNativeAutofillProvider, mRequest.mFormData);
         }
     }
@@ -281,6 +293,27 @@ public class AwAutofillProvider extends AutofillProvider {
         notifyVirtualValueChanged(index);
     }
 
+    @Override
+    public void onTextFieldDidScroll(int index, float x, float y, float width, float height) {
+        // crbug.com/730764 - from P and above, Android framework listens to the onScrollChanged()
+        // and repositions the autofill UI automatically.
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.O_MR1) return;
+        if (mRequest == null) return;
+
+        short sIndex = (short) index;
+        FocusField focusField = mRequest.getFocusField();
+        if (focusField == null || sIndex != focusField.fieldIndex) return;
+
+        int virtualId = mRequest.getVirtualId(sIndex);
+        Rect absBound = transformToWindowBounds(new RectF(x, y, x + width, y + height));
+        // Notify the new position to the Android framework. Note that we do not call
+        // notifyVirtualViewExited() here intentionally to avoid flickering.
+        mAutofillManager.notifyVirtualViewEntered(mContainerView, virtualId, absBound);
+
+        // Update focus field position.
+        mRequest.setFocusField(new FocusField(focusField.fieldIndex, absBound));
+    }
+
     private void notifyVirtualValueChanged(int index) {
         AutofillValue autofillValue = mRequest.getFieldNewValue(index);
         if (autofillValue == null) return;
@@ -289,11 +322,11 @@ public class AwAutofillProvider extends AutofillProvider {
     }
 
     @Override
-    public void onWillSubmitForm() {
+    public void onFormSubmitted(int submissionSource) {
         // The changes could be missing, like those made by Javascript, we'd better to notify
         // AutofillManager current values. also see crbug.com/353001 and crbug.com/732856.
         notifyFormValues();
-        mAutofillManager.commit();
+        mAutofillManager.commit(submissionSource);
         mRequest = null;
     }
 
@@ -333,14 +366,14 @@ public class AwAutofillProvider extends AutofillProvider {
 
     @Override
     protected void reset() {
-        mAutofillManager.cancel();
-        mRequest = null;
+        // We don't need to reset anything here, it should be safe to cancel
+        // current autofill session when new one starts in
+        // startAutofillSession().
     }
 
     @Override
     protected void setNativeAutofillProvider(long nativeAutofillProvider) {
         if (nativeAutofillProvider == mNativeAutofillProvider) return;
-        mNativeAutofillProvider = nativeAutofillProvider;
         // Setting the mNativeAutofillProvider to 0 may occur as a
         // result of WebView.destroy, or because a WebView has been
         // gc'ed. In the former case we can go ahead and clean up the
@@ -350,10 +383,9 @@ public class AwAutofillProvider extends AutofillProvider {
         // possible to know which case we're in, so just catch and
         // ignore the exception.
         try {
-            reset();
-            if (nativeAutofillProvider == 0) {
-                mAutofillManager.destroy();
-            }
+            if (mNativeAutofillProvider != 0) mRequest = null;
+            mNativeAutofillProvider = nativeAutofillProvider;
+            if (nativeAutofillProvider == 0) mAutofillManager.destroy();
         } catch (IllegalStateException e) {
         }
     }
@@ -361,8 +393,8 @@ public class AwAutofillProvider extends AutofillProvider {
     @Override
     public void setWebContents(WebContents webContents) {
         if (webContents == mWebContents) return;
+        if (mWebContents != null) mRequest = null;
         mWebContents = webContents;
-        reset();
     }
 
     @Override

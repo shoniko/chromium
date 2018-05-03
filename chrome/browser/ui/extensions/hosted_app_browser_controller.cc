@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 
+#include "base/metrics/histogram_macros.h"
+#include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
@@ -13,12 +15,16 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/extensions/api/url_handlers/url_handlers_parser.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/app_theme_color_info.h"
 #include "components/security_state/core/security_state.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image_skia.h"
 #include "url/gurl.h"
@@ -52,6 +58,9 @@ gfx::ImageSkia GetFallbackAppIcon(Browser* browser) {
 
 }  // namespace
 
+const char kPwaWindowEngagementTypeHistogram[] =
+    "Webapp.Engagement.EngagementType";
+
 // static
 bool HostedAppBrowserController::IsForHostedApp(const Browser* browser) {
   const std::string extension_id =
@@ -70,16 +79,34 @@ bool HostedAppBrowserController::IsForExperimentalHostedAppBrowser(
 }
 
 HostedAppBrowserController::HostedAppBrowserController(Browser* browser)
-    : browser_(browser),
+    : SiteEngagementObserver(SiteEngagementService::Get(browser->profile())),
+      browser_(browser),
       extension_id_(
           web_app::GetExtensionIdFromApplicationName(browser->app_name())) {}
 
 HostedAppBrowserController::~HostedAppBrowserController() {}
 
+bool HostedAppBrowserController::IsForInstalledPwa(
+    content::WebContents* web_contents) const {
+  if (!web_contents ||
+      web_contents != browser_->tab_strip_model()->GetActiveWebContents()) {
+    return false;
+  }
+
+  if (!browser_->is_app())
+    return false;
+
+  // If a bookmark app has a URL handler, then it is a PWA.
+  // TODO(https://crbug.com/774918): Replace once there is a more explicit
+  // indicator of a Bookmark App for an installable website.
+  if (extensions::UrlHandlers::GetUrlHandlers(GetExtension()) == nullptr)
+    return false;
+
+  return true;
+}
+
 bool HostedAppBrowserController::ShouldShowLocationBar() const {
-  const Extension* extension =
-      ExtensionRegistry::Get(browser_->profile())->GetExtensionById(
-          extension_id_, ExtensionRegistry::EVERYTHING);
+  const Extension* extension = GetExtension();
 
   const content::WebContents* web_contents =
       browser_->tab_strip_model()->GetActiveWebContents();
@@ -150,6 +177,44 @@ base::Optional<SkColor> HostedAppBrowserController::GetThemeColor() const {
   const Extension* extension =
       registry->GetExtensionById(extension_id_, ExtensionRegistry::EVERYTHING);
   return AppThemeColorInfo::GetThemeColor(extension);
+}
+
+base::string16 HostedAppBrowserController::GetTitle() const {
+  content::WebContents* web_contents =
+      browser_->tab_strip_model()->GetActiveWebContents();
+  if (!web_contents)
+    return base::string16();
+
+  content::NavigationEntry* entry =
+      web_contents->GetController().GetVisibleEntry();
+  return entry ? entry->GetTitle() : base::string16();
+}
+
+const Extension* HostedAppBrowserController::GetExtension() const {
+  return ExtensionRegistry::Get(browser_->profile())
+      ->GetExtensionById(extension_id_, ExtensionRegistry::EVERYTHING);
+}
+
+std::string HostedAppBrowserController::GetAppShortName() const {
+  return GetExtension()->short_name();
+}
+
+std::string HostedAppBrowserController::GetDomainAndRegistry() const {
+  return net::registry_controlled_domains::GetDomainAndRegistry(
+      AppLaunchInfo::GetLaunchWebURL(GetExtension()),
+      net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+}
+
+void HostedAppBrowserController::OnEngagementEvent(
+    content::WebContents* web_contents,
+    const GURL& /*url*/,
+    double /*score*/,
+    SiteEngagementService::EngagementType type) {
+  if (!IsForInstalledPwa(web_contents))
+    return;
+
+  UMA_HISTOGRAM_ENUMERATION(kPwaWindowEngagementTypeHistogram, type,
+                            SiteEngagementService::ENGAGEMENT_LAST);
 }
 
 }  // namespace extensions

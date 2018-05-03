@@ -118,7 +118,7 @@ extern const char kKillReasonURL[];
 extern const char kPrivacyLearnMoreURL[];
 
 // "myactivity.google.com" URL for the history checkbox in ClearBrowsingData.
-extern const char kMyActivityUrl[];
+extern const char kMyActivityUrlInClearBrowsingData[];
 
 // "Learn more" URL for the "Do not track" setting in the privacy section.
 extern const char kDoNotTrackLearnMoreURL[];
@@ -147,12 +147,6 @@ extern const char kOutdatedPluginLearnMoreURL[];
 
 // The URL for the "Learn more" page for the blocked plugin infobar.
 extern const char kBlockedPluginLearnMoreURL[];
-
-// The URL for the "Learn more" page for hotword search voice trigger.
-extern const char kHotwordLearnMoreURL[];
-
-// The URL for managing a user's audio history.
-extern const char kManageAudioHistoryURL[];
 
 // The URL for the "Learn more" page for register protocol handler infobars.
 extern const char kLearnMoreRegisterProtocolHandlerURL[];
@@ -271,8 +265,11 @@ extern const char kMediaAccessLearnMoreUrl[];
 extern const char kLanguageSettingsLearnMoreUrl[];
 
 #if defined(OS_MACOSX)
-// The URL for the Mac OS X 10.6/10.7/10.8 deprecation help center article.
-extern const char kMac10_678_DeprecationURL[];
+// "Learn more" URL for the enterprise sign-in confirmation dialog.
+extern const char kChromeEnterpriseSignInLearnMoreURL[];
+
+// The URL for the "learn more" link on the 10.9 obsolescence infobar.
+extern const char kMac10_9_ObsoleteURL[];
 #endif
 
 #if defined(OS_WIN)
@@ -293,6 +290,14 @@ extern const char kChooserUsbOverviewURL[];
 #if defined(OS_CHROMEOS)
 // The URL for EOL notification
 extern const char kEolNotificationURL[];
+
+// The URL for providing more information about Google nameservers.
+extern const char kGoogleNameserversLearnMoreURL[];
+#endif
+
+#if defined(OS_CHROMEOS)
+// The URL for the "Learn more" page for the time zone settings page.
+extern const char kTimeZoneSettingsLearnMoreURL[];
 #endif
 
 }  // namespace chrome

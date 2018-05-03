@@ -30,6 +30,7 @@
 
 #include "public/web/WebFrameSerializer.h"
 
+#include "base/macros.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/ElementShadow.h"
@@ -64,14 +65,12 @@
 #include "platform/wtf/Deque.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/StringConcatenate.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLResponse.h"
-#include "public/platform/WebVector.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebDocumentLoader.h"
 #include "public/web/WebFrame.h"
@@ -88,7 +87,6 @@ const char kShadowDelegatesFocusAttributeName[] = "shadowdelegatesfocus";
 
 class MHTMLFrameSerializerDelegate final : public FrameSerializer::Delegate {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(MHTMLFrameSerializerDelegate);
 
  public:
   MHTMLFrameSerializerDelegate(
@@ -115,6 +113,8 @@ class MHTMLFrameSerializerDelegate final : public FrameSerializer::Delegate {
   WebFrameSerializer::MHTMLPartsGenerationDelegate& web_delegate_;
   HeapHashSet<WeakMember<const Element>>& shadow_template_elements_;
   bool popup_overlays_skipped_;
+
+  DISALLOW_COPY_AND_ASSIGN(MHTMLFrameSerializerDelegate);
 };
 
 MHTMLFrameSerializerDelegate::MHTMLFrameSerializerDelegate(
@@ -357,7 +357,7 @@ std::pair<Node*, Element*> MHTMLFrameSerializerDelegate::GetAuxiliaryDOMTree(
 
   String shadow_mode;
   switch (shadow_root.GetType()) {
-    case ShadowRootType::kUserAgent:
+    case ShadowRootType::kUserAgentV1:
       // No need to serialize.
       return std::pair<Node*, Element*>();
     case ShadowRootType::V0:

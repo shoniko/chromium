@@ -8,7 +8,7 @@
 #include "core/css/resolver/FilterOperationResolver.h"
 #include "core/css/resolver/StyleBuilder.h"
 #include "core/css/resolver/StyleResolverState.h"
-#include "core/html/HTMLCanvasElement.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "core/paint/FilterEffectBuilder.h"
 #include "core/style/ComputedStyle.h"
 #include "core/style/FilterOperation.h"
@@ -20,7 +20,7 @@
 #include "platform/fonts/FontSelector.h"
 #include "platform/graphics/DrawLooperBuilder.h"
 #include "platform/graphics/filters/FilterEffect.h"
-#include "platform/graphics/filters/SkiaImageFilterBuilder.h"
+#include "platform/graphics/filters/PaintFilterBuilder.h"
 #include "platform/graphics/paint/PaintCanvas.h"
 #include "platform/graphics/paint/PaintFlags.h"
 #include "platform/graphics/skia/SkiaUtils.h"
@@ -116,7 +116,7 @@ CanvasRenderingContext2DState::CanvasRenderingContext2DState(
     font_.GetFontSelector()->RegisterForInvalidationCallbacks(this);
 }
 
-CanvasRenderingContext2DState::~CanvasRenderingContext2DState() {}
+CanvasRenderingContext2DState::~CanvasRenderingContext2DState() = default;
 
 void CanvasRenderingContext2DState::FontsNeedUpdate(
     FontSelector* font_selector) {
@@ -276,8 +276,9 @@ void CanvasRenderingContext2DState::ResetTransform() {
   is_transform_invertible_ = true;
 }
 
-sk_sp<SkImageFilter> CanvasRenderingContext2DState::GetFilterForOffscreenCanvas(
-    IntSize canvas_size) const {
+sk_sp<PaintFilter> CanvasRenderingContext2DState::GetFilterForOffscreenCanvas(
+    IntSize canvas_size,
+    BaseRenderingContext2D* context) const {
   if (!filter_value_)
     return nullptr;
 
@@ -301,17 +302,18 @@ sk_sp<SkImageFilter> CanvasRenderingContext2DState::GetFilterForOffscreenCanvas(
       1.0f,  // Deliberately ignore zoom on the canvas element.
       &fill_flags_for_filter, &stroke_flags_for_filter);
 
-  FilterEffect* last_effect =
-      filter_effect_builder.BuildFilterEffect(operations);
+  FilterEffect* last_effect = filter_effect_builder.BuildFilterEffect(
+      operations, !context->OriginClean());
   if (last_effect) {
+    // TODO(chrishtr): Taint the origin if needed. crbug.com/792506.
     resolved_filter_ =
-        SkiaImageFilterBuilder::Build(last_effect, kInterpolationSpaceSRGB);
+        PaintFilterBuilder::Build(last_effect, kInterpolationSpaceSRGB);
   }
 
   return resolved_filter_;
 }
 
-sk_sp<SkImageFilter> CanvasRenderingContext2DState::GetFilter(
+sk_sp<PaintFilter> CanvasRenderingContext2DState::GetFilter(
     Element* style_resolution_host,
     IntSize canvas_size,
     CanvasRenderingContext2D* context) const {
@@ -336,7 +338,7 @@ sk_sp<SkImageFilter> CanvasRenderingContext2DState::GetFilter(
                                       filter_style.get());
     resolver_state.SetStyle(filter_style);
 
-    StyleBuilder::ApplyProperty(CSSPropertyFilter, resolver_state,
+    StyleBuilder::ApplyProperty(GetCSSPropertyFilter(), resolver_state,
                                 *filter_value_);
     resolver_state.LoadPendingResources();
 
@@ -355,10 +357,10 @@ sk_sp<SkImageFilter> CanvasRenderingContext2DState::GetFilter(
         1.0f,  // Deliberately ignore zoom on the canvas element.
         &fill_flags_for_filter, &stroke_flags_for_filter);
 
-    if (FilterEffect* last_effect =
-            filter_effect_builder.BuildFilterEffect(filter_style->Filter())) {
+    if (FilterEffect* last_effect = filter_effect_builder.BuildFilterEffect(
+            filter_style->Filter(), !context->OriginClean())) {
       resolved_filter_ =
-          SkiaImageFilterBuilder::Build(last_effect, kInterpolationSpaceSRGB);
+          PaintFilterBuilder::Build(last_effect, kInterpolationSpaceSRGB);
       if (resolved_filter_) {
         context->UpdateFilterReferences(filter_style->Filter());
         if (last_effect->OriginTainted())
@@ -371,10 +373,11 @@ sk_sp<SkImageFilter> CanvasRenderingContext2DState::GetFilter(
 }
 
 bool CanvasRenderingContext2DState::HasFilterForOffscreenCanvas(
-    IntSize canvas_size) const {
+    IntSize canvas_size,
+    BaseRenderingContext2D* context) const {
   // Checking for a non-null m_filterValue isn't sufficient, since this value
   // might refer to a non-existent filter.
-  return !!GetFilterForOffscreenCanvas(canvas_size);
+  return !!GetFilterForOffscreenCanvas(canvas_size, context);
 }
 
 bool CanvasRenderingContext2DState::HasFilter(
@@ -421,11 +424,11 @@ SkDrawLooper* CanvasRenderingContext2DState::ShadowAndForegroundDrawLooper()
   return shadow_and_foreground_draw_looper_.get();
 }
 
-sk_sp<SkImageFilter> CanvasRenderingContext2DState::ShadowOnlyImageFilter()
+sk_sp<PaintFilter> CanvasRenderingContext2DState::ShadowOnlyImageFilter()
     const {
   if (!shadow_only_image_filter_) {
     double sigma = SkBlurRadiusToSigma(shadow_blur_);
-    shadow_only_image_filter_ = SkDropShadowImageFilter::Make(
+    shadow_only_image_filter_ = sk_make_sp<DropShadowPaintFilter>(
         shadow_offset_.Width(), shadow_offset_.Height(), sigma, sigma,
         shadow_color_, SkDropShadowImageFilter::kDrawShadowOnly_ShadowMode,
         nullptr);
@@ -433,11 +436,11 @@ sk_sp<SkImageFilter> CanvasRenderingContext2DState::ShadowOnlyImageFilter()
   return shadow_only_image_filter_;
 }
 
-sk_sp<SkImageFilter>
+sk_sp<PaintFilter>
 CanvasRenderingContext2DState::ShadowAndForegroundImageFilter() const {
   if (!shadow_and_foreground_image_filter_) {
     double sigma = SkBlurRadiusToSigma(shadow_blur_);
-    shadow_and_foreground_image_filter_ = SkDropShadowImageFilter::Make(
+    shadow_and_foreground_image_filter_ = sk_make_sp<DropShadowPaintFilter>(
         shadow_offset_.Width(), shadow_offset_.Height(), sigma, sigma,
         shadow_color_,
         SkDropShadowImageFilter::kDrawShadowAndForeground_ShadowMode, nullptr);

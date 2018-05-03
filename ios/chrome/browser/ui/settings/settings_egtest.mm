@@ -6,11 +6,11 @@
 #import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
 #include <map>
+#include <memory>
 
 #include "base/bind.h"
 #import "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
@@ -23,7 +23,7 @@
 #include "ios/chrome/browser/pref_names.h"
 #import "ios/chrome/browser/ui/authentication/signin_promo_view.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
-#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
+#include "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
@@ -167,7 +167,7 @@ void SetCertificate() {
             channel_id_service->GetChannelIDStore();
         base::Time now = base::Time::Now();
         channel_id_store->SetChannelID(
-            base::MakeUnique<net::ChannelIDStore::ChannelID>(
+            std::make_unique<net::ChannelIDStore::ChannelID>(
                 kTestOrigin1, now, crypto::ECPrivateKey::Create()));
       }));
 
@@ -498,7 +498,6 @@ bool IsCertificateCleared() {
 // Tests that clearing the cookies through the UI does clear all of them. Use a
 // local server to navigate to a page that sets then tests a cookie, and then
 // clears the cookie and tests it is not set.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code.
 - (void)testClearCookies {
   // Creates a map of canned responses and set up the test HTML server.
   std::map<GURL, std::pair<std::string, std::string>> response;
@@ -616,7 +615,7 @@ bool IsCertificateCleared() {
 
   [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
       performAction:grey_tap()];
-  chrome_test_util::CloseAllIncognitoTabs();
+  GREYAssert(chrome_test_util::CloseAllIncognitoTabs(), @"Tabs did not close");
 }
 
 // Verifies the UI elements are accessible on the Settings page.

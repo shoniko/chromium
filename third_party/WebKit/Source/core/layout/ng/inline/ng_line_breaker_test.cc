@@ -6,7 +6,6 @@
 
 #include "core/layout/ng/inline/ng_inline_break_token.h"
 #include "core/layout/ng/inline/ng_inline_node.h"
-#include "core/layout/ng/inline/ng_line_box_fragment_builder.h"
 #include "core/layout/ng/inline/ng_line_breaker.h"
 #include "core/layout/ng/layout_ng_block_flow.h"
 #include "core/layout/ng/ng_constraint_space_builder.h"
@@ -31,32 +30,31 @@ class NGLineBreakerTest : public NGBaseLayoutAlgorithmTest {
                                          LayoutUnit available_width) {
     DCHECK(node);
 
-    if (!node.IsPrepareLayoutFinished())
-      node.PrepareLayout();
+    node.PrepareLayoutIfNeeded();
 
     scoped_refptr<NGConstraintSpace> space =
         NGConstraintSpaceBuilder(
-            NGWritingMode::kHorizontalTopBottom,
+            WritingMode::kHorizontalTb,
             /* icb_size */ {NGSizeIndefinite, NGSizeIndefinite})
             .SetAvailableSize({available_width, NGSizeIndefinite})
-            .ToConstraintSpace(NGWritingMode::kHorizontalTopBottom);
+            .ToConstraintSpace(WritingMode::kHorizontalTb);
 
-    NGLineBoxFragmentBuilder container_builder(
-        node, &node.Style(), space->WritingMode(), space->Direction());
-    container_builder.SetBfcOffset(NGBfcOffset{LayoutUnit(), LayoutUnit()});
-
+    Vector<NGPositionedFloat> positioned_floats;
     Vector<scoped_refptr<NGUnpositionedFloat>> unpositioned_floats;
 
     scoped_refptr<NGInlineBreakToken> break_token;
 
     Vector<NGInlineItemResults> lines;
     NGExclusionSpace exclusion_space;
+    NGLayoutOpportunity opportunity;
+    opportunity.rect =
+        NGBfcRect(NGBfcOffset(), {available_width, LayoutUnit::Max()});
     NGLineInfo line_info;
     while (!break_token || !break_token->IsFinished()) {
-      NGLineBreaker line_breaker(node, *space, &container_builder,
-                                 &unpositioned_floats, break_token.get());
-      if (!line_breaker.NextLine(NGLogicalOffset(), exclusion_space,
-                                 &line_info))
+      NGLineBreaker line_breaker(node, NGLineBreakerMode::kContent, *space,
+                                 &positioned_floats, &unpositioned_floats,
+                                 &exclusion_space, 0u, break_token.get());
+      if (!line_breaker.NextLine(opportunity, &line_info))
         break;
 
       break_token = line_breaker.CreateBreakToken(nullptr);

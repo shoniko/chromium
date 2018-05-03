@@ -3,8 +3,10 @@
 # found in the LICENSE file.
 
 import("//build/config/android/rules.gni")
+import("//build/config/android/config.gni")
 
 java_library("build_hooks_java") {
+  emma_never_instrument = true
   java_files = [ "java/org/chromium/build/BuildHooks.java" ]
 
   # Make all targets pull in the try-with-resources support files.
@@ -13,13 +15,27 @@ java_library("build_hooks_java") {
   deps = [
     "//third_party/bazel/desugar:desugar_runtime_java",
   ]
+  srcjar_deps = [ ":base_build_hooks_config" ]
   no_build_hooks = true
   supports_android = true
+}
+
+java_cpp_template("base_build_hooks_config") {
+  sources = [
+    "java/templates/BuildHooksConfig.template",
+  ]
+  package_path = "org/chromium/build"
+
+  defines = []
+  if (report_java_assert) {
+    defines += [ "_REPORT_JAVA_ASSERT" ]
+  }
 }
 
 build_hooks_android_impl = "java/org/chromium/build/BuildHooksAndroidImpl.java"
 
 android_library("build_hooks_android_java") {
+  emma_never_instrument = true
   java_files = [
     "java/org/chromium/build/BuildHooksAndroid.java",
     build_hooks_android_impl,
@@ -32,6 +48,7 @@ android_library("build_hooks_android_java") {
 # This default implementation is used if an android_apk target doesn't
 # specify a different implementation via build_hooks_android_impl_deps.
 android_library("build_hooks_android_impl_java") {
+  emma_never_instrument = true
   java_files = [ build_hooks_android_impl ]
   deps = [
     ":build_hooks_android_java",

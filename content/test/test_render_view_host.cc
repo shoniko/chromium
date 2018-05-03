@@ -97,10 +97,6 @@ TestRenderWidgetHostView::~TestRenderWidgetHostView() {
     manager->InvalidateFrameSinkId(frame_sink_id_);
 }
 
-RenderWidgetHost* TestRenderWidgetHostView::GetRenderWidgetHost() const {
-  return rwh_;
-}
-
 gfx::Vector2dF TestRenderWidgetHostView::GetLastScrollOffset() const {
   return gfx::Vector2dF();
 }
@@ -172,11 +168,6 @@ bool TestRenderWidgetHostView::HasAcceleratedSurface(
 
 #if defined(OS_MACOSX)
 
-ui::AcceleratedWidgetMac* TestRenderWidgetHostView::GetAcceleratedWidgetMac()
-    const {
-  return nullptr;
-}
-
 void TestRenderWidgetHostView::SetActive(bool active) {
   // <viettrungluu@gmail.com>: Do I need to do anything here?
 }
@@ -207,8 +198,12 @@ void TestRenderWidgetHostView::DidCreateNewRendererCompositorFrameSink(
 
 void TestRenderWidgetHostView::SubmitCompositorFrame(
     const viz::LocalSurfaceId& local_surface_id,
-    viz::CompositorFrame frame) {
+    viz::CompositorFrame frame,
+    viz::mojom::HitTestRegionListPtr hit_test_region_list) {
   did_swap_compositor_frame_ = true;
+  uint32_t frame_token = frame.metadata.frame_token;
+  if (frame_token)
+    OnFrameTokenChanged(frame_token);
 }
 
 bool TestRenderWidgetHostView::LockMouse() {
@@ -218,14 +213,27 @@ bool TestRenderWidgetHostView::LockMouse() {
 void TestRenderWidgetHostView::UnlockMouse() {
 }
 
+RenderWidgetHostImpl* TestRenderWidgetHostView::GetRenderWidgetHostImpl()
+    const {
+  return rwh_;
+}
+
 viz::FrameSinkId TestRenderWidgetHostView::GetFrameSinkId() {
   return frame_sink_id_;
+}
+
+viz::SurfaceId TestRenderWidgetHostView::GetCurrentSurfaceId() const {
+  return viz::SurfaceId();
 }
 
 void TestRenderWidgetHostView::OnFirstSurfaceActivation(
     const viz::SurfaceInfo& surface_info) {
   // TODO(fsamuel): Once surface synchronization is turned on, the fallback
   // surface should be set here.
+}
+
+void TestRenderWidgetHostView::OnFrameTokenChanged(uint32_t frame_token) {
+  OnFrameTokenChangedForView(frame_token);
 }
 
 TestRenderViewHost::TestRenderViewHost(
@@ -276,9 +284,15 @@ bool TestRenderViewHost::CreateRenderView(
   GetWidget()->set_renderer_initialized(true);
   DCHECK(IsRenderViewLive());
   opener_frame_route_id_ = opener_frame_route_id;
-  RenderFrameHost* main_frame = GetMainFrame();
-  if (main_frame)
-    static_cast<RenderFrameHostImpl*>(main_frame)->SetRenderFrameCreated(true);
+  RenderFrameHostImpl* main_frame =
+      static_cast<RenderFrameHostImpl*>(GetMainFrame());
+  if (main_frame && is_active()) {
+    service_manager::mojom::InterfaceProviderPtr
+        stub_interface_provider_request;
+    main_frame->BindInterfaceProviderRequest(
+        mojo::MakeRequest(&stub_interface_provider_request));
+    main_frame->SetRenderFrameCreated(true);
+  }
 
   return true;
 }

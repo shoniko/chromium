@@ -81,7 +81,7 @@ class CommandMarshal {
  public:
   explicit CommandMarshal(Backend* cache_backend)
       : command_failed_(false), cache_backend_(cache_backend) {}
-  virtual ~CommandMarshal() {}
+  virtual ~CommandMarshal() = default;
 
   // Reads the next command's name to execute.
   virtual std::string ReadCommandName() = 0;
@@ -194,7 +194,7 @@ class ProgramArgumentCommandMarshal final : public CommandMarshal {
   // Implements CommandMarshal.
   void ReturnBuffer(net::GrowableIOBuffer* buffer) override {
     DCHECK(!has_failed());
-    std::cout.write(buffer->data(), buffer->offset());
+    std::cout.write(buffer->StartOfBuffer(), buffer->offset());
   }
 
   // Implements CommandMarshal.

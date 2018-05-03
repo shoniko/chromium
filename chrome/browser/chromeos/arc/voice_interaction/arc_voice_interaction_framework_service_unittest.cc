@@ -13,12 +13,15 @@
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/voice_interaction/fake_voice_interaction_controller.h"
 #include "chrome/browser/chromeos/arc/voice_interaction/highlighter_controller_client.h"
+#include "chrome/browser/chromeos/arc/voice_interaction/voice_interaction_controller_client.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_cras_audio_client.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_util.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_arc_session.h"
 #include "components/arc/test/fake_voice_interaction_framework_instance.h"
 #include "components/prefs/pref_service.h"
@@ -34,14 +37,8 @@ namespace {
 class TestHighlighterController : public ash::mojom::HighlighterController,
                                   public service_manager::Service {
  public:
-  TestHighlighterController()
-      : binding_(this),
-        connector_factory_(this),
-        connector_(connector_factory_.CreateConnector()) {}
-
+  TestHighlighterController() : binding_(this) {}
   ~TestHighlighterController() override = default;
-
-  service_manager::Connector* connector() { return connector_.get(); }
 
   void CallHandleSelection(const gfx::Rect& rect) {
     client_->HandleSelection(rect);
@@ -90,8 +87,6 @@ class TestHighlighterController : public ash::mojom::HighlighterController,
   }
 
   mojo::Binding<ash::mojom::HighlighterController> binding_;
-  service_manager::TestConnectorFactory connector_factory_;
-  std::unique_ptr<service_manager::Connector> connector_;
   ash::mojom::HighlighterControllerClientPtr client_;
   bool is_enabled_ = false;
 
@@ -119,23 +114,44 @@ class ArcVoiceInteractionFrameworkServiceTest : public ash::AshTestBase {
     arc_session_manager_ = std::make_unique<ArcSessionManager>(
         std::make_unique<ArcSessionRunner>(base::Bind(FakeArcSession::Create)));
     arc_bridge_service_ = std::make_unique<ArcBridgeService>();
-    highlighter_controller_ = std::make_unique<TestHighlighterController>();
+
+    auto highlighter_controller_ptr =
+        std::make_unique<TestHighlighterController>();
+    highlighter_controller_ = highlighter_controller_ptr.get();
+    voice_interaction_controller_ =
+        std::make_unique<FakeVoiceInteractionController>();
+    voice_interaction_controller_client_ =
+        std::make_unique<VoiceInteractionControllerClient>();
+    connector_factory_ =
+        service_manager::TestConnectorFactory::CreateForUniqueService(
+            std::move(highlighter_controller_ptr));
+    connector_ = connector_factory_->CreateConnector();
     framework_service_ = std::make_unique<ArcVoiceInteractionFrameworkService>(
         profile_.get(), arc_bridge_service_.get());
     framework_service_->GetHighlighterClientForTesting()
-        ->SetConnectorForTesting(highlighter_controller_->connector());
+        ->SetConnectorForTesting(connector_.get());
+    voice_interaction_controller_client()->SetControllerForTesting(
+        voice_interaction_controller_->CreateInterfacePtrAndBind());
     framework_instance_ =
         std::make_unique<FakeVoiceInteractionFrameworkInstance>();
     arc_bridge_service_->voice_interaction_framework()->SetInstance(
         framework_instance_.get());
+    WaitForInstanceReady(arc_bridge_service_->voice_interaction_framework());
     // Flushing is required for the AttachClient call to get through to the
     // highligther controller.
     FlushHighlighterControllerMojo();
 
     framework_service()->SetVoiceInteractionSetupCompleted();
+    // Flushing is required for the notify mojo call to get through to the voice
+    // interaction controller.
+    FlushVoiceInteractionControllerMojo();
   }
 
   void TearDown() override {
+    arc_bridge_service_->voice_interaction_framework()->CloseInstance(
+        framework_instance_.get());
+    voice_interaction_controller_.reset();
+    voice_interaction_controller_client_.reset();
     framework_instance_.reset();
     framework_service_.reset();
     arc_bridge_service_.reset();
@@ -146,22 +162,36 @@ class ArcVoiceInteractionFrameworkServiceTest : public ash::AshTestBase {
   }
 
  protected:
-  ArcBridgeService* arc_bridge_service() { return arc_bridge_service_.get(); }
+  ArcBridgeService* arc_bridge_service() const {
+    return arc_bridge_service_.get();
+  }
 
-  ArcVoiceInteractionFrameworkService* framework_service() {
+  ArcVoiceInteractionFrameworkService* framework_service() const {
     return framework_service_.get();
   }
 
-  FakeVoiceInteractionFrameworkInstance* framework_instance() {
+  FakeVoiceInteractionFrameworkInstance* framework_instance() const {
     return framework_instance_.get();
   }
 
-  TestHighlighterController* highlighter_controller() {
-    return highlighter_controller_.get();
+  TestHighlighterController* highlighter_controller() const {
+    return highlighter_controller_;
+  }
+
+  FakeVoiceInteractionController* voice_interaction_controller() {
+    return voice_interaction_controller_.get();
+  }
+
+  VoiceInteractionControllerClient* voice_interaction_controller_client() {
+    return voice_interaction_controller_client_.get();
   }
 
   void FlushHighlighterControllerMojo() {
     framework_service_->GetHighlighterClientForTesting()->FlushMojoForTesting();
+  }
+
+  void FlushVoiceInteractionControllerMojo() {
+    voice_interaction_controller_client()->FlushMojoForTesting();
   }
 
  private:
@@ -170,9 +200,15 @@ class ArcVoiceInteractionFrameworkServiceTest : public ash::AshTestBase {
   std::unique_ptr<session_manager::SessionManager> session_manager_;
   std::unique_ptr<ArcBridgeService> arc_bridge_service_;
   std::unique_ptr<ArcSessionManager> arc_session_manager_;
-  std::unique_ptr<TestHighlighterController> highlighter_controller_;
+  std::unique_ptr<service_manager::TestConnectorFactory> connector_factory_;
+  std::unique_ptr<service_manager::Connector> connector_;
+  // |highlighter_controller_| is valid until |connector_factory_| is deleted.
+  TestHighlighterController* highlighter_controller_;
+  std::unique_ptr<FakeVoiceInteractionController> voice_interaction_controller_;
   std::unique_ptr<ArcVoiceInteractionFrameworkService> framework_service_;
   std::unique_ptr<FakeVoiceInteractionFrameworkInstance> framework_instance_;
+  std::unique_ptr<VoiceInteractionControllerClient>
+      voice_interaction_controller_client_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcVoiceInteractionFrameworkServiceTest);
 };
@@ -191,6 +227,10 @@ TEST_F(ArcVoiceInteractionFrameworkServiceTest, ShowSettings) {
 
 TEST_F(ArcVoiceInteractionFrameworkServiceTest, StartSession) {
   framework_service()->StartSessionFromUserInteraction(gfx::Rect());
+  // A notification should be sent if the container is not ready yet.
+  FlushVoiceInteractionControllerMojo();
+  EXPECT_EQ(ash::mojom::VoiceInteractionState::NOT_READY,
+            voice_interaction_controller()->voice_interaction_state());
   // The signal to start voice interaction session should be sent.
   EXPECT_EQ(1u, framework_instance()->start_session_count());
 }
@@ -207,15 +247,24 @@ TEST_F(ArcVoiceInteractionFrameworkServiceTest, StartSessionWithoutFlag) {
 
 TEST_F(ArcVoiceInteractionFrameworkServiceTest, StartSessionWithoutInstance) {
   // Reset the framework instance.
-  arc_bridge_service()->voice_interaction_framework()->SetInstance(nullptr);
+  arc_bridge_service()->voice_interaction_framework()->CloseInstance(
+      framework_instance());
 
   framework_service()->StartSessionFromUserInteraction(gfx::Rect());
+  // A notification should be sent if the container is not ready yet.
+  FlushVoiceInteractionControllerMojo();
+  EXPECT_EQ(ash::mojom::VoiceInteractionState::NOT_READY,
+            voice_interaction_controller()->voice_interaction_state());
   // The signal should not be sent when framework instance not ready.
   EXPECT_EQ(0u, framework_instance()->start_session_count());
 }
 
 TEST_F(ArcVoiceInteractionFrameworkServiceTest, ToggleSession) {
   framework_service()->ToggleSessionFromUserInteraction();
+  // A notification should be sent if the container is not ready yet.
+  FlushVoiceInteractionControllerMojo();
+  EXPECT_EQ(ash::mojom::VoiceInteractionState::NOT_READY,
+            voice_interaction_controller()->voice_interaction_state());
   // The signal to toggle voice interaction session should be sent.
   EXPECT_EQ(1u, framework_instance()->toggle_session_count());
 }
@@ -274,7 +323,8 @@ TEST_F(ArcVoiceInteractionFrameworkServiceTest, HighlighterControllerClient) {
 
   // Clear the framework instance to simulate the container crash.
   // The client should become detached.
-  arc_bridge_service()->voice_interaction_framework()->SetInstance(nullptr);
+  arc_bridge_service()->voice_interaction_framework()->CloseInstance(
+      framework_instance());
   FlushHighlighterControllerMojo();
   EXPECT_FALSE(highlighter_controller()->client_attached());
 
@@ -282,6 +332,7 @@ TEST_F(ArcVoiceInteractionFrameworkServiceTest, HighlighterControllerClient) {
   // The client should become attached again.
   arc_bridge_service()->voice_interaction_framework()->SetInstance(
       framework_instance());
+  WaitForInstanceReady(arc_bridge_service()->voice_interaction_framework());
   FlushHighlighterControllerMojo();
   EXPECT_TRUE(highlighter_controller()->client_attached());
 
@@ -300,16 +351,33 @@ TEST_F(ArcVoiceInteractionFrameworkServiceTest,
   framework_service()->ToggleSessionFromUserInteraction();
   framework_instance()->FlushMojoForTesting();
   FlushHighlighterControllerMojo();
-  EXPECT_EQ(ash::VoiceInteractionState::RUNNING,
+  EXPECT_EQ(ash::mojom::VoiceInteractionState::RUNNING,
             framework_service()->GetStateForTesting());
 
   framework_service()->ToggleSessionFromUserInteraction();
   framework_instance()->FlushMojoForTesting();
   FlushHighlighterControllerMojo();
-  EXPECT_EQ(ash::VoiceInteractionState::STOPPED,
+  EXPECT_EQ(ash::mojom::VoiceInteractionState::STOPPED,
             framework_service()->GetStateForTesting());
 
   EXPECT_FALSE(highlighter_controller()->is_enabled());
+}
+
+TEST_F(ArcVoiceInteractionFrameworkServiceTest,
+       VoiceInteractionControllerClient) {
+  FakeVoiceInteractionController* controller = voice_interaction_controller();
+  VoiceInteractionControllerClient* controller_client =
+      voice_interaction_controller_client();
+  // The voice interaction flags should be set after the initial setup.
+  EXPECT_EQ(controller->voice_interaction_state(),
+            ash::mojom::VoiceInteractionState::STOPPED);
+
+  // Send the signal to set the voice interaction state.
+  controller_client->NotifyStatusChanged(
+      ash::mojom::VoiceInteractionState::RUNNING);
+  FlushVoiceInteractionControllerMojo();
+  EXPECT_EQ(controller->voice_interaction_state(),
+            ash::mojom::VoiceInteractionState::RUNNING);
 }
 
 }  // namespace arc

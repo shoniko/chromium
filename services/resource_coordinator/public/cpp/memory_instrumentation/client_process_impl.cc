@@ -64,7 +64,7 @@ ClientProcessImpl::ClientProcessImpl(const Config& config)
           base::Unretained(this)),
       is_coordinator_process);
 
-  tracing_observer_ = base::MakeUnique<TracingObserver>(
+  tracing_observer_ = std::make_unique<TracingObserver>(
       base::trace_event::TraceLog::GetInstance(),
       base::trace_event::MemoryDumpManager::GetInstance());
 }
@@ -75,18 +75,26 @@ void ClientProcessImpl::RequestChromeMemoryDump(
     const base::trace_event::MemoryDumpRequestArgs& args,
     const RequestChromeMemoryDumpCallback& callback) {
   DCHECK(!callback.is_null());
+  auto it_and_inserted =
+      pending_chrome_callbacks_.emplace(args.dump_guid, std::move(callback));
+  DCHECK(it_and_inserted.second) << "Duplicated request id " << args.dump_guid;
   base::trace_event::MemoryDumpManager::GetInstance()->CreateProcessDump(
       args, base::Bind(&ClientProcessImpl::OnChromeMemoryDumpDone,
-                       base::Unretained(this), callback, args));
+                       base::Unretained(this)));
 }
 
 void ClientProcessImpl::OnChromeMemoryDumpDone(
-    const RequestChromeMemoryDumpCallback& callback,
-    const base::trace_event::MemoryDumpRequestArgs& req_args,
     bool success,
     uint64_t dump_guid,
     std::unique_ptr<base::trace_event::ProcessMemoryDump> process_memory_dump) {
   DCHECK(success || !process_memory_dump);
+
+  auto callback_it = pending_chrome_callbacks_.find(dump_guid);
+  DCHECK(callback_it != pending_chrome_callbacks_.end());
+
+  auto callback = std::move(callback_it->second);
+  pending_chrome_callbacks_.erase(callback_it);
+
   if (!process_memory_dump) {
     callback.Run(false, dump_guid, nullptr);
     return;
@@ -95,17 +103,18 @@ void ClientProcessImpl::OnChromeMemoryDumpDone(
 }
 
 void ClientProcessImpl::RequestGlobalMemoryDump_NoCallback(
-    const base::trace_event::MemoryDumpRequestArgs& args) {
+    base::trace_event::MemoryDumpType dump_type,
+    base::trace_event::MemoryDumpLevelOfDetail level_of_detail) {
   if (!task_runner_->RunsTasksInCurrentSequence()) {
     task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&ClientProcessImpl::RequestGlobalMemoryDump_NoCallback,
-                   base::Unretained(this), args));
+                   base::Unretained(this), dump_type, level_of_detail));
     return;
   }
 
   coordinator_->RequestGlobalMemoryDumpAndAppendToTrace(
-      args,
+      dump_type, level_of_detail,
       mojom::Coordinator::RequestGlobalMemoryDumpAndAppendToTraceCallback());
 }
 

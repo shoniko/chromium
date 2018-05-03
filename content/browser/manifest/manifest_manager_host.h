@@ -37,6 +37,9 @@ class ManifestManagerHost : public WebContentsObserver,
   // have an empty manifest.
   void GetManifest(const GetManifestCallback& callback);
 
+  void RequestManifestDebugInfo(
+      blink::mojom::ManifestManager::RequestManifestDebugInfoCallback callback);
+
   // WebContentsObserver
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
 
@@ -48,13 +51,13 @@ class ManifestManagerHost : public WebContentsObserver,
 
   void OnRequestManifestResponse(int request_id,
                                  const GURL& url,
-                                 const base::Optional<Manifest>& manifest);
+                                 const Manifest& manifest);
 
   // mojom::ManifestUrlChangeObserver:
   void ManifestUrlChanged(const base::Optional<GURL>& manifest_url) override;
 
   RenderFrameHost* manifest_manager_frame_ = nullptr;
-  blink::mojom::ManifestManagerAssociatedPtr manifest_manager_;
+  blink::mojom::ManifestManagerPtr manifest_manager_;
   CallbackMap callbacks_;
 
   WebContentsFrameBindingSet<mojom::ManifestUrlChangeObserver>

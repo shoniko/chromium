@@ -14,10 +14,24 @@ goog.require('__crWeb.message');
 
 /** Beginning of anonymous object */
 (function() {
+  // Skip iframes that have different origins from the main frame. For such
+  // frames no form related actions (eg. filling, saving) are supported.
+  try {
+    // The following line generates exception for iframes that have different
+    // origin that.
+    // TODO(crbug.com/792642): implement sending messages instead of using
+    // window.top, when messaging framework is ready.
+    if (!window.top.document)
+      return;
+  }
+  catch(error) {
+    return;
+  }
+
 
   /**
    * Focus and input events for form elements are messaged to the main
-   * application for broadcast to CRWWebControllerObservers.
+   * application for broadcast to WebStateObservers.
    * This is done with a single event handler for each type being added to the
    * main document element which checks the source element of the event; this
    * is much easier to manage than adding handlers to individual elements.
@@ -25,13 +39,14 @@ goog.require('__crWeb.message');
    */
   var formActivity_ = function(evt) {
     var srcElement = evt.srcElement;
-    var fieldName = srcElement.name || '';
     var value = srcElement.value || '';
+    var fieldType = srcElement.type || '';
 
     var msg = {
       'command': 'form.activity',
       'formName': __gCrWeb.common.getFormIdentifier(evt.srcElement.form),
-      'fieldName': fieldName,
+      'fieldName': __gCrWeb.common.getFieldIdentifier(srcElement),
+      'fieldType': fieldType,
       'type': evt.type,
       'value': value
     };

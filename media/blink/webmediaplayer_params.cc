@@ -17,6 +17,8 @@ WebMediaPlayerParams::WebMediaPlayerParams(
     const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
     const scoped_refptr<base::TaskRunner>& worker_task_runner,
     const scoped_refptr<base::SingleThreadTaskRunner>& compositor_task_runner,
+    const scoped_refptr<base::SingleThreadTaskRunner>&
+        video_frame_compositor_task_runner,
     const AdjustAllocatedMemoryCB& adjust_allocated_memory_cb,
     blink::WebContentDecryptionModule* initial_cdm,
     SurfaceManager* surface_manager,
@@ -26,11 +28,9 @@ WebMediaPlayerParams::WebMediaPlayerParams(
     base::TimeDelta max_keyframe_distance_to_disable_background_video_mse,
     bool enable_instant_source_buffer_gc,
     bool embedded_media_experience_enabled,
-    mojom::WatchTimeRecorderProvider* provider,
-    CreateCapabilitiesRecorderCB create_capabilities_recorder_cb,
+    mojom::MediaMetricsProviderPtr metrics_provider,
     base::Callback<std::unique_ptr<blink::WebSurfaceLayerBridge>(
         blink::WebSurfaceLayerBridgeObserver*)> create_bridge_callback,
-    blink::WebContextProviderCallback context_provider_callback,
     scoped_refptr<viz::ContextProvider> context_provider)
     : defer_load_cb_(defer_load_cb),
       audio_renderer_sink_(audio_renderer_sink),
@@ -38,6 +38,7 @@ WebMediaPlayerParams::WebMediaPlayerParams(
       media_task_runner_(media_task_runner),
       worker_task_runner_(worker_task_runner),
       compositor_task_runner_(compositor_task_runner),
+      video_frame_compositor_task_runner_(video_frame_compositor_task_runner),
       adjust_allocated_memory_cb_(adjust_allocated_memory_cb),
       initial_cdm_(initial_cdm),
       surface_manager_(surface_manager),
@@ -49,13 +50,10 @@ WebMediaPlayerParams::WebMediaPlayerParams(
           max_keyframe_distance_to_disable_background_video_mse),
       enable_instant_source_buffer_gc_(enable_instant_source_buffer_gc),
       embedded_media_experience_enabled_(embedded_media_experience_enabled),
-      watch_time_recorder_provider_(provider),
-      create_capabilities_recorder_cb_(
-          std::move(create_capabilities_recorder_cb)),
+      metrics_provider_(std::move(metrics_provider)),
       create_bridge_callback_(create_bridge_callback),
-      context_provider_callback_(std::move(context_provider_callback)),
       context_provider_(std::move(context_provider)) {}
 
-WebMediaPlayerParams::~WebMediaPlayerParams() {}
+WebMediaPlayerParams::~WebMediaPlayerParams() = default;
 
 }  // namespace media

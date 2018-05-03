@@ -6,6 +6,8 @@ package org.chromium.chrome.browser.customtabs;
 
 import static org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider.CUSTOM_TABS_UI_TYPE_DEFAULT;
 import static org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider.CUSTOM_TABS_UI_TYPE_INFO_PAGE;
+import static org.chromium.chrome.browser.webapps.WebappActivity.ACTIVITY_TYPE_OTHER;
+import static org.chromium.chrome.browser.webapps.WebappActivity.ACTIVITY_TYPE_WEBAPK;
 
 import android.app.Activity;
 import android.app.PendingIntent;
@@ -80,6 +82,7 @@ import org.chromium.chrome.browser.toolbar.ToolbarControlContainer;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.util.UrlUtilities;
+import org.chromium.chrome.browser.webapps.WebappInterceptNavigationDelegate;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
@@ -142,14 +145,12 @@ public class CustomTabActivity extends ChromeActivity {
 
     private final CustomTabsConnection mConnection = CustomTabsConnection.getInstance();
 
+    private WebappInterceptNavigationDelegate.CustomTabTimeSpentLogger mWebappTimeSpentLogger;
+
     private static class PageLoadMetricsObserver implements PageLoadMetrics.Observer {
         private final CustomTabsConnection mConnection;
         private final CustomTabsSessionToken mSession;
         private final WebContents mWebContents;
-
-        private int mEffectiveConnectionType; // See net::EffectiveConnectionType.
-        private long mHttpRttMs;
-        private long mTransportRttMs;
 
         public PageLoadMetricsObserver(CustomTabsConnection connection,
                 CustomTabsSessionToken session, Tab tab) {
@@ -159,18 +160,23 @@ public class CustomTabActivity extends ChromeActivity {
         }
 
         @Override
-        public void onNetworkQualityEstimate(WebContents webContents, int effectiveConnectionType,
-                long httpRttMs, long transportRttMs) {
+        public void onNewNavigation(WebContents webContents, long navigationId) {}
+
+        @Override
+        public void onNetworkQualityEstimate(WebContents webContents, long navigationId,
+                int effectiveConnectionType, long httpRttMs, long transportRttMs) {
             if (webContents != mWebContents) return;
 
-            mEffectiveConnectionType = effectiveConnectionType;
-            mHttpRttMs = httpRttMs;
-            mTransportRttMs = transportRttMs;
+            Bundle args = new Bundle();
+            args.putLong(PageLoadMetrics.EFFECTIVE_CONNECTION_TYPE, effectiveConnectionType);
+            args.putLong(PageLoadMetrics.HTTP_RTT, httpRttMs);
+            args.putLong(PageLoadMetrics.TRANSPORT_RTT, transportRttMs);
+            mConnection.notifyPageLoadMetrics(mSession, args);
         }
 
         @Override
-        public void onFirstContentfulPaint(
-                WebContents webContents, long navigationStartTick, long firstContentfulPaintMs) {
+        public void onFirstContentfulPaint(WebContents webContents, long navigationId,
+                long navigationStartTick, long firstContentfulPaintMs) {
             if (webContents != mWebContents) return;
 
             mConnection.notifySinglePageLoadMetric(mSession, PageLoadMetrics.FIRST_CONTENTFUL_PAINT,
@@ -178,17 +184,17 @@ public class CustomTabActivity extends ChromeActivity {
         }
 
         @Override
-        public void onLoadEventStart(
-                WebContents webContents, long navigationStartTick, long loadEventStartMs) {
+        public void onLoadEventStart(WebContents webContents, long navigationId,
+                long navigationStartTick, long loadEventStartMs) {
             if (webContents != mWebContents) return;
             mConnection.notifySinglePageLoadMetric(mSession, PageLoadMetrics.LOAD_EVENT_START,
                     navigationStartTick, loadEventStartMs);
         }
 
         @Override
-        public void onLoadedMainResource(WebContents webContents, long dnsStartMs, long dnsEndMs,
-                long connectStartMs, long connectEndMs, long requestStartMs, long sendStartMs,
-                long sendEndMs) {
+        public void onLoadedMainResource(WebContents webContents, long navigationId,
+                long dnsStartMs, long dnsEndMs, long connectStartMs, long connectEndMs,
+                long requestStartMs, long sendStartMs, long sendEndMs) {
             if (webContents != mWebContents) return;
 
             Bundle args = new Bundle();
@@ -197,11 +203,8 @@ public class CustomTabActivity extends ChromeActivity {
             args.putLong(PageLoadMetrics.CONNECT_START, connectStartMs);
             args.putLong(PageLoadMetrics.CONNECT_END, connectEndMs);
             args.putLong(PageLoadMetrics.REQUEST_START, requestStartMs);
-            args.putLong(PageLoadMetrics.RESPONSE_START, sendStartMs);
-            args.putLong(PageLoadMetrics.RESPONSE_END, sendEndMs);
-            args.putLong(PageLoadMetrics.EFFECTIVE_CONNECTION_TYPE, mEffectiveConnectionType);
-            args.putLong(PageLoadMetrics.HTTP_RTT, mHttpRttMs);
-            args.putLong(PageLoadMetrics.TRANSPORT_RTT, mTransportRttMs);
+            args.putLong(PageLoadMetrics.SEND_START, sendStartMs);
+            args.putLong(PageLoadMetrics.SEND_END, sendEndMs);
             mConnection.notifyPageLoadMetrics(mSession, args);
         }
     }
@@ -233,6 +236,10 @@ public class CustomTabActivity extends ChromeActivity {
     private TabModelObserver mTabModelObserver = new EmptyTabModelObserver() {
         @Override
         public void didAddTab(Tab tab, TabLaunchType type) {
+            // Ensure that the PageLoadMetrics observer is attached in all cases, if in
+            // the future we do not go through initializeMainTab. ObserverList.addObserver
+            // will deduplicate additions, so it is safe to add both here as well as in
+            // initializeMainTab().
             PageLoadMetrics.addObserver(mMetricsObserver);
             tab.addObserver(mTabObserver);
         }
@@ -545,7 +552,14 @@ public class CustomTabActivity extends ChromeActivity {
                 getIntent(), IntentHandler.EXTRA_PARENT_TAB_ID, Tab.INVALID_TAB_ID);
         Tab tab = new Tab(assignedTabId, parentTabId, false, getWindowAndroid(),
                 TabLaunchType.FROM_EXTERNAL_APP, null, null);
-        tab.setAppAssociatedWith(mConnection.getClientPackageNameForSession(mSession));
+        if (getIntent().getIntExtra(
+                    CustomTabIntentDataProvider.EXTRA_BROWSER_LAUNCH_SOURCE, ACTIVITY_TYPE_OTHER)
+                == ACTIVITY_TYPE_WEBAPK) {
+            String webapkPackageName = getIntent().getStringExtra(Browser.EXTRA_APPLICATION_ID);
+            tab.setAppAssociatedWith(webapkPackageName);
+        } else {
+            tab.setAppAssociatedWith(mConnection.getClientPackageNameForSession(mSession));
+        }
         tab.initialize(
                 webContents, getTabContentManager(),
                 new CustomTabDelegateFactory(
@@ -614,6 +628,9 @@ public class CustomTabActivity extends ChromeActivity {
                 getApplication(), mSession, mIntentDataProvider.isOpenedByChrome());
 
         mMetricsObserver = new PageLoadMetricsObserver(mConnection, mSession, tab);
+        // Immediately add the observer to PageLoadMetrics to catch early events that may
+        // be generated in the middle of tab initialization.
+        PageLoadMetrics.addObserver(mMetricsObserver);
         tab.addObserver(mTabObserver);
 
         prepareTabBackground(tab);
@@ -681,12 +698,20 @@ public class CustomTabActivity extends ChromeActivity {
             }
         }
         mIsInitialResume = false;
+        mWebappTimeSpentLogger =
+                WebappInterceptNavigationDelegate.CustomTabTimeSpentLogger
+                        .createInstanceAndStartTimer(getIntent().getIntExtra(
+                                CustomTabIntentDataProvider.EXTRA_BROWSER_LAUNCH_SOURCE,
+                                ACTIVITY_TYPE_OTHER));
     }
 
     @Override
     public void onPauseWithNative() {
         super.onPauseWithNative();
         mConnection.notifyNavigationEvent(mSession, CustomTabsCallback.TAB_HIDDEN);
+        if (mWebappTimeSpentLogger != null) {
+            mWebappTimeSpentLogger.onPause();
+        }
     }
 
     @Override
@@ -1137,7 +1162,7 @@ public class CustomTabActivity extends ChromeActivity {
 
                 // Blink has rendered the page by this point, but we need to wait for the compositor
                 // frame swap to avoid flash of white content.
-                getCompositorViewHolder().getCompositorView().surfaceRedrawNeededAsync(null, () -> {
+                getCompositorViewHolder().getCompositorView().surfaceRedrawNeededAsync(() -> {
                     if (!tab.isInitialized() || isActivityDestroyed()) return;
                     tab.getView().setBackgroundResource(0);
                 });
@@ -1171,7 +1196,7 @@ public class CustomTabActivity extends ChromeActivity {
         customTabIntent.intent.setData(Uri.parse(url));
 
         Intent intent = LaunchIntentDispatcher.createCustomTabActivityIntent(
-                context, customTabIntent.intent, false);
+                context, customTabIntent.intent);
         intent.setPackage(context.getPackageName());
         intent.putExtra(CustomTabIntentDataProvider.EXTRA_UI_TYPE, CUSTOM_TABS_UI_TYPE_INFO_PAGE);
         intent.putExtra(Browser.EXTRA_APPLICATION_ID, context.getPackageName());

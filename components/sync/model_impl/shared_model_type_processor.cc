@@ -22,6 +22,28 @@
 
 namespace syncer {
 
+namespace {
+
+bool CompareProtoTimeStamp(const int64_t left, const int64_t right) {
+  return left > right;
+}
+
+// This function use quick select algorithm (std::nth_element) to find the |n|th
+// bigest number in the vector |time_stamps|.
+int64_t FindTheNthBigestProtoTimeStamp(std::vector<int64_t> time_stamps,
+                                       size_t n) {
+  DCHECK(n);
+
+  if (n > time_stamps.size())
+    return 0;
+
+  std::nth_element(time_stamps.begin(), time_stamps.begin() + n - 1,
+                   time_stamps.end(), &CompareProtoTimeStamp);
+
+  return time_stamps[n - 1];
+}
+}  // namespace
+
 SharedModelTypeProcessor::SharedModelTypeProcessor(
     ModelType type,
     ModelTypeSyncBridge* bridge,
@@ -256,9 +278,11 @@ void SharedModelTypeProcessor::Delete(
     return;
   }
 
-  entity->Delete();
+  if (entity->Delete())
+    metadata_change_list->UpdateMetadata(storage_key, entity->metadata());
+  else
+    RemoveEntity(entity, metadata_change_list);
 
-  metadata_change_list->UpdateMetadata(storage_key, entity->metadata());
   NudgeForCommitIfNeeded();
 }
 
@@ -283,11 +307,7 @@ void SharedModelTypeProcessor::UpdateStorageKey(
 void SharedModelTypeProcessor::UntrackEntity(const EntityData& entity_data) {
   const std::string& client_tag_hash = entity_data.client_tag_hash;
   DCHECK(!client_tag_hash.empty());
-
-  ProcessorEntityTracker* entity = GetEntityForTagHash(client_tag_hash);
-  DCHECK(entity);
-  DCHECK(entity->storage_key().empty());
-
+  DCHECK(GetEntityForTagHash(client_tag_hash)->storage_key().empty());
   entities_.erase(client_tag_hash);
 }
 
@@ -363,9 +383,7 @@ void SharedModelTypeProcessor::OnCommitCompleted(
       if (!entity->IsUnsynced()) {
         entity_change_list.push_back(
             EntityChange::CreateDelete(entity->storage_key()));
-        metadata_change_list->ClearMetadata(entity->storage_key());
-        storage_key_to_tag_hash_.erase(entity->storage_key());
-        entities_.erase(entity->metadata().client_tag_hash());
+        RemoveEntity(entity, metadata_change_list.get());
       }
       // If unsynced, we could theoretically update persisted metadata to have
       // more accurate bookkeeping. However, this wouldn't actually do anything
@@ -373,9 +391,7 @@ void SharedModelTypeProcessor::OnCommitCompleted(
       // any of the changing metadata in the commit message. So skip updating
       // metadata.
     } else if (entity->CanClearMetadata()) {
-      metadata_change_list->ClearMetadata(entity->storage_key());
-      storage_key_to_tag_hash_.erase(entity->storage_key());
-      entities_.erase(entity->metadata().client_tag_hash());
+      RemoveEntity(entity, metadata_change_list.get());
     } else {
       metadata_change_list->UpdateMetadata(entity->storage_key(),
                                            entity->metadata());
@@ -386,7 +402,7 @@ void SharedModelTypeProcessor::OnCommitCompleted(
   // their commit_requested_sequence_number so they are committed again on next
   // sync cycle.
   // TODO(crbug.com/740757): Iterating over all entities is inefficient. It is
-  // better to remember in GetLocalChanges which entities are bieng committed
+  // better to remember in GetLocalChanges which entities are being committed
   // and adjust only them. Alternatively we can make worker return commit status
   // for all entities, not just successful ones and use that to lookup entities
   // to clear.
@@ -814,6 +830,7 @@ void SharedModelTypeProcessor::ExpireEntriesIfNeeded(
     cached_gc_directive_version_ = new_gc_directive.version_watermark();
     has_expired_changes = true;
   }
+
   if (new_gc_directive.has_age_watermark_in_days()) {
     DCHECK(new_gc_directive.age_watermark_in_days());
     // For saving resource purpose(ex. cpu, battery), We round up garbage
@@ -828,6 +845,13 @@ void SharedModelTypeProcessor::ExpireEntriesIfNeeded(
       cached_gc_directive_aged_out_day_ = to_be_expired;
       has_expired_changes = true;
     }
+  }
+
+  if (new_gc_directive.has_max_number_of_items()) {
+    DCHECK(new_gc_directive.max_number_of_items());
+    ExpireEntriesByItemLimit(new_gc_directive.max_number_of_items(),
+                             metadata_changes.get());
+    has_expired_changes = true;
   }
 
   if (has_expired_changes)
@@ -854,7 +878,7 @@ void SharedModelTypeProcessor::ExpireEntriesByVersion(
   std::vector<std::string> storage_key_to_be_deleted;
   for (const auto& kv : entities_) {
     ProcessorEntityTracker* entity = kv.second.get();
-    if (entity && !entity->IsUnsynced() &&
+    if (!entity->IsUnsynced() &&
         entity->metadata().server_version() < version_watermark) {
       storage_key_to_be_deleted.push_back(entity->storage_key());
     }
@@ -873,7 +897,7 @@ void SharedModelTypeProcessor::ExpireEntriesByAge(
   std::vector<std::string> storage_key_to_be_deleted;
   for (const auto& kv : entities_) {
     ProcessorEntityTracker* entity = kv.second.get();
-    if (entity && !entity->IsUnsynced() &&
+    if (!entity->IsUnsynced() &&
         ProtoTimeToTime(entity->metadata().modification_time()) <=
             to_be_expired) {
       storage_key_to_be_deleted.push_back(entity->storage_key());
@@ -881,6 +905,43 @@ void SharedModelTypeProcessor::ExpireEntriesByAge(
   }
 
   ClearMetadataForEntries(storage_key_to_be_deleted, metadata_changes);
+}
+
+void SharedModelTypeProcessor::ExpireEntriesByItemLimit(
+    int32_t max_number_of_items,
+    MetadataChangeList* metadata_changes) {
+  DCHECK(metadata_changes);
+
+  size_t limited_number = max_number_of_items;
+  if (limited_number >= entities_.size())
+    return;
+
+  std::vector<int64_t> all_proto_times;
+  for (const auto& kv : entities_) {
+    ProcessorEntityTracker* entity = kv.second.get();
+    all_proto_times.push_back(entity->metadata().modification_time());
+  }
+  int64_t expired_proto_time = FindTheNthBigestProtoTimeStamp(
+      std::move(all_proto_times), limited_number);
+
+  std::vector<std::string> storage_key_to_be_deleted;
+  for (const auto& kv : entities_) {
+    ProcessorEntityTracker* entity = kv.second.get();
+    if (!entity->IsUnsynced() &&
+        entity->metadata().modification_time() < expired_proto_time) {
+      storage_key_to_be_deleted.push_back(entity->storage_key());
+    }
+  }
+
+  ClearMetadataForEntries(storage_key_to_be_deleted, metadata_changes);
+}
+
+void SharedModelTypeProcessor::RemoveEntity(
+    ProcessorEntityTracker* entity,
+    MetadataChangeList* metadata_change_list) {
+  metadata_change_list->ClearMetadata(entity->storage_key());
+  storage_key_to_tag_hash_.erase(entity->storage_key());
+  entities_.erase(entity->metadata().client_tag_hash());
 }
 
 }  // namespace syncer

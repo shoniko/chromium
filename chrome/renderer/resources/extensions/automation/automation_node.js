@@ -181,6 +181,14 @@ var GetBoundsForRange = natives.GetBoundsForRange;
 /**
  * @param {number} axTreeID The id of the accessibility tree.
  * @param {number} nodeID The id of a node.
+ * @return {?automation.Rect} The unclipped location of the node, or
+ * undefined if the tree or node wasn't found.
+ */
+var GetUnclippedLocation = natives.GetUnclippedLocation;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
  * @return {!Array.<number>} The text offset where each line starts, or an empty
  *     array if this node has no text content, or undefined if the tree or node
  *     was not found.
@@ -353,6 +361,13 @@ AutomationNodeImpl.prototype = {
     return GetBoundsForRange(this.treeID, this.id, startIndex, endIndex);
   },
 
+  get unclippedLocation() {
+    var result = GetUnclippedLocation(this.treeID, this.id);
+    if (result === undefined)
+      result = GetLocation(this.treeID, this.id);
+    return result;
+  },
+
   get indexInParent() {
     return GetIndexInParent(this.treeID, this.id);
   },
@@ -466,12 +481,21 @@ AutomationNodeImpl.prototype = {
   },
 
   hitTest: function(x, y, eventToFire) {
+    this.hitTestInternal(x, y, eventToFire);
+  },
+
+  hitTestWithReply: function(x, y, opt_callback) {
+    this.hitTestInternal(x, y, 'hitTestResult', opt_callback);
+  },
+
+  hitTestInternal: function(x, y, eventToFire, opt_callback) {
     // Convert from global to tree-relative coordinates.
     var location = GetLocation(this.treeID, GetRootID(this.treeID));
     this.performAction_('hitTest',
                         { x: Math.floor(x - location.left),
                           y: Math.floor(y - location.top),
-                          eventToFire: eventToFire });
+                          eventToFire: eventToFire },
+                        opt_callback);
   },
 
   makeVisible: function() {
@@ -511,7 +535,7 @@ AutomationNodeImpl.prototype = {
   },
 
   setSelection: function(startIndex, endIndex) {
-    if (this.role == 'textField' || this.role == 'textBox') {
+    if (this.state.editable) {
       this.performAction_('setSelection',
                           { focusNodeID: this.id,
                             anchorOffset: startIndex,
@@ -804,6 +828,8 @@ AutomationNodeImpl.prototype = {
 var stringAttributes = [
     'accessKey',
     'ariaInvalidValue',
+    'autoComplete',
+    'className',
     'containerLiveRelevant',
     'containerLiveStatus',
     'description',
@@ -822,6 +848,7 @@ var stringAttributes = [
 
 var boolAttributes = [
     'busy',
+    'clickable',
     'containerLiveAtomic',
     'containerLiveBusy',
     'liveAtomic',
@@ -859,7 +886,9 @@ var intAttributes = [
 var nodeRefAttributes = [
     ['activedescendantId', 'activeDescendant'],
     ['inPageLinkTargetId', 'inPageLinkTarget'],
+    ['nextFocusId', 'nextFocus'],
     ['nextOnLineId', 'nextOnLine'],
+    ['previousFocusId', 'previousFocus'],
     ['previousOnLineId', 'previousOnLine'],
     ['tableColumnHeaderId', 'tableColumnHeader'],
     ['tableHeaderId', 'tableHeader'],
@@ -1177,6 +1206,10 @@ AutomationRootNodeImpl.prototype = {
       targetNodeImpl.dispatchEvent(
           eventParams.eventType, eventParams.eventFrom,
           eventParams.mouseX, eventParams.mouseY);
+
+      if (eventParams.actionRequestID != -1) {
+        this.onActionResult(eventParams.actionRequestID, targetNode);
+      }
     } else {
       logging.WARNING('Got ' + eventParams.eventType +
                       ' event on unknown node: ' + eventParams.targetID +
@@ -1227,6 +1260,7 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
     'focus',
     'getImageData',
     'hitTest',
+    'hitTestWithReply',
     'makeVisible',
     'matches',
     'performCustomAction',
@@ -1272,6 +1306,7 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
       'underline',
       'lineThrough',
       'customActions',
+      'unclippedLocation',
   ]),
 });
 

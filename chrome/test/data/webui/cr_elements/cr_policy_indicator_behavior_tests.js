@@ -4,7 +4,7 @@
 
 /** @fileoverview Suite of tests for CrPolicyIndicatorBehavior. */
 suite('CrPolicyIndicatorBehavior', function() {
-  var TestIndicator;
+  let TestIndicator;
   suiteSetup(function() {
     TestIndicator = Polymer({
       is: 'test-indicator',
@@ -13,13 +13,13 @@ suite('CrPolicyIndicatorBehavior', function() {
     });
   });
 
-  var indicator;
+  let indicator;
   setup(function() {
     indicator = new TestIndicator;
   });
 
   test('default indicator is blank', function() {
-    assertEquals(CrPolicyIndicatorType.NONE, indicator.indicatorType)
+    assertEquals(CrPolicyIndicatorType.NONE, indicator.indicatorType);
     assertFalse(indicator.indicatorVisible);
   });
 

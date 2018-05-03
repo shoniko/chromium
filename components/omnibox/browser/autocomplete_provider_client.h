@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_OMNIBOX_BROWSER_AUTOCOMPLETE_PROVIDER_CLIENT_H_
 #define COMPONENTS_OMNIBOX_BROWSER_AUTOCOMPLETE_PROVIDER_CLIENT_H_
 
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
@@ -90,10 +92,17 @@ class AutocompleteProviderClient {
   // most commonly-used URLs from that set.
   virtual std::vector<base::string16> GetBuiltinsToProvideAsUserTypes() = 0;
 
+  // The timestamp for the last visit of the page being displayed in the current
+  // tab.
+  virtual base::Time GetCurrentVisitTimestamp() const = 0;
+
   virtual bool IsOffTheRecord() const = 0;
   virtual bool SearchSuggestEnabled() const = 0;
 
   virtual bool TabSyncEnabledAndUnencrypted() const = 0;
+
+  // This function returns true if the user is signed in.
+  virtual bool IsAuthenticated() const = 0;
 
   // Given some string |text| that the user wants to use for navigation,
   // determines how it should be interpreted.
@@ -132,6 +141,10 @@ class AutocompleteProviderClient {
   // Called after creation of |keyword_provider| to allow the client to
   // configure the provider if desired.
   virtual void ConfigureKeywordProvider(KeywordProvider* keyword_provider) {}
+
+  // Called to find out if there is an open tab with the given URL within
+  // the current profile.
+  virtual bool IsTabOpenWithURL(const GURL& url) = 0;
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_AUTOCOMPLETE_PROVIDER_CLIENT_H_

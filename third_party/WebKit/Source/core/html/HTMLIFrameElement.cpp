@@ -31,6 +31,7 @@
 #include "core/html_names.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutIFrame.h"
+#include "core/policy/IFramePolicy.h"
 #include "platform/runtime_enabled_features.h"
 
 namespace blink {
@@ -39,7 +40,6 @@ using namespace HTMLNames;
 
 inline HTMLIFrameElement::HTMLIFrameElement(Document& document)
     : HTMLFrameElementBase(iframeTag, document),
-      did_load_non_empty_document_(false),
       collapsed_by_client_(false),
       sandbox_(HTMLIFrameElementSandbox::Create(this)),
       referrer_policy_(kReferrerPolicyDefault) {}
@@ -48,11 +48,12 @@ DEFINE_NODE_FACTORY(HTMLIFrameElement)
 
 void HTMLIFrameElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(sandbox_);
+  visitor->Trace(policy_);
   HTMLFrameElementBase::Trace(visitor);
   Supplementable<HTMLIFrameElement>::Trace(visitor);
 }
 
-HTMLIFrameElement::~HTMLIFrameElement() {}
+HTMLIFrameElement::~HTMLIFrameElement() = default;
 
 void HTMLIFrameElement::SetCollapsed(bool collapse) {
   if (collapsed_by_client_ == collapse)
@@ -70,6 +71,14 @@ DOMTokenList* HTMLIFrameElement::sandbox() const {
   return sandbox_.Get();
 }
 
+Policy* HTMLIFrameElement::policy() {
+  if (!policy_) {
+    policy_ = new IFramePolicy(&GetDocument(), ContainerPolicy(),
+                               GetOriginForFeaturePolicy());
+  }
+  return policy_.Get();
+}
+
 bool HTMLIFrameElement::IsPresentationAttribute(
     const QualifiedName& name) const {
   if (name == widthAttr || name == heightAttr || name == alignAttr ||
@@ -81,7 +90,7 @@ bool HTMLIFrameElement::IsPresentationAttribute(
 void HTMLIFrameElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == widthAttr) {
     AddHTMLLengthToStyle(style, CSSPropertyWidth, value);
   } else if (name == heightAttr) {
@@ -110,7 +119,7 @@ void HTMLIFrameElement::ParseAttribute(
   const AtomicString& value = params.new_value;
   if (name == nameAttr) {
     if (IsInDocumentTree() && GetDocument().IsHTMLDocument()) {
-      HTMLDocument& document = ToHTMLDocument(this->GetDocument());
+      HTMLDocument& document = ToHTMLDocument(GetDocument());
       document.RemoveNamedItem(name_);
       document.AddNamedItem(value);
     }
@@ -204,21 +213,21 @@ void HTMLIFrameElement::ParseAttribute(
   }
 }
 
-Vector<WebParsedFeaturePolicyDeclaration>
-HTMLIFrameElement::ConstructContainerPolicy(Vector<String>* messages,
-                                            bool* old_syntax) const {
-  scoped_refptr<SecurityOrigin> src_origin = GetOriginForFeaturePolicy();
-  scoped_refptr<SecurityOrigin> self_origin = GetDocument().GetSecurityOrigin();
-  Vector<WebParsedFeaturePolicyDeclaration> container_policy =
-      ParseFeaturePolicyAttribute(allow_, self_origin, src_origin, messages,
-                                  old_syntax);
+ParsedFeaturePolicy HTMLIFrameElement::ConstructContainerPolicy(
+    Vector<String>* messages,
+    bool* old_syntax) const {
+  scoped_refptr<const SecurityOrigin> src_origin = GetOriginForFeaturePolicy();
+  scoped_refptr<const SecurityOrigin> self_origin =
+      GetDocument().GetSecurityOrigin();
+  ParsedFeaturePolicy container_policy = ParseFeaturePolicyAttribute(
+      allow_, self_origin, src_origin, messages, old_syntax);
 
   // If allowfullscreen attribute is present and no fullscreen policy is set,
   // enable the feature for all origins.
   if (AllowFullscreen()) {
     bool has_fullscreen_policy = false;
     for (const auto& declaration : container_policy) {
-      if (declaration.feature == WebFeaturePolicyFeature::kFullscreen) {
+      if (declaration.feature == FeaturePolicyFeature::kFullscreen) {
         has_fullscreen_policy = true;
         if (messages) {
           messages->push_back(
@@ -228,10 +237,9 @@ HTMLIFrameElement::ConstructContainerPolicy(Vector<String>* messages,
       }
     }
     if (!has_fullscreen_policy) {
-      WebParsedFeaturePolicyDeclaration whitelist;
-      whitelist.feature = WebFeaturePolicyFeature::kFullscreen;
+      ParsedFeaturePolicyDeclaration whitelist;
+      whitelist.feature = FeaturePolicyFeature::kFullscreen;
       whitelist.matches_all_origins = true;
-      whitelist.origins = Vector<WebSecurityOrigin>(0UL);
       container_policy.push_back(whitelist);
     }
   }
@@ -240,7 +248,7 @@ HTMLIFrameElement::ConstructContainerPolicy(Vector<String>* messages,
   if (AllowPaymentRequest()) {
     bool has_payment_policy = false;
     for (const auto& declaration : container_policy) {
-      if (declaration.feature == WebFeaturePolicyFeature::kPayment) {
+      if (declaration.feature == FeaturePolicyFeature::kPayment) {
         has_payment_policy = true;
         if (messages) {
           messages->push_back(
@@ -250,13 +258,17 @@ HTMLIFrameElement::ConstructContainerPolicy(Vector<String>* messages,
       }
     }
     if (!has_payment_policy) {
-      WebParsedFeaturePolicyDeclaration whitelist;
-      whitelist.feature = WebFeaturePolicyFeature::kPayment;
+      ParsedFeaturePolicyDeclaration whitelist;
+      whitelist.feature = FeaturePolicyFeature::kPayment;
       whitelist.matches_all_origins = true;
-      whitelist.origins = Vector<WebSecurityOrigin>(0UL);
+      whitelist.origins = std::vector<url::Origin>(0UL);
       container_policy.push_back(whitelist);
     }
   }
+
+  // Update Policy associated with this iframe, if exists.
+  if (policy_)
+    policy_->UpdateContainerPolicy(container_policy, src_origin);
 
   return container_policy;
 }

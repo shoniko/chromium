@@ -4,19 +4,20 @@
 
 #include "chrome/browser/ui/webui/chromeos/sys_internals/sys_internals_ui.h"
 
+#include <memory>
+
 #include "base/feature_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chromeos/sys_internals/sys_internals_message_handler.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
-#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 
 SysInternalsUI::SysInternalsUI(content::WebUI* web_ui)
     : content::WebUIController(web_ui) {
-  web_ui->AddMessageHandler(base::MakeUnique<SysInternalsMessageHandler>());
+  web_ui->AddMessageHandler(std::make_unique<SysInternalsMessageHandler>());
 
   content::WebUIDataSource* html_source =
       content::WebUIDataSource::Create(chrome::kChromeUISysInternalsHost);

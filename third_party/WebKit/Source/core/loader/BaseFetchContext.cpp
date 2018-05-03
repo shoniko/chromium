@@ -16,8 +16,10 @@
 #include "platform/loader/fetch/ResourceLoadPriority.h"
 #include "platform/loader/fetch/ResourceLoadingLog.h"
 #include "platform/loader/fetch/fetch_initiator_type_names.h"
+#include "platform/network/mime/MIMETypeRegistry.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityPolicy.h"
+#include "services/network/public/interfaces/request_context_frame_type.mojom-blink.h"
 
 namespace blink {
 
@@ -162,7 +164,7 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
   if (ShouldBlockRequestByInspector(resource_request.Url()))
     return ResourceRequestBlockedReason::kInspector;
 
-  SecurityOrigin* security_origin = options.security_origin.get();
+  const SecurityOrigin* security_origin = options.security_origin.get();
   if (!security_origin)
     security_origin = GetSecurityOrigin();
 
@@ -190,7 +192,8 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
     case Resource::kLinkPrefetch:
     case Resource::kTextTrack:
     case Resource::kImportResource:
-    case Resource::kMedia:
+    case Resource::kAudio:
+    case Resource::kVideo:
     case Resource::kManifest:
     case Resource::kMock:
       // By default these types of resources can be loaded from any origin.
@@ -209,6 +212,15 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
         return ResourceRequestBlockedReason::kOrigin;
       }
       break;
+  }
+
+  // User Agent CSS stylesheets should only support loading images and should be
+  // restricted to data urls.
+  if (options.initiator_info.name == FetchInitiatorTypeNames::uacss) {
+    if (type == Resource::kImage && url.ProtocolIsData()) {
+      return ResourceRequestBlockedReason::kNone;
+    }
+    return ResourceRequestBlockedReason::kOther;
   }
 
   WebURLRequest::RequestContext request_context =
@@ -238,13 +250,15 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
       !url.ProtocolIsData())
     return ResourceRequestBlockedReason::kOrigin;
 
-  WebURLRequest::FrameType frame_type = resource_request.GetFrameType();
+  network::mojom::RequestContextFrameType frame_type =
+      resource_request.GetFrameType();
 
   // Measure the number of legacy URL schemes ('ftp://') and the number of
   // embedded-credential ('http://user:password@...') resources embedded as
   // subresources.
-  if (frame_type != WebURLRequest::kFrameTypeTopLevel) {
-    bool is_subresource = frame_type == WebURLRequest::kFrameTypeNone;
+  if (frame_type != network::mojom::RequestContextFrameType::kTopLevel) {
+    bool is_subresource =
+        frame_type == network::mojom::RequestContextFrameType::kNone;
     const SecurityOrigin* embedding_origin =
         is_subresource ? GetSecurityOrigin() : GetParentSecurityOrigin();
     DCHECK(embedding_origin);
@@ -283,6 +297,32 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
       return ResourceRequestBlockedReason::kSubresourceFilter;
     }
   }
+
+  return ResourceRequestBlockedReason::kNone;
+}
+
+ResourceRequestBlockedReason BaseFetchContext::CheckResponseNosniff(
+    WebURLRequest::RequestContext request_context,
+    const ResourceResponse& response) const {
+  bool sniffing_allowed =
+      ParseContentTypeOptionsHeader(response.HttpHeaderField(
+          HTTPNames::X_Content_Type_Options)) != kContentTypeOptionsNosniff;
+  if (sniffing_allowed)
+    return ResourceRequestBlockedReason::kNone;
+
+  String mime_type = response.HttpContentType();
+  if (request_context == WebURLRequest::kRequestContextStyle &&
+      !MIMETypeRegistry::IsSupportedStyleSheetMIMEType(mime_type)) {
+    AddConsoleMessage(ConsoleMessage::Create(
+        kSecurityMessageSource, kErrorMessageLevel,
+        "Refused to apply style from '" + response.Url().ElidedString() +
+            "' because its MIME type ('" + mime_type + "') " +
+            "is not a supported stylesheet MIME type, and strict MIME checking "
+            "is enabled."));
+    return ResourceRequestBlockedReason::kContentType;
+  }
+  // TODO(mkwst): Move the 'nosniff' bit of 'AllowedByNosniff::MimeTypeAsScript'
+  // here alongside the style checks, and put its use counters somewhere else.
 
   return ResourceRequestBlockedReason::kNone;
 }

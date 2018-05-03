@@ -30,14 +30,6 @@ const char kDisableRemoteCoreAnimation[] = "disable-remote-core-animation";
 const char kShowMacOverlayBorders[] = "show-mac-overlay-borders";
 #endif
 
-#if defined(OS_WIN)
-// Disables merging the key event (WM_KEY*) with the char event (WM_CHAR).
-const char kDisableMergeKeyCharEvents[] = "disable-merge-key-char-events";
-
-// Enables merging the key event (WM_KEY*) with the char event (WM_CHAR).
-const char kEnableMergeKeyCharEvents[] = "enable-merge-key-char-events";
-#endif
-
 // Disables layer-edge anti-aliasing in the compositor.
 const char kDisableCompositedAntialiasing[] = "disable-composited-antialiasing";
 
@@ -53,12 +45,10 @@ const char kDisableTouchDragDrop[] = "disable-touch-drag-drop";
 // Enables touch event based drag and drop.
 const char kEnableTouchDragDrop[] = "enable-touch-drag-drop";
 
-// TODO(dcastagna): Draw debug quad borders only when it is actually
-// an overlay candidate.
-// Renders a border around GL composited overlay candidate quads to
-// help debug and study overlay support.
-const char kGlCompositedOverlayCandidateQuadBorder[] =
-    "gl-composited-overlay-candidate-quad-border";
+// Forces high-contrast mode in native UI drawing, regardless of system
+// settings. Note that this has limited effect on Windows: only Aura colors will
+// be switched to high contrast, not other system colors.
+const char kForceHighContrast[] = "force-high-contrast";
 
 // The language file that we want to try to open. Of the form
 // language[-country] where language is the 2 letter code from ISO-639.
@@ -117,10 +107,27 @@ const char kUseSkiaRenderer[] = "use-skia-renderer";
 const char kDisallowNonExactResourceReuse[] =
     "disallow-non-exact-resource-reuse";
 
+// Transform localized strings to be longer, with beginning and end markers to
+// make truncation visually apparent.
+const char kMangleLocalizedStrings[] = "mangle-localized-strings";
+
 // Re-draw everything multiple times to simulate a much slower machine.
 // Give a slow down factor to cause renderer to take that many times longer to
 // complete, such as --slow-down-compositing-scale-factor=2.
 const char kSlowDownCompositingScaleFactor[] =
     "slow-down-compositing-scale-factor";
+
+// Tint GL-composited color.
+const char kTintGlCompositedContent[] = "tint-gl-composited-content";
+
+#if defined(USE_AURA)
+// Used to enable the mus service (aka the UI service). This makes mus run in
+// process. It is also used to notify the clients that the UI service is being
+// used.
+const char kMus[] = "mus";
+
+// If set mus is hosting Viz. Only applicable is kMus if specified.
+const char kMusHostingViz[] = "mus-hosting-viz";
+#endif
 
 }  // namespace switches

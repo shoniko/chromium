@@ -30,8 +30,6 @@
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/view.h"
-#include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace {
 
@@ -105,7 +103,8 @@ void MediaGalleriesDialogViews::InitChildViews() {
 
   const int dialog_content_width = views::Widget::GetLocalizedContentsWidth(
       IDS_MEDIA_GALLERIES_DIALOG_CONTENT_WIDTH_CHARS);
-  views::GridLayout* layout = views::GridLayout::CreateAndInstall(contents_);
+  views::GridLayout* layout = contents_->SetLayoutManager(
+      std::make_unique<views::GridLayout>(contents_));
 
   int column_set_id = 0;
   views::ColumnSet* columns = layout->AddColumnSet(column_set_id);
@@ -133,7 +132,7 @@ void MediaGalleriesDialogViews::InitChildViews() {
   const int small_vertical_padding =
       provider->GetDistanceMetric(DISTANCE_RELATED_CONTROL_VERTICAL_SMALL);
   ScrollableView* scroll_container = new ScrollableView();
-  scroll_container->SetLayoutManager(new views::BoxLayout(
+  scroll_container->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::kVertical, gfx::Insets(), small_vertical_padding));
   scroll_container->SetBorder(
       views::CreateEmptyBorder(vertical_padding, 0, vertical_padding, 0));
@@ -185,7 +184,7 @@ void MediaGalleriesDialogViews::UpdateGalleries() {
   contents_->Layout();
 
   if (ControllerHasWebContents())
-    GetWidget()->client_view()->AsDialogClientView()->UpdateDialogButtons();
+    DialogModelChanged();
 }
 
 bool MediaGalleriesDialogViews::AddOrUpdateGallery(
@@ -273,7 +272,7 @@ void MediaGalleriesDialogViews::ButtonPressed(views::Button* sender,
   confirm_available_ = true;
 
   if (ControllerHasWebContents())
-    GetWidget()->client_view()->AsDialogClientView()->UpdateDialogButtons();
+    DialogModelChanged();
 
   if (sender == auxiliary_button_) {
     controller_->DidClickAuxiliaryButton();

@@ -7,7 +7,6 @@
         "renderer": [
           "autofill::mojom::AutofillDriver",
           "autofill::mojom::PasswordManagerDriver",
-          "blink::mojom::BudgetService",
           "chrome::mojom::CacheStatsRecorder",
           "chrome::mojom::NetBenchmarking",
           "extensions::StashService",
@@ -15,12 +14,7 @@
           "mojom::ModuleEventSink",
           "rappor::mojom::RapporRecorder",
           "safe_browsing::mojom::SafeBrowsing",
-          "spellcheck::mojom::SpellCheckHost",
-          "spellcheck::mojom::SpellCheckPanelHost",
           "translate::mojom::ContentTranslateDriver"
-        ],
-        "url_keyed_metrics": [
-          "ukm::mojom::UkmRecorderInterface"
         ],
         "gpu": [
           "metrics::mojom::CallStackProfileCollector"
@@ -37,24 +31,36 @@
         "ash_pref_connector": [ "pref_connector" ],
         // Only used in classic ash case.
         "chrome": [ "input_device_controller" ],
+        "chrome_printing": [ "converter" ],
         "content_browser": [ "profiling_client" ],
-        "device": [ "device:fingerprint" ],
+        "device": [
+          "device:fingerprint",
+          "device:geolocation_config",
+          "device:geolocation_control",
+          "device:ip_geolocator"
+        ],
+        "file_util": [ "analyze_archive", "zip_file" ],
         "identity": [ "identity_manager" ],
         // Only used in classic ash case.
         "local_state": [ "pref_client" ],
+        "media_gallery_util": [ "parse_media" ],
         "nacl_broker": [ "browser" ],
         "nacl_loader": [ "browser" ],
+        "patch": [ "patch_file" ],
+        "pdf_compositor": [ "compositor" ],
         "profile_import": [ "import" ],
         "profiling": [ "profiling" ],
         "proxy_resolver": [ "factory" ],
-        "pdf_to_pwg_raster_converter": [ "converter" ],
         "preferences": [ "pref_client", "pref_control" ],
+        "removable_storage_writer": [ "removable_storage_writer" ],
         "ui": [
-          "display_controller",
+          "display_dev",
           "ime_registrar",
           "input_device_controller",
           "window_manager"
-        ]
+        ],
+        "util_win" : [ "shell_util_win" ],
+        "wifi_util_win": [ "wifi_credentials" ]
       }
     },
     "navigation:frame": {
@@ -67,12 +73,9 @@
           "blink::mojom::MediaDownloadInProductHelp",
           "blink::mojom::ShareService",
           "blink::mojom::TextSuggestionHost",
-          "bluetooth::mojom::AdapterFactory",
           "chrome::mojom::OpenSearchDocumentDescriptionHandler",
           "chrome::mojom::PrerenderCanceler",
           "contextual_search::mojom::ContextualSearchJsApiService",
-          "device::mojom::UsbChooserService",
-          "device::mojom::UsbDeviceManager",
           "dom_distiller::mojom::DistillabilityService",
           "dom_distiller::mojom::DistillerJavaScriptService",
           "extensions::KeepAlive",
@@ -84,12 +87,35 @@
           "translate::mojom::ContentTranslateDriver",
 
           // TODO(beng): These should be moved to a separate capability.
-	  "media::mojom::MediaEngagementScoreDetailsProvider",
+          "media::mojom::MediaEngagementScoreDetailsProvider",
+          "mojom::BluetoothInternalsHandler",
+          "mojom::DiscardsDetailsProvider",
           "mojom::InterventionsInternalsPageHandler",
           "mojom::OmniboxPageHandler",
           "mojom::PluginsPageHandler",
           "mojom::SiteEngagementDetailsProvider",
           "mojom::UsbInternalsPageHandler"
+        ]
+      }
+    },
+    "navigation:dedicated_worker": {
+      "provides": {
+        "renderer": [
+          "blink::mojom::BudgetService"
+        ]
+      }
+    },
+    "navigation:service_worker": {
+      "provides": {
+        "renderer": [
+          "blink::mojom::BudgetService"
+        ]
+      }
+    },
+    "navigation:shared_worker": {
+      "provides": {
+        "renderer": [
+          "blink::mojom::BudgetService"
         ]
       }
     }

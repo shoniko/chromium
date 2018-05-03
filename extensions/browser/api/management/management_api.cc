@@ -26,6 +26,7 @@
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/management/management_api_constants.h"
+#include "extensions/browser/disable_reason.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -34,7 +35,6 @@
 #include "extensions/browser/requirements_checker.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/api/management.h"
-#include "extensions/common/disable_reason.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
@@ -352,7 +352,7 @@ ManagementGetPermissionWarningsByManifestFunction::Run() {
 
 void ManagementGetPermissionWarningsByManifestFunction::OnParseSuccess(
     std::unique_ptr<base::Value> value) {
-  if (!value->IsType(base::Value::Type::DICTIONARY)) {
+  if (!value->is_dict()) {
     OnParseFailure(keys::kManifestParseError);
     return;
   }
@@ -580,8 +580,7 @@ void ManagementUninstallFunctionBase::UninstallExtension() {
     base::string16 utf16_error;
     success = delegate->UninstallExtension(
         browser_context(), target_extension_id_,
-        extensions::UNINSTALL_REASON_MANAGEMENT_API,
-        base::Bind(&base::DoNothing), &utf16_error);
+        extensions::UNINSTALL_REASON_MANAGEMENT_API, &utf16_error);
     error = base::UTF16ToUTF8(utf16_error);
   } else {
     error = ErrorUtils::FormatErrorMessage(keys::kNoExtensionError,

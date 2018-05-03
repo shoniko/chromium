@@ -23,7 +23,7 @@
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "public/web/WebElement.h"
 #include "public/web/WebFrameOwnerProperties.h"
-#include "public/web/WebSandboxFlags.h"
+#include "third_party/WebKit/common/sandbox_flags.h"
 
 namespace blink {
 
@@ -116,15 +116,17 @@ bool WebFrame::Swap(WebFrame* frame) {
       TRACE_EVENT_INSTANT1("loading", "markAsMainFrame",
                            TRACE_EVENT_SCOPE_THREAD, "frame", &local_frame);
     }
+    local_frame.SetIsProvisional(false);
   } else {
     ToWebRemoteFrameImpl(frame)->InitializeCoreFrame(*page, owner, name);
   }
 
-  if (parent_ && old_frame->HasBeenActivated())
-    ToCoreFrame(*frame)->UpdateUserActivationInFrameTree();
+  Frame* new_frame = ToCoreFrame(*frame);
 
-  ToCoreFrame(*frame)->GetWindowProxyManager()->SetGlobalProxies(
-      global_proxies);
+  if (parent_ && old_frame->HasBeenActivated())
+    new_frame->UpdateUserActivationInFrameTree();
+
+  new_frame->GetWindowProxyManager()->SetGlobalProxies(global_proxies);
 
   parent_ = nullptr;
 
@@ -142,7 +144,7 @@ WebSecurityOrigin WebFrame::GetSecurityOrigin() const {
 
 void WebFrame::SetFrameOwnerPolicy(
     WebSandboxFlags flags,
-    const blink::WebParsedFeaturePolicy& container_policy) {
+    const blink::ParsedFeaturePolicy& container_policy) {
   // At the moment, this is only used to replicate sandbox flags and container
   // policy for frames with a remote owner.
   RemoteFrameOwner* owner = ToRemoteFrameOwner(ToCoreFrame(*this)->Owner());
@@ -153,6 +155,12 @@ void WebFrame::SetFrameOwnerPolicy(
 
 WebInsecureRequestPolicy WebFrame::GetInsecureRequestPolicy() const {
   return ToCoreFrame(*this)->GetSecurityContext()->GetInsecureRequestPolicy();
+}
+
+std::vector<unsigned> WebFrame::GetInsecureRequestToUpgrade() const {
+  SecurityContext::InsecureNavigationsSet* set =
+      ToCoreFrame(*this)->GetSecurityContext()->InsecureNavigationsToUpgrade();
+  return SecurityContext::SerializeInsecureNavigationSet(*set);
 }
 
 void WebFrame::SetFrameOwnerProperties(

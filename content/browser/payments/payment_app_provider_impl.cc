@@ -16,6 +16,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/common/time.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_provider_type.mojom.h"
 
 namespace content {
 namespace {
@@ -141,7 +142,7 @@ class RespondWithCallbacks
     std::vector<std::pair<int, int>> ids;
     for (const auto& controllee : service_worker_version_->controllee_map()) {
       if (controllee.second->provider_type() ==
-          SERVICE_WORKER_PROVIDER_FOR_WINDOW) {
+          blink::mojom::ServiceWorkerProviderType::kForWindow) {
         ids.emplace_back(std::make_pair(controllee.second->process_id(),
                                         controllee.second->frame_id()));
       }
@@ -207,7 +208,8 @@ void DispatchAbortPaymentEvent(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (service_worker_status != SERVICE_WORKER_OK) {
-    std::move(callback).Run(false);
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::BindOnce(std::move(callback), false));
     return;
   }
 
@@ -236,7 +238,8 @@ void DispatchCanMakePaymentEvent(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (service_worker_status != SERVICE_WORKER_OK) {
-    std::move(callback).Run(false);
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::BindOnce(std::move(callback), false));
     return;
   }
 
@@ -303,13 +306,10 @@ void DidFindRegistrationOnIO(
   ServiceWorkerVersion* active_version =
       service_worker_registration->active_version();
   DCHECK(active_version);
-
-  auto done_callback = base::AdaptCallbackForRepeating(base::BindOnce(
-      std::move(callback), base::WrapRefCounted(active_version)));
-
   active_version->RunAfterStartWorker(
       ServiceWorkerMetrics::EventType::PAYMENT_REQUEST,
-      base::BindOnce(done_callback, service_worker_status), done_callback);
+      base::BindOnce(std::move(callback),
+                     base::WrapRefCounted(active_version)));
 }
 
 void FindRegistrationOnIO(
@@ -320,7 +320,7 @@ void FindRegistrationOnIO(
 
   service_worker_context->FindReadyRegistrationForIdOnly(
       registration_id,
-      base::Bind(&DidFindRegistrationOnIO, base::Passed(std::move(callback))));
+      base::BindOnce(&DidFindRegistrationOnIO, std::move(callback)));
 }
 
 void StartServiceWorkerForDispatch(BrowserContext* browser_context,

@@ -11,6 +11,8 @@
 #include "ash/highlighter/highlighter_result_view.h"
 #include "ash/highlighter/highlighter_view.h"
 #include "ash/public/cpp/scale_utility.h"
+#include "ash/public/cpp/shell_window_ids.h"
+#include "ash/shell.h"
 #include "base/metrics/histogram_macros.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
@@ -55,7 +57,7 @@ float GetScreenshotScale(aura::Window* window) {
 HighlighterController::HighlighterController()
     : binding_(this), weak_factory_(this) {}
 
-HighlighterController::~HighlighterController() {}
+HighlighterController::~HighlighterController() = default;
 
 void HighlighterController::SetExitCallback(base::OnceClosure exit_callback,
                                             bool require_success) {
@@ -110,8 +112,9 @@ views::View* HighlighterController::GetPointerView() const {
 void HighlighterController::CreatePointerView(
     base::TimeDelta presentation_delay,
     aura::Window* root_window) {
-  highlighter_view_ =
-      std::make_unique<HighlighterView>(presentation_delay, root_window);
+  highlighter_view_ = std::make_unique<HighlighterView>(
+      presentation_delay,
+      Shell::GetContainer(root_window, kShellWindowId_OverlayContainer));
   result_view_.reset();
 }
 

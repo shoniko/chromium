@@ -23,7 +23,7 @@ class WebInputMethodController {
     kKeepSelection,
   };
 
-  virtual ~WebInputMethodController() {}
+  virtual ~WebInputMethodController() = default;
 
   // Called to inform the WebInputMethodController of a new composition text. If
   // selectionStart and selectionEnd has the same value, then it indicates the
@@ -68,6 +68,10 @@ class WebInputMethodController {
 
   // Fetch the current selection range of this frame.
   virtual WebRange GetSelectionOffsets() const = 0;
+
+  // Fetches the character range of the current composition, also called the
+  // "marked range."
+  virtual WebRange CompositionRange() { return WebRange(); };
 };
 
 }  // namespace blink

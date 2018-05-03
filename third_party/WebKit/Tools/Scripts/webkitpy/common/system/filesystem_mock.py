@@ -33,7 +33,7 @@ import re
 import StringIO
 import unittest
 
-from webkitpy.common.system.filesystem import _remove_contents
+from webkitpy.common.system.filesystem import _remove_contents, _sanitize_filename
 
 
 class MockFileSystem(object):
@@ -337,6 +337,10 @@ class MockFileSystem(object):
         self.files[path] = contents
         self.written_files[path] = contents
 
+    def open_text_tempfile(self, suffix=''):
+        path = self.mktemp(suffix)
+        return (WritableTextFileObject(self, path), path)
+
     def open_text_file_for_reading(self, path):
         if self.files[path] is None:
             self._raise_not_found(path)
@@ -434,6 +438,12 @@ class MockFileSystem(object):
         if idx == -1:
             idx = len(path)
         return (path[0:idx], path[idx:])
+
+    def symlink(self, source, link_name):
+        raise NotImplementedError('Symlink not expected to be called in tests')
+
+    def sanitize_filename(self, filename, replacement='_'):
+        return _sanitize_filename(filename, replacement)
 
 
 class WritableBinaryFileObject(object):

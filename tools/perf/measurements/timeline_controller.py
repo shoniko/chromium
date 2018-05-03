@@ -52,7 +52,7 @@ class TimelineController(object):
     if self._enable_auto_issuing_record:
       self._interaction.End()
     # Stop tracing.
-    timeline_data = tab.browser.platform.tracing_controller.StopTracing()
+    timeline_data = tab.browser.platform.tracing_controller.StopTracing()[0]
 
     # TODO(#763375): Rely on results.telemetry_info.trace_local_path/etc.
     kwargs = {}

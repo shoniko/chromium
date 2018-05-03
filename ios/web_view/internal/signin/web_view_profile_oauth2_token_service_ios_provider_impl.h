@@ -8,18 +8,17 @@
 #include <string>
 #include <vector>
 
-#include "base/ios/weak_nsobject.h"
 #include "base/macros.h"
 #include "components/signin/ios/browser/profile_oauth2_token_service_ios_provider.h"
 
-@class CWVAuthenticationController;
+class IOSWebViewSigninClient;
 
 // Implementation of ProfileOAuth2TokenServiceIOSProvider.
 class WebViewProfileOAuth2TokenServiceIOSProviderImpl
     : public ProfileOAuth2TokenServiceIOSProvider {
  public:
   WebViewProfileOAuth2TokenServiceIOSProviderImpl(
-      CWVAuthenticationController* controller);
+      IOSWebViewSigninClient* signin_client);
   ~WebViewProfileOAuth2TokenServiceIOSProviderImpl() override;
 
   // ios::ProfileOAuth2TokenServiceIOSProvider
@@ -34,7 +33,7 @@ class WebViewProfileOAuth2TokenServiceIOSProviderImpl
       NSError* error) const override;
 
  private:
-  base::WeakNSObject<CWVAuthenticationController> controller_;
+  IOSWebViewSigninClient* signin_client_;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewProfileOAuth2TokenServiceIOSProviderImpl);
 };

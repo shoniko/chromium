@@ -51,6 +51,11 @@ class SchedulerClient {
   virtual void ScheduledActionBeginMainFrameNotExpectedUntil(
       base::TimeTicks time) = 0;
 
+  // Functions used for reporting anmation targeting UMA, crbug.com/758439.
+  virtual size_t CompositedAnimationsCount() const = 0;
+  virtual size_t MainThreadAnimationsCount() const = 0;
+  virtual size_t MainThreadCompositableAnimationsCount() const = 0;
+
  protected:
   virtual ~SchedulerClient() {}
 };
@@ -165,6 +170,8 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
 
   viz::BeginFrameAck CurrentBeginFrameAckForActiveTree() const;
 
+  void ClearHistoryOnNavigation();
+
  protected:
   // Virtual for testing.
   virtual base::TimeTicks Now() const;
@@ -184,7 +191,7 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
 
   SchedulerStateMachine::BeginImplFrameDeadlineMode
       begin_impl_frame_deadline_mode_ =
-          SchedulerStateMachine::BEGIN_IMPL_FRAME_DEADLINE_MODE_NONE;
+          SchedulerStateMachine::BeginImplFrameDeadlineMode::NONE;
   base::TimeTicks deadline_;
   base::TimeTicks deadline_scheduled_at_;
 
@@ -197,8 +204,9 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
 
   SchedulerStateMachine state_machine_;
   bool inside_process_scheduled_actions_ = false;
+  bool inside_scheduled_action_ = false;
   SchedulerStateMachine::Action inside_action_ =
-      SchedulerStateMachine::ACTION_NONE;
+      SchedulerStateMachine::Action::NONE;
 
   bool stopped_ = false;
 
@@ -212,6 +220,7 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
   void DrawForced();
   void ProcessScheduledActions();
   void UpdateCompositorTimingHistoryRecordingEnabled();
+  bool ShouldDropBeginFrame(const viz::BeginFrameArgs& args) const;
   bool ShouldRecoverMainLatency(const viz::BeginFrameArgs& args,
                                 bool can_activate_before_deadline) const;
   bool ShouldRecoverImplLatency(const viz::BeginFrameArgs& args,
@@ -231,6 +240,7 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
                          BeginFrameResult result);
   void OnBeginImplFrameDeadline();
   void PollToAdvanceCommitState();
+  void BeginMainFrameAnimateAndLayoutOnly(const viz::BeginFrameArgs& args);
 
   bool IsInsideAction(SchedulerStateMachine::Action action) {
     return inside_action_ == action;

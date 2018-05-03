@@ -27,6 +27,8 @@
 #define HTMLDocumentParser_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "core/CoreExport.h"
 #include "core/dom/ParserContentPolicy.h"
 #include "core/dom/ScriptableDocumentParser.h"
@@ -34,7 +36,6 @@
 #include "core/html/parser/HTMLInputStream.h"
 #include "core/html/parser/HTMLParserOptions.h"
 #include "core/html/parser/HTMLParserReentryPermit.h"
-#include "core/html/parser/HTMLParserScriptRunnerHost.h"
 #include "core/html/parser/HTMLPreloadScanner.h"
 #include "core/html/parser/HTMLSourceTracker.h"
 #include "core/html/parser/HTMLToken.h"
@@ -45,10 +46,9 @@
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/html/parser/XSSAuditor.h"
 #include "core/html/parser/XSSAuditorDelegate.h"
+#include "core/script/HTMLParserScriptRunnerHost.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/wtf/Deque.h"
-#include "platform/wtf/RefPtr.h"
-#include "platform/wtf/WeakPtr.h"
 #include "platform/wtf/text/TextPosition.h"
 
 namespace blink {
@@ -65,7 +65,6 @@ class HTMLParserScriptRunner;
 class HTMLPreloadScanner;
 class HTMLResourcePreloader;
 class HTMLTreeBuilder;
-class SegmentedString;
 class TokenizedChunkQueue;
 
 class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
@@ -106,8 +105,8 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   bool IsParsingAtLineNumber() const final;
   OrdinalNumber LineNumber() const final;
 
-  void SuspendScheduledTasks() final;
-  void ResumeScheduledTasks() final;
+  void PauseScheduledTasks() final;
+  void UnpauseScheduledTasks() final;
 
   HTMLParserReentryPermit* ReentryPermit() { return reentry_permit_.get(); }
 
@@ -139,7 +138,7 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   void SetDecoder(std::unique_ptr<TextResourceDecoder>) final;
 
  protected:
-  void insert(const SegmentedString&) final;
+  void insert(const String&) final;
   void Append(const String&) override;
   void Finish() final;
 
@@ -215,10 +214,10 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   bool ShouldUseThreading() const { return should_use_threading_; }
 
   bool IsParsingFragment() const;
-  bool IsScheduledForResume() const;
+  bool IsScheduledForUnpause() const;
   bool InPumpSession() const { return pump_session_nesting_level_ > 0; }
   bool ShouldDelayEnd() const {
-    return InPumpSession() || IsPaused() || IsScheduledForResume() ||
+    return InPumpSession() || IsPaused() || IsScheduledForUnpause() ||
            IsExecutingScript();
   }
 
@@ -260,8 +259,8 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   // Using WeakPtr for GarbageCollected is discouraged. But in this case this is
   // ok because HTMLDocumentParser guarantees to revoke all WeakPtrs in the pre
   // finalizer.
-  WeakPtrFactory<HTMLDocumentParser> weak_factory_;
-  WeakPtr<BackgroundHTMLParser> background_parser_;
+  base::WeakPtrFactory<HTMLDocumentParser> weak_factory_;
+  base::WeakPtr<BackgroundHTMLParser> background_parser_;
   Member<HTMLResourcePreloader> preloader_;
   PreloadRequestStream queued_preloads_;
   scoped_refptr<TokenizedChunkQueue> tokenized_chunk_queue_;
@@ -279,7 +278,7 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   bool should_use_threading_;
   bool end_was_delayed_;
   bool have_background_parser_;
-  bool tasks_were_suspended_;
+  bool tasks_were_paused_;
   unsigned pump_session_nesting_level_;
   unsigned pump_speculations_session_nesting_level_;
   bool is_parsing_at_line_number_;

@@ -14,6 +14,8 @@
 
 namespace payments {
 
+class PaymentRequestDelegate;
+
 // Represents a service worker based payment app.
 class ServiceWorkerPaymentInstrument : public PaymentInstrument {
  public:
@@ -22,8 +24,23 @@ class ServiceWorkerPaymentInstrument : public PaymentInstrument {
       const GURL& top_level_origin,
       const GURL& frame_origin,
       const PaymentRequestSpec* spec,
-      std::unique_ptr<content::StoredPaymentApp> stored_payment_app_info);
+      std::unique_ptr<content::StoredPaymentApp> stored_payment_app_info,
+      PaymentRequestDelegate* payment_request_delegate);
   ~ServiceWorkerPaymentInstrument() override;
+
+  // The callback for ValidateCanMakePayment.
+  // The first return value is a pointer point to the corresponding
+  // ServiceWorkerPaymentInstrument of the result. The second return value is
+  // the result.
+  using ValidateCanMakePaymentCallback =
+      base::OnceCallback<void(ServiceWorkerPaymentInstrument*, bool)>;
+
+  // Validates whether this payment instrument can be used for this payment
+  // request. It fires CanMakePaymentEvent to the payment handler to do
+  // validation. The result is returned through callback.If the returned result
+  // is false, then this instrument should not be used for this payment request.
+  // This interface must be called before any other interfaces in this class.
+  void ValidateCanMakePayment(ValidateCanMakePaymentCallback callback);
 
   // PaymentInstrument:
   void InvokePaymentApp(Delegate* delegate) override;
@@ -34,16 +51,22 @@ class ServiceWorkerPaymentInstrument : public PaymentInstrument {
   void RecordUse() override;
   base::string16 GetLabel() const override;
   base::string16 GetSublabel() const override;
-  bool IsValidForModifier(
-      const std::vector<std::string>& method,
-      const std::vector<std::string>& supported_networks,
-      const std::set<autofill::CreditCard::CardType>& supported_types,
-      bool supported_types_specified) const override;
+  bool IsValidForModifier(const std::vector<std::string>& methods,
+                          bool supported_networks_specified,
+                          const std::set<std::string>& supported_networks,
+                          bool supported_types_specified,
+                          const std::set<autofill::CreditCard::CardType>&
+                              supported_types) const override;
   const gfx::ImageSkia* icon_image_skia() const override;
 
  private:
+  friend class ServiceWorkerPaymentInstrumentTest;
+
   void OnPaymentAppInvoked(mojom::PaymentHandlerResponsePtr response);
   mojom::PaymentRequestEventDataPtr CreatePaymentRequestEventData();
+
+  mojom::CanMakePaymentEventDataPtr CreateCanMakePaymentEventData();
+  void OnCanMakePayment(ValidateCanMakePaymentCallback callback, bool result);
 
   content::BrowserContext* browser_context_;
   GURL top_level_origin_;
@@ -55,6 +78,12 @@ class ServiceWorkerPaymentInstrument : public PaymentInstrument {
   // Weak pointer is fine here since the owner of this object is
   // PaymentRequestState which also owns PaymentResponseHelper.
   Delegate* delegate_;
+
+  // Weak pointer that must outlive this object.
+  PaymentRequestDelegate* payment_request_delegate_;
+
+  // PaymentAppProvider::CanMakePayment result of this payment instrument.
+  bool can_make_payment_result_;
 
   base::WeakPtrFactory<ServiceWorkerPaymentInstrument> weak_ptr_factory_;
 

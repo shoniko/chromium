@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "chromecast/media/cma/backend/post_processing_pipeline.h"
 #include "chromecast/media/cma/backend/post_processor_factory.h"
+#include "chromecast/public/volume_control.h"
 
 namespace base {
 class ListValue;
@@ -20,7 +21,7 @@ class ListValue;
 namespace chromecast {
 namespace media {
 
-class AudioPostProcessor;
+class AudioPostProcessor2;
 
 // Creates and contains multiple AudioPostProcessors, as specified in ctor.
 // Provides convenience methods to access and use the AudioPostProcessors.
@@ -36,18 +37,23 @@ class PostProcessingPipelineImpl : public PostProcessingPipeline {
                     float current_volume,
                     bool is_silence) override;
 
+  float* GetOutputBuffer() override;
+  int NumOutputChannels() override;
+
   bool SetSampleRate(int sample_rate) override;
   bool IsRinging() override;
 
   // Send string |config| to post processor |name|.
   void SetPostProcessorConfig(const std::string& name,
                               const std::string& config) override;
+  void SetContentType(AudioContentType content_type) override;
+  void UpdatePlayoutChannel(int channel) override;
 
  private:
   // Note: typedef is used to silence chromium-style mandatory constructor in
   // structs.
   typedef struct {
-    std::unique_ptr<AudioPostProcessor> ptr;
+    std::unique_ptr<AudioPostProcessor2> ptr;
     std::string name;
   } PostProcessorInfo;
 
@@ -62,6 +68,8 @@ class PostProcessingPipelineImpl : public PostProcessingPipeline {
   float current_multiplier_;
   float cast_volume_;
   float current_dbfs_;
+  int num_output_channels_ = 0;
+  float* output_buffer_ = nullptr;
 
   // factory_ keeps shared libraries open, so it must outlive processors_.
   PostProcessorFactory factory_;

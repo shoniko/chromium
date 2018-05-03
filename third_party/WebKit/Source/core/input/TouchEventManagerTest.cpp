@@ -20,6 +20,17 @@ class TouchEventManagerTest : public SimTest {
   EventHandler& EventHandler() {
     return GetDocument().GetFrame()->GetEventHandler();
   }
+
+  WebPointerEvent CreateTouchPointerEvent(WebInputEvent::Type type) {
+    WebPointerEvent event(
+        type,
+        WebPointerProperties(1, WebPointerProperties::PointerType::kTouch,
+                             WebPointerProperties::Button::kLeft,
+                             WebFloatPoint(100, 100), WebFloatPoint(100, 100)),
+        1, 1);
+    event.SetFrameScale(1);
+    return event;
+  }
 };
 
 class CheckEventListenerCallback final : public EventListener {
@@ -49,31 +60,30 @@ TEST_F(TouchEventManagerTest, LostTouchDueToInnerIframeRemove) {
   WebView().Resize(WebSize(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
-  request.Complete(
-      "<body style='padding: 0px; width: 400px; height: 400px;'>"
-      "<iframe id='target' style='width: 200px; height: 200px;'></iframe>"
-      "</body>");
+  request.Complete(R"HTML(
+    <body style='padding: 0px; width: 400px; height: 400px;'>
+    <iframe id='target' style='width: 200px; height: 200px;'></iframe>
+    </body>
+  )HTML");
   CheckEventListenerCallback* callback = CheckEventListenerCallback::Create();
   GetDocument().body()->addEventListener(EventTypeNames::touchstart, callback);
 
-  WebTouchEvent event;
-  event.SetFrameScale(1);
-  WebTouchPoint point(
-      WebPointerProperties(1, WebPointerProperties::PointerType::kTouch,
-                           WebPointerProperties::Button::kLeft,
-                           WebFloatPoint(100, 100), WebFloatPoint(100, 100)));
-
-  point.state = WebTouchPoint::State::kStatePressed;
-  event.touches[event.touches_length++] = point;
-  EventHandler().HandleTouchEvent(event, Vector<WebTouchEvent>());
+  EventHandler().HandlePointerEvent(
+      CreateTouchPointerEvent(WebInputEvent::kPointerDown),
+      Vector<WebPointerEvent>());
+  EventHandler().DispatchBufferedTouchEvents();
 
   GetDocument().getElementById("target")->remove();
 
-  event.touches[0].state = WebTouchPoint::State::kStateReleased;
-  EventHandler().HandleTouchEvent(event, Vector<WebTouchEvent>());
+  EventHandler().HandlePointerEvent(
+      CreateTouchPointerEvent(WebInputEvent::kPointerUp),
+      Vector<WebPointerEvent>());
+  EventHandler().DispatchBufferedTouchEvents();
 
-  event.touches[0].state = WebTouchPoint::State::kStatePressed;
-  EventHandler().HandleTouchEvent(event, Vector<WebTouchEvent>());
+  EventHandler().HandlePointerEvent(
+      CreateTouchPointerEvent(WebInputEvent::kPointerDown),
+      Vector<WebPointerEvent>());
+  EventHandler().DispatchBufferedTouchEvents();
 
   ASSERT_TRUE(callback->HasReceivedEvent());
 }

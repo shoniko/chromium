@@ -248,6 +248,9 @@ int AudioParamHandler::ComputeQHistogramValue(float new_value) const {
 
 // ----------------------------------------------------------------
 
+// TODO(crbug.com/764396): Remove this when fixed.
+bool AudioParam::s_value_setter_warning_done_ = false;
+
 AudioParam::AudioParam(BaseAudioContext& context,
                        AudioParamType param_type,
                        String param_name,
@@ -351,8 +354,21 @@ void AudioParam::setValue(float value) {
       break;
   };
 
+  // TODO(crbug.com/764396): Remove this when fixed.
+  WarnIfSetterOverlapsEvent();
+
   WarnIfOutsideRange("value", value);
   Handler().SetValue(value);
+}
+
+// TODO(crbug.com/764396): Remove this when fixed.
+void AudioParam::WarnIfSetterOverlapsEvent() {
+  DCHECK(IsMainThread());
+
+  // Check for overlap and print a warning only if we haven't already
+  // printed a warning.
+  Handler().Timeline().WarnIfSetterOverlapsEvent(
+      Context(), Handler().GetParamName(), !s_value_setter_warning_done_);
 }
 
 float AudioParam::defaultValue() const {

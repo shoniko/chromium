@@ -116,6 +116,9 @@ enum ShelfItemType {
   // Represents an open dialog.
   TYPE_DIALOG,
 
+  // Represents the back button, which is shown in tablet mode.
+  TYPE_BACK_BUTTON,
+
   // Default value.
   TYPE_UNDEFINED,
 };
@@ -129,8 +132,6 @@ enum ShelfItemStatus {
   STATUS_CLOSED,
   // A shelf item that has live instance.
   STATUS_RUNNING,
-  // An active shelf item that has focus.
-  STATUS_ACTIVE,
   // A shelf item that needs user's attention.
   STATUS_ATTENTION,
 };

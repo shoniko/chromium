@@ -6,6 +6,7 @@
 #define ImageBitmap_h
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/html/canvas/CanvasImageSource.h"
 #include "core/html/canvas/ImageElementBase.h"
@@ -14,10 +15,8 @@
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/Image.h"
-#include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/StaticBitmapImage.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
 namespace blink {
@@ -28,14 +27,6 @@ class ImageData;
 class ImageDecoder;
 class OffscreenCanvas;
 
-enum AlphaDisposition {
-  kPremultiplyAlpha,
-  kDontPremultiplyAlpha,
-};
-enum DataColorFormat {
-  kRGBAColorType,
-  kN32ColorType,
-};
 enum ColorSpaceInfoUpdate {
   kUpdateColorSpaceInformation,
   kDontUpdateColorSpaceInformation,
@@ -97,7 +88,7 @@ class CORE_EXPORT ImageBitmap final : public ScriptWrappable,
   scoped_refptr<StaticBitmapImage> BitmapImage() const { return image_; }
   scoped_refptr<Uint8Array> CopyBitmapData();
   scoped_refptr<Uint8Array> CopyBitmapData(AlphaDisposition,
-                                           DataColorFormat = kRGBAColorType);
+                                           DataU8ColorType = kRGBAColorType);
   unsigned long width() const;
   unsigned long height() const;
   IntSize Size() const;
@@ -115,9 +106,8 @@ class CORE_EXPORT ImageBitmap final : public ScriptWrappable,
   // CanvasImageSource implementation
   scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
                                                AccelerationHint,
-                                               SnapshotReason,
                                                const FloatSize&) override;
-  bool WouldTaintOrigin(SecurityOrigin*) const override {
+  bool WouldTaintOrigin(const SecurityOrigin*) const override {
     return !image_->OriginClean();
   }
   void AdjustDrawRects(FloatRect* src_rect, FloatRect* dst_rect) const override;
@@ -136,6 +126,8 @@ class CORE_EXPORT ImageBitmap final : public ScriptWrappable,
     bool flip_y = false;
     bool premultiply_alpha = true;
     bool should_scale_input = false;
+    bool has_color_space_conversion = false;
+    bool source_is_unpremul = false;
     unsigned resize_width = 0;
     unsigned resize_height = 0;
     IntRect crop_rect;

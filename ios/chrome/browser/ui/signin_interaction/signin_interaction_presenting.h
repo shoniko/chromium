@@ -23,9 +23,9 @@
                         animated:(BOOL)animated
                       completion:(ProceduralBlock)completion;
 
-// Dismisses the presented view controller.
-- (void)dismissViewControllerAnimated:(BOOL)animated
-                           completion:(ProceduralBlock)completion;
+// Dismisses all view controllers presented via this protocol.
+- (void)dismissAllViewControllersAnimated:(BOOL)animated
+                               completion:(ProceduralBlock)completion;
 
 // Presents a dialog for |error| at the top of the presentation hierarchy.
 // |dismissAction| is run when the dialog is dismissed. This method should not
@@ -35,6 +35,9 @@
 
 // Dismisses the error dialog.
 - (void)dismissError;
+
+// Shows the accounts settings UI.
+- (void)showAccountsSettings;
 
 // Indicates whether the object is currently presenting.
 @property(nonatomic, assign, readonly, getter=isPresenting) BOOL presenting;

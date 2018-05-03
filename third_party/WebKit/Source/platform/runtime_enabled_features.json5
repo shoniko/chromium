@@ -40,7 +40,7 @@
     // feature to be enabled at runtime on a per-page basis through a signed
     // token for the corresponding feature name. Declaring the
     // origin_trial_feature_name will cause a static method to be generated in
-    // OriginTrials.h/cpp. This static method allows the feature implementation
+    // origin_trials.h/cpp. This static method allows the feature implementation
     // to check if it is enabled for the current context.
     origin_trial_feature_name: {
     },
@@ -104,6 +104,7 @@
     },
     {
       name: "AudioWorklet",
+      origin_trial_feature_name: "AudioWorklet",
       status: "experimental",
     },
     {
@@ -130,8 +131,11 @@
       status: "stable",
     },
     {
+      name: "BlockingDownloadsInSandbox",
+    },
+    {
       name: "BlockMetaSetCookie",
-      status: "experimental"
+      status: "stable"
     },
     {
       name: "Budget",
@@ -165,16 +169,12 @@
       name: "ClientPlaceholdersForServerLoFi",
     },
     {
-      name: "CoalescedEvents",
-      status: "stable",
-    },
-    {
       name: "CompositedSelectionUpdate",
     },
     {
       name: "CompositeOpaqueFixedPosition",
       settable_from_internals: true,
-      status: "test",
+      status: "experimental",
     },
     {
       name: "CompositeOpaqueScrollers",
@@ -211,10 +211,7 @@
     {
       name: "CSSAdditiveAnimations",
       depends_on: ["StackedCSSPropertyAnimations"],
-      status: "experimental",
-    },
-    {
-      name: "CSSApplyAtRules",
+      settable_from_internals: true,
       status: "experimental",
     },
     {
@@ -223,7 +220,7 @@
     },
     {
       name: "CSSDisplayContents",
-      status: "experimental",
+      status: "stable",
     },
     {
       name: "CSSFontSizeAdjust",
@@ -242,7 +239,15 @@
       status: "experimental",
     },
     {
+      name: "CSSLayoutAPI",
+      status: "experimental",
+    },
+    {
       name: "CSSMaskSourceType",
+      status: "experimental",
+    },
+    {
+      name: "CSSMatches",
       status: "experimental",
     },
     {
@@ -262,9 +267,13 @@
       status: "stable",
     },
     {
+      name: "CSSOverscrollBehavior",
+      status: "stable",
+    },
+    {
       name: "CSSPaintAPI",
       depends_on: ["Worklet"],
-      status: "experimental",
+      status: "stable",
     },
     {
       name: "CSSPaintAPIArguments",
@@ -272,12 +281,8 @@
       status: "experimental",
     },
     {
-      name: "CSSScrollBoundaryBehavior",
-      status: "stable",
-    },
-    {
       name: "CSSScrollSnapPoints",
-      status: "test",
+      status: "experimental",
     },
     {
       name: "CSSSnapSize",
@@ -289,7 +294,7 @@
     },
     {
       name: "CSSTransformBox",
-      status: "experimental",
+      status: "stable",
     },
     {
       name: "CSSTypedOM",
@@ -312,9 +317,7 @@
       status: "test",
     },
     {
-      name: "CustomSchemeHandler",
-      depends_on: ["NavigatorContentUtils"],
-      status: "experimental",
+      name: "CustomUserTiming",
     },
     {
       name: "Database",
@@ -323,11 +326,6 @@
     {
       name: "DecodeToYUV",
       status: "experimental",
-    },
-    // Remove this flag once we can remove /deep/ at M63.
-    {
-      name: "DeepCombinatorInCSSDynamicProfile",
-      status: "test",
     },
     {
       name: "DeprecationReporting",
@@ -342,12 +340,13 @@
       status: "stable",
     },
     {
-      name: "DisplayList2dCanvas",
-      status: "stable",
+      name: "DisableHardwareNoiseSuppression",
+      origin_trial_feature_name: "DisableHardwareNoiseSuppression",
+      status: "experimental",
     },
     {
       name: "DisplayNoneIFrameCreatesNoLayoutObject",
-      status: "experimental",
+      status: "stable",
     },
     {
       name: "DocumentCookie",
@@ -357,6 +356,10 @@
     },
     {
       name: "DocumentWrite",
+    },
+    {
+      name: "DoubleTapToJumpOnVideo",
+      settable_from_internals: true
     },
     {
       name: "EmbedderCSPEnforcement",
@@ -394,14 +397,29 @@
       status: "stable",
     },
     {
+      name: "FeaturePolicyAutoplayFeature",
+      status: "stable",
+      depends_on: ["FeaturePolicy"]
+    },
+    {
       name: "FeaturePolicyExperimentalFeatures",
     },
     {
       name: "FeaturePolicyForPermissions",
-      status: "stable"
+      status: "stable",
+      depends_on: ["FeaturePolicy"]
+    },
+    {
+      name: "FeaturePolicyJavaScriptInterface",
+      status: "experimental",
+      depends_on: ["FeaturePolicy"]
     },
     {
       name: "FetchRequestCache",
+      status: "stable",
+    },
+    {
+      name: "FetchRequestKeepalive",
       status: "experimental",
     },
     {
@@ -409,11 +427,12 @@
       status: "stable",
     },
     {
-      name: "FontCacheScaling",
-      status: "test",
+      name: "FocusOptions",
+      status: "stable",
     },
     {
-      name: "ForceDisplayList2dCanvas",
+      name: "FontCacheScaling",
+      status: "test",
     },
     // For simulating Android's overlay fullscreen video in layout tests on Linux.
     {
@@ -423,9 +442,11 @@
       name: "ForceTallerSelectPopup",
     },
     {
-      name: "ForeignFetch",
-      origin_trial_feature_name: "ForeignFetch",
-      status: "experimental",
+      name: "FractionalMouseEvent",
+    },
+    {
+      name: "FractionalMouseTypePointerEvent",
+      status: "stable",
     },
     {
       name: "FractionalScrollOffsets",
@@ -477,20 +498,19 @@
       status: "test",
     },
     {
-      name: "ImageAsyncAttribute",
-      status: "test",
+      name: "ImageDecodingAttribute",
+      status: "stable",
     },
     {
       name: "ImageOrientation",
       status: "test",
     },
     {
-      name: "InertAttribute",
-      status: "experimental",
+      name: "IncrementalShadowDOM",
     },
     {
-      name: "InputEvent",
-      status: "stable",
+      name: "InertAttribute",
+      status: "experimental",
     },
     {
       name: "InputModeAttribute",
@@ -534,12 +554,12 @@
       status: "experimental",
     },
     {
-      name: "LinkServiceWorker",
-      origin_trial_feature_name: "ForeignFetch",
-      status: "experimental",
+      name: "LoadingWithMojo",
+      status: "stable",
     },
     {
-      name: "LoadingWithMojo",
+      name: "LocksAPI",
+      status: "experimental",
     },
     {
       name: "LongTaskObserver",
@@ -549,8 +569,14 @@
       name: "LongTaskV2",
     },
     {
+      name: "LowLatencyCanvas",
+      origin_trial_feature_name: "LowLatencyCanvas",
+      status: "experimental",
+    },
+    {
       name: "MediaCapabilities",
-      status: "test",
+      origin_trial_feature_name: "MediaCapabilities",
+      status: "experimental",
     },
     {
       name: "MediaCapture",
@@ -583,10 +609,6 @@
       name: "MediaEngagementBypassAutoplayPolicies",
     },
     {
-      name: "MediaPlaybackRateOutOfRange",
-      status: "experimental",
-    },
-    {
       name: "MediaQueryShape",
       status: "experimental",
     },
@@ -602,10 +624,6 @@
     },
     {
       name: "MediaSourceNewAbortAndDuration",
-      status: "experimental",
-    },
-    {
-      name: "MediaStreamSpeech",
       status: "experimental",
     },
     {
@@ -629,8 +647,8 @@
       name: "ModernMediaControls",
     },
     {
-      name: "ModuleScripts",
-      status: "stable",
+      name: "ModulePreload",
+      status: "experimental",
     },
     {
       name: "ModuleScriptsDynamicImport",
@@ -639,7 +657,7 @@
       name: "ModuleScriptsImportMetaUrl",
     },
     {
-      name: "MojoBlobs",
+      name: "MojoBlobURLs",
     },
     {
       name: "MojoJS",
@@ -679,6 +697,10 @@
       status: "stable",
     },
     {
+      name: "NetInfoSaveData",
+      status: "stable",
+    },
+    {
       name: "NetworkService",
     },
     // Not a web exposed feature, enabled from the command line.
@@ -703,11 +725,11 @@
       status: "stable",
     },
     {
-      name: "NullableDocumentDomain",
-      status: "experimental",
+      name: "NotificationsWithMojo",
     },
     {
-      name: "OffMainThreadFetch",
+      name: "NullableDocumentDomain",
+      status: "experimental",
     },
     {
       name: "OnDeviceChange",
@@ -741,6 +763,10 @@
     {
       name: "OverlayScrollbars",
       settable_from_internals: true,
+    },
+    {
+      name: "PageLifecycle",
+      status: "test",
     },
     {
       name: "PagePopup",
@@ -795,6 +821,9 @@
       status: "experimental",
     },
     {
+      name: "PictureInPicture",
+    },
+    {
       name: "PreciseMemoryInfo",
     },
     {
@@ -809,7 +838,7 @@
     },
     {
       name: "PreloadDefaultIsMetadata",
-      status: "experimental",
+      status: "stable",
     },
     {
       name: "Presentation",
@@ -821,6 +850,9 @@
     {
       name: "PushMessaging",
       status: "stable",
+    },
+    {
+      name: "PWAFullCodeCache"
     },
     {
       name: "ReducedReferrerGranularity",
@@ -853,8 +885,12 @@
       status: "experimental",
     },
     {
+      name: "RequireCSSExtensionForFile",
+      status: "stable",
+    },
+    {
       name: "ResizeObserver",
-      status: "experimental",
+      status: "stable",
     },
     {
       name: "ResourceLoadScheduler",
@@ -870,7 +906,7 @@
       name: "RootLayerScrolling",
     },
     {
-      name: "RTCRtpSender",
+      name: "RTCUnifiedPlan",
       status: "experimental",
     },
     {
@@ -882,6 +918,10 @@
       name: "ScrollAnchoring",
       settable_from_internals: true,
       status: "experimental",
+    },
+    // Serialize and restore scroll anchors.
+    {
+      name: "ScrollAnchorSerialization",
     },
     {
       name: "ScrollCustomization",
@@ -912,10 +952,17 @@
     },
     {
       name: "ServerTiming",
-      status: "experimental",
+      status: "stable",
+    },
+    {
+      name: "ServiceWorkerScriptFullCodeCache",
     },
     {
       name: "ServiceWorkerScriptStreaming",
+    },
+    {
+      name: "ServiceWorkerUpdateViaCache",
+      status: "experimental",
     },
     {
       name: "SetRootScroller",
@@ -931,14 +978,13 @@
       name: "ShadowPiercingDescendantCombinator",
       status: "experimental",
     },
-    // Remove this flag once we can remove ::shadow at M63.
-    {
-      name: "ShadowPseudoElementInCSSDynamicProfile",
-      status: "test",
-    },
     {
       name: "ShapeDetection",
       status: "experimental",
+    },
+    {
+      name: "SharedArrayBuffer",
+      status: "stable",
     },
     {
       name: "SharedWorker",
@@ -949,11 +995,8 @@
       status: "experimental",
     },
     {
-      name: "SlimmingPaintStrictCullRectClipping",
-    },
-    {
       name: "SlimmingPaintV175",
-      implied_by: ["SlimmingPaintV2"],
+      implied_by: ["SlimmingPaintV2", "LayoutNGPaintFragments"],
     },
     {
       name: "SlimmingPaintV2",
@@ -978,7 +1021,15 @@
       status: "experimental",
     },
     {
-      name: "StopLoadingInBackgroundAndroid",
+      name: "StopInBackground",
+      status: "test",
+    },
+    {
+      name: "StopLoadingInBackground",
+      status: "test",
+    },
+    {
+      name: "StopNonTimersInBackground",
       status: "test",
     },
     {
@@ -1048,10 +1099,6 @@
       name: "V8IdleTasks",
     },
     {
-      name: "ValidationBubbleInRenderer",
-      status: "stable",
-    },
-    {
       name: "VibrateRequiresUserGesture",
       status: "stable",
     },
@@ -1082,6 +1129,7 @@
     },
     {
       name: "WebAnimationsAPI",
+      settable_from_internals: true,
       status: "experimental",
     },
     {
@@ -1131,25 +1179,16 @@
       status: "test",
     },
     {
-      name: "WebVR2",
-      depends_on: ["WebVR"],
-      status: "test",
-    },
-    {
-      name: "WebVRExperimentalRendering",
-      // Don't mark this as depends_on: ["WebVR"], we want to be able to turn
-      // it on for just origin trial sites where the dependency is unset.
-      // We also need it for tests since the default mode requires re-entrant
-      // mojo event handling, and the Javascript mocks don't support that.
-      status: "test",
-    },
-    {
       name: "WebVTTRegions",
       status: "experimental",
     },
     {
+      name: "WebXR",
+      status: "test",
+    },
+    {
       name: "Worklet",
-      status: "experimental",
+      status: "stable",
     },
     {
       name: "WorkStealingInScriptRunner",

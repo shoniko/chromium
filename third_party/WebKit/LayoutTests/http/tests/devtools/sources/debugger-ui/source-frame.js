@@ -10,11 +10,6 @@
   await TestRunner.loadModule('network_test_runner');
   await TestRunner.loadModule('application_test_runner');
   await TestRunner.showPanel('sources');
-  await TestRunner.loadHTML(`
-      <p>Tests that it's possible to set breakpoint in source frame, and that
-      source frame displays breakpoints and console errors.
-      </p>
-    `);
   await TestRunner.evaluateInPagePromise(`
       function addErrorToConsole()
       {
@@ -38,8 +33,8 @@
       function didShowScriptSource(sourceFrame) {
         TestRunner.addResult('Script source was shown.');
         shownSourceFrame = sourceFrame;
-        TestRunner.addSniffer(SourceFrame.UISourceCodeFrame.prototype, '_addMessageToSource', didAddMessage);
-        TestRunner.addSniffer(SourceFrame.UISourceCodeFrame.prototype, '_removeMessageFromSource', didRemoveMessage);
+        TestRunner.addSniffer(Sources.UISourceCodeFrame.prototype, '_addMessageToSource', didAddMessage);
+        TestRunner.addSniffer(Sources.UISourceCodeFrame.prototype, '_removeMessageFromSource', didRemoveMessage);
         TestRunner.evaluateInPage('addErrorToConsole()');
       }
 

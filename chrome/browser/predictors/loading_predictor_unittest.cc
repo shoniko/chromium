@@ -31,7 +31,9 @@ namespace {
 // First two are prefetchable, last one is not (see SetUp()).
 const char kUrl[] = "http://www.google.com/cats";
 const char kUrl2[] = "http://www.google.com/dogs";
-const char kUrl3[] = "https://unknown.website/catsanddogs";
+const char kUrl3[] =
+    "file://unknown.website/catsanddogs";  // Non http(s) scheme to avoid
+                                           // preconnect to the main frame.
 
 class MockPreconnectManager : public PreconnectManager {
  public:
@@ -39,16 +41,20 @@ class MockPreconnectManager : public PreconnectManager {
       base::WeakPtr<Delegate> delegate,
       scoped_refptr<net::URLRequestContextGetter> context_getter);
 
-  MOCK_METHOD3(Start,
+  MOCK_METHOD2(StartProxy,
                void(const GURL& url,
-                    const std::vector<GURL>& preconnect_origins,
-                    const std::vector<GURL>& preresolve_hosts));
+                    const std::vector<PreconnectRequest>& requests));
   MOCK_METHOD1(StartPreresolveHost, void(const GURL& url));
   MOCK_METHOD1(StartPreresolveHosts,
                void(const std::vector<std::string>& hostnames));
   MOCK_METHOD2(StartPreconnectUrl,
                void(const GURL& url, bool allow_credentials));
   MOCK_METHOD1(Stop, void(const GURL& url));
+
+  void Start(const GURL& url,
+             std::vector<PreconnectRequest>&& requests) override {
+    StartProxy(url, requests);
+  }
 };
 
 MockPreconnectManager::MockPreconnectManager(
@@ -75,15 +81,15 @@ class LoadingPredictorTest : public testing::Test {
 };
 
 LoadingPredictorTest::LoadingPredictorTest()
-    : profile_(base::MakeUnique<TestingProfile>()) {}
+    : profile_(std::make_unique<TestingProfile>()) {}
 
 LoadingPredictorTest::~LoadingPredictorTest() = default;
 
 void LoadingPredictorTest::SetUp() {
   auto config = CreateConfig();
-  predictor_ = base::MakeUnique<LoadingPredictor>(config, profile_.get());
+  predictor_ = std::make_unique<LoadingPredictor>(config, profile_.get());
 
-  auto mock = base::MakeUnique<StrictMock<MockResourcePrefetchPredictor>>(
+  auto mock = std::make_unique<StrictMock<MockResourcePrefetchPredictor>>(
       config, profile_.get());
   EXPECT_CALL(*mock, GetPrefetchData(GURL(kUrl), _))
       .WillRepeatedly(Return(true));
@@ -127,7 +133,7 @@ class LoadingPredictorPreconnectTest : public LoadingPredictorTest {
 void LoadingPredictorPreconnectTest::SetUp() {
   LoadingPredictorTest::SetUp();
   auto mock_preconnect_manager =
-      base::MakeUnique<StrictMock<MockPreconnectManager>>(
+      std::make_unique<StrictMock<MockPreconnectManager>>(
           predictor_->GetWeakPtr(), profile_->GetRequestContext());
   mock_preconnect_manager_ = mock_preconnect_manager.get();
   predictor_->set_mock_preconnect_manager(std::move(mock_preconnect_manager));
@@ -310,17 +316,8 @@ TEST_F(LoadingPredictorPreconnectTest, TestAddInitialUrlToEmptyPrediction) {
       .WillOnce(Return(false));
   EXPECT_CALL(
       *mock_preconnect_manager_,
-      Start(main_frame_url, std::vector<GURL>({GURL("http://search.com")}),
-            std::vector<GURL>()));
-  predictor_->PrepareForPageLoad(main_frame_url, HintOrigin::EXTERNAL);
-}
-
-// Checks that the predictor doesn't preconnect to an initial origin in the case
-// of NAVIGATION hint.
-TEST_F(LoadingPredictorPreconnectTest, TestAddInitialUrlForNavigationHint) {
-  GURL main_frame_url("http://search.com/kittens");
-  EXPECT_CALL(*mock_predictor_, PredictPreconnectOrigins(main_frame_url, _))
-      .WillOnce(Return(false));
+      StartProxy(main_frame_url, std::vector<PreconnectRequest>(
+                                     {{GURL("http://search.com"), 2}})));
   predictor_->PrepareForPageLoad(main_frame_url, HintOrigin::NAVIGATION);
 }
 
@@ -328,17 +325,19 @@ TEST_F(LoadingPredictorPreconnectTest, TestAddInitialUrlForNavigationHint) {
 // if the list already containts the origin.
 TEST_F(LoadingPredictorPreconnectTest, TestAddInitialUrlMatchesPrediction) {
   GURL main_frame_url("http://search.com/kittens");
-  PreconnectPrediction prediction = CreatePreconnectPrediction(
-      "search.com", true,
-      {GURL("http://search.com"), GURL("http://cdn.search.com")},
-      {GURL("http://ads.search.com")});
+  PreconnectPrediction prediction =
+      CreatePreconnectPrediction("search.com", true,
+                                 {{GURL("http://search.com"), 1},
+                                  {GURL("http://cdn.search.com"), 1},
+                                  {GURL("http://ads.search.com"), 0}});
   EXPECT_CALL(*mock_predictor_, PredictPreconnectOrigins(main_frame_url, _))
       .WillOnce(DoAll(SetArgPointee<1>(prediction), Return(true)));
-  EXPECT_CALL(*mock_preconnect_manager_,
-              Start(main_frame_url,
-                    std::vector<GURL>({GURL("http://search.com"),
-                                       GURL("http://cdn.search.com")}),
-                    std::vector<GURL>({GURL("http://ads.search.com")})));
+  EXPECT_CALL(
+      *mock_preconnect_manager_,
+      StartProxy(main_frame_url, std::vector<PreconnectRequest>(
+                                     {{GURL("http://search.com"), 2},
+                                      {GURL("http://cdn.search.com"), 1},
+                                      {GURL("http://ads.search.com"), 0}})));
   predictor_->PrepareForPageLoad(main_frame_url, HintOrigin::EXTERNAL);
 }
 
@@ -347,18 +346,20 @@ TEST_F(LoadingPredictorPreconnectTest, TestAddInitialUrlMatchesPrediction) {
 // url redirects to another host.
 TEST_F(LoadingPredictorPreconnectTest, TestAddInitialUrlDoesntMatchPrediction) {
   GURL main_frame_url("http://search.com/kittens");
-  PreconnectPrediction prediction = CreatePreconnectPrediction(
-      "search.com", true,
-      {GURL("http://en.search.com"), GURL("http://cdn.search.com")},
-      {GURL("http://ads.search.com")});
+  PreconnectPrediction prediction =
+      CreatePreconnectPrediction("search.com", true,
+                                 {{GURL("http://en.search.com"), 1},
+                                  {GURL("http://cdn.search.com"), 1},
+                                  {GURL("http://ads.search.com"), 0}});
   EXPECT_CALL(*mock_predictor_, PredictPreconnectOrigins(main_frame_url, _))
       .WillOnce(DoAll(SetArgPointee<1>(prediction), Return(true)));
-  EXPECT_CALL(*mock_preconnect_manager_,
-              Start(main_frame_url,
-                    std::vector<GURL>({GURL("http://search.com"),
-                                       GURL("http://en.search.com"),
-                                       GURL("http://cdn.search.com")}),
-                    std::vector<GURL>({GURL("http://ads.search.com")})));
+  EXPECT_CALL(
+      *mock_preconnect_manager_,
+      StartProxy(main_frame_url, std::vector<PreconnectRequest>(
+                                     {{GURL("http://search.com"), 2},
+                                      {GURL("http://en.search.com"), 1},
+                                      {GURL("http://cdn.search.com"), 1},
+                                      {GURL("http://ads.search.com"), 0}})));
   predictor_->PrepareForPageLoad(main_frame_url, HintOrigin::EXTERNAL);
 }
 

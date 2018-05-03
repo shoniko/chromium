@@ -1,7 +1,7 @@
 {
     "extensions": [
         {
-            "type": "@SourceFrame.UISourceCodeFrame.LineDecorator",
+            "type": "@SourceFrame.LineDecorator",
             "className": "PerfUI.LineLevelProfile.LineDecorator",
             "decoratorType": "performance"
         },
@@ -46,7 +46,6 @@
     "resources": [
         "chartViewport.css",
         "filmStripView.css",
-        "filmStripDialog.css",
         "flameChart.css",
         "overviewGrid.css",
         "pieChart.css",

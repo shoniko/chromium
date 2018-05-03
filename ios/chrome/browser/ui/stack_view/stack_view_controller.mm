@@ -12,10 +12,10 @@
 
 #include "base/format_macros.h"
 #import "base/ios/block_types.h"
+#include "base/ios/ios_util.h"
 #include "base/logging.h"
 #import "base/mac/bundle_locations.h"
 #import "base/mac/foundation_util.h"
-
 #include "base/mac/scoped_block.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
@@ -27,6 +27,7 @@
 #include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/feature_engagement/tracker_factory.h"
 #include "ios/chrome/browser/feature_engagement/tracker_util.h"
+#import "ios/chrome/browser/snapshots/snapshot_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_model_observer.h"
@@ -36,6 +37,7 @@
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/keyboard/UIKeyCommand+Chrome.h"
+#include "ios/chrome/browser/ui/main/main_feature_flags.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_toolbar_controller.h"
 #import "ios/chrome/browser/ui/reversed_animation.h"
 #import "ios/chrome/browser/ui/rtl_geometry.h"
@@ -49,10 +51,14 @@
 #import "ios/chrome/browser/ui/stack_view/stack_view_toolbar_controller.h"
 #import "ios/chrome/browser/ui/stack_view/title_label.h"
 #import "ios/chrome/browser/ui/toolbar/new_tab_button.h"
-#import "ios/chrome/browser/ui/toolbar/toolbar_controller_constants.h"
+#import "ios/chrome/browser/ui/toolbar/public/toolbar_controller_base_feature.h"
+#import "ios/chrome/browser/ui/toolbar/public/toolbar_controller_constants.h"
+#import "ios/chrome/browser/ui/toolbar/public/toolbar_utils.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_snapshot_providing.h"
+#import "ios/chrome/browser/ui/tools_menu/public/tools_menu_configuration_provider.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_menu_configuration.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_view_item.h"
+#import "ios/chrome/browser/ui/tools_menu/tools_menu_coordinator.h"
 #import "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/common/material_timing.h"
@@ -122,6 +128,9 @@ const CGFloat kCardBottomPadding = 29.0;
 // Animation key used for the dummy toolbar background view animation.
 NSString* const kDummyToolbarBackgroundViewAnimationKey =
     @"DummyToolbarBackgroundViewAnimationKey";
+// Animation key used for the transition toolbar snapshot animation.
+NSString* const kTransitionToolbarAnimationKey =
+    @"TransitionToolbarAnimationKey";
 }  // anonymous namespace
 
 // Container for the state associated with gesture-related events.
@@ -199,7 +208,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 
 @end
 
-@interface StackViewController (Private)
+@interface StackViewController ()<ToolsMenuConfigurationProvider>
 
 // Clears the internal state of the object. Should only be called when the
 // object is not being shown. After this method is called, a call to
@@ -213,8 +222,6 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 // scroll to one of its boundaries without also having reached the
 // corresponding boundary of the stack being scrolled.
 - (void)updateScrollViewContentSize;
-// Deregisters for the notifications |registerForNotifications| specifies.
-- (void)deregisterForNotifications;
 // Eliminates the ability for the user to perform any further interactions
 // with the stack view. Should be called when the stack view starts being
 // dismissed.
@@ -244,9 +251,14 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 // (including the active set itself changing).
 - (void)activeCardCountChanged;
 // Computes and stores the initial card size information that will decide how
-// layout is done for the remainder of the stack view's lifetime, and configures
-// the card sets accordingly.
-- (void)setInitialCardSizing;
+// layout is done for the remainder of the stack view's lifetime.
+- (void)setInitialCardSizingForSize:(CGSize)size;
+// Configures the card sets based on the initial card size and the current size
+// of the scroll view.
+- (void)configureCardSets;
+// Returns |YES| if |viewWillAppear| should perform steps to display cards for
+// the first time.
+- (BOOL)needsInitialDisplay;
 // Updates the card sizing and layout for the current device orientation.
 // If |animates| is true, the size change will be animated, otherwise it will be
 // done synchronously.
@@ -289,9 +301,10 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 // Returns the size of a single card (at normal zoom).
 - (CGSize)cardSize;
 // Returns the size that should be used for cards being displayed in a viewport
-// with breadth |breadth|, taking margins into account and preserving the
-// content area aspect ratio.
-- (CGSize)cardSizeForBreadth:(CGFloat)breadth;
+// with breadth |breadth| and a scrollview of size |scrollViewSize|, taking
+// margins into account and preserving the content area aspect ratio.
+- (CGSize)cardSizeForBreadth:(CGFloat)breadth
+              scrollViewSize:(CGSize)scrollViewSize;
 // Returns the amount that |point| is offset on the current scroll axis.
 - (CGFloat)scrollOffsetAmountForPoint:(CGPoint)point;
 // Returns the amount that |position| is offset on the current scroll axis.
@@ -357,14 +370,14 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
                         transitionStyle:(StackTransitionStyle)transitionStyle;
 // Reverses the dummy toolbar background animations for cancelled transitions.
 - (void)reverseDummyToolbarBackgroundViewAnimation;
-// Adds the toolbar view owned by |transitionToolbarController| to the stack's
-// view hierarchy and animates the frame alongside the active card set's current
-// card (i.e. from its position at the top of the screen to the tab portion of
-// the provided |cardFrame| or vise versa).  The transition completion delegate
-// callbacks will reparent the toolbar view back into the BVC's view hiearchy.
-- (void)animateTransitionToolbarWithCardFrame:(CGRect)cardFrame
-                              transitionStyle:
-                                  (StackTransitionStyle)transitionStyle;
+// Adds a snapshot of the toolbar, provided by the |snapshotProvider| of the
+// |transitionToolbarOwner| to the stack's view hierarchy and animates the frame
+// alongside the active card set's current card (i.e. from its position at the
+// top of the screen to the tab portion of the provided |cardFrame| or vise
+// versa).
+- (void)animateTransitionToolbarSnapshotWithCardFrame:(CGRect)cardFrame
+                                      transitionStyle:
+                                          (StackTransitionStyle)transitionStyle;
 // Returns an vector of LayoutRects corresponding to the active card set's
 // frames at the moment of switching to or from the stack view.  The cards below
 // the current card in the z axis will have top-aligned unscaled frames, the
@@ -388,11 +401,6 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 // Returns the card corresponding to |view|. This is not an efficient lookup,
 // so this should *not* be called frequently.
 - (StackCard*)cardForView:(CardView*)view;
-// Shows the tools menu popup.
-- (void)showToolsMenuPopup;
-// All local tab state is cleared, and |currentlyClosingAllTabs_| is set to
-// |NO|.
-- (void)allModelTabsHaveClosed:(NSNotification*)notify;
 
 // Updates the display views so that they are aligned to the scroll view's
 // viewport. Should be called any time the scroll view's content offset
@@ -490,6 +498,13 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   BOOL _isBeingDismissed;
   // |YES| if the stack view is currently active.
   BOOL _isActive;
+  // |YES| if the stack view has been told to restore internal state, but has
+  // not yet become active.
+  BOOL _preparingForActive;
+  // |YES| if initial card sizes have been computed but cards have not yet been
+  // laid out for the first time.  This is only used when the
+  // TabSwitcherPresentsBVC experiment is enabled.
+  BOOL _needsInitialDisplay;
   // Records whether a memory warning occurred in the current session.
   BOOL _receivedMemoryWarningInSession;
   // |YES| if there is card set animation being processed. For testing only.
@@ -507,10 +522,10 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 @synthesize testDelegate = _testDelegate;
 @synthesize transitionStyle = _transitionStyle;
 @synthesize transitionTappedCard = _transitionTappedCard;
-@synthesize transitionToolbarController = _transitionToolbarController;
-@synthesize transitionToolbarFrame = _transitionToolbarFrame;
 @synthesize transitionToolbarOwner = _transitionToolbarOwner;
+@synthesize transitionToolbarSnapshot = _transitionToolbarSnapshot;
 @synthesize transitionWasCancelled = _transitionWasCancelled;
+@synthesize toolsMenuCoordinator = _toolsMenuCoordinator;
 
 - (instancetype)initWithMainCardSet:(CardSet*)mainCardSet
                          otrCardSet:(CardSet*)otrCardSet
@@ -545,6 +560,11 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
                               forProtocol:@protocol(BrowserCommands)];
     [_dispatcher startDispatchingToTarget:applicationCommandEndpoint
                               forProtocol:@protocol(ApplicationCommands)];
+
+    _toolsMenuCoordinator = [[ToolsMenuCoordinator alloc] init];
+    _toolsMenuCoordinator.dispatcher = _dispatcher;
+    _toolsMenuCoordinator.configurationProvider = self;
+    [_toolsMenuCoordinator start];
   }
   return self;
 }
@@ -578,8 +598,9 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   return nil;
 }
 
-- (id<ApplicationCommands, BrowserCommands>)dispatcher {
-  return static_cast<id<ApplicationCommands, BrowserCommands>>(_dispatcher);
+- (id<ApplicationCommands, BrowserCommands, ToolbarCommands>)dispatcher {
+  return static_cast<id<ApplicationCommands, BrowserCommands, ToolbarCommands>>(
+      _dispatcher);
 }
 
 - (void)setUpWithMainCardSet:(CardSet*)mainCardSet
@@ -610,6 +631,9 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   DCHECK(otrModel);
   DCHECK(activeModel == otrModel || activeModel == mainModel);
   DCHECK(!_isActive);
+  DCHECK(!_preparingForActive);
+  _preparingForActive = YES;
+
   CardSet* mainCardSet = [[CardSet alloc] initWithModel:mainModel];
   CardSet* otrCardSet = [[CardSet alloc] initWithModel:otrModel];
   CardSet* activeCardSet =
@@ -628,7 +652,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 }
 
 - (void)setOtrTabModel:(TabModel*)otrModel {
-  DCHECK(_isActive);
+  DCHECK(_isActive || _preparingForActive);
   DCHECK(_mainCardSet == _activeCardSet);
   DCHECK([otrModel count] == 0);
   DCHECK([[_otrCardSet tabModel] count] == 0);
@@ -639,11 +663,6 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   DCHECK(!_isActive);
   [[_mainCardSet displayView] removeFromSuperview];
   [[_otrCardSet displayView] removeFromSuperview];
-
-  // Only deregister from the specific notifications for which this class
-  // registered. Do not use the blanket |removeObserver|, otherwise the low
-  // memory notification is not received and the view is never unloaded.
-  [self deregisterForNotifications];
 
   [_mainCardSet disconnect];
   _mainCardSet = nil;
@@ -723,8 +742,6 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
             ? UIInterfaceOrientationPortrait
             : UIInterfaceOrientationLandscapeRight;
   }
-  [self registerForNotifications];
-
   // TODO(blundell): Why isn't this recognizer initialized with the
   // pinch and mode switch recognizers?
   UIPanGestureRecognizer* panGestureRecognizer =
@@ -736,9 +753,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   [_swipeGestureRecognizer setDelegate:self];
 }
 
-- (void)loadView {
-  [super loadView];
-
+- (void)viewDidLoad {
   _backgroundView = [[UIView alloc] initWithFrame:self.view.bounds];
   [_backgroundView setAutoresizingMask:(UIViewAutoresizingFlexibleHeight |
                                         UIViewAutoresizingFlexibleWidth)];
@@ -746,11 +761,31 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 
   _toolbarController =
       [[StackViewToolbarController alloc] initWithDispatcher:self.dispatcher];
+  [self addChildViewController:_toolbarController];
+  self.toolsMenuCoordinator.presentationProvider = _toolbarController;
   CGRect toolbarFrame = [self.view bounds];
   toolbarFrame.origin.y = CGRectGetMinY([[_toolbarController view] frame]);
   toolbarFrame.size.height = CGRectGetHeight([[_toolbarController view] frame]);
   [[_toolbarController view] setFrame:toolbarFrame];
   [self.view addSubview:[_toolbarController view]];
+  [_toolbarController didMoveToParentViewController:self];
+
+  if (IsSafeAreaCompatibleToolbarEnabled()) {
+    [[_toolbarController view].leadingAnchor
+        constraintEqualToAnchor:self.view.leadingAnchor]
+        .active = YES;
+    [[_toolbarController view].trailingAnchor
+        constraintEqualToAnchor:self.view.trailingAnchor]
+        .active = YES;
+    [[_toolbarController view].topAnchor
+        constraintEqualToAnchor:self.view.topAnchor]
+        .active = YES;
+    [_toolbarController heightConstraint].constant =
+        ToolbarHeightWithTopOfScreenOffset(
+            [_toolbarController statusBarOffset]);
+    [_toolbarController heightConstraint].active = YES;
+  }
+
   [self updateToolbarAppearanceWithAnimation:NO];
 
   InstallBackgroundInView(_backgroundView);
@@ -772,8 +807,23 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
     }
   }
   [self.view addSubview:_scrollView];
-  [_scrollView setAutoresizingMask:(UIViewAutoresizingFlexibleHeight |
-                                    UIViewAutoresizingFlexibleWidth)];
+
+  if (IsSafeAreaCompatibleToolbarEnabled()) {
+    [_scrollView setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [NSLayoutConstraint activateConstraints:@[
+      [_scrollView.topAnchor
+          constraintEqualToAnchor:[_toolbarController view].bottomAnchor],
+      [_scrollView.leadingAnchor
+          constraintEqualToAnchor:self.view.leadingAnchor],
+      [_scrollView.trailingAnchor
+          constraintEqualToAnchor:self.view.trailingAnchor],
+      [_scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+    ]];
+  } else {
+    [_scrollView setAutoresizingMask:(UIViewAutoresizingFlexibleHeight |
+                                      UIViewAutoresizingFlexibleWidth)];
+  }
+
   [_scrollView setBounces:NO];
   [_scrollView setScrollsToTop:NO];
   [_scrollView setClipsToBounds:NO];
@@ -786,8 +836,19 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   [self prepareForDisplay];
 }
 
+- (void)viewSafeAreaInsetsDidChange {
+  [super viewSafeAreaInsetsDidChange];
+  if (IsSafeAreaCompatibleToolbarEnabled()) {
+    [_toolbarController heightConstraint].constant =
+        ToolbarHeightWithTopOfScreenOffset(
+            [_toolbarController statusBarOffset]);
+    [[_toolbarController view] setNeedsLayout];
+  }
+}
+
 - (void)viewWillAppear:(BOOL)animated {
   _isActive = YES;
+  _preparingForActive = NO;
   // Sizing steps need to be done here rather than viewDidLoad since they
   // depend on the view bounds being correct. Setting initial card size should
   // be done only once, however, and viewWillAppear: can be called more than
@@ -797,11 +858,27 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   // rest of the time refreshing is necessary because the card views may have
   // been purged and recreated or the orientation might have changed while in
   // a modal view.
-  BOOL isInitialDisplay = _initialCardSize.height == 0.0;
-  if (isInitialDisplay) {
+  if ([self needsInitialDisplay]) {
+    _needsInitialDisplay = NO;
+
+    // Calls like -viewportSizeWasChanged should instead be called in
+    // viewDidLayoutSubviews, but since stack_view_controller is going away in
+    // the near future, it's easier to put this here instead of refactoring.
+    if (IsSafeAreaCompatibleToolbarEnabled()) {
+      [self.view layoutIfNeeded];
+    }
+
+    // If cards haven't been sized yet, size them now.
+    if (_initialCardSize.height == 0.0) {
+      DCHECK(!TabSwitcherPresentsBVCEnabled());
+      [self setInitialCardSizingForSize:_scrollView.bounds.size];
+    } else {
+      DCHECK(TabSwitcherPresentsBVCEnabled());
+    }
+
     [_mainCardSet setObserver:self];
     [_otrCardSet setObserver:self];
-    [self setInitialCardSizing];
+    [self configureCardSets];
     [self viewportSizeWasChanged];
   } else {
     [self refreshCardDisplayWithAnimation:NO];
@@ -831,8 +908,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
     _isActive = NO;
     [self clearInternalState];
   }
-  [_toolbarController dismissToolsMenuPopup];
-
+  [self.dispatcher dismissToolsMenu];
   [super viewDidDisappear:animated];
 }
 
@@ -900,9 +976,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   }
 
   [self updateToolbarAppearanceWithAnimation:YES];
-
-  [_toolbarController dismissToolsMenuPopup];
-
+  [self.dispatcher dismissToolsMenu];
   [self refreshCardDisplayWithAnimation:YES];
 
   // Animate the update of the card tabs.
@@ -949,21 +1023,6 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
                    completion:nil];
 }
 
-- (void)registerForNotifications {
-  NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
-  [defaultCenter addObserver:self
-                    selector:@selector(allModelTabsHaveClosed:)
-                        name:kTabModelAllTabsDidCloseNotification
-                      object:nil];
-}
-
-- (void)deregisterForNotifications {
-  NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
-  [defaultCenter removeObserver:self
-                           name:kTabModelAllTabsDidCloseNotification
-                         object:nil];
-}
-
 - (void)prepareForDismissal {
   UIView* activeView = [_activeCardSet displayView];
   [activeView removeGestureRecognizer:_pinchRecognizer];
@@ -999,6 +1058,12 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   BOOL useDefaultStyle = _isBeingDismissed && ![self isCurrentSetIncognito];
   return useDefaultStyle ? UIStatusBarStyleDefault
                          : UIStatusBarStyleLightContent;
+}
+
+- (void)prepareForDisplayAtSize:(CGSize)size {
+  DCHECK(TabSwitcherPresentsBVCEnabled());
+  _needsInitialDisplay = YES;
+  [self setInitialCardSizingForSize:size];
 }
 
 #pragma mark -
@@ -1077,6 +1142,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
       void (^toDoWhenDone)(void) = NULL;
       if (card == lastVisibleCard) {
         toDoWhenDone = ^{
+          [cardSet setIgnoresTabModelChanges:NO];
           [cardSet.tabModel closeAllTabs];
         };
       }
@@ -1125,11 +1191,14 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   [self enableGestureHandlers];
 }
 
-- (void)setInitialCardSizing {
+- (void)setInitialCardSizingForSize:(CGSize)size {
   DCHECK(_initialCardSize.height == 0.0);
-  CGFloat viewportBreadth = [self scrollBreadth:[_scrollView bounds].size];
-  _initialCardSize = [self cardSizeForBreadth:viewportBreadth];
+  CGFloat viewportBreadth = [self scrollBreadth:size];
+  _initialCardSize =
+      [self cardSizeForBreadth:viewportBreadth scrollViewSize:size];
+}
 
+- (void)configureCardSets {
   // Configure the stack layout behaviors. This is done only once because the
   // fan-out, margins, etc. should stay the same even if the cards change size
   // due to rotation.
@@ -1138,6 +1207,14 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
       configureLayoutParametersWithMargin:page_animation_util::kCardMargin];
   [_otrCardSet
       configureLayoutParametersWithMargin:page_animation_util::kCardMargin];
+}
+
+- (BOOL)needsInitialDisplay {
+  if (TabSwitcherPresentsBVCEnabled()) {
+    return _needsInitialDisplay;
+  } else {
+    return _initialCardSize.height == 0.0;
+  }
 }
 
 - (void)updateDeckOrientationWithAnimation:(BOOL)animates {
@@ -1372,21 +1449,21 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   CGFloat availableBreadth = [self scrollBreadth:[_scrollView bounds].size];
   if ([self bothDecksShouldBeDisplayed])
     availableBreadth *= kActiveDeckDisplayFraction;
-  CGSize idealCardSize = [self cardSizeForBreadth:availableBreadth];
+  CGSize idealCardSize = [self cardSizeForBreadth:availableBreadth
+                                   scrollViewSize:[_scrollView bounds].size];
 
   // Crop the ideal size so that it's no bigger than the initial size.
   return CGSizeMake(std::min(idealCardSize.width, _initialCardSize.width),
                     std::min(idealCardSize.height, _initialCardSize.height));
 }
 
-- (CGSize)cardSizeForBreadth:(CGFloat)breadth {
+- (CGSize)cardSizeForBreadth:(CGFloat)breadth scrollViewSize:(CGSize)viewSize {
   BOOL isPortrait = IsPortrait();
   CGFloat cardBreadth = breadth - 2 * page_animation_util::kCardMargin;
   CGFloat contentBreadthInset =
       isPortrait ? kCardImageInsets.left + kCardImageInsets.right
                  : kCardImageInsets.top + kCardImageInsets.bottom;
   CGFloat contentBreadth = cardBreadth - contentBreadthInset;
-  CGSize viewSize = [_scrollView bounds].size;
   CGFloat aspectRatio =
       [self scrollLength:viewSize] / [self scrollBreadth:viewSize];
   CGFloat contentLength = std::floor(aspectRatio * contentBreadth);
@@ -1513,7 +1590,12 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   [self reverseDummyToolbarBackgroundViewAnimation];
   [self reverseTransitionAnimationsForCardSet:_activeCardSet];
   [self reverseTransitionAnimationsForCardSet:[self inactiveCardSet]];
-  [self.transitionToolbarController reverseTransitionAnimations];
+    if (self.transitionToolbarSnapshot) {
+      ReverseAnimationsForKeyForLayers(kTransitionToolbarAnimationKey, @[
+        self.transitionToolbarSnapshot.layer,
+        self.transitionToolbarSnapshot.layer.mask
+      ]);
+    }
   // Commit the transaction.  Since the animations added for the previous
   // transition are all removed, this commit will call the previous
   // animation's completion block.
@@ -1544,13 +1626,8 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
       [card.view cleanUpAnimations];
   }
   // Clean up toolbar animations.
-  [self.transitionToolbarController.view removeFromSuperview];
-  [self.transitionToolbarOwner reparentToolbarController];
-  [self.transitionToolbarController cleanUpTransitionAnimations];
-  self.transitionToolbarController.view.animatingTransition = NO;
-  [self.transitionToolbarController view].frame = self.transitionToolbarFrame;
-  self.transitionToolbarController = nil;
-  self.transitionToolbarFrame = CGRectZero;
+    [self.transitionToolbarSnapshot removeFromSuperview];
+    self.transitionToolbarSnapshot = nil;
   self.transitionToolbarOwner = nil;
   // Clean up dummy toolbar background.
   [self.dummyToolbarBackgroundView removeFromSuperview];
@@ -1585,6 +1662,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
     [_animationDelegate tabSwitcherPresentationAnimationDidEnd:self];
     [_delegate tabSwitcherPresentationTransitionDidEnd:self];
   } else {
+    [_animationDelegate tabSwitcherDismissalAnimationDidEnd:self];
     [_delegate tabSwitcherDismissTransitionDidEnd:self];
   }
 }
@@ -1604,14 +1682,25 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 
   // Get reference to toolbar for transition.
   self.transitionToolbarOwner = [_delegate tabSwitcherTransitionToolbarOwner];
-  self.transitionToolbarController =
-      [self.transitionToolbarOwner relinquishedToolbarController];
-  self.transitionToolbarController.view.animatingTransition = YES;
-  self.transitionToolbarFrame = self.transitionToolbarController.view.frame;
 
   // Create dummy toolbar background view.
   self.dummyToolbarBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
   [self.dummyToolbarBackgroundView setClipsToBounds:YES];
+
+  if (TabSwitcherPresentsBVCEnabled()) {
+    if (!CGSizeEqualToSize(self.view.frame.size,
+                           self.view.superview.bounds.size)) {
+      // Forcibly mark the view as needing layout if it is a different size from
+      // its superview.
+      [self.view setNeedsLayout];
+    }
+
+    // Forces a layout because the views may not yet be sized and positioned
+    // correctly for their initial layout.
+    [self.view layoutIfNeeded];
+    [self refreshCardDisplayWithAnimation:NO];
+    [self updateToolbarAppearanceWithAnimation:NO];
+  }
 
   // Set the transition completion block.
   [CATransaction begin];
@@ -1633,13 +1722,20 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   CGRect currentCardFrame =
       AlignRectOriginAndSizeToPixels(LayoutRectGetRect(currentCardLayout));
 
+  if (IsSafeAreaCompatibleToolbarEnabled()) {
+    // Forces a layout because the views may not yet be positioned correctly
+    // due to a screen rotation.
+    [self.view layoutIfNeeded];
+  }
+
   // Animate the dummy toolbar background view.
   [self animateDummyToolbarForCardFrame:currentCardFrame
                         transitionStyle:transitionStyle];
 
-  // Animate the transition toolbar.
-  [self animateTransitionToolbarWithCardFrame:currentCardFrame
-                              transitionStyle:transitionStyle];
+  //  Animate the transition toolbar.
+    [self animateTransitionToolbarSnapshotWithCardFrame:currentCardFrame
+                                        transitionStyle:transitionStyle];
+
 
   // Update the order of the view hierarchy.
   [self reorderSubviewsForTransition];
@@ -1798,20 +1894,14 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 
   // The card's frame image extends beyond the edges of the screen when the
   // current card is scaled to the full content area, so extend the toolbar
-  // background to match the card's width.  For the NTP toolbar, extend the
-  // frame downward so that it covers the portion of the card frame that
-  // overlaps with the content snapshot.
+  // background to match the card's width.
   UIView* toolbarView = [_toolbarController view];
   UIView* displayView = _activeCardSet.displayView;
   CGRect screenToolbarFrame = [displayView convertRect:toolbarView.frame
                                               fromView:toolbarView.superview];
-  CGFloat bottomOutset = [self.transitionToolbarController
-                             isKindOfClass:[NewTabPageToolbarController class]]
-                             ? -kCardFrameImageSnapshotOverlap
-                             : 0.0;
   UIEdgeInsets screenToolbarFrameOutsets =
-      UIEdgeInsetsMake(0.0, kCardFrameInset - kCardImageInsets.left,
-                       bottomOutset, kCardFrameInset - kCardImageInsets.right);
+      UIEdgeInsetsMake(0.0, kCardFrameInset - kCardImageInsets.left, 0.0,
+                       kCardFrameInset - kCardImageInsets.right);
   screenToolbarFrame =
       UIEdgeInsetsInsetRect(screenToolbarFrame, screenToolbarFrameOutsets);
   CGPoint screenCardOrigin =
@@ -1836,17 +1926,12 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
                               alpha:1.0]
           : [UIColor colorWithWhite:kCardFrameBackgroundBrightness alpha:1.0];
   UIColor* toolbarBackgroundColor = cardBackgroundColor;
-  if ([self.transitionToolbarController
-          isKindOfClass:[NewTabPageToolbarController class]]) {
-    // Use white for the non-incognito NTP toolbar.
-    toolbarBackgroundColor = [UIColor whiteColor];
-  } else if (self.transitionToolbarController.backgroundView.hidden ||
-             self.transitionToolbarController.backgroundView.alpha == 0) {
-    // If the background view isn't visible, use the base toolbar view's
-    // background color.
-    toolbarBackgroundColor =
-        self.transitionToolbarController.view.backgroundColor;
-  }
+    UIColor* backgroundColor =
+        [self.transitionToolbarOwner
+                .toolbarSnapshotProvider toolbarBackgroundColor];
+    if (backgroundColor) {
+      toolbarBackgroundColor = backgroundColor;
+    }
 
   // Create frame animation.
   CFTimeInterval duration = ios::material::kDuration1;
@@ -1905,27 +1990,34 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
                                    @[ self.dummyToolbarBackgroundView.layer ]);
 }
 
-- (void)animateTransitionToolbarWithCardFrame:(CGRect)cardFrame
-                              transitionStyle:
-                                  (StackTransitionStyle)transitionStyle {
-  // Add the transition toolbar and update its frame.
-  CGFloat toolbarHeight =
-      self.transitionToolbarController.view.frame.size.height;
-  [_activeCardSet.displayView
-      insertSubview:self.transitionToolbarController.view
-       aboveSubview:_activeCardSet.currentCard.view];
-  CGRect toolbarFrame =
-      [_activeCardSet.displayView convertRect:[_toolbarController view].frame
-                                     fromView:self.view];
+- (void)animateTransitionToolbarSnapshotWithCardFrame:(CGRect)cardFrame
+                                      transitionStyle:(StackTransitionStyle)
+                                                          transitionStyle {
+  // Add the snapshot and update its frame.
+  self.transitionToolbarSnapshot =
+      [self.transitionToolbarOwner.toolbarSnapshotProvider
+          snapshotForStackViewWithWidth:CGRectGetWidth(self.view.frame)
+                         safeAreaInsets:SafeAreaInsetsForView(self.view)];
+  CGFloat toolbarHeight = self.transitionToolbarSnapshot.frame.size.height;
+
+  CALayer* mask = [CALayer layer];
+  mask.backgroundColor = [UIColor blackColor].CGColor;
+
+  self.transitionToolbarSnapshot.layer.mask = mask;
+  [_activeCardSet.displayView insertSubview:self.transitionToolbarSnapshot
+                               aboveSubview:_activeCardSet.currentCard.view];
+  CGRect toolbarFrame = [_activeCardSet.displayView
+      convertRect:_toolbarController.view.frame
+         fromView:_toolbarController.view.superview];
   CGFloat heightDifference = toolbarFrame.size.height - toolbarHeight;
   toolbarFrame.origin.y += heightDifference;
   toolbarFrame.size.height -= heightDifference;
-  self.transitionToolbarController.view.frame = toolbarFrame;
+  self.transitionToolbarSnapshot.frame = toolbarFrame;
 
   // The toolbar should animate such that its frame interpolates between the
   // normal toolbar frame at the top of the screen and the frame of the current
   // card's tab view.
-  CGRect screenToolbarFrame = self.transitionToolbarController.view.frame;
+  CGRect screenToolbarFrame = self.transitionToolbarSnapshot.frame;
   CGFloat cardTabHeight = kCardImageInsets.top - kCardFrameInset;
   CGRect cardToolbarFrame =
       CGRectInset(cardFrame, kCardFrameInset, kCardFrameInset);
@@ -1934,16 +2026,61 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   // Add animations.
   BOOL isPresentingStackView =
       (transitionStyle == STACK_TRANSITION_STYLE_PRESENTING);
-  ToolbarTransitionStyle style = isPresentingStackView
-                                     ? TOOLBAR_TRANSITION_STYLE_TO_STACK_VIEW
-                                     : TOOLBAR_TRANSITION_STYLE_TO_BVC;
   CGRect beginFrame =
       isPresentingStackView ? screenToolbarFrame : cardToolbarFrame;
   CGRect endFrame =
       isPresentingStackView ? cardToolbarFrame : screenToolbarFrame;
-  [self.transitionToolbarController animateTransitionWithBeginFrame:beginFrame
-                                                           endFrame:endFrame
-                                                    transitionStyle:style];
+
+  // Difference between the height of the toolbar at the beginning of the
+  // animation and at the end.
+  CGFloat additionalHeight =
+      screenToolbarFrame.size.height - endFrame.size.height;
+
+  // Frame letting the toolbar be displayed such as the mask is croping the
+  // additional height and let the part with the content be displayed in the
+  // |endFrame|.
+  CGRect endFrameWithMask =
+      CGRectMake(endFrame.origin.x, endFrame.origin.y - additionalHeight,
+                 endFrame.size.width, screenToolbarFrame.size.height);
+
+  // Animation moving and resizing the snapshot between its card position and
+  // the toolbar position, depending if it is a presentation or a dismissal.
+  // The toolbar is not resized in height, it is croped using the mask.
+  CAAnimation* frameAnimation = FrameAnimationMake(
+      self.transitionToolbarSnapshot.layer, beginFrame, endFrameWithMask);
+  frameAnimation.duration = ios::material::kDuration1;
+  frameAnimation.timingFunction = TimingFunction(ios::material::CurveEaseInOut);
+
+  // The snapshot is faded out/in to do a cross fade with the title of the card.
+  CGFloat beginOpacity = isPresentingStackView ? 1 : 0;
+  CGFloat endOpacity = isPresentingStackView ? 0 : 1;
+  CAAnimation* fadeAnimation = OpacityAnimationMake(beginOpacity, endOpacity);
+  fadeAnimation.timingFunction = TimingFunction(ios::material::CurveEaseIn);
+  fadeAnimation.duration = ios::material::kDuration6;
+
+  [self.transitionToolbarSnapshot.layer
+      addAnimation:AnimationGroupMake(@[ frameAnimation, fadeAnimation ])
+            forKey:kTransitionToolbarAnimationKey];
+
+  // The mask animation is used to crop the additional height of the toolbar to
+  // have the snapshot display only the content part of the toolbar.
+  // The last pixel is croped as it is displaying the shadow below the toolbar.
+  CGRect toolbarMaskFrame = CGRectMake(0, 0, screenToolbarFrame.size.width,
+                                       screenToolbarFrame.size.height - 1);
+  CGRect cardMaskFrame = CGRectMake(0, additionalHeight, endFrame.size.width,
+                                    endFrame.size.height - 1);
+
+  CGRect beginMaskFrame =
+      isPresentingStackView ? toolbarMaskFrame : cardMaskFrame;
+  CGRect endMaskFrame =
+      isPresentingStackView ? cardMaskFrame : toolbarMaskFrame;
+
+  CAAnimation* cropAnimation =
+      FrameAnimationMake(mask, beginMaskFrame, endMaskFrame);
+  cropAnimation.duration = ios::material::kDuration1;
+  cropAnimation.timingFunction = TimingFunction(ios::material::CurveEaseInOut);
+  mask.frame = endFrame;
+  [mask addAnimation:cropAnimation forKey:kTransitionToolbarAnimationKey];
 }
 
 - (void)dismissWithSelectedTabAnimation {
@@ -2085,7 +2222,9 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   // generating a snapshot, but then restore the original frame.
   CGRect originalTabFrame = [tab view].frame;
   [tab view].frame = viewBounds;
-  newCard.image = [tab updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
+  newCard.image =
+      SnapshotTabHelper::FromWebState(tab.webState)
+          ->UpdateSnapshot(/*with_overlays=*/true, /*visible_frame_only=*/true);
   [tab view].frame = originalTabFrame;
   newCard.center =
       CGPointMake(CGRectGetMidX(viewBounds), CGRectGetMidY(viewBounds));
@@ -2094,6 +2233,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   void (^completionBlock)(void) = ^{
     [newCard removeFromSuperview];
     [[_scrollView layer] setShouldRasterize:NO];
+    [_animationDelegate tabSwitcherDismissalAnimationDidEnd:self];
     [_delegate tabSwitcherDismissTransitionDidEnd:self];
     double duration = [NSDate timeIntervalSinceReferenceDate] - startTime;
     if (_activeCardSet.tabModel.isOffTheRecord) {
@@ -2126,8 +2266,8 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer*)recognizer
        shouldReceiveTouch:(UITouch*)touch {
-  // Don't swallow any touches while the tools popup menu is open.
-  if ([_toolbarController toolsPopupController])
+  // Don't swallow any touches while the tools menu is open.
+  if ([self.toolsMenuCoordinator isShowingToolsMenu])
     return NO;
 
   if ((recognizer == _pinchRecognizer) ||
@@ -2539,10 +2679,6 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
     [_gestureStateTracker setResetSwipedCardOnNextSwipe:YES];
     return;
   }
-  // Remove the transition toolbar controller from the view hierarchy if the
-  // card swipe occurs while a transition animation is occurring.
-  if ([self.transitionToolbarController.view isDescendantOfView:self.view])
-    [self.transitionToolbarController.view removeFromSuperview];
   [self swipeCard:gesture];
 }
 
@@ -2708,11 +2844,13 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   return nil;
 }
 
-#pragma mark - BrowserCommands
+#pragma mark - ToolsMenuCoordinator Configuration
 
-- (void)showToolsMenu {
+- (ToolsMenuConfiguration*)menuConfigurationForToolsMenuCoordinator:
+    (ToolsMenuCoordinator*)coordinator {
   ToolsMenuConfiguration* configuration =
-      [[ToolsMenuConfiguration alloc] initWithDisplayView:[self view]];
+      [[ToolsMenuConfiguration alloc] initWithDisplayView:[self view]
+                                       baseViewController:self];
   [configuration setInTabSwitcher:YES];
   // When checking for the existence of tabs, catch the case where the main set
   // is both active and empty, but the incognito set has some cards.
@@ -2721,8 +2859,10 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
     [configuration setNoOpenedTabs:YES];
   if (_activeCardSet == _otrCardSet)
     [configuration setInIncognito:YES];
-  [_toolbarController showToolsMenuPopupWithConfiguration:configuration];
+  return configuration;
 }
+
+#pragma mark - BrowserCommands
 
 - (void)openNewTab:(OpenNewTabCommand*)command {
   // Ensure that the right mode is showing.
@@ -2756,27 +2896,17 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 
 #pragma mark Notification Handlers
 
-- (void)allModelTabsHaveClosed:(NSNotification*)notify {
+- (void)cardSetDidCloseAllTabs:(CardSet*)cardSet {
   // Early return if the stack view is not active.  This can sometimes occur if
   // |clearInternalState| triggers the deletion of a tab model.
   if (!_isActive)
     return;
 
-  CardSet* closedSet =
-      (notify.object == [_mainCardSet tabModel]) ? _mainCardSet : _otrCardSet;
-
-  // If the tabModel that send the notification is not one handled by one of
-  // the two card sets, just return. This will happen when the otr tab model is
-  // deleted because the incognito profile is deleted.
-  if (notify.object != [closedSet tabModel])
-    return;
-
-  if (closedSet == _activeCardSet)
+  if (cardSet == _activeCardSet)
     [self activeCardCountChanged];
-  for (UIView* card in [closedSet.displayView subviews]) {
+  for (UIView* card in [cardSet.displayView subviews]) {
     [card removeFromSuperview];
   }
-  [closedSet setIgnoresTabModelChanges:NO];
   // No need to re-sync with the card set here, since the tab model (and thus
   // the card set) is known to be empty.
 
@@ -2785,8 +2915,8 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   // finishes closing while the main set is still animating (in the case of
   // closing all cards at once) wait until the main set finishes before updating
   // the display (necessary so the state is right if a new tab is opened).
-  if ((closedSet == _otrCardSet && ![_mainCardSet ignoresTabModelChanges]) ||
-      (closedSet == _mainCardSet && [[_otrCardSet cards] count] == 0)) {
+  if ((cardSet == _otrCardSet && ![_mainCardSet ignoresTabModelChanges]) ||
+      (cardSet == _mainCardSet && [[_otrCardSet cards] count] == 0)) {
     [self displayMainCardSetOnly];
   }
 
@@ -2904,6 +3034,13 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 - (void)cardSet:(CardSet*)cardSet
     didRemoveCard:(StackCard*)removedCard
           atIndex:(NSUInteger)index {
+  // If card was tapped during a transition, but its WebState was closed before
+  // the animation finishes, reset |transitionTappedCard|, as attempting to
+  // show that Tab upon finishing the animation will result in a crash since its
+  // WebState is destroyed.
+  if (removedCard == self.transitionTappedCard)
+    self.transitionTappedCard = nil;
+
   if (cardSet == _activeCardSet) {
     // Reenable the gesture handlers (disabled in
     // -cardSet:willRemoveCard:atIndex). It is now safe to do so as the card
@@ -3035,10 +3172,18 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 }
 
 - (void)alignDisplayViewsToViewport {
-  DCHECK(CGSizeEqualToSize([_mainCardSet displayView].frame.size,
-                           [_scrollView frame].size));
-  DCHECK(CGSizeEqualToSize([_otrCardSet displayView].frame.size,
-                           [_scrollView frame].size));
+  // TODO(crbug.com/789975): The iPhoneX iOS 11.0.0 simulator was a beta release
+  // and has a bug that causes this DCHECK to fire incorrectly.  Disable the
+  // DCHECK on iPhoneX 11.0.0, until the bots are updated to a newer simulator
+  // version.
+  if (!IsIPhoneX() || base::ios::IsRunningOnOrLater(11, 0, 1)) {
+    DCHECK(CGSizeEqualToSize(
+        AlignRectOriginAndSizeToPixels([_mainCardSet displayView].frame).size,
+        [_scrollView frame].size));
+    DCHECK(CGSizeEqualToSize(
+        AlignRectOriginAndSizeToPixels([_otrCardSet displayView].frame).size,
+        [_scrollView frame].size));
+  }
   CGRect newDisplayViewFrame = CGRectMake(
       [_scrollView contentOffset].x, [_scrollView contentOffset].y,
       [_scrollView frame].size.width, [_scrollView frame].size.height);

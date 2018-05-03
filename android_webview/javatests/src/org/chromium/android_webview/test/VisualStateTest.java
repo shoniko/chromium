@@ -27,11 +27,11 @@ import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.GraphicsTestUtils;
 import org.chromium.android_webview.test.util.JavascriptEventObserver;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.JavascriptInjector;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.io.ByteArrayInputStream;
@@ -426,7 +426,6 @@ public class VisualStateTest {
 
         // JS will notify this observer once it has changed the background color of the page.
         final Object pageChangeNotifier = new Object() {
-            @SuppressFBWarnings("UMAC_UNCALLABLE_METHOD_OF_ANONYMOUS_CLASS")
             public void onPageChanged() {
                 ThreadUtils.postOnUiThread(
                         () -> awContents.insertVisualStateCallback(20, new VisualStateCallback() {
@@ -442,8 +441,8 @@ public class VisualStateTest {
         };
 
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            awContents.getWebContents().addPossiblyUnsafeJavascriptInterface(
-                    pageChangeNotifier, "pageChangeNotifier", null);
+            JavascriptInjector.fromWebContents(awContents.getWebContents())
+                    .addPossiblyUnsafeInterface(pageChangeNotifier, "pageChangeNotifier", null);
             awContents.loadUrl(WAIT_FOR_JS_DETACHED_TEST_URL);
         });
 

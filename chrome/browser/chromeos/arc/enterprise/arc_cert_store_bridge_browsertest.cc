@@ -6,6 +6,8 @@
 #include <tuple>
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/run_loop.h"
@@ -29,6 +31,7 @@
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/arc_util.h"
 #include "components/arc/common/cert_store.mojom.h"
+#include "components/arc/test/connection_holder_util.h"
 #include "components/policy/policy_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/scoped_test_system_nss_key_slot.h"
@@ -61,7 +64,14 @@ namespace arc {
 class FakeArcCertStoreInstance : public mojom::CertStoreInstance {
  public:
   // mojom::CertStoreInstance:
-  void Init(mojom::CertStoreHostPtr host) override { host_ = std::move(host); }
+  void InitDeprecated(mojom::CertStoreHostPtr host) override {
+    Init(std::move(host), base::BindOnce(&base::DoNothing));
+  }
+
+  void Init(mojom::CertStoreHostPtr host, InitCallback callback) override {
+    host_ = std::move(host);
+    std::move(callback).Run();
+  }
 
   void OnKeyPermissionsChanged(
       const std::vector<std::string>& permissions) override {
@@ -125,11 +135,12 @@ class ArcCertStoreBridgeTest : public InProcessBrowserTest {
     instance_ = std::make_unique<FakeArcCertStoreInstance>();
     ASSERT_TRUE(arc_bridge());
     arc_bridge()->cert_store()->SetInstance(instance_.get());
+    WaitForInstanceReady(arc_bridge()->cert_store());
   }
 
   void TearDownOnMainThread() override {
     ASSERT_TRUE(arc_bridge());
-    arc_bridge()->cert_store()->SetInstance(nullptr);
+    arc_bridge()->cert_store()->CloseInstance(instance_.get());
     instance_.reset();
 
     // Since ArcServiceLauncher is (re-)set up with profile() in
@@ -240,7 +251,8 @@ class ArcCertStoreBridgeTest : public InProcessBrowserTest {
     std::string client_cert1_spki(
         client_cert1_->derPublicKey.data,
         client_cert1_->derPublicKey.data + client_cert1_->derPublicKey.len);
-    permissions_for_ext->RegisterKeyForCorporateUsage(client_cert1_spki);
+    permissions_for_ext->RegisterKeyForCorporateUsage(
+        client_cert1_spki, {chromeos::KeyPermissions::KeyLocation::kUserSlot});
     done_callback.Run();
   }
 
@@ -336,7 +348,7 @@ IN_PROC_BROWSER_TEST_F(ArcCertStoreBridgeTest, ListCertificatesTest) {
   mojom_cert1->alias = client_cert1_->nickname;
   auto x509_cert = net::x509_util::CreateX509CertificateFromCERTCertificate(
       client_cert1_.get());
-  net::X509Certificate::GetPEMEncoded(x509_cert->os_cert_handle(),
+  net::X509Certificate::GetPEMEncoded(x509_cert->cert_buffer(),
                                       &mojom_cert1->cert);
 
   std::vector<mojom::CertificatePtr> expected_certs;

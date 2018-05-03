@@ -27,9 +27,10 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/network/public/interfaces/request_context_frame_type.mojom.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -67,9 +68,11 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
     scope_ = GURL("https://host/scope/");
     script_url_ = GURL("https://host/script.js");
     import_script_url_ = GURL("https://host/import.js");
-    registration_ = new ServiceWorkerRegistration(
-        blink::mojom::ServiceWorkerRegistrationOptions(scope_), 1L,
-        context()->AsWeakPtr());
+
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = scope_;
+    registration_ = base::MakeRefCounted<ServiceWorkerRegistration>(
+        options, 1L, context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(registration_.get(), script_url_,
                                         context()->storage()->NewVersionId(),
                                         context()->AsWeakPtr());
@@ -109,7 +112,7 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
   // Creates a ServiceWorkerContextHandler directly.
   std::unique_ptr<ServiceWorkerContextRequestHandler> CreateHandler(
       ResourceType resource_type) {
-    return base::MakeUnique<ServiceWorkerContextRequestHandler>(
+    return std::make_unique<ServiceWorkerContextRequestHandler>(
         context()->AsWeakPtr(), provider_host_,
         base::WeakPtr<storage::BlobStorageContext>(), resource_type);
   }
@@ -121,11 +124,13 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
     ServiceWorkerRequestHandler::InitializeHandler(
         request, helper_->context_wrapper(), &blob_storage_context_,
         helper_->mock_render_process_id(), provider_host_->provider_id(),
-        false /* skip_service_worker */, FETCH_REQUEST_MODE_NO_CORS,
-        FETCH_CREDENTIALS_MODE_OMIT, FetchRedirectMode::FOLLOW_MODE,
-        std::string() /* integrity */, RESOURCE_TYPE_SERVICE_WORKER,
-        REQUEST_CONTEXT_TYPE_SERVICE_WORKER, REQUEST_CONTEXT_FRAME_TYPE_NONE,
-        nullptr);
+        false /* skip_service_worker */,
+        network::mojom::FetchRequestMode::kNoCORS,
+        network::mojom::FetchCredentialsMode::kOmit,
+        network::mojom::FetchRedirectMode::kFollow,
+        std::string() /* integrity */, false /* keepalive */,
+        RESOURCE_TYPE_SERVICE_WORKER, REQUEST_CONTEXT_TYPE_SERVICE_WORKER,
+        network::mojom::RequestContextFrameType::kNone, nullptr);
   }
 
  protected:
@@ -254,11 +259,12 @@ TEST_F(ServiceWorkerContextRequestHandlerTest,
   ServiceWorkerRequestHandler::InitializeHandler(
       request.get(), helper_->context_wrapper(), &blob_storage_context_,
       helper_->mock_render_process_id(), provider_host_->provider_id(),
-      true /* skip_service_worker */, FETCH_REQUEST_MODE_NO_CORS,
-      FETCH_CREDENTIALS_MODE_OMIT, FetchRedirectMode::FOLLOW_MODE,
-      std::string() /* integrity */, RESOURCE_TYPE_SERVICE_WORKER,
-      REQUEST_CONTEXT_TYPE_SERVICE_WORKER, REQUEST_CONTEXT_FRAME_TYPE_NONE,
-      nullptr);
+      true /* skip_service_worker */, network::mojom::FetchRequestMode::kNoCORS,
+      network::mojom::FetchCredentialsMode::kOmit,
+      network::mojom::FetchRedirectMode::kFollow, std::string() /* integrity */,
+      false /* keepalive */, RESOURCE_TYPE_SERVICE_WORKER,
+      REQUEST_CONTEXT_TYPE_SERVICE_WORKER,
+      network::mojom::RequestContextFrameType::kNone, nullptr);
   // Verify a ServiceWorkerRequestHandler was created.
   ServiceWorkerRequestHandler* handler =
       ServiceWorkerRequestHandler::GetHandler(request.get());

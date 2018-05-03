@@ -296,7 +296,7 @@ LayoutDeprecatedFlexibleBox::LayoutDeprecatedFlexibleBox(Element& element)
   }
 }
 
-LayoutDeprecatedFlexibleBox::~LayoutDeprecatedFlexibleBox() {}
+LayoutDeprecatedFlexibleBox::~LayoutDeprecatedFlexibleBox() = default;
 
 static LayoutUnit MarginWidthForChild(LayoutBox* child) {
   // A margin basically has three types: fixed, percentage, and auto (variable).
@@ -381,16 +381,17 @@ void LayoutDeprecatedFlexibleBox::UpdateBlockLayout(bool relayout_children) {
 
   UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLayout);
 
-  if (Style()->BoxAlign() != ComputedStyle::InitialBoxAlign())
+  if (Style()->BoxAlign() != ComputedStyleInitialValues::InitialBoxAlign())
     UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxAlignNotInitial);
 
-  if (Style()->BoxDirection() != ComputedStyle::InitialBoxDirection())
+  if (Style()->BoxDirection() !=
+      ComputedStyleInitialValues::InitialBoxDirection())
     UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxDirectionNotInitial);
 
-  if (Style()->BoxLines() != ComputedStyle::InitialBoxLines())
+  if (Style()->BoxLines() != ComputedStyleInitialValues::InitialBoxLines())
     UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxLinesNotInitial);
 
-  if (Style()->BoxPack() != ComputedStyle::InitialBoxPack())
+  if (Style()->BoxPack() != ComputedStyleInitialValues::InitialBoxPack())
     UseCounter::Count(GetDocument(), WebFeature::kWebkitBoxPackNotInitial);
 
   if (!FirstChildBox()) {
@@ -463,17 +464,18 @@ static void GatherFlexChildrenInfo(FlexBoxIterator& iterator,
                                    unsigned& lowest_flex_group,
                                    bool& have_flex) {
   for (LayoutBox* child = iterator.First(); child; child = iterator.Next()) {
-    if (child->Style()->BoxFlex() != ComputedStyle::InitialBoxFlex())
+    if (child->Style()->BoxFlex() !=
+        ComputedStyleInitialValues::InitialBoxFlex())
       UseCounter::Count(document, WebFeature::kWebkitBoxChildFlexNotInitial);
 
     if (child->Style()->BoxFlexGroup() !=
-        ComputedStyle::InitialBoxFlexGroup()) {
+        ComputedStyleInitialValues::InitialBoxFlexGroup()) {
       UseCounter::Count(document,
                         WebFeature::kWebkitBoxChildFlexGroupNotInitial);
     }
 
     if (child->Style()->BoxOrdinalGroup() !=
-        ComputedStyle::InitialBoxOrdinalGroup()) {
+        ComputedStyleInitialValues::InitialBoxOrdinalGroup()) {
       UseCounter::Count(document,
                         WebFeature::kWebkitBoxChildOrdinalGroupNotInitial);
     }
@@ -1354,17 +1356,18 @@ LayoutUnit LayoutDeprecatedFlexibleBox::AllowedChildFlex(LayoutBox* child,
   if (IsHorizontal()) {
     LayoutUnit min_width = child->MinPreferredLogicalWidth();
     LayoutUnit width = ContentWidthForChild(child);
-    if (child->Style()->MinWidth().IsFixed())
-      min_width = LayoutUnit(child->Style()->MinWidth().Value());
-    else if (child->Style()->MinWidth().GetType() == kAuto)
+    const Length& min_width_length = child->Style()->MinWidth();
+    if (min_width_length.IsFixed())
+      min_width = LayoutUnit(min_width_length.Value());
+    else if (min_width_length.IsAuto())
       min_width = LayoutUnit();
 
     LayoutUnit allowed_shrinkage = (min_width - width).ClampPositiveToZero();
     return allowed_shrinkage;
   }
-  Length min_height = child->Style()->MinHeight();
-  if (min_height.IsFixed() || min_height.IsAuto()) {
-    LayoutUnit min_height(child->Style()->MinHeight().Value());
+  const Length& min_height_length = child->Style()->MinHeight();
+  if (min_height_length.IsFixed() || min_height_length.IsAuto()) {
+    LayoutUnit min_height(min_height_length.Value());
     LayoutUnit height = ContentHeightForChild(child);
     LayoutUnit allowed_shrinkage = (min_height - height).ClampPositiveToZero();
     return allowed_shrinkage;

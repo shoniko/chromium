@@ -206,7 +206,7 @@ void RetrieveShaderInterfaceBlockInfo(const ShaderInterfaceBlockProto& proto,
   (*map)[proto.mapped_name()] = interface_block;
 }
 
-void RunShaderCallback(GLES2DecoderClient* client,
+void RunShaderCallback(DecoderClient* client,
                        GpuProgramProto* proto,
                        std::string sha_string) {
   std::string shader;
@@ -288,7 +288,7 @@ MemoryProgramCache::MemoryProgramCache(
     bool disable_gpu_shader_disk_cache,
     bool disable_program_caching_for_transform_feedback,
     GpuProcessActivityFlags* activity_flags)
-    : max_size_bytes_(max_cache_size_bytes),
+    : ProgramCache(max_cache_size_bytes),
       disable_gpu_shader_disk_cache_(disable_gpu_shader_disk_cache),
       disable_program_caching_for_transform_feedback_(
           disable_program_caching_for_transform_feedback),
@@ -297,7 +297,7 @@ MemoryProgramCache::MemoryProgramCache(
       store_(ProgramMRUCache::NO_AUTO_EVICT),
       activity_flags_(activity_flags) {}
 
-MemoryProgramCache::~MemoryProgramCache() {}
+MemoryProgramCache::~MemoryProgramCache() = default;
 
 void MemoryProgramCache::ClearBackend() {
   store_.Clear();
@@ -311,7 +311,7 @@ ProgramCache::ProgramLoadResult MemoryProgramCache::LoadLinkedProgram(
     const LocationMap* bind_attrib_location_map,
     const std::vector<std::string>& transform_feedback_varyings,
     GLenum transform_feedback_buffer_mode,
-    GLES2DecoderClient* client) {
+    DecoderClient* client) {
   if (!ProgramBinaryExtensionsAvailable()) {
     // Early exit if this context can't support program binaries
     return PROGRAM_LOAD_FAILURE;
@@ -343,7 +343,7 @@ ProgramCache::ProgramLoadResult MemoryProgramCache::LoadLinkedProgram(
   const std::vector<uint8_t>& decoded =
       value->is_compressed()
           ? DecompressData(value->data(), value->decompressed_length(),
-                           max_size_bytes_)
+                           max_size_bytes())
           : value->data();
   if (decoded.empty()) {
     // Decompression failure.
@@ -398,7 +398,7 @@ void MemoryProgramCache::SaveLinkedProgram(
     const LocationMap* bind_attrib_location_map,
     const std::vector<std::string>& transform_feedback_varyings,
     GLenum transform_feedback_buffer_mode,
-    GLES2DecoderClient* client) {
+    DecoderClient* client) {
   if (!ProgramBinaryExtensionsAvailable()) {
     // Early exit if this context can't support program binaries
     return;
@@ -410,7 +410,7 @@ void MemoryProgramCache::SaveLinkedProgram(
   GLenum format;
   GLsizei length = 0;
   glGetProgramiv(program, GL_PROGRAM_BINARY_LENGTH, &length);
-  if (length == 0 || static_cast<unsigned int>(length) > max_size_bytes_) {
+  if (length == 0 || static_cast<unsigned int>(length) > max_size_bytes()) {
     return;
   }
   std::vector<uint8_t> binary(length);
@@ -454,7 +454,7 @@ void MemoryProgramCache::SaveLinkedProgram(
   if(existing != store_.end())
     store_.Erase(existing);
 
-  while (curr_size_bytes_ + binary.size() > max_size_bytes_) {
+  while (curr_size_bytes_ + binary.size() > max_size_bytes()) {
     DCHECK(!store_.empty());
     store_.Erase(store_.rbegin());
   }

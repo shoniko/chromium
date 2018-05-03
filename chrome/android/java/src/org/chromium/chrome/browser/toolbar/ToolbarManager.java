@@ -124,7 +124,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
      */
     public static final int MINIMUM_LOAD_PROGRESS = 5;
 
-    private static final String CHROME_MEMEX_URL = "https://chrome-memex.corp.google.com";
+    private static final String CHROME_MEMEX_URL = "https://chrome-memex.appspot.com";
 
     private final ToolbarLayout mToolbar;
     private final ToolbarControlContainer mControlContainer;
@@ -223,7 +223,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
 
         mLocationBar = mToolbar.getLocationBar();
         mLocationBar.setToolbarDataProvider(mToolbarModel);
-        mLocationBar.setUrlFocusChangeListener(this);
+        mLocationBar.addUrlFocusChangeListener(this);
         mLocationBar.setDefaultTextEditActionModeCallback(
                 mActionModeController.getActionModeCallback());
         mLocationBar.initializeControls(
@@ -237,11 +237,10 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
         mHomepageStateListener = new HomepageStateListener() {
             @Override
             public void onHomepageStateUpdated() {
-                mToolbar.onHomeButtonUpdate(
-                        HomepageManager.isHomepageEnabled(mToolbar.getContext()));
+                mToolbar.onHomeButtonUpdate(HomepageManager.isHomepageEnabled());
             }
         };
-        HomepageManager.getInstance(mToolbar.getContext()).addListener(mHomepageStateListener);
+        HomepageManager.getInstance().addListener(mHomepageStateListener);
 
         mTabModelSelectorObserver = new EmptyTabModelSelectorObserver() {
             @Override
@@ -313,7 +312,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
                 if (mToolbarModel.getTab() == null) return;
 
                 assert tab == mToolbarModel.getTab();
-                mLocationBar.updateSecurityIcon(tab.getSecurityLevel());
+                mLocationBar.updateSecurityIcon();
             }
 
             @Override
@@ -329,6 +328,12 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
 
                 // A URL update is a decent enough indicator that the toolbar widget is in
                 // a stable state to capture its bitmap for use in fullscreen.
+                mControlContainer.setReadyForBitmapCapture(true);
+            }
+
+            @Override
+            public void onShown(Tab tab) {
+                if (TextUtils.isEmpty(tab.getUrl())) return;
                 mControlContainer.setReadyForBitmapCapture(true);
             }
 
@@ -396,7 +401,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
             public void onWebContentsSwapped(Tab tab, boolean didStartLoad, boolean didFinishLoad) {
                 if (!didStartLoad) return;
                 mLocationBar.setUrlToPageUrl();
-                mLocationBar.updateSecurityIcon(tab.getSecurityLevel());
+                mLocationBar.updateSecurityIcon();
                 if (didFinishLoad) {
                     mLoadProgressSimulator.start();
                 }
@@ -666,8 +671,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
         mToolbar.addOnAttachStateChangeListener(new OnAttachStateChangeListener() {
             @Override
             public void onViewDetachedFromWindow(View v) {
-                Context context = mToolbar.getContext();
-                HomepageManager.getInstance(context).removeListener(mHomepageStateListener);
+                HomepageManager.getInstance().removeListener(mHomepageStateListener);
                 mTabModelSelector.removeObserver(mTabModelSelectorObserver);
                 for (TabModel model : mTabModelSelector.getModels()) {
                     model.removeObserver(mTabModelObserver);
@@ -777,6 +781,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
      * Call to tear down all of the toolbar dependencies.
      */
     public void destroy() {
+        mLocationBar.removeUrlFocusChangeListener(this);
         Tab currentTab = mToolbarModel.getTab();
         if (currentTab != null) currentTab.removeObserver(mTabObserver);
         mToolbar.destroy();
@@ -963,8 +968,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
 
         Tab currentTab = mToolbarModel.getTab();
         if (currentTab == null) return;
-        Context context = mToolbar.getContext();
-        String homePageUrl = HomepageManager.getHomepageUri(context);
+        String homePageUrl = HomepageManager.getHomepageUri();
         if (TextUtils.isEmpty(homePageUrl)) {
             homePageUrl = UrlConstants.NTP_URL;
         }
@@ -1301,6 +1305,10 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
     private void startLoadProgress() {
         if (mToolbar.isProgressStarted()) return;
         mToolbar.startLoadProgress();
+    }
+
+    public void setProgressBarEnabled(boolean enabled) {
+        mToolbar.getProgressBar().setVisibility(enabled ? View.VISIBLE : View.GONE);
     }
 
     private boolean shouldShowCusrsorInLocationBar() {

@@ -27,9 +27,9 @@ using base::android::ScopedJavaLocalRef;
 class WindowAndroid::WindowBeginFrameSource : public viz::BeginFrameSource {
  public:
   explicit WindowBeginFrameSource(WindowAndroid* window)
-      : window_(window),
-        observers_(
-            base::ObserverList<viz::BeginFrameObserver>::NOTIFY_EXISTING_ONLY),
+      : BeginFrameSource(kNotRestartableId),
+        window_(window),
+        observers_(base::ObserverListPolicy::EXISTING_ONLY),
         observer_count_(0),
         next_sequence_number_(viz::BeginFrameArgs::kStartingFrameNumber),
         paused_(false) {}
@@ -113,6 +113,16 @@ void WindowAndroid::WindowBeginFrameSource::OnPauseChanged(bool paused) {
   paused_ = paused;
   for (auto& obs : observers_)
     obs.OnBeginFrameSourcePausedChanged(paused_);
+}
+
+// static
+WindowAndroid* WindowAndroid::FromJavaWindowAndroid(
+    const JavaParamRef<jobject>& jwindow_android) {
+  if (jwindow_android.is_null())
+    return nullptr;
+
+  return reinterpret_cast<WindowAndroid*>(Java_WindowAndroid_getNativePointer(
+      AttachCurrentThread(), jwindow_android));
 }
 
 WindowAndroid::WindowAndroid(JNIEnv* env, jobject obj, int display_id)
@@ -283,7 +293,9 @@ ScopedJavaLocalRef<jobject> WindowAndroid::GetWindowToken() {
 // Native JNI methods
 // ----------------------------------------------------------------------------
 
-jlong Init(JNIEnv* env, const JavaParamRef<jobject>& obj, int sdk_display_id) {
+jlong JNI_WindowAndroid_Init(JNIEnv* env,
+                             const JavaParamRef<jobject>& obj,
+                             int sdk_display_id) {
   WindowAndroid* window = new WindowAndroid(env, obj, sdk_display_id);
   return reinterpret_cast<intptr_t>(window);
 }

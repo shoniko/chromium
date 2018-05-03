@@ -4,9 +4,10 @@
 
 #include "core/layout/ng/layout_ng_mixin.h"
 
+#include <memory>
+#include <utility>
+
 #include "core/layout/HitTestLocation.h"
-#include "core/layout/LayoutBlockFlow.h"
-#include "core/layout/ng/inline/ng_inline_fragment_iterator.h"
 #include "core/layout/ng/inline/ng_inline_node_data.h"
 #include "core/layout/ng/ng_constraint_space.h"
 #include "core/layout/ng/ng_layout_result.h"
@@ -17,7 +18,7 @@
 namespace blink {
 
 template <typename Base>
-LayoutNGMixin<Base>::~LayoutNGMixin() {}
+LayoutNGMixin<Base>::~LayoutNGMixin() = default;
 
 template <typename Base>
 bool LayoutNGMixin<Base>::IsOfType(LayoutObject::LayoutObjectType type) const {
@@ -32,7 +33,7 @@ NGInlineNodeData* LayoutNGMixin<Base>::GetNGInlineNodeData() const {
 
 template <typename Base>
 void LayoutNGMixin<Base>::ResetNGInlineNodeData() {
-  ng_inline_node_data_ = WTF::MakeUnique<NGInlineNodeData>();
+  ng_inline_node_data_ = std::make_unique<NGInlineNodeData>();
 }
 
 // The current fragment from the last layout cycle for this box.
@@ -142,7 +143,29 @@ LayoutNGMixin<Base>::CachedLayoutResultForTesting() {
 template <typename Base>
 void LayoutNGMixin<Base>::SetPaintFragment(
     scoped_refptr<const NGPhysicalFragment> fragment) {
-  paint_fragment_ = WTF::MakeUnique<NGPaintFragment>(std::move(fragment));
+  paint_fragment_ = std::make_unique<NGPaintFragment>(std::move(fragment));
+}
+
+static Vector<NGPaintFragment*> GetNGPaintFragmentsInternal(
+    NGPaintFragment* paint,
+    const LayoutObject& layout_object) {
+  if (!paint)
+    return Vector<NGPaintFragment*>();
+  Vector<NGPaintFragment*> fragments;
+  if (paint->GetLayoutObject() == &layout_object)
+    fragments.push_back(paint);
+  for (const auto& child : paint->Children()) {
+    const auto& result =
+        GetNGPaintFragmentsInternal(child.get(), layout_object);
+    fragments.AppendVector(result);
+  }
+  return fragments;
+}
+
+template <typename Base>
+Vector<NGPaintFragment*> LayoutNGMixin<Base>::GetPaintFragments(
+    const LayoutObject& layout_object) const {
+  return GetNGPaintFragmentsInternal(PaintFragment(), layout_object);
 }
 
 template <typename Base>
@@ -150,16 +173,9 @@ void LayoutNGMixin<Base>::Paint(const PaintInfo& paint_info,
                                 const LayoutPoint& paint_offset) const {
   if (RuntimeEnabledFeatures::LayoutNGPaintFragmentsEnabled() &&
       PaintFragment())
-    NGBlockFlowPainter(*this).Paint(paint_info,
-                                    paint_offset + Base::Location());
+    NGBlockFlowPainter(*this).Paint(paint_info, paint_offset);
   else
     LayoutBlockFlow::Paint(paint_info, paint_offset);
-}
-
-template <typename Base>
-void LayoutNGMixin<Base>::UpdateMargins(
-    const NGConstraintSpace& constraint_space) {
-  Base::SetMargin(ComputePhysicalMargins(constraint_space, Base::StyleRef()));
 }
 
 template <typename Base>
@@ -168,7 +184,8 @@ bool LayoutNGMixin<Base>::NodeAtPoint(
     const HitTestLocation& location_in_container,
     const LayoutPoint& accumulated_offset,
     HitTestAction action) {
-  if (!RuntimeEnabledFeatures::LayoutNGPaintFragmentsEnabled()) {
+  if (!RuntimeEnabledFeatures::LayoutNGPaintFragmentsEnabled() ||
+      !PaintFragment()) {
     return LayoutBlockFlow::NodeAtPoint(result, location_in_container,
                                         accumulated_offset, action);
   }
@@ -189,6 +206,7 @@ bool LayoutNGMixin<Base>::NodeAtPoint(
                                                accumulated_offset, action);
 }
 
+template class LayoutNGMixin<LayoutTableCell>;
 template class LayoutNGMixin<LayoutBlockFlow>;
 
 }  // namespace blink

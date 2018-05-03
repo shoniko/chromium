@@ -31,6 +31,7 @@
 #ifndef Notification_h
 #define Notification_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/serialization/SerializedScriptValue.h"
@@ -40,10 +41,8 @@
 #include "modules/ModulesExport.h"
 #include "modules/vibration/NavigatorVibration.h"
 #include "platform/AsyncMethodRunner.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "public/platform/WebVector.h"
 #include "public/platform/modules/notifications/WebNotificationData.h"
 #include "public/platform/modules/notifications/WebNotificationDelegate.h"
 #include "public/platform/modules/permissions/permission.mojom-blink.h"
@@ -53,9 +52,9 @@ namespace blink {
 
 class ExecutionContext;
 class NotificationOptions;
-class NotificationPermissionCallback;
 class NotificationResourcesLoader;
 class ScriptState;
+class V8NotificationPermissionCallback;
 
 class MODULES_EXPORT Notification final
     : public EventTargetWithInlineData,
@@ -114,8 +113,9 @@ class MODULES_EXPORT Notification final
 
   static String PermissionString(mojom::blink::PermissionStatus);
   static String permission(ExecutionContext*);
-  static ScriptPromise requestPermission(ScriptState*,
-                                         NotificationPermissionCallback*);
+  static ScriptPromise requestPermission(
+      ScriptState*,
+      V8NotificationPermissionCallback* deprecated_callback = nullptr);
 
   static size_t maxActions();
 

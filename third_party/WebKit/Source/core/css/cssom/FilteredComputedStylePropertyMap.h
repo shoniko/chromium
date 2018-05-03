@@ -5,6 +5,7 @@
 #ifndef FilteredComputedStylePropertyMap_h
 #define FilteredComputedStylePropertyMap_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSPropertyIDTemplates.h"
 #include "core/css/cssom/ComputedStylePropertyMap.h"
@@ -13,34 +14,28 @@ namespace blink {
 
 class CORE_EXPORT FilteredComputedStylePropertyMap
     : public ComputedStylePropertyMap {
-  WTF_MAKE_NONCOPYABLE(FilteredComputedStylePropertyMap);
-
  public:
   static FilteredComputedStylePropertyMap* Create(
-      CSSComputedStyleDeclaration* computed_style_declaration,
+      Node* node,
       const Vector<CSSPropertyID>& native_properties,
-      const Vector<AtomicString>& custom_properties,
-      Node* node) {
-    return new FilteredComputedStylePropertyMap(
-        computed_style_declaration, native_properties, custom_properties, node);
+      const Vector<AtomicString>& custom_properties) {
+    return new FilteredComputedStylePropertyMap(node, native_properties,
+                                                custom_properties);
   }
-
-  CSSStyleValue* get(const String& property_name, ExceptionState&) override;
-  CSSStyleValueVector getAll(const String& property_name,
-                             ExceptionState&) override;
-  bool has(const String& property_name, ExceptionState&) override;
-
-  Vector<String> getProperties() override;
 
  private:
   FilteredComputedStylePropertyMap(
-      CSSComputedStyleDeclaration*,
+      Node*,
       const Vector<CSSPropertyID>& native_properties,
-      const Vector<AtomicString>& custom_properties,
-      Node*);
+      const Vector<AtomicString>& custom_properties);
+
+  const CSSValue* GetProperty(CSSPropertyID) override;
+  const CSSValue* GetCustomProperty(AtomicString) override;
+  void ForEachProperty(const IterationCallback&) override;
 
   HashSet<CSSPropertyID> native_properties_;
   HashSet<AtomicString> custom_properties_;
+  DISALLOW_COPY_AND_ASSIGN(FilteredComputedStylePropertyMap);
 };
 
 }  // namespace blink

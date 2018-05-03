@@ -42,7 +42,7 @@
 namespace blink {
 
 class Event;
-class WorkerGlobalScope;
+class WorkerOrWorkletGlobalScope;
 
 // There are two kinds of event listeners: HTML or non-HMTL. onload,
 // onfocus, etc (attributes) are always HTML event handler type; Event
@@ -59,7 +59,7 @@ class CORE_EXPORT V8AbstractEventListener : public EventListener {
   static const V8AbstractEventListener* Cast(const EventListener* listener) {
     return listener->GetType() == kJSEventListenerType
                ? static_cast<const V8AbstractEventListener*>(listener)
-               : 0;
+               : nullptr;
   }
 
   static V8AbstractEventListener* Cast(EventListener* listener) {
@@ -115,7 +115,7 @@ class CORE_EXPORT V8AbstractEventListener : public EventListener {
   virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  protected:
-  V8AbstractEventListener(bool is_attribute, DOMWrapperWorld&, v8::Isolate*);
+  V8AbstractEventListener(v8::Isolate*, bool is_attribute, DOMWrapperWorld&);
 
   virtual v8::Local<v8::Object> GetListenerObjectInternal(
       ExecutionContext* execution_context) {
@@ -145,11 +145,11 @@ class CORE_EXPORT V8AbstractEventListener : public EventListener {
   // true if the listener is created through a DOM attribute.
   bool is_attribute_;
 
-  RefPtr<DOMWrapperWorld> world_;
+  scoped_refptr<DOMWrapperWorld> world_;
   v8::Isolate* isolate_;
 
-  // nullptr unless this listener belongs to a worker.
-  Member<WorkerGlobalScope> worker_global_scope_;
+  // nullptr unless this listener belongs to a worker or worklet.
+  Member<WorkerOrWorkletGlobalScope> worker_or_worklet_global_scope_;
 
   SelfKeepAlive<V8AbstractEventListener> keep_alive_;
 };

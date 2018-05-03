@@ -6,6 +6,7 @@ package org.chromium.webapk.shell_apk;
 
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
@@ -16,6 +17,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowApplication;
 
@@ -56,10 +58,11 @@ public final class MainActivityTest {
         installBrowser(browserPackageName);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class).withIntent(launchIntent).create();
+        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
 
         Intent startActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
-        Assert.assertEquals(MainActivity.ACTION_START_WEBAPK, startActivityIntent.getAction());
+        Assert.assertEquals(
+                HostBrowserLauncher.ACTION_START_WEBAPK, startActivityIntent.getAction());
         Assert.assertEquals(
                 expectedStartUrl, startActivityIntent.getStringExtra(WebApkConstants.EXTRA_URL));
     }
@@ -87,10 +90,11 @@ public final class MainActivityTest {
         installBrowser(browserPackageName);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class).withIntent(launchIntent).create();
+        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
 
         Intent startActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
-        Assert.assertEquals(MainActivity.ACTION_START_WEBAPK, startActivityIntent.getAction());
+        Assert.assertEquals(
+                HostBrowserLauncher.ACTION_START_WEBAPK, startActivityIntent.getAction());
         Assert.assertEquals(
                 expectedStartUrl, startActivityIntent.getStringExtra(WebApkConstants.EXTRA_URL));
     }
@@ -118,10 +122,11 @@ public final class MainActivityTest {
         installBrowser(browserPackageName);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class).withIntent(launchIntent).create();
+        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
 
         Intent startActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
-        Assert.assertEquals(MainActivity.ACTION_START_WEBAPK, startActivityIntent.getAction());
+        Assert.assertEquals(
+                HostBrowserLauncher.ACTION_START_WEBAPK, startActivityIntent.getAction());
         Assert.assertEquals(
                 expectedStartUrl, startActivityIntent.getStringExtra(WebApkConstants.EXTRA_URL));
     }
@@ -148,10 +153,11 @@ public final class MainActivityTest {
         installBrowser(browserPackageName);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class).withIntent(launchIntent).create();
+        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
 
         Intent startActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
-        Assert.assertEquals(MainActivity.ACTION_START_WEBAPK, startActivityIntent.getAction());
+        Assert.assertEquals(
+                HostBrowserLauncher.ACTION_START_WEBAPK, startActivityIntent.getAction());
         Assert.assertEquals(
                 intentStartUrl, startActivityIntent.getStringExtra(WebApkConstants.EXTRA_URL));
     }
@@ -181,20 +187,21 @@ public final class MainActivityTest {
         installBrowser(browserPackageName);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class).withIntent(launchIntent).create();
+        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
 
         Intent startActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
-        Assert.assertEquals(MainActivity.ACTION_START_WEBAPK, startActivityIntent.getAction());
+        Assert.assertEquals(
+                HostBrowserLauncher.ACTION_START_WEBAPK, startActivityIntent.getAction());
         Assert.assertEquals(
                 expectedStartUrl, startActivityIntent.getStringExtra(WebApkConstants.EXTRA_URL));
     }
 
     private void installBrowser(String browserPackageName) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("http://"));
-        RuntimeEnvironment.getRobolectricPackageManager().addResolveInfoForIntent(
-                intent, newResolveInfo(browserPackageName));
-        RuntimeEnvironment.getRobolectricPackageManager().addPackage(
-                newPackageInfo(browserPackageName));
+        Shadows.shadowOf(RuntimeEnvironment.application.getPackageManager())
+                .addResolveInfoForIntent(intent, newResolveInfo(browserPackageName));
+        Shadows.shadowOf(RuntimeEnvironment.application.getPackageManager())
+                .addPackage(newPackageInfo(browserPackageName));
     }
 
     private static ResolveInfo newResolveInfo(String packageName) {
@@ -209,6 +216,8 @@ public final class MainActivityTest {
         PackageInfo packageInfo = new PackageInfo();
         packageInfo.packageName = packageName;
         packageInfo.versionName = "Developer Build";
+        packageInfo.applicationInfo = new ApplicationInfo();
+        packageInfo.applicationInfo.enabled = true;
         return packageInfo;
     }
 }

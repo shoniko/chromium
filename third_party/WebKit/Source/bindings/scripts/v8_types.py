@@ -176,6 +176,27 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
     extended_attributes = extended_attributes or {}
     idl_type = idl_type.preprocessed_type
 
+    # Nullable types
+    def needs_optional_wrapper():
+        if not idl_type.is_nullable or not used_in_cpp_sequence:
+            return False
+        # NativeValueTraits<T>::NullValue should exist in order to provide the
+        # implicit null value, if needed.
+        return not idl_type.inner_type.cpp_type_has_null_value
+
+    if needs_optional_wrapper():
+        inner_type = idl_type.inner_type
+        if inner_type.is_dictionary or inner_type.is_sequence or inner_type.is_record_type:
+            # TODO(jbroman, bashi): Implement this if needed.
+            # This is non-trivial to support because HeapVector refuses to hold
+            # Optional<>, and IDLDictionaryBase (and subclasses) have no
+            # integrated null state that can be distinguished from a present but
+            # empty dictionary. It's unclear whether this will ever come up in
+            # real spec WebIDL.
+            raise NotImplementedError('Sequences of nullable dictionary, sequence or record types are not yet supported.')
+        return 'Optional<%s>' % inner_type.cpp_type_args(
+            extended_attributes, raw_type, used_as_rvalue_type, used_as_variadic_argument, used_in_cpp_sequence)
+
     # Array or sequence types
     if used_as_variadic_argument:
         native_array_element_type = idl_type
@@ -209,7 +230,7 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
         return CPP_SPECIAL_CONVERSION_RULES[base_idl_type]
 
     if base_idl_type == 'SerializedScriptValue':
-        return 'RefPtr<%s>' % base_idl_type
+        return 'scoped_refptr<%s>' % base_idl_type
     if idl_type.is_string_type:
         if not raw_type:
             return 'const String&' if used_as_rvalue_type else 'String'
@@ -323,6 +344,8 @@ def implemented_as(idl_type):
     base_idl_type = idl_type.base_type
     if base_idl_type in IdlType.implemented_as_interfaces:
         return IdlType.implemented_as_interfaces[base_idl_type]
+    elif idl_type.is_callback_function or idl_type.is_callback_interface:
+        return 'V8%s' % base_idl_type
     return base_idl_type
 
 
@@ -360,6 +383,8 @@ IdlArrayOrSequenceType.is_traceable = property(
     lambda self: self.element_type.is_traceable)
 IdlRecordType.is_traceable = property(
     lambda self: self.value_type.is_traceable)
+IdlNullableType.is_traceable = property(
+    lambda self: self.inner_type.is_traceable)
 
 
 ################################################################################
@@ -577,17 +602,23 @@ def v8_conversion_is_trivial(idl_type):
 IdlType.v8_conversion_is_trivial = property(v8_conversion_is_trivial)
 
 
-def native_value_traits_type_name(idl_type):
+def native_value_traits_type_name(idl_type, in_sequence_or_record=False):
     idl_type = idl_type.preprocessed_type
 
     if idl_type.is_nullable:
-        idl_type = idl_type.inner_type
-
-    if idl_type.native_array_element_type:
-        name = 'IDLSequence<%s>' % native_value_traits_type_name(idl_type.native_array_element_type)
+        inner_type = native_value_traits_type_name(idl_type.inner_type)
+        # IDLNullable is only required for sequences and such.
+        # The IDL compiler already has special cases for nullable operation
+        # parameters, dictionary fields, etc.
+        if in_sequence_or_record:
+            name = 'IDLNullable<%s>' % native_value_traits_type_name(idl_type.inner_type)
+        else:
+            name = inner_type
+    elif idl_type.native_array_element_type:
+        name = 'IDLSequence<%s>' % native_value_traits_type_name(idl_type.native_array_element_type, True)
     elif idl_type.is_record_type:
         name = 'IDLRecord<%s, %s>' % (native_value_traits_type_name(idl_type.key_type),
-                                      native_value_traits_type_name(idl_type.value_type))
+                                      native_value_traits_type_name(idl_type.value_type, True))
     elif idl_type.is_basic_type or idl_type.name == 'Promise':
         name = 'IDL%s' % idl_type.name
     elif idl_type.implemented_as is not None:
@@ -655,12 +686,15 @@ def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name
     elif idl_type.is_union_type:
         nullable = 'UnionTypeConversionMode::kNullable' if idl_type.includes_nullable_type \
             else 'UnionTypeConversionMode::kNotNullable'
-        cpp_expression_format = 'V8{idl_type}::ToImpl({isolate}, {v8_value}, {variable_name}, %s, exceptionState)' % nullable
+        # We need to consider the moving of the null through the union in order
+        # to generate the correct V8* class name.
+        this_cpp_type = idl_type.cpp_type_args(extended_attributes=extended_attributes)
+        cpp_expression_format = '%s::ToImpl({isolate}, {v8_value}, {variable_name}, %s, exceptionState)' % \
+            (v8_type(this_cpp_type), nullable)
     elif idl_type.use_output_parameter_for_result:
         cpp_expression_format = 'V8{idl_type}::ToImpl({isolate}, {v8_value}, {variable_name}, exceptionState)'
     elif idl_type.is_callback_function:
-        cpp_expression_format = (
-            'V8{idl_type}::Create(ScriptState::Current({isolate}), {v8_value})')
+        cpp_expression_format = 'V8{idl_type}::Create({v8_value}.As<v8::Function>())'
     elif idl_type.v8_conversion_needs_exception_state:
         # Effectively, this if branch means everything with v8_conversion_needs_exception_state == True
         # except for unions and dictionary interfaces.
@@ -982,7 +1016,7 @@ CPP_VALUE_TO_V8_VALUE = {
     'NodeFilter': 'ToV8({cpp_value}, {creation_context}, {isolate})',
     'Record': 'ToV8({cpp_value}, {creation_context}, {isolate})',
     'ScriptValue': '{cpp_value}.V8Value()',
-    'SerializedScriptValue': 'V8Deserialize({isolate}, {cpp_value})',
+    'SerializedScriptValue': 'V8Deserialize({isolate}, {cpp_value}.get())',
     # General
     'sequence': 'ToV8({cpp_value}, {creation_context}, {isolate})',
     'FrozenArray': 'FreezeV8Object(ToV8({cpp_value}, {creation_context}, {isolate}), {isolate})',
@@ -1033,10 +1067,12 @@ def union_literal_cpp_value(idl_type, idl_literal):
         member_type = idl_type.numeric_member_type
     elif idl_literal.idl_type == 'boolean':
         member_type = idl_type.boolean_member_type
+    elif idl_literal.idl_type == 'sequence':
+        member_type = idl_type.sequence_member_type
     else:
         raise ValueError('Unsupported literal type: ' + idl_literal.idl_type)
 
-    return '%s::From%s(%s)' % (idl_type.name, member_type.name,
+    return '%s::From%s(%s)' % (idl_type.cpp_type_args(), member_type.name,
                                member_type.literal_cpp_value(idl_literal))
 
 

@@ -173,6 +173,26 @@ TEST(BlinkEventUtilTest, WebMouseWheelEventCoalescing) {
   EXPECT_EQ(4, coalesced_event.delta_x);
   EXPECT_EQ(5, coalesced_event.delta_y);
 
+  event_to_be_coalesced.phase = blink::WebMouseWheelEvent::kPhaseBegan;
+  coalesced_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
+  EXPECT_FALSE(CanCoalesce(event_to_be_coalesced, coalesced_event));
+
+  event_to_be_coalesced.has_synthetic_phase = true;
+  coalesced_event.has_synthetic_phase = true;
+  EXPECT_TRUE(CanCoalesce(event_to_be_coalesced, coalesced_event));
+  Coalesce(event_to_be_coalesced, &coalesced_event);
+  EXPECT_EQ(blink::WebMouseWheelEvent::kPhaseChanged, coalesced_event.phase);
+  EXPECT_EQ(7, coalesced_event.delta_x);
+  EXPECT_EQ(9, coalesced_event.delta_y);
+
+  event_to_be_coalesced.phase = blink::WebMouseWheelEvent::kPhaseChanged;
+  coalesced_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
+  EXPECT_TRUE(CanCoalesce(event_to_be_coalesced, coalesced_event));
+  Coalesce(event_to_be_coalesced, &coalesced_event);
+  EXPECT_EQ(blink::WebMouseWheelEvent::kPhaseBegan, coalesced_event.phase);
+  EXPECT_EQ(10, coalesced_event.delta_x);
+  EXPECT_EQ(13, coalesced_event.delta_y);
+
   event_to_be_coalesced.resending_plugin_id = 3;
   EXPECT_FALSE(CanCoalesce(event_to_be_coalesced, coalesced_event));
 }
@@ -199,6 +219,37 @@ TEST(BlinkEventUtilTest, WebGestureEventCoalescing) {
 
   event_to_be_coalesced.resending_plugin_id = 3;
   EXPECT_FALSE(CanCoalesce(event_to_be_coalesced, coalesced_event));
+}
+
+TEST(BlinkEventUtilTest, WebEventModifersAndEventFlags) {
+  using WebInputEvent = blink::WebInputEvent;
+  constexpr int kWebEventModifiersToTest[] = {WebInputEvent::kShiftKey,
+                                              WebInputEvent::kControlKey,
+                                              WebInputEvent::kAltKey,
+                                              WebInputEvent::kAltGrKey,
+                                              WebInputEvent::kMetaKey,
+                                              WebInputEvent::kCapsLockOn,
+                                              WebInputEvent::kNumLockOn,
+                                              WebInputEvent::kScrollLockOn,
+                                              WebInputEvent::kLeftButtonDown,
+                                              WebInputEvent::kMiddleButtonDown,
+                                              WebInputEvent::kRightButtonDown,
+                                              WebInputEvent::kBackButtonDown,
+                                              WebInputEvent::kForwardButtonDown,
+                                              WebInputEvent::kIsAutoRepeat};
+  // For each WebEventModifier value, test that it maps to a unique ui::Event
+  // flag, and that the flag correctly maps back to the WebEventModifier.
+  int event_flags = 0;
+  for (int event_modifier : kWebEventModifiersToTest) {
+    int event_flag = WebEventModifiersToEventFlags(event_modifier);
+
+    // |event_flag| must be unique.
+    EXPECT_EQ(event_flags & event_flag, 0);
+    event_flags |= event_flag;
+
+    // |event_flag| must map to |event_modifier|.
+    EXPECT_EQ(EventFlagsToWebEventModifiers(event_flag), event_modifier);
+  }
 }
 
 }  // namespace ui

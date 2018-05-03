@@ -34,19 +34,22 @@ namespace media {
 #define PARAMETERS_ALIGNMENT 16
 static_assert(AudioBus::kChannelAlignment == PARAMETERS_ALIGNMENT,
               "Audio buffer parameters struct alignment not same as AudioBus");
+// ****WARNING****: Do not change the field types or ordering of these fields
+// without checking that alignment is correct. The structs may be concurrently
+// accessed by both 32bit and 64bit process in shmem. http://crbug.com/781095.
 struct MEDIA_SHMEM_EXPORT ALIGNAS(PARAMETERS_ALIGNMENT)
     AudioInputBufferParameters {
   double volume;
-  uint32_t size;
   int64_t capture_time;  // base::TimeTicks in microseconds.
+  uint32_t size;
   uint32_t id;
   bool key_pressed;
 };
 struct MEDIA_SHMEM_EXPORT ALIGNAS(PARAMETERS_ALIGNMENT)
     AudioOutputBufferParameters {
-  uint32_t frames_skipped;
   int64_t delay;            // base::TimeDelta in microseconds.
   int64_t delay_timestamp;  // base::TimeTicks in microseconds.
+  uint32_t frames_skipped;
   uint32_t bitstream_data_size;
   uint32_t bitstream_frames;
 };
@@ -135,6 +138,7 @@ class MEDIA_SHMEM_EXPORT AudioParameters {
     DUCKING = 0x2,  // Enables ducking if the OS supports it.
     KEYBOARD_MIC = 0x4,
     HOTWORD = 0x8,
+    NOISE_SUPPRESSION = 0x10
   };
 
   AudioParameters();

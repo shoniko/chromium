@@ -88,13 +88,17 @@ const char kDisableAcceleratedMjpegDecode[] =
 const char kDisableAcceleratedVideoDecode[] =
     "disable-accelerated-video-decode";
 
+// Disables hardware acceleration of video encode, where available.
+const char kDisableAcceleratedVideoEncode[] =
+    "disable-accelerated-video-encode";
+
 // Disable limits on the number of backing stores. Can prevent blinking for
 // users with many windows/tabs and lots of memory.
 const char kDisableBackingStoreLimit[]      = "disable-backing-store-limit";
 
 // Disable backgrounding renders for occluded windows. Done for tests to avoid
 // nondeterministic behavior.
-extern const char kDisableBackgroundingOccludedWindowsForTesting[] =
+const char kDisableBackgroundingOccludedWindowsForTesting[] =
     "disable-backgrounding-occluded-windows";
 
 // Disable task throttling of timer tasks from background pages.
@@ -106,6 +110,10 @@ const char kDisableBackgroundTimerThrottling[] =
 // Applied after kEnableBlinkFeatures, and after other flags that change these
 // features.
 const char kDisableBlinkFeatures[]          = "disable-blink-features";
+
+// Disables compositor Ukm recording in browser tests.
+// TODO(khushalsagar): Remove once crbug.com/761524 is resolved.
+const char kDisableCompositorUkmForTests[] = "disable-compositor-ukm-for-tests";
 
 // Disables HTML5 DB support.
 const char kDisableDatabases[]              = "disable-databases";
@@ -120,9 +128,6 @@ const char kDisableWebGL[] = "disable-webgl";
 
 // Disable WebGL2.
 const char kDisableWebGL2[] = "disable-webgl2";
-
-// Comma-separated list of feature names to disable. See also kEnableFeatures.
-const char kDisableFeatures[]               = "disable-features";
 
 // Disable FileSystem API.
 const char kDisableFileSystem[]             = "disable-file-system";
@@ -140,9 +145,6 @@ const char kDisableGestureRequirementForPresentation[] =
 // Disables GPU hardware acceleration.  If software renderer is not in place,
 // then the GPU process won't launch.
 const char kDisableGpu[]                    = "disable-gpu";
-
-// Disable async worker context.
-const char kDisableGpuAsyncWorkerContext[] = "disable-gpu-async-worker-context";
 
 // Prevent the compositor from using its GPU implementation.
 const char kDisableGpuCompositing[]         = "disable-gpu-compositing";
@@ -169,6 +171,10 @@ const char kDisableLowResTiling[] = "disable-low-res-tiling";
 
 // Disable the GPU process sandbox.
 const char kDisableGpuSandbox[]             = "disable-gpu-sandbox";
+
+// Disable the thread that crashes the GPU process if it stops responding to
+// messages.
+const char kDisableGpuWatchdog[] = "disable-gpu-watchdog";
 
 // Suppresses hang monitor dialogs in renderer processes.  This may allow slow
 // unload handlers on a page to prevent the tab from closing, but the Task
@@ -262,6 +268,10 @@ const char kDisableRendererBackgrounding[]  = "disable-renderer-backgrounding";
 // useful for tests that want to force disabling.
 const char kDisableResizeLock[] = "disable-resize-lock";
 
+// Whether the ResourceScheduler is disabled.  Note this is only useful for C++
+// Headless embedders who need to implement their own resource scheduling.
+const char kDisableResourceScheduler[] = "disable-resource-scheduler";
+
 // Disable shared workers.
 const char kDisableSharedWorkers[]          = "disable-shared-workers";
 
@@ -342,21 +352,9 @@ const char kEnableBackgroundFetchPersistence[] =
 // features.
 const char kEnableBlinkFeatures[]           = "enable-blink-features";
 
-// PlzNavigate: Use or not the experimental browser-side navigation path.
-const char kDisableBrowserSideNavigation[] = "disable-browser-side-navigation";
-const char kEnableBrowserSideNavigation[]   = "enable-browser-side-navigation";
-
 // Enable animating of images in the compositor instead of blink.
 const char kEnableCompositorImageAnimations[] =
     "enable-compositor-image-animations";
-
-// Enables display list based 2d canvas implementation. Options:
-//  1. Enable: allow browser to use display list for 2d canvas (browser makes
-//     decision).
-//  2. Force: browser always uses display list for 2d canvas.
-const char kEnableDisplayList2dCanvas[]     = "enable-display-list-2d-canvas";
-const char kForceDisplayList2dCanvas[]      = "force-display-list-2d-canvas";
-const char kDisableDisplayList2dCanvas[]    = "disable-display-list-2d-canvas";
 
 // Enable experimental canvas features, e.g. canvas 2D context attributes
 const char kEnableExperimentalCanvasFeatures[] =
@@ -369,12 +367,6 @@ const char kEnableExperimentalWebPlatformFeatures[] =
 // Disables all RuntimeEnabledFeatures that can be enabled via OriginTrials.
 const char kDisableOriginTrialControlledBlinkFeatures[] =
     "disable-origin-trial-controlled-blink-features";
-
-// Comma-separated list of feature names to enable. See also kDisableFeatures.
-const char kEnableFeatures[] = "enable-features";
-
-// Makes the GL worker context run asynchronously by using a separate stream.
-const char kEnableGpuAsyncWorkerContext[] = "enable-gpu-async-worker-context";
 
 // Specify that all compositor resources should be backed by GPU memory buffers.
 const char kEnableGpuMemoryBufferCompositorResources[] =
@@ -423,10 +415,6 @@ const char kEnableRGBA4444Textures[] = "enable-rgba-4444-textures";
 // Set options to cache V8 data. (off, preparse data, or code)
 const char kV8CacheOptions[] = "v8-cache-options";
 
-// Set strategies to cache V8 data in CacheStorage. (off, normal, or aggressive)
-const char kV8CacheStrategiesForCacheStorage[] =
-    "v8-cache-strategies-for-cache-storage";
-
 // Cause the OS X sandbox write to syslog every time an access to a resource
 // is denied by the sandbox.
 const char kEnableSandboxLogging[]          = "enable-sandbox-logging";
@@ -446,9 +434,6 @@ const char kEnableSmoothScrolling[]         = "enable-smooth-scrolling";
 
 // Enable spatial navigation
 const char kEnableSpatialNavigation[]       = "enable-spatial-navigation";
-
-// Enables StatsTable, logging statistics to a global named shared memory table.
-const char kEnableStatsTable[]              = "enable-stats-table";
 
 // Blocks all insecure requests from secure contexts, and prevents the user
 // from overriding that decision.
@@ -547,6 +532,9 @@ const char kGpuLauncher[]                   = "gpu-launcher";
 // Makes this process a GPU sub-process.
 const char kGpuProcess[]                    = "gpu-process";
 
+// Starts the GPU sandbox before creating a GL context.
+const char kGpuSandboxStartEarly[] = "gpu-sandbox-start-early";
+
 // Causes the GPU process to display a dialog on launch.
 const char kGpuStartupDialog[]              = "gpu-startup-dialog";
 
@@ -584,9 +572,6 @@ const char kIPCConnectionTimeout[]          = "ipc-connection-timeout";
 //   --isolate-origins=https://www.foo.com,https://www.bar.com
 const char kIsolateOrigins[] = "isolate-origins";
 
-// Chrome is running in Mash.
-const char kIsRunningInMash[] = "is-running-in-mash";
-
 // Disable latest shipping ECMAScript 6 features.
 const char kDisableJavaScriptHarmonyShipping[] =
     "disable-javascript-harmony-shipping";
@@ -605,11 +590,12 @@ const char kLogGpuControlListDecisions[]    = "log-gpu-control-list-decisions";
 const char kLoggingLevel[]                  = "log-level";
 
 // Overrides the default file name to use for general-purpose logging (does not
-// affect which events are logged). Currently supported only in app_shell.
-// TODO(crbug.com/760431): Make this work in chrome and content_shell too.
+// affect which events are logged).
 const char kLogFile[] = "log-file";
 
-// Enables saving net log events to a file and sets the file name to use.
+// Enables saving net log events to a file. If a value is given, it used as the
+// path the the file, otherwise the file is named netlog.json and placed in the
+// user data directory.
 const char kLogNetLog[]                     = "log-net-log";
 
 // Resizes of the main frame are caused by changing between landscape and
@@ -637,9 +623,6 @@ const char kMojoLocalStorage[]              = "mojo-local-storage";
 // Mutes audio sent to the audio device so it is not audible during
 // automated testing.
 const char kMuteAudio[]                     = "mute-audio";
-
-// Don't send HTTP-Referer headers.
-const char kNoReferrers[]                   = "no-referrers";
 
 // Disables the sandbox for all process types that are normally sandboxed.
 const char kNoSandbox[]                     = "no-sandbox";
@@ -748,6 +731,9 @@ const char kPullToRefresh[] = "pull-to-refresh";
 // Register Pepper plugins (see pepper_plugin_list.cc for its format).
 const char kRegisterPepperPlugins[]         = "register-pepper-plugins";
 
+// Enables remote debug over stdio pipes [in=3, out=4].
+const char kRemoteDebuggingPipe[] = "remote-debugging-pipe";
+
 // Enables remote debug over HTTP on the specified port.
 const char kRemoteDebuggingPort[]           = "remote-debugging-port";
 
@@ -855,21 +841,19 @@ const char kTouchEventFeatureDetectionDisabled[] = "disabled";
 // the platform default is used.
 const char kTouchTextSelectionStrategy[]    = "touch-selection-strategy";
 
-// Prioritizes the UI's command stream in the GPU process
-const char kUIPrioritizeInGpuProcess[] = "ui-prioritize-in-gpu-process";
-
 // Bypass the media stream infobar by selecting the default device for media
 // streams (e.g. WebRTC). Works with --use-fake-device-for-media-stream.
 const char kUseFakeUIForMediaStream[]     = "use-fake-ui-for-media-stream";
-
-// Texture target for CHROMIUM_image backed content textures.
-const char kContentImageTextureTarget[] = "content-image-texture-target";
 
 // Texture target for CHROMIUM_image backed video frame textures.
 const char kVideoImageTextureTarget[] = "video-image-texture-target";
 
 // Set when Chromium should use a mobile user agent.
 const char kUseMobileUserAgent[] = "use-mobile-user-agent";
+
+// Use the MockCertVerifier. This only works in test code.
+const char kUseMockCertVerifierForTesting[] =
+    "use-mock-cert-verifier-for-testing";
 
 // The contents of this flag are prepended to the utility process command line.
 // Useful values might be "valgrind" or "xterm -e gdb --args".
@@ -881,8 +865,6 @@ const char kUtilityProcess[]                = "utility";
 // When utility process is sandboxed, there is still access to one directory.
 // This flag specifies the directory that can be accessed.
 const char kUtilityProcessAllowedDir[]      = "utility-allowed-dir";
-
-const char kUtilityProcessRunningElevated[] = "utility-run-elevated";
 
 // Causes the utility process to display a dialog on launch.
 const char kUtilityStartupDialog[] = "utility-startup-dialog";
@@ -934,14 +916,20 @@ const char kEnforceWebRtcIPPermissionCheck[] =
 // handling policy is specified in Preferences.
 const char kForceWebRtcIPHandlingPolicy[] = "force-webrtc-ip-handling-policy";
 
+// Override the maximum framerate as can be specified in calls to getUserMedia.
+// This flag expects a value.  Example: --max-gum-fps=17.5
+const char kWebRtcMaxCaptureFramerate[] = "max-gum-fps";
+
+// Configure the maximum CPU time percentage of a single core that can be
+// consumed for desktop capturing. Default is 50. Set 100 to disable the
+// throttling of the capture.
+const char kWebRtcMaxCpuConsumptionPercentage[] =
+    "webrtc-max-cpu-consumption-percentage";
+
 // Renderer process parameter for WebRTC Stun probe trial to determine the
 // interval. Please see SetupStunProbeTrial in
 // chrome_browser_field_trials_desktop.cc for more detail.
 const char kWebRtcStunProbeTrialParameter[] = "webrtc-stun-probe-trial";
-
-// Override the maximum framerate as can be specified in calls to getUserMedia.
-// This flag expects a value.  Example: --max-gum-fps=17.5
-const char kWebRtcMaxCaptureFramerate[]     = "max-gum-fps";
 #endif
 
 #if defined(OS_ANDROID)
@@ -1001,10 +989,6 @@ const char kDisableAudioSupportForDesktopShare[] =
 #if defined(OS_CHROMEOS)
 // Disables panel fitting (used for mirror mode).
 const char kDisablePanelFitting[]           = "disable-panel-fitting";
-
-// Disables VA-API accelerated video encode.
-const char kDisableVaapiAcceleratedVideoEncode[] =
-    "disable-vaapi-accelerated-video-encode";
 #endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)

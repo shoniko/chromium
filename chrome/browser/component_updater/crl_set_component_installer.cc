@@ -11,7 +11,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "components/component_updater/component_installer.h"
@@ -24,9 +24,9 @@ namespace component_updater {
 
 namespace {
 
-// kPublicKeySHA256 is the SHA256 hash of the SubjectPublicKeyInfo of the key
-// that's used to sign generated CRL sets.
-static const uint8_t kPublicKeySHA256[32] = {
+// kCrlSetPublicKeySHA256 is the SHA256 hash of the SubjectPublicKeyInfo of the
+// key that's used to sign generated CRL sets.
+static const uint8_t kCrlSetPublicKeySHA256[32] = {
     0x75, 0xda, 0xf8, 0xcb, 0x77, 0x68, 0x40, 0x33, 0x65, 0x4c, 0x97,
     0xe5, 0xc5, 0x1b, 0xcd, 0x81, 0x7b, 0x1e, 0xeb, 0x11, 0x2c, 0xe1,
     0xa4, 0x33, 0x8c, 0xf5, 0x72, 0x5e, 0xed, 0xb8, 0x43, 0x97,
@@ -55,6 +55,7 @@ class CRLSetPolicy : public ComponentInstallerPolicy {
   update_client::CrxInstaller::Result OnCustomInstall(
       const base::DictionaryValue& manifest,
       const base::FilePath& install_dir) override;
+  void OnCustomUninstall() override;
   bool VerifyInstallation(const base::DictionaryValue& manifest,
                           const base::FilePath& install_dir) const override;
   void ComponentReady(const base::Version& version,
@@ -87,6 +88,8 @@ update_client::CrxInstaller::Result CRLSetPolicy::OnCustomInstall(
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
 
+void CRLSetPolicy::OnCustomUninstall() {}
+
 bool CRLSetPolicy::VerifyInstallation(const base::DictionaryValue& manifest,
                                       const base::FilePath& install_dir) const {
   return base::PathExists(install_dir.Append(FILE_PATH_LITERAL("crl-set")));
@@ -107,7 +110,8 @@ base::FilePath CRLSetPolicy::GetRelativeInstallDir() const {
 }
 
 void CRLSetPolicy::GetHash(std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kPublicKeySHA256), std::end(kPublicKeySHA256));
+  hash->assign(std::begin(kCrlSetPublicKeySHA256),
+               std::end(kCrlSetPublicKeySHA256));
 }
 
 std::string CRLSetPolicy::GetName() const {
@@ -127,10 +131,9 @@ std::vector<std::string> CRLSetPolicy::GetMimeTypes() const {
 
 void RegisterCRLSetComponent(ComponentUpdateService* cus,
                              const base::FilePath& user_data_dir) {
-  // |cus| will take ownership of |installer| during installer->Register(cus).
-  ComponentInstaller* installer =
-      new ComponentInstaller(base::MakeUnique<CRLSetPolicy>());
-  installer->Register(cus, base::Closure());
+  auto installer = base::MakeRefCounted<ComponentInstaller>(
+      std::make_unique<CRLSetPolicy>());
+  installer->Register(cus, base::OnceClosure());
 }
 
 }  // namespace component_updater

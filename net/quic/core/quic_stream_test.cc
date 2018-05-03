@@ -10,6 +10,7 @@
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/core/quic_write_blocked_list.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/platform/api/quic_arraysize.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_ptr_util.h"
@@ -20,21 +21,20 @@
 #include "net/quic/test_tools/quic_flow_controller_peer.h"
 #include "net/quic/test_tools/quic_session_peer.h"
 #include "net/quic/test_tools/quic_stream_peer.h"
+#include "net/quic/test_tools/quic_stream_sequencer_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock_mutant.h"
 
 using std::string;
+using testing::_;
 using testing::AnyNumber;
 using testing::AtLeast;
-using testing::CreateFunctor;
-using testing::DoAll;
 using testing::InSequence;
 using testing::Invoke;
+using testing::InvokeWithoutArgs;
 using testing::Return;
 using testing::StrictMock;
-using testing::WithArgs;
-using testing::_;
 
 namespace net {
 namespace test {
@@ -73,7 +73,7 @@ class QuicStreamTest : public QuicTestWithParam<bool> {
   QuicStreamTest()
       : initial_flow_control_window_bytes_(kMaxPacketSize),
         zero_(QuicTime::Delta::Zero()),
-        supported_versions_(AllSupportedTransportVersions()) {
+        supported_versions_(AllSupportedVersions()) {
     headers_[":host"] = "www.google.com";
     headers_[":path"] = "/index.hml";
     headers_[":scheme"] = "https";
@@ -139,7 +139,7 @@ class QuicStreamTest : public QuicTestWithParam<bool> {
 
   QuicConsumedData CloseStreamOnWriteError(QuicStream* /*stream*/,
                                            QuicStreamId id,
-                                           QuicIOVector /*iov*/,
+                                           size_t /*write_length*/,
                                            QuicStreamOffset /*offset*/,
                                            StreamSendingState /*state*/) {
     session_->CloseStream(id);
@@ -156,7 +156,7 @@ class QuicStreamTest : public QuicTestWithParam<bool> {
   QuicWriteBlockedList* write_blocked_list_;
   uint32_t initial_flow_control_window_bytes_;
   QuicTime::Delta zero_;
-  QuicTransportVersionVector supported_versions_;
+  ParsedQuicVersionVector supported_versions_;
   const QuicStreamId kTestStreamId = 5u;
 };
 
@@ -171,7 +171,7 @@ TEST_F(QuicStreamTest, WriteAllData) {
   connection_->SetMaxPacketLength(length);
 
   EXPECT_CALL(*session_, WritevData(stream_, kTestStreamId, _, _, _))
-      .WillOnce(Return(QuicConsumedData(kDataLen, true)));
+      .WillOnce(Invoke(&(MockQuicSession::ConsumeData)));
   stream_->WriteOrBufferData(kData1, false, nullptr);
   EXPECT_FALSE(HasWriteBlockedStreams());
 }
@@ -192,7 +192,9 @@ TEST_F(QuicStreamTest, BlockIfOnlySomeDataConsumed) {
   // Write some data and no fin.  If we consume some but not all of the data,
   // we should be write blocked a not all the data was consumed.
   EXPECT_CALL(*session_, WritevData(stream_, kTestStreamId, _, _, _))
-      .WillOnce(Return(QuicConsumedData(1, false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 1u, 0u, NO_FIN)));
   stream_->WriteOrBufferData(QuicStringPiece(kData1, 2), false, nullptr);
   ASSERT_EQ(1u, write_blocked_list_->NumBlockedStreams());
   EXPECT_EQ(1u, stream_->BufferedDataBytes());
@@ -206,7 +208,9 @@ TEST_F(QuicStreamTest, BlockIfFinNotConsumedWithData) {
   // (This should never actually happen as the fin should be sent out with the
   // last data)
   EXPECT_CALL(*session_, WritevData(stream_, kTestStreamId, _, _, _))
-      .WillOnce(Return(QuicConsumedData(2, false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 2u, 0u, NO_FIN)));
   stream_->WriteOrBufferData(QuicStringPiece(kData1, 2), true, nullptr);
   ASSERT_EQ(1u, write_blocked_list_->NumBlockedStreams());
 }
@@ -246,7 +250,9 @@ TEST_F(QuicStreamTest, WriteOrBufferData) {
   connection_->SetMaxPacketLength(length);
 
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(kDataLen - 1, false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), kDataLen - 1, 0u, NO_FIN)));
   stream_->WriteOrBufferData(kData1, false, nullptr);
   EXPECT_EQ(1u, stream_->BufferedDataBytes());
   EXPECT_TRUE(HasWriteBlockedStreams());
@@ -257,13 +263,31 @@ TEST_F(QuicStreamTest, WriteOrBufferData) {
   // Make sure we get the tail of the first write followed by the bytes_consumed
   InSequence s;
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(kDataLen - 1, false)));
+      .WillOnce(InvokeWithoutArgs(testing::CreateFunctor(
+          &(MockQuicSession::ConsumeData), stream_, stream_->id(), kDataLen - 1,
+          kDataLen - 1, NO_FIN)));
   stream_->OnCanWrite();
 
   // And finally the end of the bytes_consumed.
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(2, true)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 2u, 2 * kDataLen - 2, FIN)));
   stream_->OnCanWrite();
+}
+
+TEST_F(QuicStreamTest, WriteOrBufferDataReachStreamLimit) {
+  SetQuicReloadableFlag(quic_stream_too_long, true);
+  Initialize(kShouldProcessData);
+  string data("aaaaa");
+  QuicStreamPeer::SetStreamBytesWritten(kMaxStreamLength - data.length(),
+                                        stream_);
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(Invoke(&(MockQuicSession::ConsumeData)));
+  stream_->WriteOrBufferData(data, false, nullptr);
+  EXPECT_CALL(*connection_, CloseConnection(QUIC_STREAM_LENGTH_OVERFLOW, _, _));
+  EXPECT_DFATAL(stream_->WriteOrBufferData("a", false, nullptr),
+                "Write too many data via stream");
 }
 
 TEST_F(QuicStreamTest, ConnectionCloseAfterStreamClose) {
@@ -290,7 +314,9 @@ TEST_F(QuicStreamTest, RstAlwaysSentIfNoFinSent) {
 
   // Write some data, with no FIN.
   EXPECT_CALL(*session_, WritevData(stream_, kTestStreamId, _, _, _))
-      .WillOnce(Return(QuicConsumedData(1, false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 1u, 0u, NO_FIN)));
   stream_->WriteOrBufferData(QuicStringPiece(kData1, 1), false, nullptr);
   EXPECT_FALSE(fin_sent());
   EXPECT_FALSE(rst_sent());
@@ -313,7 +339,9 @@ TEST_F(QuicStreamTest, RstNotSentIfFinSent) {
 
   // Write some data, with FIN.
   EXPECT_CALL(*session_, WritevData(stream_, kTestStreamId, _, _, _))
-      .WillOnce(Return(QuicConsumedData(1, true)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 1u, 0u, FIN)));
   stream_->WriteOrBufferData(QuicStringPiece(kData1, 1), true, nullptr);
   EXPECT_TRUE(fin_sent());
   EXPECT_FALSE(rst_sent());
@@ -362,7 +390,8 @@ TEST_F(QuicStreamTest, StreamFlowControlMultipleWindowUpdates) {
       QuicFlowControllerPeer::SendWindowOffset(stream_->flow_controller()));
 
   // Check a single WINDOW_UPDATE results in correct offset.
-  QuicWindowUpdateFrame window_update_1(stream_->id(), 1234);
+  QuicWindowUpdateFrame window_update_1(kInvalidControlFrameId, stream_->id(),
+                                        1234);
   stream_->OnWindowUpdateFrame(window_update_1);
   EXPECT_EQ(
       window_update_1.byte_offset,
@@ -370,9 +399,12 @@ TEST_F(QuicStreamTest, StreamFlowControlMultipleWindowUpdates) {
 
   // Now send a few more WINDOW_UPDATES and make sure that only the largest is
   // remembered.
-  QuicWindowUpdateFrame window_update_2(stream_->id(), 1);
-  QuicWindowUpdateFrame window_update_3(stream_->id(), 9999);
-  QuicWindowUpdateFrame window_update_4(stream_->id(), 5678);
+  QuicWindowUpdateFrame window_update_2(kInvalidControlFrameId, stream_->id(),
+                                        1);
+  QuicWindowUpdateFrame window_update_3(kInvalidControlFrameId, stream_->id(),
+                                        9999);
+  QuicWindowUpdateFrame window_update_4(kInvalidControlFrameId, stream_->id(),
+                                        5678);
   stream_->OnWindowUpdateFrame(window_update_2);
   stream_->OnWindowUpdateFrame(window_update_3);
   stream_->OnWindowUpdateFrame(window_update_4);
@@ -446,9 +478,24 @@ TEST_F(QuicStreamTest, FinalByteOffsetFromRst) {
   Initialize(kShouldProcessData);
 
   EXPECT_FALSE(stream_->HasFinalReceivedByteOffset());
-  QuicRstStreamFrame rst_frame(stream_->id(), QUIC_STREAM_CANCELLED, 1234);
+  QuicRstStreamFrame rst_frame(kInvalidControlFrameId, stream_->id(),
+                               QUIC_STREAM_CANCELLED, 1234);
   stream_->OnStreamReset(rst_frame);
   EXPECT_TRUE(stream_->HasFinalReceivedByteOffset());
+}
+
+TEST_F(QuicStreamTest, InvalidFinalByteOffsetFromRst) {
+  Initialize(kShouldProcessData);
+
+  EXPECT_FALSE(stream_->HasFinalReceivedByteOffset());
+  QuicRstStreamFrame rst_frame(kInvalidControlFrameId, stream_->id(),
+                               QUIC_STREAM_CANCELLED, 0xFFFFFFFFFFFF);
+  // Stream should not accept the frame, and the connection should be closed.
+  EXPECT_CALL(*connection_,
+              CloseConnection(QUIC_FLOW_CONTROL_RECEIVED_TOO_MUCH_DATA, _, _));
+  stream_->OnStreamReset(rst_frame);
+  EXPECT_TRUE(stream_->HasFinalReceivedByteOffset());
+  stream_->OnClose();
 }
 
 TEST_F(QuicStreamTest, FinalByteOffsetFromZeroLengthStreamFrame) {
@@ -489,6 +536,49 @@ TEST_F(QuicStreamTest, FinalByteOffsetFromZeroLengthStreamFrame) {
       QuicFlowControllerPeer::ReceiveWindowOffset(session_->flow_controller()));
 }
 
+TEST_F(QuicStreamTest, OnStreamResetOffsetOverflow) {
+  SetQuicReloadableFlag(quic_stream_too_long, true);
+  Initialize(kShouldProcessData);
+  QuicRstStreamFrame rst_frame(kInvalidControlFrameId, stream_->id(),
+                               QUIC_STREAM_CANCELLED, kMaxStreamLength + 1);
+  EXPECT_CALL(*connection_, CloseConnection(QUIC_STREAM_LENGTH_OVERFLOW, _, _));
+  stream_->OnStreamReset(rst_frame);
+}
+
+TEST_F(QuicStreamTest, OnStreamFrameUpperLimit) {
+  SetQuicReloadableFlag(quic_stream_too_long, true);
+  Initialize(kShouldProcessData);
+
+  // Modify receive window offset and sequencer buffer total_bytes_read_ to
+  // avoid flow control violation.
+  QuicFlowControllerPeer::SetReceiveWindowOffset(stream_->flow_controller(),
+                                                 kMaxStreamLength + 5u);
+  QuicFlowControllerPeer::SetReceiveWindowOffset(session_->flow_controller(),
+                                                 kMaxStreamLength + 5u);
+  QuicStreamSequencerPeer::SetFrameBufferTotalBytesRead(
+      QuicStreamPeer::sequencer(stream_), kMaxStreamLength - 10u);
+
+  EXPECT_CALL(*connection_, CloseConnection(QUIC_STREAM_LENGTH_OVERFLOW, _, _))
+      .Times(0);
+  QuicStreamFrame stream_frame(stream_->id(), false, kMaxStreamLength - 1,
+                               QuicStringPiece("."));
+  stream_->OnStreamFrame(stream_frame);
+  QuicStreamFrame stream_frame2(stream_->id(), true, kMaxStreamLength,
+                                QuicStringPiece(""));
+  stream_->OnStreamFrame(stream_frame2);
+}
+
+TEST_F(QuicStreamTest, StreamTooLong) {
+  SetQuicReloadableFlag(quic_stream_too_long, true);
+  Initialize(kShouldProcessData);
+  EXPECT_CALL(*connection_, CloseConnection(QUIC_STREAM_LENGTH_OVERFLOW, _, _))
+      .Times(1);
+  QuicStreamFrame stream_frame(stream_->id(), false, kMaxStreamLength,
+                               QuicStringPiece("."));
+  EXPECT_DFATAL(stream_->OnStreamFrame(stream_frame),
+                "Receive stream frame reaches max stream length");
+}
+
 TEST_F(QuicStreamTest, SetDrainingIncomingOutgoing) {
   // Don't have incoming data consumed.
   Initialize(kShouldNotProcessData);
@@ -506,7 +596,9 @@ TEST_F(QuicStreamTest, SetDrainingIncomingOutgoing) {
 
   // Outgoing data with FIN.
   EXPECT_CALL(*session_, WritevData(stream_, kTestStreamId, _, _, _))
-      .WillOnce(Return(QuicConsumedData(2, true)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 2u, 0u, FIN)));
   stream_->WriteOrBufferData(QuicStringPiece(kData1, 2), true, nullptr);
   EXPECT_TRUE(stream_->write_side_closed());
 
@@ -521,7 +613,9 @@ TEST_F(QuicStreamTest, SetDrainingOutgoingIncoming) {
 
   // Outgoing data with FIN.
   EXPECT_CALL(*session_, WritevData(stream_, kTestStreamId, _, _, _))
-      .WillOnce(Return(QuicConsumedData(2, true)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 2u, 0u, FIN)));
   stream_->WriteOrBufferData(QuicStringPiece(kData1, 2), true, nullptr);
   EXPECT_TRUE(stream_->write_side_closed());
 
@@ -548,7 +642,7 @@ TEST_F(QuicStreamTest, EarlyResponseFinHandling) {
   Initialize(kShouldProcessData);
   EXPECT_CALL(*connection_, CloseConnection(_, _, _)).Times(0);
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillRepeatedly(Invoke(MockQuicSession::ConsumeAllData));
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
 
   // Receive data for the request.
   QuicStreamFrame frame1(stream_->id(), false, 0, QuicStringPiece("Start"));
@@ -572,7 +666,7 @@ TEST_F(QuicStreamTest, StreamWaitsForAcks) {
       new StrictMock<MockAckListener>);
   stream_->set_ack_listener(mock_ack_listener);
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillRepeatedly(Invoke(MockQuicSession::ConsumeAllData));
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   // Stream is not waiting for acks initially.
   EXPECT_FALSE(stream_->IsWaitingForAcks());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
@@ -581,9 +675,8 @@ TEST_F(QuicStreamTest, StreamWaitsForAcks) {
   stream_->WriteOrBufferData(kData1, false, nullptr);
   EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
   EXPECT_TRUE(stream_->IsWaitingForAcks());
-  QuicStreamFrame frame1(stream_->id(), false, 0, kData1);
-  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(frame1.data_length, _));
-  stream_->OnStreamFrameAcked(frame1, QuicTime::Delta::Zero());
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(9, _));
+  stream_->OnStreamFrameAcked(0, 9, false, QuicTime::Delta::Zero());
   // Stream is not waiting for acks as all sent data is acked.
   EXPECT_FALSE(stream_->IsWaitingForAcks());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
@@ -598,21 +691,19 @@ TEST_F(QuicStreamTest, StreamWaitsForAcks) {
   EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
 
   // kData2 is retransmitted.
-  QuicStreamFrame frame2(stream_->id(), false, 9, kData2);
-  EXPECT_CALL(*mock_ack_listener, OnPacketRetransmitted(frame2.data_length));
-  stream_->OnStreamFrameRetransmitted(frame2);
+  EXPECT_CALL(*mock_ack_listener, OnPacketRetransmitted(9));
+  stream_->OnStreamFrameRetransmitted(9, 9, false);
 
   // kData2 is acked.
-  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(frame2.data_length, _));
-  stream_->OnStreamFrameAcked(frame2, QuicTime::Delta::Zero());
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(9, _));
+  stream_->OnStreamFrameAcked(9, 9, false, QuicTime::Delta::Zero());
   // Stream is waiting for acks as FIN is not acked.
   EXPECT_TRUE(stream_->IsWaitingForAcks());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 
   // FIN is acked.
-  QuicStreamFrame frame3(stream_->id(), true, 18, "");
-  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(frame3.data_length, _));
-  stream_->OnStreamFrameAcked(frame3, QuicTime::Delta::Zero());
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(0, _));
+  stream_->OnStreamFrameAcked(18, 0, true, QuicTime::Delta::Zero());
   EXPECT_FALSE(stream_->IsWaitingForAcks());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 }
@@ -620,7 +711,7 @@ TEST_F(QuicStreamTest, StreamWaitsForAcks) {
 TEST_F(QuicStreamTest, StreamDataGetAckedOutOfOrder) {
   Initialize(kShouldProcessData);
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillRepeatedly(Invoke(MockQuicSession::ConsumeAllData));
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   // Send data.
   stream_->WriteOrBufferData(kData1, false, nullptr);
   stream_->WriteOrBufferData(kData1, false, nullptr);
@@ -629,31 +720,26 @@ TEST_F(QuicStreamTest, StreamDataGetAckedOutOfOrder) {
   EXPECT_EQ(3u, QuicStreamPeer::SendBuffer(stream_).size());
   EXPECT_TRUE(stream_->IsWaitingForAcks());
 
-  QuicStreamFrame frame1(stream_->id(), false, 0, kData1);
-  QuicStreamFrame frame2(stream_->id(), false, 9, kData1);
-  QuicStreamFrame frame3(stream_->id(), false, 18, kData1);
-  QuicStreamFrame frame4(stream_->id(), true, 27, "");
-  stream_->OnStreamFrameAcked(frame2, QuicTime::Delta::Zero());
+  stream_->OnStreamFrameAcked(9, 9, false, QuicTime::Delta::Zero());
   EXPECT_EQ(3u, QuicStreamPeer::SendBuffer(stream_).size());
-  stream_->OnStreamFrameAcked(frame3, QuicTime::Delta::Zero());
+  stream_->OnStreamFrameAcked(18, 9, false, QuicTime::Delta::Zero());
   EXPECT_EQ(3u, QuicStreamPeer::SendBuffer(stream_).size());
-  stream_->OnStreamFrameDiscarded(frame1);
+  stream_->OnStreamFrameAcked(0, 9, false, QuicTime::Delta::Zero());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
   // FIN is not acked yet.
   EXPECT_TRUE(stream_->IsWaitingForAcks());
-  stream_->OnStreamFrameAcked(frame4, QuicTime::Delta::Zero());
+  stream_->OnStreamFrameAcked(27, 0, true, QuicTime::Delta::Zero());
   EXPECT_FALSE(stream_->IsWaitingForAcks());
 }
 
 TEST_F(QuicStreamTest, CancelStream) {
   Initialize(kShouldProcessData);
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillRepeatedly(Invoke(MockQuicSession::ConsumeAllData));
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   EXPECT_FALSE(stream_->IsWaitingForAcks());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 
   stream_->WriteOrBufferData(kData1, false, nullptr);
-  QuicStreamFrame frame(stream_->id(), 0, false, kData1);
   EXPECT_TRUE(stream_->IsWaitingForAcks());
   EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
   // Cancel stream.
@@ -664,40 +750,38 @@ TEST_F(QuicStreamTest, CancelStream) {
   EXPECT_CALL(*session_,
               SendRstStream(stream_->id(), QUIC_STREAM_CANCELLED, 9));
   stream_->Reset(QUIC_STREAM_CANCELLED);
-  stream_->OnStreamFrameDiscarded(frame);
+  EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
   // Stream stops waiting for acks as data is not going to be retransmitted.
   EXPECT_FALSE(stream_->IsWaitingForAcks());
-  EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 }
 
 TEST_F(QuicStreamTest, RstFrameReceivedStreamNotFinishSending) {
   Initialize(kShouldProcessData);
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillRepeatedly(Invoke(MockQuicSession::ConsumeAllData));
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   EXPECT_FALSE(stream_->IsWaitingForAcks());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 
   stream_->WriteOrBufferData(kData1, false, nullptr);
-  QuicStreamFrame frame(stream_->id(), 0, false, kData1);
   EXPECT_TRUE(stream_->IsWaitingForAcks());
   EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
 
   // RST_STREAM received.
-  QuicRstStreamFrame rst_frame(stream_->id(), QUIC_STREAM_CANCELLED, 9);
+  QuicRstStreamFrame rst_frame(kInvalidControlFrameId, stream_->id(),
+                               QUIC_STREAM_CANCELLED, 9);
   EXPECT_CALL(*session_,
               SendRstStream(stream_->id(), QUIC_RST_ACKNOWLEDGEMENT, 9));
   stream_->OnStreamReset(rst_frame);
-  stream_->OnStreamFrameDiscarded(frame);
+  EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
   // Stream stops waiting for acks as it does not finish sending and rst is
   // sent.
   EXPECT_FALSE(stream_->IsWaitingForAcks());
-  EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 }
 
 TEST_F(QuicStreamTest, RstFrameReceivedStreamFinishSending) {
   Initialize(kShouldProcessData);
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillRepeatedly(Invoke(MockQuicSession::ConsumeAllData));
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   EXPECT_FALSE(stream_->IsWaitingForAcks());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 
@@ -706,7 +790,8 @@ TEST_F(QuicStreamTest, RstFrameReceivedStreamFinishSending) {
 
   // RST_STREAM received.
   EXPECT_CALL(*session_, SendRstStream(_, _, _)).Times(0);
-  QuicRstStreamFrame rst_frame(stream_->id(), QUIC_STREAM_CANCELLED, 1234);
+  QuicRstStreamFrame rst_frame(kInvalidControlFrameId, stream_->id(),
+                               QUIC_STREAM_CANCELLED, 1234);
   stream_->OnStreamReset(rst_frame);
   // Stream stops waiting for acks as it has unacked data.
   EXPECT_TRUE(stream_->IsWaitingForAcks());
@@ -716,22 +801,20 @@ TEST_F(QuicStreamTest, RstFrameReceivedStreamFinishSending) {
 TEST_F(QuicStreamTest, ConnectionClosed) {
   Initialize(kShouldProcessData);
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillRepeatedly(Invoke(MockQuicSession::ConsumeAllData));
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
   EXPECT_FALSE(stream_->IsWaitingForAcks());
   EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 
   stream_->WriteOrBufferData(kData1, false, nullptr);
-  QuicStreamFrame frame(stream_->id(), 0, false, kData1);
   EXPECT_TRUE(stream_->IsWaitingForAcks());
 
   EXPECT_CALL(*session_,
               SendRstStream(stream_->id(), QUIC_RST_ACKNOWLEDGEMENT, 9));
   stream_->OnConnectionClosed(QUIC_INTERNAL_ERROR,
                               ConnectionCloseSource::FROM_SELF);
-  stream_->OnStreamFrameDiscarded(frame);
+  EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
   // Stream stops waiting for acks as connection is going to close.
   EXPECT_FALSE(stream_->IsWaitingForAcks());
-  EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
 }
 
 TEST_F(QuicStreamTest, WriteBufferedData) {
@@ -746,7 +829,9 @@ TEST_F(QuicStreamTest, WriteBufferedData) {
 
   // Testing WriteOrBufferData.
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(100, false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 100u, 0u, NO_FIN)));
   stream_->WriteOrBufferData(data, false, nullptr);
   stream_->WriteOrBufferData(data, false, nullptr);
   stream_->WriteOrBufferData(data, false, nullptr);
@@ -754,7 +839,9 @@ TEST_F(QuicStreamTest, WriteBufferedData) {
   EXPECT_EQ(3 * data.length() - 100, stream_->BufferedDataBytes());
 
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(100, false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 100, 100u, NO_FIN)));
   // Buffered data size > threshold, do not ask upper layer for more data.
   EXPECT_CALL(*stream_, OnCanWriteNewData()).Times(0);
   stream_->OnCanWrite();
@@ -762,11 +849,12 @@ TEST_F(QuicStreamTest, WriteBufferedData) {
   EXPECT_FALSE(stream_->CanWriteNewData());
 
   // Send buffered data to make buffered data size < threshold.
+  size_t data_to_write = 3 * data.length() - 200 -
+                         GetQuicFlag(FLAGS_quic_buffered_data_threshold) + 1;
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(
-          3 * data.length() - 200 -
-              GetQuicFlag(FLAGS_quic_buffered_data_threshold) + 1,
-          false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), data_to_write, 200u, NO_FIN)));
   // Buffered data size < threshold, ask upper layer for more data.
   EXPECT_CALL(*stream_, OnCanWriteNewData()).Times(1);
   stream_->OnCanWrite();
@@ -776,7 +864,7 @@ TEST_F(QuicStreamTest, WriteBufferedData) {
 
   // Flush all buffered data.
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Invoke(MockQuicSession::ConsumeAllData));
+      .WillOnce(Invoke(MockQuicSession::ConsumeData));
   EXPECT_CALL(*stream_, OnCanWriteNewData()).Times(1);
   stream_->OnCanWrite();
   EXPECT_EQ(0u, stream_->BufferedDataBytes());
@@ -802,9 +890,13 @@ TEST_F(QuicStreamTest, WriteBufferedData) {
   EXPECT_FALSE(consumed.fin_consumed);
   EXPECT_EQ(data.length(), stream_->BufferedDataBytes());
 
+  data_to_write =
+      data.length() - GetQuicFlag(FLAGS_quic_buffered_data_threshold) + 1;
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(
-          data.length() - FLAGS_quic_buffered_data_threshold + 1, false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), data_to_write, 0u, NO_FIN)));
+
   EXPECT_CALL(*stream_, OnCanWriteNewData()).Times(1);
   stream_->OnCanWrite();
   EXPECT_EQ(GetQuicFlag(FLAGS_quic_buffered_data_threshold) - 1,
@@ -821,6 +913,23 @@ TEST_F(QuicStreamTest, WriteBufferedData) {
   EXPECT_FALSE(stream_->CanWriteNewData());
 }
 
+TEST_F(QuicStreamTest, WritevDataReachStreamLimit) {
+  SetQuicReloadableFlag(quic_stream_too_long, true);
+  Initialize(kShouldProcessData);
+  string data("aaaaa");
+  QuicStreamPeer::SetStreamBytesWritten(kMaxStreamLength - data.length(),
+                                        stream_);
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(Invoke(&(MockQuicSession::ConsumeData)));
+  struct iovec iov = {const_cast<char*>(data.data()), 5u};
+  QuicConsumedData consumed = stream_->WritevData(&iov, 1u, false);
+  EXPECT_EQ(data.length(), consumed.bytes_consumed);
+  struct iovec iov2 = {const_cast<char*>(data.data()), 1u};
+  EXPECT_CALL(*connection_, CloseConnection(QUIC_STREAM_LENGTH_OVERFLOW, _, _));
+  EXPECT_DFATAL(stream_->WritevData(&iov2, 1u, false),
+                "Write too many data via stream");
+}
+
 TEST_F(QuicStreamTest, WriteMemSlices) {
   // Set buffered data low water mark to be 100.
   SetQuicFlag(&FLAGS_quic_buffered_data_threshold, 100);
@@ -833,20 +942,22 @@ TEST_F(QuicStreamTest, WriteMemSlices) {
   }
   char data[1024];
   std::vector<std::pair<char*, int>> buffers;
-  buffers.push_back(std::make_pair(data, arraysize(data)));
-  buffers.push_back(std::make_pair(data, arraysize(data)));
+  buffers.push_back(std::make_pair(data, QUIC_ARRAYSIZE(data)));
+  buffers.push_back(std::make_pair(data, QUIC_ARRAYSIZE(data)));
   QuicTestMemSliceVector vector1(buffers);
   QuicTestMemSliceVector vector2(buffers);
   QuicMemSliceSpan span1 = vector1.span();
   QuicMemSliceSpan span2 = vector2.span();
 
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(100, false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 100u, 0u, NO_FIN)));
   // There is no buffered data before, all data should be consumed.
   QuicConsumedData consumed = stream_->WriteMemSlices(span1, false);
   EXPECT_EQ(2048u, consumed.bytes_consumed);
   EXPECT_FALSE(consumed.fin_consumed);
-  EXPECT_EQ(2 * arraysize(data) - 100, stream_->BufferedDataBytes());
+  EXPECT_EQ(2 * QUIC_ARRAYSIZE(data) - 100, stream_->BufferedDataBytes());
   EXPECT_FALSE(stream_->fin_buffered());
 
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _)).Times(0);
@@ -854,14 +965,15 @@ TEST_F(QuicStreamTest, WriteMemSlices) {
   consumed = stream_->WriteMemSlices(span2, true);
   EXPECT_EQ(0u, consumed.bytes_consumed);
   EXPECT_FALSE(consumed.fin_consumed);
-  EXPECT_EQ(2 * arraysize(data) - 100, stream_->BufferedDataBytes());
+  EXPECT_EQ(2 * QUIC_ARRAYSIZE(data) - 100, stream_->BufferedDataBytes());
   EXPECT_FALSE(stream_->fin_buffered());
 
+  size_t data_to_write = 2 * QUIC_ARRAYSIZE(data) - 100 -
+                         GetQuicFlag(FLAGS_quic_buffered_data_threshold) + 1;
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Return(QuicConsumedData(
-          2 * arraysize(data) - 100 -
-              GetQuicFlag(FLAGS_quic_buffered_data_threshold) + 1,
-          false)));
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), data_to_write, 100u, NO_FIN)));
   EXPECT_CALL(*stream_, OnCanWriteNewData()).Times(1);
   stream_->OnCanWrite();
   EXPECT_EQ(GetQuicFlag(FLAGS_quic_buffered_data_threshold) - 1,
@@ -871,18 +983,186 @@ TEST_F(QuicStreamTest, WriteMemSlices) {
   consumed = stream_->WriteMemSlices(span2, true);
   EXPECT_EQ(2048u, consumed.bytes_consumed);
   EXPECT_TRUE(consumed.fin_consumed);
-  EXPECT_EQ(
-      2 * arraysize(data) + GetQuicFlag(FLAGS_quic_buffered_data_threshold) - 1,
-      stream_->BufferedDataBytes());
+  EXPECT_EQ(2 * QUIC_ARRAYSIZE(data) +
+                GetQuicFlag(FLAGS_quic_buffered_data_threshold) - 1,
+            stream_->BufferedDataBytes());
   EXPECT_TRUE(stream_->fin_buffered());
 
   // Flush all buffered data.
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
-      .WillOnce(Invoke(MockQuicSession::ConsumeAllData));
+      .WillOnce(Invoke(MockQuicSession::ConsumeData));
   stream_->OnCanWrite();
   EXPECT_CALL(*stream_, OnCanWriteNewData()).Times(0);
   EXPECT_FALSE(stream_->HasBufferedData());
   EXPECT_TRUE(stream_->write_side_closed());
+}
+
+TEST_F(QuicStreamTest, WriteMemSlicesReachStreamLimit) {
+  SetQuicReloadableFlag(quic_stream_too_long, true);
+  Initialize(kShouldProcessData);
+  if (!session_->can_use_slices()) {
+    return;
+  }
+  QuicStreamPeer::SetStreamBytesWritten(kMaxStreamLength - 5u, stream_);
+  char data[5];
+  std::vector<std::pair<char*, int>> buffers;
+  buffers.push_back(std::make_pair(data, QUIC_ARRAYSIZE(data)));
+  QuicTestMemSliceVector vector1(buffers);
+  QuicMemSliceSpan span1 = vector1.span();
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 5u, 0u, NO_FIN)));
+  // There is no buffered data before, all data should be consumed.
+  QuicConsumedData consumed = stream_->WriteMemSlices(span1, false);
+  EXPECT_EQ(5u, consumed.bytes_consumed);
+
+  std::vector<std::pair<char*, int>> buffers2;
+  buffers2.push_back(std::make_pair(data, 1u));
+  QuicTestMemSliceVector vector2(buffers);
+  QuicMemSliceSpan span2 = vector2.span();
+  EXPECT_CALL(*connection_, CloseConnection(QUIC_STREAM_LENGTH_OVERFLOW, _, _));
+  EXPECT_DFATAL(stream_->WriteMemSlices(span2, false),
+                "Write too many data via stream");
+}
+
+TEST_F(QuicStreamTest, StreamDataGetAckedMultipleTimes) {
+  SetQuicReloadableFlag(quic_allow_multiple_acks_for_data2, true);
+  Initialize(kShouldProcessData);
+  QuicReferenceCountedPointer<MockAckListener> mock_ack_listener(
+      new StrictMock<MockAckListener>);
+  stream_->set_ack_listener(mock_ack_listener);
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
+  // Send [0, 27) and fin.
+  stream_->WriteOrBufferData(kData1, false, nullptr);
+  stream_->WriteOrBufferData(kData1, false, nullptr);
+  stream_->WriteOrBufferData(kData1, true, nullptr);
+  EXPECT_EQ(3u, QuicStreamPeer::SendBuffer(stream_).size());
+  EXPECT_TRUE(stream_->IsWaitingForAcks());
+
+  // Ack [0, 9), [5, 22) and [18, 26)
+  // Verify [0, 9) 9 bytes are acked.
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(9, _));
+  stream_->OnStreamFrameAcked(0, 9, false, QuicTime::Delta::Zero());
+  EXPECT_EQ(2u, QuicStreamPeer::SendBuffer(stream_).size());
+  // Verify [9, 22) 13 bytes are acked.
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(13, _));
+  stream_->OnStreamFrameAcked(5, 17, false, QuicTime::Delta::Zero());
+  EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
+  // Verify [22, 26) 4 bytes are acked.
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(4, _));
+  stream_->OnStreamFrameAcked(18, 8, false, QuicTime::Delta::Zero());
+  EXPECT_EQ(1u, QuicStreamPeer::SendBuffer(stream_).size());
+  EXPECT_TRUE(stream_->IsWaitingForAcks());
+
+  // Ack [0, 27).
+  // Verify [26, 27) 1 byte is acked.
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(1, _));
+  stream_->OnStreamFrameAcked(26, 1, false, QuicTime::Delta::Zero());
+  EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
+  EXPECT_TRUE(stream_->IsWaitingForAcks());
+
+  // Ack Fin. Verify OnPacketAcked is called.
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(0, _));
+  stream_->OnStreamFrameAcked(27, 0, true, QuicTime::Delta::Zero());
+  EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
+  EXPECT_FALSE(stream_->IsWaitingForAcks());
+
+  // Ack [10, 27) and fin.
+  // No new data is acked, verify OnPacketAcked is not called.
+  EXPECT_CALL(*mock_ack_listener, OnPacketAcked(_, _)).Times(0);
+  stream_->OnStreamFrameAcked(10, 17, true, QuicTime::Delta::Zero());
+  EXPECT_EQ(0u, QuicStreamPeer::SendBuffer(stream_).size());
+  EXPECT_FALSE(stream_->IsWaitingForAcks());
+}
+
+TEST_F(QuicStreamTest, OnStreamFrameLost) {
+  if (!FLAGS_quic_reloadable_flag_quic_allow_multiple_acks_for_data2) {
+    return;
+  }
+  Initialize(kShouldProcessData);
+
+  // Send [0, 9).
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(Invoke(MockQuicSession::ConsumeData));
+  stream_->WriteOrBufferData(kData1, false, nullptr);
+  EXPECT_FALSE(stream_->HasBufferedData());
+
+  // Try to send [9, 27), but connection is blocked.
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(Return(QuicConsumedData(0, false)));
+  stream_->WriteOrBufferData(kData2, false, nullptr);
+  stream_->WriteOrBufferData(kData2, false, nullptr);
+  EXPECT_TRUE(stream_->HasBufferedData());
+  EXPECT_FALSE(stream_->HasPendingRetransmission());
+
+  // Lost [0, 9). When stream gets a chance to write, only lost data is
+  // transmitted.
+  stream_->OnStreamFrameLost(0, 9, false);
+  EXPECT_TRUE(stream_->HasPendingRetransmission());
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(Invoke(MockQuicSession::ConsumeData));
+  stream_->OnCanWrite();
+  EXPECT_FALSE(stream_->HasPendingRetransmission());
+  EXPECT_TRUE(stream_->HasBufferedData());
+
+  // This OnCanWrite causes [9, 27) to be sent.
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(Invoke(MockQuicSession::ConsumeData));
+  stream_->OnCanWrite();
+  EXPECT_FALSE(stream_->HasBufferedData());
+
+  // Send a fin only frame.
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(Invoke(MockQuicSession::ConsumeData));
+  stream_->WriteOrBufferData("", true, nullptr);
+
+  // Lost [9, 27) and fin.
+  stream_->OnStreamFrameLost(9, 18, false);
+  stream_->OnStreamFrameLost(27, 0, true);
+  EXPECT_TRUE(stream_->HasPendingRetransmission());
+
+  // Ack [9, 18).
+  stream_->OnStreamFrameAcked(9, 9, false, QuicTime::Delta::Zero());
+  EXPECT_TRUE(stream_->HasPendingRetransmission());
+  // This OnCanWrite causes [18, 27) and fin to be retransmitted. Verify fin can
+  // be bundled with data.
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 9, 18u, FIN)));
+  stream_->OnCanWrite();
+  EXPECT_FALSE(stream_->HasPendingRetransmission());
+  // Lost [9, 18) again, but it is not considered as lost because kData2
+  // has been acked.
+  stream_->OnStreamFrameLost(9, 9, false);
+  EXPECT_FALSE(stream_->HasPendingRetransmission());
+}
+
+TEST_F(QuicStreamTest, CannotBundleLostFin) {
+  Initialize(kShouldProcessData);
+
+  // Send [0, 18) and fin.
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillRepeatedly(Invoke(MockQuicSession::ConsumeData));
+  stream_->WriteOrBufferData(kData1, false, nullptr);
+  stream_->WriteOrBufferData(kData2, true, nullptr);
+
+  // Lost [0, 9) and fin.
+  stream_->OnStreamFrameLost(0, 9, false);
+  stream_->OnStreamFrameLost(18, 0, true);
+
+  // Retransmit lost data. Verify [0, 9) and fin are retransmitted in two
+  // frames.
+  InSequence s;
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(InvokeWithoutArgs(
+          testing::CreateFunctor(&(MockQuicSession::ConsumeData), stream_,
+                                 stream_->id(), 9, 0u, NO_FIN)));
+  EXPECT_CALL(*session_, WritevData(_, _, _, _, _))
+      .WillOnce(Return(QuicConsumedData(0, true)));
+  stream_->OnCanWrite();
 }
 
 }  // namespace

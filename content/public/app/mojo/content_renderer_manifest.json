@@ -5,7 +5,11 @@
     "service_manager:connector": {
       "provides": {
         "browser": [
+          "blink::mojom::OomIntervention",
+          "blink::mojom::WebDatabase",
+          "content::mojom::AppCacheFrontend",
           "content::mojom::Child",
+          "content::mojom::ChildControl",
           "content::mojom::ChildHistogramFetcher",
           "content::mojom::ChildHistogramFetcherFactory",
           "content::mojom::EmbeddedWorkerInstanceClient",
@@ -13,7 +17,6 @@
           "content::mojom::FrameFactory",
           "content::mojom::RenderWidgetWindowTreeClientFactory",
           "content::mojom::SharedWorkerFactory",
-          "content::mojom::WebDatabase",
           "IPC::mojom::ChannelBootstrap",
           "visitedlink::mojom::VisitedLinkNotificationSink",
           "web_cache::mojom::WebCache"
@@ -24,11 +27,15 @@
       },
       "requires": {
         "*": [ "app" ],
-        "content_browser": [ "renderer", "url_keyed_metrics" ],
+        "content_browser": [
+          "dwrite_font_proxy",
+          "field_trials",
+          "renderer"
+        ],
+        "metrics": [ "url_keyed_metrics" ],
         "device": [
           "device:power_monitor",
           "device:screen_orientation",
-          "device:sensors",
           "device:time_zone_monitor"
         ],
         "ui": [
@@ -44,12 +51,14 @@
           "blink::mojom::EngagementClient",
           "blink::mojom::InstallationService",
           "blink::mojom::ManifestManager",
+          "blink::mojom::MediaDevicesListener",
           "blink::mojom::TextSuggestionBackend",
           "content::mojom::ImageDownloader",
           "content::mojom::FrameInputHandler",
+          "content::mojom::FullscreenVideoElementHandler",
           "content::mojom::MediaStreamDispatcher",
           "content::mojom::Widget",
-          "mojom::MediaDevicesListener"
+          "viz::mojom::InputTargetClient"
         ]
       },
       "requires": {

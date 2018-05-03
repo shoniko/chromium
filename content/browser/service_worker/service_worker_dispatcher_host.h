@@ -17,11 +17,12 @@
 #include "base/strings/string16.h"
 #include "content/browser/service_worker/service_worker_registration_status.h"
 #include "content/common/service_worker/service_worker.mojom.h"
+#include "content/common/service_worker/service_worker_event_dispatcher.mojom.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/browser_associated_interface.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "mojo/public/cpp/bindings/strong_associated_binding_set.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 
 namespace blink {
 class MessagePortChannel;
@@ -38,10 +39,17 @@ class ServiceWorkerContextCore;
 class ServiceWorkerContextWrapper;
 class ServiceWorkerHandle;
 class ServiceWorkerProviderHost;
-class ServiceWorkerRegistration;
-class ServiceWorkerRegistrationHandle;
 class ServiceWorkerVersion;
-struct ServiceWorkerVersionAttributes;
+
+namespace service_worker_dispatcher_host_unittest {
+class ServiceWorkerDispatcherHostTest;
+class TestingServiceWorkerDispatcherHost;
+FORWARD_DECLARE_TEST(ServiceWorkerDispatcherHostTest,
+                     ProviderCreatedAndDestroyed);
+FORWARD_DECLARE_TEST(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash);
+FORWARD_DECLARE_TEST(BackgroundSyncManagerTest,
+                     RegisterWithoutLiveSWRegistration);
+}  // namespace service_worker_dispatcher_host_unittest
 
 // ServiceWorkerDispatcherHost is the browser-side endpoint for several IPC
 // messages for service workers. There is a 1:1 correspondence between
@@ -90,33 +98,12 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
   // be destroyed.
   bool Send(IPC::Message* message) override;
 
-  // Following methods are virtual only for testing.
+  // This method is virtual only for testing.
   virtual void RegisterServiceWorkerHandle(
       std::unique_ptr<ServiceWorkerHandle> handle);
-  virtual void RegisterServiceWorkerRegistrationHandle(
-      ServiceWorkerRegistrationHandle* handle);
-  virtual void UnregisterServiceWorkerRegistrationHandle(int handle_id);
 
   ServiceWorkerHandle* FindServiceWorkerHandle(int provider_id,
                                                int64_t version_id);
-
-  // Gets or creates the registration and version handles appropriate for
-  // representing |registration| inside of |provider_host|. Sets |out_info| and
-  // |out_attrs| accordingly for these handles.
-  void GetRegistrationObjectInfoAndVersionAttributes(
-      base::WeakPtr<ServiceWorkerProviderHost> provider_host,
-      ServiceWorkerRegistration* registration,
-      blink::mojom::ServiceWorkerRegistrationObjectInfoPtr* out_info,
-      ServiceWorkerVersionAttributes* out_attrs);
-
-  // Returns an object info representing |registration|. The object info holds a
-  // Mojo connection to the ServiceWorkerRegistrationHandle for the
-  // |registration| to ensure the handle stays alive while the object info is
-  // alive. A new handle is created if one does not already exist.
-  blink::mojom::ServiceWorkerRegistrationObjectInfoPtr
-  CreateRegistrationObjectInfo(
-      base::WeakPtr<ServiceWorkerProviderHost> provider_host,
-      ServiceWorkerRegistration* registration);
 
   ResourceContext* resource_context() { return resource_context_; }
 
@@ -128,16 +115,22 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
  private:
   friend class BrowserThread;
   friend class base::DeleteHelper<ServiceWorkerDispatcherHost>;
-  friend class ServiceWorkerDispatcherHostTest;
-  friend class TestingServiceWorkerDispatcherHost;
-  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerDispatcherHostTest,
-                           ProviderCreatedAndDestroyed);
-  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerDispatcherHostTest,
-                           CleanupOnRendererCrash);
-  FRIEND_TEST_ALL_PREFIXES(BackgroundSyncManagerTest,
-                           RegisterWithoutLiveSWRegistration);
+  friend class service_worker_dispatcher_host_unittest::
+      ServiceWorkerDispatcherHostTest;
+  friend class service_worker_dispatcher_host_unittest::
+      TestingServiceWorkerDispatcherHost;
+  FRIEND_TEST_ALL_PREFIXES(
+      service_worker_dispatcher_host_unittest::ServiceWorkerDispatcherHostTest,
+      ProviderCreatedAndDestroyed);
+  FRIEND_TEST_ALL_PREFIXES(
+      service_worker_dispatcher_host_unittest::ServiceWorkerDispatcherHostTest,
+      CleanupOnRendererCrash);
+  FRIEND_TEST_ALL_PREFIXES(
+      service_worker_dispatcher_host_unittest::BackgroundSyncManagerTest,
+      RegisterWithoutLiveSWRegistration);
 
-  using StatusCallback = base::Callback<void(ServiceWorkerStatusCode status)>;
+  using StatusCallback =
+      base::OnceCallback<void(ServiceWorkerStatusCode status)>;
   enum class ProviderStatus { OK, NO_CONTEXT, DEAD_HOST, NO_HOST, NO_URL };
   // Debugging for https://crbug.com/750267
   enum class Phase { kInitial, kAddedToContext, kRemovedFromContext };
@@ -146,20 +139,6 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
   void OnProviderCreated(ServiceWorkerProviderHostInfo info) override;
 
   // IPC Message handlers
-  void OnEnableNavigationPreload(int thread_id,
-                                 int request_id,
-                                 int provider_id,
-                                 int64_t registration_id,
-                                 bool enable);
-  void OnGetNavigationPreloadState(int thread_id,
-                                   int request_id,
-                                   int provider_id,
-                                   int64_t registration_id);
-  void OnSetNavigationPreloadHeader(int thread_id,
-                                    int request_id,
-                                    int provider_id,
-                                    int64_t registration_id,
-                                    const std::string& value);
   void OnCountFeature(int64_t version_id, uint32_t feature);
   void OnIncrementServiceWorkerRefCount(int handle_id);
   void OnDecrementServiceWorkerRefCount(int handle_id);
@@ -178,59 +157,30 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
       const url::Origin& source_origin,
       const std::vector<blink::MessagePortChannel>& sent_message_ports,
       ServiceWorkerProviderHost* sender_provider_host,
-      const StatusCallback& callback);
-  template <typename SourceInfo>
+      StatusCallback callback);
+  template <typename SourceInfoPtr>
   void DispatchExtendableMessageEventInternal(
       scoped_refptr<ServiceWorkerVersion> worker,
       const base::string16& message,
       const url::Origin& source_origin,
       const std::vector<blink::MessagePortChannel>& sent_message_ports,
       const base::Optional<base::TimeDelta>& timeout,
-      const StatusCallback& callback,
-      const SourceInfo& source_info);
+      StatusCallback callback,
+      SourceInfoPtr source_info);
+  template <typename SourceInfoPtr>
   void DispatchExtendableMessageEventAfterStartWorker(
       scoped_refptr<ServiceWorkerVersion> worker,
       const base::string16& message,
       const url::Origin& source_origin,
       const std::vector<blink::MessagePortChannel>& sent_message_ports,
-      const ExtendableMessageEventSource& source,
+      SourceInfoPtr source_info,
       const base::Optional<base::TimeDelta>& timeout,
-      const StatusCallback& callback);
-  template <typename SourceInfo>
-  void DidFailToDispatchExtendableMessageEvent(
-      const std::vector<blink::MessagePortChannel>& sent_message_ports,
-      const SourceInfo& source_info,
-      const StatusCallback& callback,
+      StatusCallback callback,
       ServiceWorkerStatusCode status);
-  bool IsValidSourceInfo(const ServiceWorkerClientInfo& source_info);
-  bool IsValidSourceInfo(
-      const blink::mojom::ServiceWorkerObjectInfo& source_info);
-  void ReleaseSourceInfo(const ServiceWorkerClientInfo& source_info);
-  void ReleaseSourceInfo(
-      const blink::mojom::ServiceWorkerObjectInfo& source_info);
-
-  ServiceWorkerRegistrationHandle* FindRegistrationHandle(
-      int provider_id,
-      int64_t registration_id);
+  void ReleaseSourceInfo(blink::mojom::ServiceWorkerClientInfoPtr source_info);
+  void ReleaseSourceInfo(blink::mojom::ServiceWorkerObjectInfoPtr source_info);
 
   ServiceWorkerContextCore* GetContext();
-  // Returns the provider host with id equal to |provider_id|, or nullptr
-  // if the provider host could not be found or is not appropriate for
-  // initiating a request such as register/unregister/update.
-  ServiceWorkerProviderHost* GetProviderHostForRequest(
-      ProviderStatus* out_status,
-      int provider_id);
-
-  void DidUpdateNavigationPreloadEnabled(int thread_id,
-                                         int request_id,
-                                         int registration_id,
-                                         bool enable,
-                                         ServiceWorkerStatusCode status);
-  void DidUpdateNavigationPreloadHeader(int thread_id,
-                                        int request_id,
-                                        int registration_id,
-                                        const std::string& value,
-                                        ServiceWorkerStatusCode status);
 
   const int render_process_id_;
   ResourceContext* resource_context_;
@@ -240,10 +190,6 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
   scoped_refptr<ServiceWorkerContextWrapper> context_wrapper_;
 
   base::IDMap<std::unique_ptr<ServiceWorkerHandle>> handles_;
-
-  using RegistrationHandleMap =
-      base::IDMap<std::unique_ptr<ServiceWorkerRegistrationHandle>>;
-  RegistrationHandleMap registration_handles_;
 
   bool channel_ready_;  // True after BrowserMessageFilter::sender_ != NULL.
   std::vector<std::unique_ptr<IPC::Message>> pending_messages_;

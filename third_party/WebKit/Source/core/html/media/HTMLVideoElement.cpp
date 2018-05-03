@@ -44,8 +44,8 @@
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutVideo.h"
 #include "platform/Histogram.h"
+#include "platform/graphics/CanvasResourceProvider.h"
 #include "platform/graphics/GraphicsContext.h"
-#include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/gpu/Extensions3DUtil.h"
 #include "platform/runtime_enabled_features.h"
 #include "public/platform/WebCanvas.h"
@@ -80,8 +80,8 @@ inline HTMLVideoElement::HTMLVideoElement(Document& document)
 
 HTMLVideoElement* HTMLVideoElement::Create(Document& document) {
   HTMLVideoElement* video = new HTMLVideoElement(document);
-  video->EnsureUserAgentShadowRoot();
-  video->SuspendIfNeeded();
+  video->EnsureUserAgentShadowRootV1();
+  video->PauseIfNeeded();
   return video;
 }
 
@@ -148,7 +148,7 @@ void HTMLVideoElement::AttachLayoutTree(AttachContext& context) {
 void HTMLVideoElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name == widthAttr)
     AddHTMLLengthToStyle(style, CSSPropertyWidth, value);
   else if (name == heightAttr)
@@ -442,7 +442,6 @@ KURL HTMLVideoElement::PosterImageURL() const {
 scoped_refptr<Image> HTMLVideoElement::GetSourceImageForCanvas(
     SourceImageStatus* status,
     AccelerationHint,
-    SnapshotReason,
     const FloatSize&) {
   if (!HasAvailableVideoFrame()) {
     *status = kInvalidSourceImageStatus;
@@ -451,17 +450,18 @@ scoped_refptr<Image> HTMLVideoElement::GetSourceImageForCanvas(
 
   IntSize intrinsic_size(videoWidth(), videoHeight());
   // FIXME: Not sure if we dhould we be doing anything with the AccelerationHint
-  // argument here?
-  std::unique_ptr<ImageBuffer> image_buffer =
-      ImageBuffer::Create(intrinsic_size);
-  if (!image_buffer) {
+  // argument here? Currently we use unacceleration mode.
+  std::unique_ptr<CanvasResourceProvider> resource_provider =
+      CanvasResourceProvider::Create(
+          intrinsic_size, CanvasResourceProvider::kSoftwareResourceUsage);
+  if (!resource_provider) {
     *status = kInvalidSourceImageStatus;
     return nullptr;
   }
 
-  PaintCurrentFrame(image_buffer->Canvas(),
+  PaintCurrentFrame(resource_provider->Canvas(),
                     IntRect(IntPoint(0, 0), intrinsic_size), nullptr);
-  scoped_refptr<Image> snapshot = image_buffer->NewImageSnapshot();
+  scoped_refptr<Image> snapshot = resource_provider->Snapshot();
   if (!snapshot) {
     *status = kInvalidSourceImageStatus;
     return nullptr;
@@ -472,7 +472,7 @@ scoped_refptr<Image> HTMLVideoElement::GetSourceImageForCanvas(
 }
 
 bool HTMLVideoElement::WouldTaintOrigin(
-    SecurityOrigin* destination_security_origin) const {
+    const SecurityOrigin* destination_security_origin) const {
   return !IsMediaDataCORSSameOrigin(destination_security_origin);
 }
 
@@ -514,27 +514,23 @@ void HTMLVideoElement::MediaRemotingStarted(
     const WebString& remote_device_friendly_name) {
   if (!remoting_interstitial_) {
     remoting_interstitial_ = new MediaRemotingInterstitial(*this);
-    ShadowRoot& shadow_root = EnsureUserAgentShadowRoot();
+    ShadowRoot& shadow_root = EnsureUserAgentShadowRootV1();
     shadow_root.InsertBefore(remoting_interstitial_, shadow_root.firstChild());
     HTMLMediaElement::AssertShadowRootChildren(shadow_root);
   }
   remoting_interstitial_->Show(remote_device_friendly_name);
 }
 
-void HTMLVideoElement::MediaRemotingStopped() {
+void HTMLVideoElement::MediaRemotingStopped(
+    WebLocalizedString::Name error_msg) {
   if (remoting_interstitial_)
-    remoting_interstitial_->Hide();
+    remoting_interstitial_->Hide(error_msg);
 }
 
 WebMediaPlayer::DisplayType HTMLVideoElement::DisplayType() const {
   if (is_picture_in_picture_)
     return WebMediaPlayer::DisplayType::kPictureInPicture;
   return HTMLMediaElement::DisplayType();
-}
-
-void HTMLVideoElement::DisableMediaRemoting() {
-  if (GetWebMediaPlayer())
-    GetWebMediaPlayer()->RequestRemotePlaybackDisabled(true);
 }
 
 bool HTMLVideoElement::IsRemotingInterstitialVisible() const {

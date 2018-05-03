@@ -39,7 +39,9 @@
 
 namespace blink {
 
+class ExceptionState;
 class Interpolation;
+class KeyframeEffectOptions;
 
 // Time independent representation of an Animation's content.
 // Can be sampled for the active pairs of Keyframes (represented by
@@ -50,9 +52,17 @@ class CORE_EXPORT EffectModel : public GarbageCollectedFinalized<EffectModel> {
     kCompositeReplace,
     kCompositeAdd,
   };
+  // Returns the correct CompositeOperation for a KeyframeEffectOptions,
+  // respecting any relevant RuntimeFeatures that are enabled or disabled.
+  static CompositeOperation ExtractCompositeOperation(
+      const KeyframeEffectOptions&);
+  static bool StringToCompositeOperation(String,
+                                         CompositeOperation&,
+                                         ExceptionState* = nullptr);
+  static String CompositeOperationToString(CompositeOperation);
 
-  EffectModel() {}
-  virtual ~EffectModel() {}
+  EffectModel() = default;
+  virtual ~EffectModel() = default;
   virtual bool Sample(int iteration,
                       double fraction,
                       double iteration_duration,

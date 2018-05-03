@@ -11,7 +11,6 @@
 #include "base/callback_forward.h"
 #include "base/process/process.h"
 #include "content/common/content_export.h"
-#include "gpu/config/gpu_feature_info.h"
 
 class GURL;
 
@@ -33,11 +32,6 @@ class GpuDataManager {
   // This is only called by extensions testing.
   virtual void BlacklistWebGLForTesting() = 0;
 
-  virtual bool IsFeatureBlacklisted(int feature) const = 0;
-
-  virtual gpu::GpuFeatureStatus GetFeatureStatus(
-      gpu::GpuFeatureType feature) const = 0;
-
   virtual gpu::GPUInfo GetGPUInfo() const = 0;
 
   // This indicator might change because we could collect more GPU info or
@@ -56,13 +50,15 @@ class GpuDataManager {
   // Check if basic and context GPU info have been collected.
   virtual bool IsEssentialGpuInfoAvailable() const = 0;
 
+  // On Windows, besides basic and context GPU info, it also checks if
+  // DxDiagnostics have been collected.
+  // On other platforms, it's the same as IsEsentialGpuInfoAvailable().
+  virtual bool IsCompleteGpuInfoAvailable() const = 0;
+
   // Requests that the GPU process report its current video memory usage stats.
   virtual void RequestVideoMemoryUsageStatsUpdate(
       const base::Callback<void(const gpu::VideoMemoryUsageStats& stats)>&
           callback) const = 0;
-
-  // Returns true if SwiftShader should be used.
-  virtual bool ShouldUseSwiftShader() const = 0;
 
   // Registers/unregister |observer|.
   virtual void AddObserver(GpuDataManagerObserver* observer) = 0;
@@ -78,19 +74,10 @@ class GpuDataManager {
                             const std::string& gl_renderer,
                             const std::string& gl_version) = 0;
 
-  // Obtain collected GL strings.
-  virtual void GetGLStrings(std::string* gl_vendor,
-                            std::string* gl_renderer,
-                            std::string* gl_version) = 0;
-
-  // Turn off all hardware acceleration.
   virtual void DisableHardwareAcceleration() = 0;
 
   // Whether a GPU is in use (as opposed to a software renderer).
   virtual bool HardwareAccelerationEnabled() const = 0;
-
-  // Whether the browser compositor can be used.
-  virtual bool CanUseGpuBrowserCompositor() const = 0;
 
   // Extensions that are currently disabled.
   virtual void GetDisabledExtensions(

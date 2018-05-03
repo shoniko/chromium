@@ -8,6 +8,7 @@
 #include "modules/canvas/canvas2d/ClipList.h"
 #include "platform/fonts/Font.h"
 #include "platform/fonts/FontSelectorClient.h"
+#include "platform/graphics/paint/PaintFilter.h"
 #include "platform/graphics/paint/PaintFlags.h"
 #include "platform/transforms/AffineTransform.h"
 #include "platform/wtf/Vector.h"
@@ -15,6 +16,7 @@
 
 namespace blink {
 
+class BaseRenderingContext2D;
 class CanvasRenderingContext2D;
 class CanvasStyle;
 class CSSValue;
@@ -93,11 +95,13 @@ class CanvasRenderingContext2DState final
     unparsed_filter_ = filter_string;
   }
   const String& UnparsedFilter() const { return unparsed_filter_; }
-  sk_sp<SkImageFilter> GetFilter(Element*,
-                                 IntSize canvas_size,
-                                 CanvasRenderingContext2D*) const;
-  sk_sp<SkImageFilter> GetFilterForOffscreenCanvas(IntSize canvas_size) const;
-  bool HasFilterForOffscreenCanvas(IntSize canvas_size) const;
+  sk_sp<PaintFilter> GetFilter(Element*,
+                               IntSize canvas_size,
+                               CanvasRenderingContext2D*) const;
+  sk_sp<PaintFilter> GetFilterForOffscreenCanvas(IntSize canvas_size,
+                                                 BaseRenderingContext2D*) const;
+  bool HasFilterForOffscreenCanvas(IntSize canvas_size,
+                                   BaseRenderingContext2D*) const;
   bool HasFilter(Element*,
                  IntSize canvas_size,
                  CanvasRenderingContext2D*) const;
@@ -199,8 +203,8 @@ class CanvasRenderingContext2DState final
   SkDrawLooper* EmptyDrawLooper() const;
   SkDrawLooper* ShadowOnlyDrawLooper() const;
   SkDrawLooper* ShadowAndForegroundDrawLooper() const;
-  sk_sp<SkImageFilter> ShadowOnlyImageFilter() const;
-  sk_sp<SkImageFilter> ShadowAndForegroundImageFilter() const;
+  sk_sp<PaintFilter> ShadowOnlyImageFilter() const;
+  sk_sp<PaintFilter> ShadowAndForegroundImageFilter() const;
 
   unsigned unrealized_save_count_;
 
@@ -219,8 +223,8 @@ class CanvasRenderingContext2DState final
   mutable sk_sp<SkDrawLooper> empty_draw_looper_;
   mutable sk_sp<SkDrawLooper> shadow_only_draw_looper_;
   mutable sk_sp<SkDrawLooper> shadow_and_foreground_draw_looper_;
-  mutable sk_sp<SkImageFilter> shadow_only_image_filter_;
-  mutable sk_sp<SkImageFilter> shadow_and_foreground_image_filter_;
+  mutable sk_sp<PaintFilter> shadow_only_image_filter_;
+  mutable sk_sp<PaintFilter> shadow_and_foreground_image_filter_;
 
   double global_alpha_;
   AffineTransform transform_;
@@ -233,7 +237,7 @@ class CanvasRenderingContext2DState final
 
   String unparsed_filter_;
   Member<const CSSValue> filter_value_;
-  mutable sk_sp<SkImageFilter> resolved_filter_;
+  mutable sk_sp<PaintFilter> resolved_filter_;
 
   // Text state.
   TextAlign text_align_;

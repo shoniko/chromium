@@ -5,8 +5,9 @@
 #ifndef WebFrameScheduler_h
 #define WebFrameScheduler_h
 
-#include "platform/wtf/RefPtr.h"
+#include "base/memory/scoped_refptr.h"
 #include "public/platform/TaskType.h"
+#include "public/platform/WebScopedVirtualTimePauser.h"
 
 #include <memory>
 
@@ -17,7 +18,7 @@ class WebViewScheduler;
 
 class WebFrameScheduler {
  public:
-  virtual ~WebFrameScheduler() {}
+  virtual ~WebFrameScheduler() = default;
 
   // Observer type that regulates conditions to invoke callbacks.
   enum class ObserverType { kLoader };
@@ -37,8 +38,8 @@ class WebFrameScheduler {
 
   class ActiveConnectionHandle {
    public:
-    ActiveConnectionHandle() {}
-    virtual ~ActiveConnectionHandle() {}
+    ActiveConnectionHandle() = default;
+    virtual ~ActiveConnectionHandle() = default;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(ActiveConnectionHandle);
@@ -116,43 +117,30 @@ class WebFrameScheduler {
   // and unthrottled task runner corresponds to pausable task runner.
 
   // Returns a WebTaskRunner that is suitable with the given task type.
-  virtual RefPtr<WebTaskRunner> GetTaskRunner(TaskType) = 0;
+  virtual scoped_refptr<WebTaskRunner> GetTaskRunner(TaskType) = 0;
 
   // Returns the parent WebViewScheduler.
-  virtual WebViewScheduler* GetWebViewScheduler() = 0;
+  virtual WebViewScheduler* GetWebViewScheduler() const = 0;
 
-  // Tells the scheduler a resource load has started. The scheduler may make
-  // policy decisions based on this.
-  virtual void DidStartLoading(unsigned long identifier) = 0;
+  // Returns a WebScopedVirtualTimePauser which can be used to vote for pausing
+  // virtual time. Virtual time will be paused if any WebScopedVirtualTimePauser
+  // votes to pause it, and only unpaused only if all
+  // WebScopedVirtualTimePausers are either destroyed or vote to unpause.  Note
+  // the WebScopedVirtualTimePauser returned by this method is initially
+  // unpaused.
+  virtual WebScopedVirtualTimePauser CreateWebScopedVirtualTimePauser() = 0;
 
-  // Tells the scheduler a resource load has stopped. The scheduler may make
-  // policy decisions based on this.
-  virtual void DidStopLoading(unsigned long identifier) = 0;
-
-  // Tells the scheduler that a history navigation is expected soon, virtual
-  // time may be paused. Must be called from the main thread.
-  virtual void WillNavigateBackForwardSoon() = 0;
-
-  // Tells the scheduler that a provisional load has started, virtual time may
-  // be paused. Must be called from the main thread.
+  // Tells the scheduler that a provisional load has started, the scheduler may
+  // reset the task cost estimators and the UserModel. Must be called from the
+  // main thread.
   virtual void DidStartProvisionalLoad(bool is_main_frame) = 0;
 
-  // Tells the scheduler that a provisional load has failed, virtual time may be
-  // unpaused. Must be called from the main thread.
-  virtual void DidFailProvisionalLoad() = 0;
-
-  // Tells the scheduler that a provisional load has committed, virtual time ma
-  // be unpaused. In addition the scheduler may reset the task cost estimators
-  // and the UserModel. Must be called from the main thread.
+  // Tells the scheduler that a provisional load has committed, the scheduler
+  // may reset the task cost estimators and the UserModel. Must be called from
+  // the main thread.
   virtual void DidCommitProvisionalLoad(bool is_web_history_inert_commit,
                                         bool is_reload,
                                         bool is_main_frame) = 0;
-
-  // Tells the scheduler if we are parsing a document on another thread. This
-  // tells the scheduler not to advance virtual time if it's using the
-  // DETERMINISTIC_LOADING policy.
-  virtual void SetDocumentParsingInBackground(
-      bool background_parsing_enabled) = 0;
 
   // Tells the scheduler that the first meaningful paint has occured for this
   // frame.
@@ -164,9 +152,12 @@ class WebFrameScheduler {
   virtual std::unique_ptr<ActiveConnectionHandle>
   OnActiveConnectionCreated() = 0;
 
-  // Returns true if this frame is should not throttled (e.g. because of audio
-  // or an active connection).
-  virtual bool IsExemptFromThrottling() const = 0;
+  // Returns true if this frame is should not throttled (e.g. due to an active
+  // connection).
+  // Note that this only applies to the current frame,
+  // use GetWebViewScheduler()->IsExemptFromBudgetBasedThrottling for
+  // the status of the page.
+  virtual bool IsExemptFromBudgetBasedThrottling() const = 0;
 };
 
 }  // namespace blink

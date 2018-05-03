@@ -21,7 +21,7 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -66,9 +66,10 @@ class PaymentAppContentUnitTestBase::PaymentAppForWorkerTestHelper
       bool pause_after_download,
       mojom::ServiceWorkerEventDispatcherRequest dispatcher_request,
       mojom::ControllerServiceWorkerRequest controller_request,
+      blink::mojom::ServiceWorkerHostAssociatedPtrInfo service_worker_host,
       mojom::EmbeddedWorkerInstanceHostAssociatedPtrInfo instance_host,
       mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info,
-      mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info)
+      blink::mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info)
       override {
     ServiceWorkerVersion* version =
         context()->GetLiveVersion(service_worker_version_id);
@@ -77,8 +78,9 @@ class PaymentAppContentUnitTestBase::PaymentAppForWorkerTestHelper
     EmbeddedWorkerTestHelper::OnStartWorker(
         embedded_worker_id, service_worker_version_id, scope, script_url,
         pause_after_download, std::move(dispatcher_request),
-        std::move(controller_request), std::move(instance_host),
-        std::move(provider_info), std::move(installed_scripts_info));
+        std::move(controller_request), std::move(service_worker_host),
+        std::move(instance_host), std::move(provider_info),
+        std::move(installed_scripts_info));
   }
 
   void OnPaymentRequestEvent(
@@ -143,9 +145,10 @@ PaymentManager* PaymentAppContentUnitTestBase::CreatePaymentManager(
   // Register service worker for payment manager.
   bool called = false;
   int64_t registration_id;
-  blink::mojom::ServiceWorkerRegistrationOptions registration_opt(scope_url);
+  blink::mojom::ServiceWorkerRegistrationOptions registration_opt;
+  registration_opt.scope = scope_url;
   worker_helper_->context()->RegisterServiceWorker(
-      sw_script_url, registration_opt, nullptr,
+      sw_script_url, registration_opt,
       base::Bind(&RegisterServiceWorkerCallback, &called, &registration_id));
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);

@@ -134,17 +134,16 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_base.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/persistent_histogram_allocator.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "components/metrics/daily_event.h"
 #include "components/metrics/environment_recorder.h"
 #include "components/metrics/field_trials_provider.h"
 #include "components/metrics/metrics_log.h"
@@ -206,12 +205,6 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
 
   registry->RegisterInt64Pref(prefs::kUninstallLaunchCount, 0);
   registry->RegisterInt64Pref(prefs::kUninstallMetricsUptimeSec, 0);
-
-  // Register the tab stats metrics.
-  registry->RegisterIntegerPref(prefs::kTabStatsTotalTabCountMax, 0);
-  registry->RegisterIntegerPref(prefs::kTabStatsMaxTabsPerWindow, 0);
-  registry->RegisterIntegerPref(prefs::kTabStatsWindowCountMax, 0);
-  metrics::DailyEvent::RegisterPref(registry, prefs::kTabStatsDailySample);
 }
 
 MetricsService::MetricsService(MetricsStateManager* state_manager,
@@ -486,8 +479,8 @@ void MetricsService::InitializeMetricsState() {
     // monitoring.
     state_manager_->clean_exit_beacon()->WriteBeaconValue(true);
     ExecutionPhaseManager manager(local_state_);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Chrome.Browser.CrashedExecutionPhase",
-                                static_cast<int>(manager.GetExecutionPhase()));
+    base::UmaHistogramSparse("Chrome.Browser.CrashedExecutionPhase",
+                             static_cast<int>(manager.GetExecutionPhase()));
     manager.SetExecutionPhase(ExecutionPhase::UNINITIALIZED_PHASE);
   }
 

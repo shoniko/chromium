@@ -22,22 +22,6 @@ Running test: testRejectedPromise
         }
         exceptionId : 0
         lineNumber : 0
-        stackTrace : {
-            callFrames : [
-            ]
-            parent : {
-                callFrames : [
-                    [0] : {
-                        columnNumber : 8
-                        functionName : 
-                        lineNumber : 0
-                        scriptId : <number>
-                        url : 
-                    }
-                ]
-                description : Promise.reject
-            }
-        }
         text : Uncaught (in promise)
     }
     result : {
@@ -60,29 +44,6 @@ Running test: testRejectedPromiseWithStack
         }
         exceptionId : 0
         lineNumber : 0
-        stackTrace : {
-            callFrames : [
-            ]
-            parent : {
-                callFrames : [
-                    [0] : {
-                        columnNumber : 6
-                        functionName : rejectPromise
-                        lineNumber : 14
-                        scriptId : <number>
-                        url : 
-                    }
-                    [1] : {
-                        columnNumber : 0
-                        functionName : 
-                        lineNumber : 0
-                        scriptId : <number>
-                        url : 
-                    }
-                ]
-                description : Promise.reject
-            }
-        }
         text : Uncaught (in promise)
     }
     result : {

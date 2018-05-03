@@ -18,6 +18,7 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
+#include "content/browser/service_worker/service_worker_fetch_dispatcher.h"
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "content/browser/service_worker/service_worker_response_type.h"
 #include "content/browser/service_worker/service_worker_url_job_wrapper.h"
@@ -25,7 +26,6 @@
 #include "content/common/service_worker/service_worker_event_dispatcher.mojom.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
-#include "content/public/common/request_context_frame_type.h"
 #include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/common/service_worker_modes.h"
@@ -35,12 +35,17 @@
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_status.h"
 #include "services/network/public/interfaces/fetch_api.mojom.h"
+#include "services/network/public/interfaces/request_context_frame_type.mojom.h"
 #include "storage/common/blob_storage/blob_storage_constants.h"
 #include "url/gurl.h"
 
 namespace net {
 class IOBuffer;
 }  // namespace net
+
+namespace network {
+class ResourceRequestBody;
+}
 
 namespace storage {
 class BlobDataHandle;
@@ -50,11 +55,19 @@ class BlobStorageContext;
 namespace content {
 
 class ResourceContext;
-class ResourceRequestBody;
 class ServiceWorkerBlobReader;
 class ServiceWorkerDataPipeReader;
-class ServiceWorkerFetchDispatcher;
 class ServiceWorkerVersion;
+
+namespace service_worker_controllee_request_handler_unittest {
+class ServiceWorkerControlleeRequestHandlerTest;
+FORWARD_DECLARE_TEST(ServiceWorkerControlleeRequestHandlerTest,
+                     LostActiveVersion);
+}  // namespace service_worker_controllee_request_handler_unittest
+
+namespace service_worker_url_request_job_unittest {
+class DelayHelper;
+}  // namespace service_worker_url_request_job_unittest
 
 class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
  public:
@@ -67,16 +80,16 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
       const std::string& client_id,
       base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
       const ResourceContext* resource_context,
-      FetchRequestMode request_mode,
-      FetchCredentialsMode credentials_mode,
-      FetchRedirectMode redirect_mode,
+      network::mojom::FetchRequestMode request_mode,
+      network::mojom::FetchCredentialsMode credentials_mode,
+      network::mojom::FetchRedirectMode redirect_mode,
       const std::string& integrity,
+      bool keepalive,
       ResourceType resource_type,
       RequestContextType request_context_type,
-      RequestContextFrameType frame_type,
-      scoped_refptr<ResourceRequestBody> body,
+      network::mojom::RequestContextFrameType frame_type,
+      scoped_refptr<network::ResourceRequestBody> body,
       ServiceWorkerFetchType fetch_type,
-      const base::Optional<base::TimeDelta>& timeout,
       Delegate* delegate);
 
   ~ServiceWorkerURLRequestJob() override;
@@ -97,11 +110,9 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
   // When an in-flight request possibly needs CORS check, use
   // FallbackToNetworkOrRenderer. This method will decide whether the request
   // can directly go to the network or should fallback to a renderer to send
-  // CORS preflight. You can use FallbackToNetwork only when, like main resource
-  // or foreign fetch cases, it's apparent that the request should go to the
-  // network directly.
-  // TODO(shimazu): Update the comment when what should we do at foreign fetch
-  // fallback is determined: crbug.com/604084
+  // CORS preflight. You can use FallbackToNetwork only when it's apparent that
+  // the request can go to the network directly (e.g., main resource requests or
+  // same-origin requests).
   void FallbackToNetwork();
   void FallbackToNetworkOrRenderer();
   void ForwardToServiceWorker();
@@ -140,9 +151,10 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
  private:
   class FileSizeResolver;
   class NavigationPreloadMetrics;
-  friend class DelayHelper;
+  friend class service_worker_url_request_job_unittest::DelayHelper;
   friend class ServiceWorkerURLRequestJobTest;
-  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerControlleeRequestHandlerTest,
+  FRIEND_TEST_ALL_PREFIXES(service_worker_controllee_request_handler_unittest::
+                               ServiceWorkerControlleeRequestHandlerTest,
                            LostActiveVersion);
 
   enum ResponseBodyType {
@@ -176,11 +188,11 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
   void DidPrepareFetchEvent(scoped_refptr<ServiceWorkerVersion> version);
   void DidDispatchFetchEvent(
       ServiceWorkerStatusCode status,
-      ServiceWorkerFetchEventResult fetch_result,
+      ServiceWorkerFetchDispatcher::FetchEventResult fetch_result,
       const ServiceWorkerResponse& response,
       blink::mojom::ServiceWorkerStreamHandlePtr body_as_stream,
       blink::mojom::BlobPtr body_as_blob,
-      const scoped_refptr<ServiceWorkerVersion>& version);
+      scoped_refptr<ServiceWorkerVersion> version);
   void SetResponse(const ServiceWorkerResponse& response);
 
   // Populates |http_response_headers_|.
@@ -212,7 +224,7 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
   void SetResponseBodyType(ResponseBodyType type);
   bool ShouldRecordResult();
   void RecordStatusZeroResponseError(
-      blink::WebServiceWorkerResponseError error);
+      blink::mojom::ServiceWorkerResponseError error);
 
   const net::HttpResponseInfo* http_info() const;
 
@@ -299,21 +311,21 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
   std::unique_ptr<ServiceWorkerBlobReader> blob_reader_;
   std::unique_ptr<ServiceWorkerDataPipeReader> data_pipe_reader_;
 
-  FetchRequestMode request_mode_;
-  FetchCredentialsMode credentials_mode_;
-  FetchRedirectMode redirect_mode_;
+  network::mojom::FetchRequestMode request_mode_;
+  network::mojom::FetchCredentialsMode credentials_mode_;
+  network::mojom::FetchRedirectMode redirect_mode_;
   std::string integrity_;
+  const bool keepalive_;
   const ResourceType resource_type_;
   RequestContextType request_context_type_;
-  RequestContextFrameType frame_type_;
+  network::mojom::RequestContextFrameType frame_type_;
   bool fall_back_required_;
   // ResourceRequestBody has a collection of BlobDataHandles attached to it
   // using the userdata mechanism. So we have to keep it not to free the blobs.
-  scoped_refptr<ResourceRequestBody> body_;
+  scoped_refptr<network::ResourceRequestBody> body_;
   std::unique_ptr<storage::BlobDataHandle> request_body_blob_data_handle_;
   scoped_refptr<storage::BlobHandle> request_body_blob_handle_;
   ServiceWorkerFetchType fetch_type_;
-  base::Optional<base::TimeDelta> timeout_;
 
   ResponseBodyType response_body_type_ = UNKNOWN;
   bool did_record_result_ = false;

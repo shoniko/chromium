@@ -25,7 +25,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
@@ -50,7 +49,6 @@ import java.util.List;
 public class FirstRunIntegrationTest {
 
     @Rule
-    @SuppressFBWarnings("URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD")
     public MultiActivityTestRule mTestRule = new MultiActivityTestRule();
 
     private FirstRunActivityTestObserver mTestObserver = new FirstRunActivityTestObserver();
@@ -140,10 +138,13 @@ public class FirstRunIntegrationTest {
         final ActivityMonitor activityMonitor = new ActivityMonitor(asyncClassName, null, false);
         final ActivityMonitor freMonitor =
                 new ActivityMonitor(FirstRunActivity.class.getName(), null, false);
+        final ActivityMonitor tabbedFREMonitor =
+                new ActivityMonitor(TabbedModeFirstRunActivity.class.getName(), null, false);
 
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         instrumentation.addMonitor(activityMonitor);
         instrumentation.addMonitor(freMonitor);
+        instrumentation.addMonitor(tabbedFREMonitor);
         runnable.run();
 
         // The original activity should be started because it was directly specified.
@@ -163,7 +164,7 @@ public class FirstRunIntegrationTest {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return freMonitor.getHits() == 1;
+                return freMonitor.getHits() == 1 || tabbedFREMonitor.getHits() == 1;
             }
         });
     }

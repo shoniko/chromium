@@ -31,10 +31,10 @@
 #ifndef V8CustomXPathNSResolver_h
 #define V8CustomXPathNSResolver_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/xml/XPathNSResolver.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/RefPtr.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -54,7 +54,7 @@ class V8CustomXPathNSResolver final : public XPathNSResolver {
  private:
   V8CustomXPathNSResolver(ScriptState*, v8::Local<v8::Object> resolver);
 
-  RefPtr<ScriptState> script_state_;
+  scoped_refptr<ScriptState> script_state_;
   v8::Local<v8::Object> resolver_;  // Handle to resolver object.
 };
 

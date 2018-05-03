@@ -6,8 +6,10 @@
 
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/notification_delegate.h"
+#include "ui/message_center/notifier_id.h"
 
 using message_center::MessageCenter;
+using message_center::NotifierId;
 
 namespace ash {
 
@@ -48,14 +50,19 @@ class AshClientNotificationDelegate
 MessageCenterController::MessageCenterController()
     : fullscreen_notification_blocker_(MessageCenter::Get()),
       inactive_user_notification_blocker_(MessageCenter::Get()),
-      login_notification_blocker_(MessageCenter::Get()),
+      session_state_notification_blocker_(MessageCenter::Get()),
       binding_(this) {}
 
-MessageCenterController::~MessageCenterController() {}
+MessageCenterController::~MessageCenterController() = default;
 
 void MessageCenterController::BindRequest(
     mojom::AshMessageCenterControllerRequest request) {
   binding_.Bind(std::move(request));
+}
+
+void MessageCenterController::SetNotifierEnabled(const NotifierId& notifier_id,
+                                                 bool enabled) {
+  client_->SetNotifierEnabled(notifier_id, enabled);
 }
 
 void MessageCenterController::SetClient(
@@ -72,6 +79,37 @@ void MessageCenterController::ShowClientNotification(
   message_center_notification->set_delegate(base::WrapRefCounted(
       new AshClientNotificationDelegate(notification.id(), client_.get())));
   MessageCenter::Get()->AddNotification(std::move(message_center_notification));
+}
+
+void MessageCenterController::UpdateNotifierIcon(const NotifierId& notifier_id,
+                                                 const gfx::ImageSkia& icon) {
+  if (notifier_id_)
+    notifier_id_->UpdateNotifierIcon(notifier_id, icon);
+}
+
+void MessageCenterController::NotifierEnabledChanged(
+    const NotifierId& notifier_id,
+    bool enabled) {
+  if (!enabled)
+    MessageCenter::Get()->RemoveNotificationsForNotifierId(notifier_id);
+}
+
+void MessageCenterController::SetNotifierSettingsListener(
+    NotifierSettingsListener* listener) {
+  DCHECK(!listener || !notifier_id_);
+  notifier_id_ = listener;
+
+  // |client_| may not be bound in unit tests.
+  if (listener && client_.is_bound()) {
+    client_->GetNotifierList(base::BindOnce(
+        &MessageCenterController::OnGotNotifierList, base::Unretained(this)));
+  }
+}
+
+void MessageCenterController::OnGotNotifierList(
+    std::vector<mojom::NotifierUiDataPtr> ui_data) {
+  if (notifier_id_)
+    notifier_id_->SetNotifierList(ui_data);
 }
 
 }  // namespace ash

@@ -10,7 +10,6 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -37,7 +36,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "components/user_manager/scoped_user_manager.h"
 #endif
 
 using content::ResourceThrottle;
@@ -152,9 +151,8 @@ class UserScriptListenerTest : public testing::Test {
 
   void SetUp() override {
 #if defined(OS_CHROMEOS)
-    user_manager_enabler_ =
-        base::MakeUnique<chromeos::ScopedUserManagerEnabler>(
-            new chromeos::FakeChromeUserManager());
+    user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
+        std::make_unique<chromeos::FakeChromeUserManager>());
 #endif
     ASSERT_TRUE(profile_manager_->SetUp());
     profile_ = profile_manager_->CreateTestingProfile("test-profile");
@@ -186,7 +184,7 @@ class UserScriptListenerTest : public testing::Test {
 
     bool defer = false;
     if (throttle) {
-      request->SetUserData(kUserDataKey, base::MakeUnique<ThrottleDelegate>(
+      request->SetUserData(kUserDataKey, std::make_unique<ThrottleDelegate>(
                                              request.get(), throttle));
 
       throttle->WillStartRequest(&defer);
@@ -225,7 +223,7 @@ class UserScriptListenerTest : public testing::Test {
   TestingProfile* profile_;
   ExtensionService* service_;
 #if defined(OS_CHROMEOS)
-  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<user_manager::ScopedUserManager> user_manager_enabler_;
 #endif
 };
 
@@ -356,7 +354,7 @@ TEST_F(UserScriptListenerTest, ResumeBeforeStart) {
   ResourceThrottle* throttle =
       listener_->CreateResourceThrottle(url, content::RESOURCE_TYPE_MAIN_FRAME);
   ASSERT_TRUE(throttle);
-  request->SetUserData(kUserDataKey, base::MakeUnique<ThrottleDelegate>(
+  request->SetUserData(kUserDataKey, std::make_unique<ThrottleDelegate>(
                                          request.get(), throttle));
 
   ASSERT_FALSE(request->is_pending());

@@ -7,12 +7,15 @@ cr.define('extension_detail_view_tests', function() {
   /** @enum {string} */
   var TestNames = {
     Layout: 'layout',
+    LayoutSource: 'layout of source section',
     ClickableElements: 'clickable elements',
     Indicator: 'indicator',
     Warnings: 'warnings',
   };
 
-  suite('ExtensionItemTest', function() {
+  var suiteName = 'ExtensionDetailViewTest';
+
+  suite(suiteName, function() {
     /**
      * Extension item created before each test.
      * @type {extensions.Item}
@@ -42,6 +45,7 @@ cr.define('extension_detail_view_tests', function() {
       item.set('data', extensionData);
       item.set('delegate', mockDelegate);
       item.set('inDevMode', false);
+      item.set('incognitoAvailable', true);
       document.body.appendChild(item);
     });
 
@@ -55,6 +59,9 @@ cr.define('extension_detail_view_tests', function() {
       expectTrue(testIsVisible('#icon'));
       expectTrue(testIsVisible('#enable-toggle'));
       expectFalse(testIsVisible('#extensions-options'));
+      expectTrue(
+          item.$.description.textContent.indexOf('This is an extension') !==
+          -1);
 
       // Check the checkboxes visibility and state. They should be visible
       // only if the associated option is enabled, and checked if the
@@ -103,8 +110,19 @@ cr.define('extension_detail_view_tests', function() {
       item.set('data.optionsPage', {openInTab: true, url: optionsUrl});
       expectTrue(testIsVisible('#extensions-options'));
 
-      // TODO(devlin): Add checks for homepage once it's added back to the
-      // mocks.
+      item.set('data.manifestHomePageUrl', 'http://example.com');
+      Polymer.dom.flush();
+      expectTrue(testIsVisible('#extensionWebsite'));
+      item.set('data.manifestHomePageUrl', '');
+      Polymer.dom.flush();
+      expectFalse(testIsVisible('#extensionWebsite'));
+
+      item.set('data.webStoreUrl', 'http://example.com');
+      Polymer.dom.flush();
+      expectTrue(testIsVisible('#viewInStore'));
+      item.set('data.webStoreUrl', '');
+      Polymer.dom.flush();
+      expectFalse(testIsVisible('#viewInStore'));
 
       expectFalse(testIsVisible('#id-section'));
       expectFalse(testIsVisible('#inspectable-views'));
@@ -113,13 +131,59 @@ cr.define('extension_detail_view_tests', function() {
       Polymer.dom.flush();
       expectTrue(testIsVisible('#id-section'));
       expectTrue(testIsVisible('#inspectable-views'));
+
+      assertTrue(item.data.incognitoAccess.isEnabled);
+      item.set('incognitoAvailable', false);
+      Polymer.dom.flush();
+      expectFalse(testIsVisible('#allow-incognito'));
+
+      item.set('incognitoAvailable', true);
+      Polymer.dom.flush();
+      expectTrue(testIsVisible('#allow-incognito'));
+
+      // Ensure that the "Extension options" button is disabled when the item
+      // itself is disabled.
+      var extensionOptions = item.$$('#extensions-options');
+      assertFalse(extensionOptions.disabled);
+      item.set('data.state', chrome.developerPrivate.ExtensionState.DISABLED);
+      Polymer.dom.flush();
+      assertTrue(extensionOptions.disabled);
+    });
+
+    test(assert(TestNames.LayoutSource), function() {
+      item.set('data.location', 'FROM_STORE');
+      Polymer.dom.flush();
+      assertEquals('Chrome Web Store', item.$.source.textContent.trim());
+      assertFalse(extension_test_util.isVisible(item, '#load-path'));
+
+      item.set('data.location', 'THIRD_PARTY');
+      Polymer.dom.flush();
+      assertEquals('Added by a third-party', item.$.source.textContent.trim());
+      assertFalse(extension_test_util.isVisible(item, '#load-path'));
+
+      item.set('data.location', 'UNPACKED');
+      item.set('data.prettifiedPath', 'foo/bar/baz/');
+      Polymer.dom.flush();
+      assertEquals('Unpacked extension', item.$.source.textContent.trim());
+      // Test whether the load path is displayed for unpacked extensions.
+      assertTrue(extension_test_util.isVisible(item, '#load-path'));
+
+      item.set('data.location', 'UNKNOWN');
+      item.set('data.prettifiedPath', '');
+      // |locationText| is expected to always be set if location is UNKNOWN.
+      item.set('data.locationText', 'Foo');
+      Polymer.dom.flush();
+      assertEquals('Foo', item.$.source.textContent.trim());
+      assertFalse(extension_test_util.isVisible(item, '#load-path'));
     });
 
     test(assert(TestNames.ClickableElements), function() {
       var optionsUrl =
           'chrome-extension://' + extensionData.id + '/options.html';
       item.set('data.optionsPage', {openInTab: true, url: optionsUrl});
+      item.set('data.prettifiedPath', 'foo/bar/baz/');
       Polymer.dom.flush();
+
       mockDelegate.testClickingCalls(
           item.$$('#allow-incognito').getLabel(), 'setItemAllowedIncognito',
           [extensionData.id, true]);
@@ -134,9 +198,12 @@ cr.define('extension_detail_view_tests', function() {
           [extensionData.id, true]);
       mockDelegate.testClickingCalls(
           item.$$('#extensions-options'), 'showItemOptionsPage',
-          [extensionData.id]);
+          [extensionData]);
       mockDelegate.testClickingCalls(
           item.$$('#remove-extension'), 'deleteItem', [extensionData.id]);
+      mockDelegate.testClickingCalls(
+          item.$$('#load-path > a[is=\'action-link\']'),
+          'showInFolder', [extensionData.id]);
     });
 
     test(assert(TestNames.Indicator), function() {
@@ -151,7 +218,7 @@ cr.define('extension_detail_view_tests', function() {
       var testWarningVisible = function(id, isVisible) {
         var f = isVisible ? expectTrue : expectFalse;
         f(extension_test_util.isVisible(item, id));
-      }
+      };
 
       testWarningVisible('#corrupted-warning', false);
       testWarningVisible('#suspicious-warning', false);
@@ -205,6 +272,7 @@ cr.define('extension_detail_view_tests', function() {
   });
 
   return {
+    suiteName: suiteName,
     TestNames: TestNames,
   };
 });

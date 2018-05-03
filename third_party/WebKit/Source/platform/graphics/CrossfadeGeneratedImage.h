@@ -26,22 +26,23 @@
 #ifndef CrossfadeGeneratedImage_h
 #define CrossfadeGeneratedImage_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/GeneratedImage.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/ImageObserver.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
 class PLATFORM_EXPORT CrossfadeGeneratedImage final : public GeneratedImage {
  public:
-  static RefPtr<CrossfadeGeneratedImage> Create(RefPtr<Image> from_image,
-                                                RefPtr<Image> to_image,
-                                                float percentage,
-                                                IntSize crossfade_size,
-                                                const IntSize& size) {
-    return WTF::AdoptRef(
+  static scoped_refptr<CrossfadeGeneratedImage> Create(
+      scoped_refptr<Image> from_image,
+      scoped_refptr<Image> to_image,
+      float percentage,
+      FloatSize crossfade_size,
+      const FloatSize& size) {
+    return base::AdoptRef(
         new CrossfadeGeneratedImage(std::move(from_image), std::move(to_image),
                                     percentage, crossfade_size, size));
   }
@@ -49,7 +50,7 @@ class PLATFORM_EXPORT CrossfadeGeneratedImage final : public GeneratedImage {
   bool UsesContainerSize() const override { return false; }
   bool HasRelativeSize() const override { return false; }
 
-  IntSize Size() const override { return crossfade_size_; }
+  IntSize Size() const override { return FlooredIntSize(crossfade_size_); }
 
  protected:
   void Draw(PaintCanvas*,
@@ -61,11 +62,11 @@ class PLATFORM_EXPORT CrossfadeGeneratedImage final : public GeneratedImage {
             ImageDecodingMode) override;
   void DrawTile(GraphicsContext&, const FloatRect&) final;
 
-  CrossfadeGeneratedImage(RefPtr<Image> from_image,
-                          RefPtr<Image> to_image,
+  CrossfadeGeneratedImage(scoped_refptr<Image> from_image,
+                          scoped_refptr<Image> to_image,
                           float percentage,
-                          IntSize crossfade_size,
-                          const IntSize&);
+                          FloatSize crossfade_size,
+                          const FloatSize&);
 
  private:
   void DrawCrossfade(PaintCanvas*,
@@ -73,11 +74,11 @@ class PLATFORM_EXPORT CrossfadeGeneratedImage final : public GeneratedImage {
                      ImageClampingMode,
                      ImageDecodingMode);
 
-  RefPtr<Image> from_image_;
-  RefPtr<Image> to_image_;
+  scoped_refptr<Image> from_image_;
+  scoped_refptr<Image> to_image_;
 
   float percentage_;
-  IntSize crossfade_size_;
+  FloatSize crossfade_size_;
 };
 
 }  // namespace blink

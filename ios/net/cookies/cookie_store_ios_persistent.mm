@@ -6,7 +6,8 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #import "ios/net/cookies/ns_http_system_cookie_store.h"
 #import "ios/net/cookies/system_cookie_util.h"
 #include "net/cookies/cookie_monster.h"
@@ -23,7 +24,12 @@ namespace net {
 CookieStoreIOSPersistent::CookieStoreIOSPersistent(
     net::CookieMonster::PersistentCookieStore* persistent_store)
     : CookieStoreIOS(persistent_store,
-                     base::MakeUnique<net::NSHTTPSystemCookieStore>()) {}
+                     std::make_unique<net::NSHTTPSystemCookieStore>()) {}
+
+CookieStoreIOSPersistent::CookieStoreIOSPersistent(
+    net::CookieMonster::PersistentCookieStore* persistent_store,
+    std::unique_ptr<SystemCookieStore> system_store)
+    : CookieStoreIOS(persistent_store, std::move(system_store)) {}
 
 CookieStoreIOSPersistent::~CookieStoreIOSPersistent() {}
 
@@ -39,28 +45,6 @@ void CookieStoreIOSPersistent::SetCookieWithOptionsAsync(
 
   cookie_monster()->SetCookieWithOptionsAsync(
       url, cookie_line, options, WrapSetCallback(std::move(callback)));
-}
-
-void CookieStoreIOSPersistent::SetCookieWithDetailsAsync(
-    const GURL& url,
-    const std::string& name,
-    const std::string& value,
-    const std::string& domain,
-    const std::string& path,
-    base::Time creation_time,
-    base::Time expiration_time,
-    base::Time last_access_time,
-    bool secure,
-    bool http_only,
-    CookieSameSite same_site,
-    CookiePriority priority,
-    SetCookiesCallback callback) {
-  DCHECK(thread_checker().CalledOnValidThread());
-
-  cookie_monster()->SetCookieWithDetailsAsync(
-      url, name, value, domain, path, creation_time, expiration_time,
-      last_access_time, secure, http_only, same_site, priority,
-      WrapSetCallback(std::move(callback)));
 }
 
 void CookieStoreIOSPersistent::SetCanonicalCookieAsync(

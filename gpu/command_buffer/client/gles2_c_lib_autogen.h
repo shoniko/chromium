@@ -1391,19 +1391,12 @@ void GL_APIENTRY GLES2VertexAttribDivisorANGLE(GLuint index, GLuint divisor) {
 void GL_APIENTRY GLES2GenMailboxCHROMIUM(GLbyte* mailbox) {
   gles2::GetGLContext()->GenMailboxCHROMIUM(mailbox);
 }
-void GL_APIENTRY GLES2ProduceTextureCHROMIUM(GLenum target,
-                                             const GLbyte* mailbox) {
-  gles2::GetGLContext()->ProduceTextureCHROMIUM(target, mailbox);
-}
 void GL_APIENTRY GLES2ProduceTextureDirectCHROMIUM(GLuint texture,
-                                                   GLenum target,
                                                    const GLbyte* mailbox) {
-  gles2::GetGLContext()->ProduceTextureDirectCHROMIUM(texture, target, mailbox);
+  gles2::GetGLContext()->ProduceTextureDirectCHROMIUM(texture, mailbox);
 }
-GLuint GL_APIENTRY GLES2CreateAndConsumeTextureCHROMIUM(GLenum target,
-                                                        const GLbyte* mailbox) {
-  return gles2::GetGLContext()->CreateAndConsumeTextureCHROMIUM(target,
-                                                                mailbox);
+GLuint GL_APIENTRY GLES2CreateAndConsumeTextureCHROMIUM(const GLbyte* mailbox) {
+  return gles2::GetGLContext()->CreateAndConsumeTextureCHROMIUM(mailbox);
 }
 void GL_APIENTRY GLES2BindUniformLocationCHROMIUM(GLuint program,
                                                   GLint location,
@@ -1438,16 +1431,11 @@ void GL_APIENTRY GLES2DiscardFramebufferEXT(GLenum target,
 void GL_APIENTRY GLES2LoseContextCHROMIUM(GLenum current, GLenum other) {
   gles2::GetGLContext()->LoseContextCHROMIUM(current, other);
 }
-GLuint64 GL_APIENTRY GLES2InsertFenceSyncCHROMIUM() {
-  return gles2::GetGLContext()->InsertFenceSyncCHROMIUM();
+void GL_APIENTRY GLES2GenSyncTokenCHROMIUM(GLbyte* sync_token) {
+  gles2::GetGLContext()->GenSyncTokenCHROMIUM(sync_token);
 }
-void GL_APIENTRY GLES2GenSyncTokenCHROMIUM(GLuint64 fence_sync,
-                                           GLbyte* sync_token) {
-  gles2::GetGLContext()->GenSyncTokenCHROMIUM(fence_sync, sync_token);
-}
-void GL_APIENTRY GLES2GenUnverifiedSyncTokenCHROMIUM(GLuint64 fence_sync,
-                                                     GLbyte* sync_token) {
-  gles2::GetGLContext()->GenUnverifiedSyncTokenCHROMIUM(fence_sync, sync_token);
+void GL_APIENTRY GLES2GenUnverifiedSyncTokenCHROMIUM(GLbyte* sync_token) {
+  gles2::GetGLContext()->GenUnverifiedSyncTokenCHROMIUM(sync_token);
 }
 void GL_APIENTRY GLES2VerifySyncTokensCHROMIUM(GLbyte** sync_tokens,
                                                GLsizei count) {
@@ -1495,12 +1483,6 @@ void GL_APIENTRY GLES2ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
   gles2::GetGLContext()->ScheduleCALayerCHROMIUM(
       contents_texture_id, contents_rect, background_color, edge_aa_mask,
       bounds_rect, filter);
-}
-void GL_APIENTRY
-GLES2SetColorSpaceForScanoutCHROMIUM(GLuint texture_id,
-                                     GLColorSpace color_space) {
-  gles2::GetGLContext()->SetColorSpaceForScanoutCHROMIUM(texture_id,
-                                                         color_space);
 }
 void GL_APIENTRY
 GLES2ScheduleCALayerInUseQueryCHROMIUM(GLsizei count, const GLuint* textures) {
@@ -1783,12 +1765,11 @@ void GL_APIENTRY GLES2BeginRasterCHROMIUM(GLuint texture_id,
       texture_id, sk_color, msaa_sample_count, can_use_lcd_text,
       use_distance_field_text, pixel_config);
 }
-void GL_APIENTRY GLES2RasterCHROMIUM(const cc::DisplayItemList* list,
-                                     GLint x,
-                                     GLint y,
-                                     GLint w,
-                                     GLint h) {
-  gles2::GetGLContext()->RasterCHROMIUM(list, x, y, w, h);
+void* GL_APIENTRY GLES2MapRasterCHROMIUM(GLsizeiptr size) {
+  return gles2::GetGLContext()->MapRasterCHROMIUM(size);
+}
+void GL_APIENTRY GLES2UnmapRasterCHROMIUM(GLsizeiptr written_size) {
+  gles2::GetGLContext()->UnmapRasterCHROMIUM(written_size);
 }
 void GL_APIENTRY GLES2EndRasterCHROMIUM() {
   gles2::GetGLContext()->EndRasterCHROMIUM();
@@ -1800,6 +1781,27 @@ void GL_APIENTRY GLES2TexStorage2DImageCHROMIUM(GLenum target,
                                                 GLsizei height) {
   gles2::GetGLContext()->TexStorage2DImageCHROMIUM(target, internalFormat,
                                                    bufferUsage, width, height);
+}
+void GL_APIENTRY GLES2SetColorSpaceMetadataCHROMIUM(GLuint texture_id,
+                                                    GLColorSpace color_space) {
+  gles2::GetGLContext()->SetColorSpaceMetadataCHROMIUM(texture_id, color_space);
+}
+void GL_APIENTRY GLES2WindowRectanglesEXT(GLenum mode,
+                                          GLsizei count,
+                                          const GLint* box) {
+  gles2::GetGLContext()->WindowRectanglesEXT(mode, count, box);
+}
+GLuint GL_APIENTRY GLES2CreateGpuFenceCHROMIUM() {
+  return gles2::GetGLContext()->CreateGpuFenceCHROMIUM();
+}
+GLuint GL_APIENTRY GLES2CreateClientGpuFenceCHROMIUM(ClientGpuFence source) {
+  return gles2::GetGLContext()->CreateClientGpuFenceCHROMIUM(source);
+}
+void GL_APIENTRY GLES2WaitGpuFenceCHROMIUM(GLuint gpu_fence_id) {
+  gles2::GetGLContext()->WaitGpuFenceCHROMIUM(gpu_fence_id);
+}
+void GL_APIENTRY GLES2DestroyGpuFenceCHROMIUM(GLuint gpu_fence_id) {
+  gles2::GetGLContext()->DestroyGpuFenceCHROMIUM(gpu_fence_id);
 }
 
 namespace gles2 {
@@ -2847,10 +2849,6 @@ extern const NameToFunc g_gles2_function_table[] = {
         reinterpret_cast<GLES2FunctionPointer>(glGenMailboxCHROMIUM),
     },
     {
-        "glProduceTextureCHROMIUM",
-        reinterpret_cast<GLES2FunctionPointer>(glProduceTextureCHROMIUM),
-    },
-    {
         "glProduceTextureDirectCHROMIUM",
         reinterpret_cast<GLES2FunctionPointer>(glProduceTextureDirectCHROMIUM),
     },
@@ -2893,10 +2891,6 @@ extern const NameToFunc g_gles2_function_table[] = {
         reinterpret_cast<GLES2FunctionPointer>(glLoseContextCHROMIUM),
     },
     {
-        "glInsertFenceSyncCHROMIUM",
-        reinterpret_cast<GLES2FunctionPointer>(glInsertFenceSyncCHROMIUM),
-    },
-    {
         "glGenSyncTokenCHROMIUM",
         reinterpret_cast<GLES2FunctionPointer>(glGenSyncTokenCHROMIUM),
     },
@@ -2933,11 +2927,6 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
         "glScheduleCALayerCHROMIUM",
         reinterpret_cast<GLES2FunctionPointer>(glScheduleCALayerCHROMIUM),
-    },
-    {
-        "glSetColorSpaceForScanoutCHROMIUM",
-        reinterpret_cast<GLES2FunctionPointer>(
-            glSetColorSpaceForScanoutCHROMIUM),
     },
     {
         "glScheduleCALayerInUseQueryCHROMIUM",
@@ -3146,8 +3135,12 @@ extern const NameToFunc g_gles2_function_table[] = {
         reinterpret_cast<GLES2FunctionPointer>(glBeginRasterCHROMIUM),
     },
     {
-        "glRasterCHROMIUM",
-        reinterpret_cast<GLES2FunctionPointer>(glRasterCHROMIUM),
+        "glMapRasterCHROMIUM",
+        reinterpret_cast<GLES2FunctionPointer>(glMapRasterCHROMIUM),
+    },
+    {
+        "glUnmapRasterCHROMIUM",
+        reinterpret_cast<GLES2FunctionPointer>(glUnmapRasterCHROMIUM),
     },
     {
         "glEndRasterCHROMIUM",
@@ -3156,6 +3149,30 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
         "glTexStorage2DImageCHROMIUM",
         reinterpret_cast<GLES2FunctionPointer>(glTexStorage2DImageCHROMIUM),
+    },
+    {
+        "glSetColorSpaceMetadataCHROMIUM",
+        reinterpret_cast<GLES2FunctionPointer>(glSetColorSpaceMetadataCHROMIUM),
+    },
+    {
+        "glWindowRectanglesEXT",
+        reinterpret_cast<GLES2FunctionPointer>(glWindowRectanglesEXT),
+    },
+    {
+        "glCreateGpuFenceCHROMIUM",
+        reinterpret_cast<GLES2FunctionPointer>(glCreateGpuFenceCHROMIUM),
+    },
+    {
+        "glCreateClientGpuFenceCHROMIUM",
+        reinterpret_cast<GLES2FunctionPointer>(glCreateClientGpuFenceCHROMIUM),
+    },
+    {
+        "glWaitGpuFenceCHROMIUM",
+        reinterpret_cast<GLES2FunctionPointer>(glWaitGpuFenceCHROMIUM),
+    },
+    {
+        "glDestroyGpuFenceCHROMIUM",
+        reinterpret_cast<GLES2FunctionPointer>(glDestroyGpuFenceCHROMIUM),
     },
     {
         NULL, NULL,

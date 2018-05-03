@@ -27,16 +27,15 @@ PowerStatusView::PowerStatusView()
     : percentage_label_(new views::Label),
       separator_label_(new views::Label),
       time_status_label_(new views::Label) {
-  SetFocusBehavior(FocusBehavior::ALWAYS);
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
 
   percentage_label_->SetEnabledColor(kHeaderTextColorNormal);
   separator_label_->SetEnabledColor(kHeaderTextColorNormal);
   separator_label_->SetText(base::ASCIIToUTF16(" - "));
 
-  views::BoxLayout* layout =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, gfx::Insets(0, 12),
-                           kTrayPopupPaddingBetweenItems);
-  SetLayoutManager(layout);
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal, gfx::Insets(0, 12),
+      kTrayPopupPaddingBetweenItems));
 
   AddChildView(percentage_label_);
   AddChildView(separator_label_);

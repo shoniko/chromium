@@ -4,11 +4,14 @@
 
 #include "remoting/codec/webrtc_video_encoder_gpu.h"
 
+#include <memory>
 #include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "build/build_config.h"
 #include "gpu/command_buffer/service/gpu_preferences.h"
 #include "media/gpu/gpu_video_encode_accelerator_factory.h"
 #include "remoting/base/constants.h"
@@ -20,6 +23,11 @@ namespace {
 // Currently, the frame scheduler only encodes a single frame at a time. Thus,
 // there's no reason to have this set to anything greater than one.
 const int kWebrtcVideoEncoderGpuOutputBufferCount = 1;
+
+constexpr media::VideoCodecProfile kH264Profile =
+    media::VideoCodecProfile::H264PROFILE_MAIN;
+
+constexpr int kH264MinimumTargetBitrateKbpsPerMegapixel = 1800;
 
 void ArgbToI420(const webrtc::DesktopFrame& frame,
                 scoped_refptr<media::VideoFrame> video_frame) {
@@ -35,6 +43,15 @@ void ArgbToI420(const webrtc::DesktopFrame& frame,
                      v_data, uv_stride, video_frame->visible_rect().width(),
                      video_frame->visible_rect().height());
 }
+
+gpu::GpuPreferences CreateGpuPreferences() {
+  gpu::GpuPreferences gpu_preferences;
+#if defined(OS_WIN)
+  gpu_preferences.enable_media_foundation_vea_on_windows7 = true;
+#endif
+  return gpu_preferences;
+}
+
 }  // namespace
 
 namespace remoting {
@@ -43,9 +60,10 @@ WebrtcVideoEncoderGpu::WebrtcVideoEncoderGpu(
     media::VideoCodecProfile codec_profile)
     : state_(UNINITIALIZED),
       codec_profile_(codec_profile),
+      bitrate_filter_(kH264MinimumTargetBitrateKbpsPerMegapixel),
       weak_factory_(this) {}
 
-WebrtcVideoEncoderGpu::~WebrtcVideoEncoderGpu() {}
+WebrtcVideoEncoderGpu::~WebrtcVideoEncoderGpu() = default;
 
 // TODO(gusss): Implement either a software fallback or some sort of delay if
 // the hardware encoder crashes.
@@ -56,6 +74,8 @@ void WebrtcVideoEncoderGpu::Encode(std::unique_ptr<webrtc::DesktopFrame> frame,
   DCHECK(frame);
   DCHECK(done);
   DCHECK_GT(params.duration, base::TimeDelta::FromMilliseconds(0));
+
+  bitrate_filter_.SetFrameSize(frame->size().width(), frame->size().height());
 
   if (state_ == INITIALIZATION_ERROR) {
     // TODO(zijiehe): The screen resolution limitation of H264 encoder is much
@@ -110,10 +130,11 @@ void WebrtcVideoEncoderGpu::Encode(std::unique_ptr<webrtc::DesktopFrame> frame,
 
   callbacks_[video_frame->timestamp()] = std::move(done);
 
-  if (params.bitrate_kbps > 0) {
+  if (params.bitrate_kbps > 0 && params.fps > 0) {
     // TODO(zijiehe): Forward frame_rate from FrameParams.
+    bitrate_filter_.SetBandwidthEstimateKbps(params.bitrate_kbps);
     video_encode_accelerator_->RequestEncodingParametersChange(
-        params.bitrate_kbps * 1024, 30);
+        bitrate_filter_.GetTargetBitrateKbps() * 1000, params.fps);
   }
   video_encode_accelerator_->Encode(video_frame, params.key_frame);
 }
@@ -137,7 +158,7 @@ void WebrtcVideoEncoderGpu::RequireBitstreamBuffers(
   output_buffers_.clear();
 
   for (unsigned int i = 0; i < kWebrtcVideoEncoderGpuOutputBufferCount; ++i) {
-    auto shm = base::MakeUnique<base::SharedMemory>();
+    auto shm = std::make_unique<base::SharedMemory>();
     // TODO(gusss): Do we need to handle mapping failure more gracefully?
     CHECK(shm->CreateAndMapAnonymous(output_buffer_size_));
     output_buffers_.push_back(std::move(shm));
@@ -162,7 +183,7 @@ void WebrtcVideoEncoderGpu::BitstreamBufferReady(int32_t bitstream_buffer_id,
            << "timestamp ms = " << timestamp.InMilliseconds();
 
   std::unique_ptr<EncodedFrame> encoded_frame =
-      base::MakeUnique<EncodedFrame>();
+      std::make_unique<EncodedFrame>();
   base::SharedMemory* output_buffer =
       output_buffers_[bitstream_buffer_id].get();
   DCHECK(output_buffer->memory());
@@ -172,6 +193,7 @@ void WebrtcVideoEncoderGpu::BitstreamBufferReady(int32_t bitstream_buffer_id,
   encoded_frame->size = webrtc::DesktopSize(input_coded_size_.width(),
                                             input_coded_size_.height());
   encoded_frame->quantizer = 0;
+  encoded_frame->codec = webrtc::kVideoCodecH264;
 
   UseOutputBitstreamBufferId(bitstream_buffer_id);
 
@@ -197,12 +219,11 @@ void WebrtcVideoEncoderGpu::BeginInitialization() {
   // Currently we set the bitrate to 8M bits / 1M bytes per frame, and 30 frames
   // per second.
   uint32_t initial_bitrate = kTargetFrameRate * 1024 * 1024 * 8;
-  gpu::GpuPreferences gpu_preferences;
 
   video_encode_accelerator_ =
       media::GpuVideoEncodeAcceleratorFactory::CreateVEA(
           input_format, input_visible_size_, codec_profile_, initial_bitrate,
-          this, gpu_preferences);
+          this, CreateGpuPreferences());
 
   if (!video_encode_accelerator_) {
     LOG(ERROR) << "Could not create VideoEncodeAccelerator";
@@ -229,13 +250,40 @@ void WebrtcVideoEncoderGpu::RunAnyPendingEncode() {
 }
 
 // static
-std::unique_ptr<WebrtcVideoEncoderGpu> WebrtcVideoEncoderGpu::CreateForH264() {
+std::unique_ptr<WebrtcVideoEncoder> WebrtcVideoEncoderGpu::CreateForH264() {
   DVLOG(3) << __func__;
 
+  LOG(WARNING) << "H264 video encoder is created.";
   // HIGH profile requires Windows 8 or upper. Considering encoding latency,
   // frame size and image quality, MAIN should be fine for us.
-  return base::WrapUnique(new WebrtcVideoEncoderGpu(
-      media::VideoCodecProfile::H264PROFILE_MAIN));
+  return base::WrapUnique(new WebrtcVideoEncoderGpu(kH264Profile));
+}
+
+// static
+bool WebrtcVideoEncoderGpu::IsSupportedByH264(
+    const WebrtcVideoEncoderSelector::Profile& profile) {
+  media::VideoEncodeAccelerator::SupportedProfiles profiles =
+      media::GpuVideoEncodeAcceleratorFactory::GetSupportedProfiles(
+          CreateGpuPreferences());
+  for (const auto& supported_profile : profiles) {
+    if (supported_profile.profile != kH264Profile) {
+      continue;
+    }
+
+    double supported_framerate = supported_profile.max_framerate_numerator;
+    supported_framerate /= supported_profile.max_framerate_denominator;
+    if (profile.frame_rate > supported_framerate) {
+      continue;
+    }
+
+    if (profile.resolution.GetArea() >
+        supported_profile.max_resolution.GetArea()) {
+      continue;
+    }
+
+    return true;
+  }
+  return false;
 }
 
 }  // namespace remoting

@@ -46,7 +46,9 @@ std::set<TestMultiBufferDataProvider*> test_data_providers;
 class TestMultiBufferDataProvider : public ResourceMultiBufferDataProvider {
  public:
   TestMultiBufferDataProvider(UrlData* url_data, MultiBuffer::BlockId pos)
-      : ResourceMultiBufferDataProvider(url_data, pos) {
+      : ResourceMultiBufferDataProvider(url_data,
+                                        pos,
+                                        false /* is_client_audio_element */) {
     CHECK(test_data_providers.insert(this).second);
   }
   ~TestMultiBufferDataProvider() override {
@@ -80,9 +82,9 @@ class TestResourceMultiBuffer : public ResourceMultiBuffer {
   explicit TestResourceMultiBuffer(UrlData* url_data, int shift)
       : ResourceMultiBuffer(url_data, shift) {}
 
-  std::unique_ptr<MultiBuffer::DataProvider> CreateWriter(
-      const BlockId& pos) override {
-    auto writer = base::MakeUnique<TestMultiBufferDataProvider>(url_data_, pos);
+  std::unique_ptr<MultiBuffer::DataProvider> CreateWriter(const BlockId& pos,
+                                                          bool) override {
+    auto writer = std::make_unique<TestMultiBufferDataProvider>(url_data_, pos);
     writer->Start();
     return writer;
   }
@@ -130,7 +132,7 @@ class TestUrlData : public UrlData {
   }
 
  protected:
-  ~TestUrlData() override {}
+  ~TestUrlData() override = default;
   const int block_shift_;
 
   std::unique_ptr<TestResourceMultiBuffer> test_multibuffer_;
@@ -158,8 +160,8 @@ class TestUrlIndex : public UrlIndex {
 
 class MockBufferedDataSourceHost : public BufferedDataSourceHost {
  public:
-  MockBufferedDataSourceHost() {}
-  virtual ~MockBufferedDataSourceHost() {}
+  MockBufferedDataSourceHost() = default;
+  virtual ~MockBufferedDataSourceHost() = default;
 
   MOCK_METHOD1(SetTotalBytes, void(int64_t total_bytes));
   MOCK_METHOD2(AddBufferedByteRange, void(int64_t start, int64_t end));
@@ -210,10 +212,10 @@ class MultibufferDataSourceTest : public testing::Test {
   MultibufferDataSourceTest() : preload_(MultibufferDataSource::AUTO) {
     ON_CALL(fetch_context_, CreateUrlLoader(_))
         .WillByDefault(Invoke([](const blink::WebAssociatedURLLoaderOptions&) {
-          return base::MakeUnique<NiceMock<MockWebAssociatedURLLoader>>();
+          return std::make_unique<NiceMock<MockWebAssociatedURLLoader>>();
         }));
 
-    url_index_ = base::MakeUnique<TestUrlIndex>(&fetch_context_);
+    url_index_ = std::make_unique<TestUrlIndex>(&fetch_context_);
   }
 
   MOCK_METHOD1(OnInitialize, void(bool));

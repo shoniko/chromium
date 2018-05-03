@@ -4,10 +4,12 @@
 
 #include "modules/storage/StorageNamespaceController.h"
 
+#include <memory>
+
 #include "core/frame/ContentSettingsClient.h"
 #include "modules/storage/InspectorDOMStorageAgent.h"
 #include "modules/storage/StorageNamespace.h"
-#include "platform/wtf/PtrUtil.h"
+#include "public/platform/Platform.h"
 #include "public/platform/WebStorageNamespace.h"
 #include "public/web/WebViewClient.h"
 
@@ -16,9 +18,9 @@ namespace blink {
 #define STATIC_ASSERT_MATCHING_ENUM(enum_name1, enum_name2)                   \
   static_assert(static_cast<int>(enum_name1) == static_cast<int>(enum_name2), \
                 "mismatching enums: " #enum_name1)
-STATIC_ASSERT_MATCHING_ENUM(kLocalStorage,
+STATIC_ASSERT_MATCHING_ENUM(StorageArea::kLocalStorage,
                             ContentSettingsClient::StorageType::kLocal);
-STATIC_ASSERT_MATCHING_ENUM(kSessionStorage,
+STATIC_ASSERT_MATCHING_ENUM(StorageArea::kSessionStorage,
                             ContentSettingsClient::StorageType::kSession);
 
 const char* StorageNamespaceController::SupplementName() {
@@ -28,7 +30,7 @@ const char* StorageNamespaceController::SupplementName() {
 StorageNamespaceController::StorageNamespaceController(WebViewClient* client)
     : inspector_agent_(nullptr), web_view_client_(client) {}
 
-StorageNamespaceController::~StorageNamespaceController() {}
+StorageNamespaceController::~StorageNamespaceController() = default;
 
 void StorageNamespaceController::Trace(blink::Visitor* visitor) {
   Supplement<Page>::Trace(visitor);
@@ -54,12 +56,14 @@ StorageNamespaceController::CreateSessionStorageNamespace() {
   if (!web_view_client_)
     return nullptr;
 
-  return WTF::WrapUnique(new StorageNamespace(
-      WTF::WrapUnique(web_view_client_->CreateSessionStorageNamespace())));
+  return std::make_unique<StorageNamespace>(
+      Platform::Current()->CreateSessionStorageNamespace(
+          web_view_client_->GetSessionStorageNamespaceId()));
 }
 
-bool StorageNamespaceController::CanAccessStorage(LocalFrame* frame,
-                                                  StorageType type) const {
+bool StorageNamespaceController::CanAccessStorage(
+    LocalFrame* frame,
+    StorageArea::StorageType type) const {
   DCHECK(frame->GetContentSettingsClient());
   return frame->GetContentSettingsClient()->AllowStorage(
       static_cast<ContentSettingsClient::StorageType>(type));

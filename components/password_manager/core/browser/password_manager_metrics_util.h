@@ -10,6 +10,7 @@
 #include <string>
 
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_reuse_defines.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
 
 namespace password_manager {
@@ -36,6 +37,7 @@ enum UIDisplayDisposition {
   AUTOMATIC_SIGNIN_TOAST,
   MANUAL_WITH_PASSWORD_PENDING_UPDATE,
   AUTOMATIC_WITH_PASSWORD_PENDING_UPDATE,
+  MANUAL_GENERATED_PASSWORD_CONFIRMATION,
   NUM_DISPLAY_DISPOSITIONS
 };
 
@@ -226,8 +228,7 @@ enum class CredentialSourceType {
   kCredentialManagementAPI
 };
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS)) || \
-    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 enum class SyncPasswordHashChange {
   SAVED_ON_CHROME_SIGNIN,
   SAVED_IN_CONTENT_AREA,
@@ -260,6 +261,17 @@ enum ShowAllSavedPasswordsContext {
   // The "Show all saved  passwords..." fallback is shown in context menu.
   SHOW_ALL_SAVED_PASSWORDS_CONTEXT_CONTEXT_MENU,
   SHOW_ALL_SAVED_PASSWORDS_CONTEXT_COUNT
+};
+
+// Metrics: "PasswordManager.CertificateErrorsWhileSeeingForms"
+enum class CertificateError {
+  NONE = 0,
+  OTHER = 1,
+  AUTHORITY_INVALID = 2,
+  DATE_INVALID = 3,
+  COMMON_NAME_INVALID = 4,
+  WEAK_SIGNATURE_ALGORITHM = 5,
+  COUNT
 };
 
 // A version of the UMA_HISTOGRAM_BOOLEAN macro that allows the |name|
@@ -360,8 +372,7 @@ void LogPasswordAcceptedSaveUpdateSubmissionIndicatorEvent(
 // Log a frame of a submitted password form.
 void LogSubmittedFormFrame(SubmittedFormFrame frame);
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS)) || \
-    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 // Log a save sync password change event.
 void LogSyncPasswordHashChange(SyncPasswordHashChange event);
 

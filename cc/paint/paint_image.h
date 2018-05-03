@@ -106,6 +106,7 @@ class CC_PAINT_EXPORT PaintImage {
   PaintImage& operator=(PaintImage&& other);
 
   bool operator==(const PaintImage& other) const;
+  bool operator!=(const PaintImage& other) const { return !(*this == other); }
 
   // Returns the smallest size that is at least as big as the requested_size
   // such that we can decode to exactly that scale. If the requested size is
@@ -160,9 +161,6 @@ class CC_PAINT_EXPORT PaintImage {
   // Returns the total number of frames known to exist in this image.
   size_t FrameCount() const;
 
-  // Returns an SkImage for the frame at |index|.
-  sk_sp<SkImage> GetSkImageForFrame(size_t index) const;
-
   std::string ToString() const;
 
  private:
@@ -180,6 +178,9 @@ class CC_PAINT_EXPORT PaintImage {
                          size_t frame_index) const;
   void CreateSkImage();
   PaintImage MakeSubset(const gfx::Rect& subset) const;
+
+  // Returns an SkImage for the frame at |index|.
+  sk_sp<SkImage> GetSkImageForFrame(size_t index) const;
 
   sk_sp<SkImage> sk_image_;
 

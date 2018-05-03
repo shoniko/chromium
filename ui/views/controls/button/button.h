@@ -192,6 +192,15 @@ class VIEWS_EXPORT Button : public InkDropHostView,
   // no default action and checkboxes.
   explicit Button(ButtonListener* listener);
 
+  // Returns the click action for the given key event.
+  // Subclasses may override this method to support default actions for key
+  // events.
+  virtual KeyClickAction GetKeyClickActionForEvent(const ui::KeyEvent& event);
+
+  // Called when the button has been clicked or tapped and should request focus
+  // if necessary.
+  virtual void RequestFocusFromEvent();
+
   // Cause the button to notify the listener that a click occurred.
   virtual void NotifyClick(const ui::Event& event);
 

@@ -27,6 +27,7 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/dom/DOMException.h"
@@ -48,7 +49,6 @@
 #include "platform/SharedBuffer.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/testing/TestingPlatformSupport.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/dtoa/utils.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
@@ -65,7 +65,7 @@ class IDBRequestTest : public ::testing::Test {
   void SetUp() override {
     url_loader_mock_factory_ = platform_->GetURLLoaderMockFactory();
     WebURLResponse response;
-    response.SetURL(KURL(NullURL(), "blob:"));
+    response.SetURL(KURL("blob:"));
     url_loader_mock_factory_->RegisterURLProtocol(WebString("blob"), response,
                                                   "");
   }
@@ -86,7 +86,7 @@ class IDBRequestTest : public ::testing::Test {
         kWebIDBTransactionModeReadOnly, db_.Get());
 
     IDBKeyPath store_key_path("primaryKey");
-    scoped_refptr<IDBObjectStoreMetadata> store_metadata = WTF::AdoptRef(
+    scoped_refptr<IDBObjectStoreMetadata> store_metadata = base::AdoptRef(
         new IDBObjectStoreMetadata("store", kStoreId, store_key_path, true, 1));
     store_ = IDBObjectStore::Create(store_metadata, transaction_);
   }
@@ -104,17 +104,19 @@ class IDBRequestTest : public ::testing::Test {
 void EnsureIDBCallbacksDontThrow(IDBRequest* request,
                                  ExceptionState& exception_state) {
   ASSERT_TRUE(request->transaction());
+  V8TestingScope scope;
 
   request->HandleResponse(
       DOMException::Create(kAbortError, "Description goes here."));
   request->HandleResponse(nullptr, IDBKey::CreateInvalid(),
-                          IDBKey::CreateInvalid(), IDBValue::Create());
+                          IDBKey::CreateInvalid(),
+                          CreateNullIDBValueForTesting(scope.GetIsolate()));
   request->HandleResponse(IDBKey::CreateInvalid());
-  request->HandleResponse(IDBValue::Create());
+  request->HandleResponse(CreateNullIDBValueForTesting(scope.GetIsolate()));
   request->HandleResponse(static_cast<int64_t>(0));
   request->HandleResponse();
   request->HandleResponse(IDBKey::CreateInvalid(), IDBKey::CreateInvalid(),
-                          IDBValue::Create());
+                          CreateNullIDBValueForTesting(scope.GetIsolate()));
   request->EnqueueResponse(Vector<String>());
 
   EXPECT_TRUE(!exception_state.HadException());
@@ -130,7 +132,7 @@ TEST_F(IDBRequestTest, EventsAfterEarlyDeathStop) {
   ASSERT_TRUE(transaction_);
 
   IDBRequest* request =
-      IDBRequest::Create(scope.GetScriptState(), IDBAny::Create(store_.Get()),
+      IDBRequest::Create(scope.GetScriptState(), store_.Get(),
                          transaction_.Get(), IDBRequest::AsyncTraceState());
 
   EXPECT_EQ(request->readyState(), "pending");
@@ -151,7 +153,7 @@ TEST_F(IDBRequestTest, EventsAfterDoneStop) {
   ASSERT_TRUE(transaction_);
 
   IDBRequest* request =
-      IDBRequest::Create(scope.GetScriptState(), IDBAny::Create(store_.Get()),
+      IDBRequest::Create(scope.GetScriptState(), store_.Get(),
                          transaction_.Get(), IDBRequest::AsyncTraceState());
   ASSERT_TRUE(!scope.GetExceptionState().HadException());
   ASSERT_TRUE(request->transaction());
@@ -164,6 +166,7 @@ TEST_F(IDBRequestTest, EventsAfterDoneStop) {
 TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithQueuedResult) {
   V8TestingScope scope;
   std::unique_ptr<MockWebIDBDatabase> backend = MockWebIDBDatabase::Create();
+  EXPECT_CALL(*backend, AckReceivedBlobs(::testing::_)).Times(1);
   EXPECT_CALL(*backend, Close()).Times(1);
   BuildTransaction(scope, std::move(backend));
 
@@ -171,7 +174,7 @@ TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithQueuedResult) {
   ASSERT_TRUE(transaction_);
 
   IDBRequest* request =
-      IDBRequest::Create(scope.GetScriptState(), IDBAny::Create(store_.Get()),
+      IDBRequest::Create(scope.GetScriptState(), store_.Get(),
                          transaction_.Get(), IDBRequest::AsyncTraceState());
   EXPECT_EQ(request->readyState(), "pending");
   ASSERT_TRUE(!scope.GetExceptionState().HadException());
@@ -187,6 +190,7 @@ TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithQueuedResult) {
 TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithTwoQueuedResults) {
   V8TestingScope scope;
   std::unique_ptr<MockWebIDBDatabase> backend = MockWebIDBDatabase::Create();
+  EXPECT_CALL(*backend, AckReceivedBlobs(::testing::_)).Times(2);
   EXPECT_CALL(*backend, Close()).Times(1);
   BuildTransaction(scope, std::move(backend));
 
@@ -194,10 +198,10 @@ TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithTwoQueuedResults) {
   ASSERT_TRUE(transaction_);
 
   IDBRequest* request1 =
-      IDBRequest::Create(scope.GetScriptState(), IDBAny::Create(store_.Get()),
+      IDBRequest::Create(scope.GetScriptState(), store_.Get(),
                          transaction_.Get(), IDBRequest::AsyncTraceState());
   IDBRequest* request2 =
-      IDBRequest::Create(scope.GetScriptState(), IDBAny::Create(store_.Get()),
+      IDBRequest::Create(scope.GetScriptState(), store_.Get(),
                          transaction_.Get(), IDBRequest::AsyncTraceState());
   EXPECT_EQ(request1->readyState(), "pending");
   EXPECT_EQ(request2->readyState(), "pending");
@@ -219,8 +223,8 @@ TEST_F(IDBRequestTest, AbortErrorAfterAbort) {
   V8TestingScope scope;
   IDBTransaction* transaction = nullptr;
   IDBRequest* request =
-      IDBRequest::Create(scope.GetScriptState(), IDBAny::Create(store_.Get()),
-                         transaction, IDBRequest::AsyncTraceState());
+      IDBRequest::Create(scope.GetScriptState(), store_.Get(), transaction,
+                         IDBRequest::AsyncTraceState());
   EXPECT_EQ(request->readyState(), "pending");
 
   // Simulate the IDBTransaction having received OnAbort from back end and

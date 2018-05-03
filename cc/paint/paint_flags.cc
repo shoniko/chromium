@@ -4,7 +4,9 @@
 
 #include "cc/paint/paint_flags.h"
 
+#include "cc/paint/paint_filter.h"
 #include "cc/paint/paint_op_buffer.h"
+#include "cc/paint/paint_op_writer.h"
 
 namespace {
 
@@ -32,7 +34,17 @@ PaintFlags::PaintFlags() {
 
 PaintFlags::PaintFlags(const PaintFlags& flags) = default;
 
+PaintFlags::PaintFlags(PaintFlags&& other) = default;
+
 PaintFlags::~PaintFlags() = default;
+
+PaintFlags& PaintFlags::operator=(const PaintFlags& other) = default;
+
+PaintFlags& PaintFlags::operator=(PaintFlags&& other) = default;
+
+void PaintFlags::setImageFilter(sk_sp<PaintFilter> filter) {
+  image_filter_ = std::move(filter);
+}
 
 bool PaintFlags::nothingToDraw() const {
   // Duplicated from SkPaint to avoid having to construct an SkPaint to
@@ -108,7 +120,8 @@ SkPaint PaintFlags::ToSkPaint() const {
   paint.setMaskFilter(mask_filter_);
   paint.setColorFilter(color_filter_);
   paint.setDrawLooper(draw_looper_);
-  paint.setImageFilter(image_filter_);
+  if (image_filter_)
+    paint.setImageFilter(image_filter_->cached_sk_filter_);
   paint.setTextSize(text_size_);
   paint.setColor(color_);
   paint.setStrokeWidth(width_);
@@ -126,6 +139,87 @@ SkPaint PaintFlags::ToSkPaint() const {
 
 bool PaintFlags::IsValid() const {
   return PaintOp::IsValidPaintFlagsSkBlendMode(getBlendMode());
+}
+
+bool PaintFlags::operator==(const PaintFlags& other) const {
+  // Can't just ToSkPaint and operator== here as SkPaint does pointer
+  // comparisons on all the ref'd skia objects on the SkPaint, which
+  // is not true after serialization.
+  if (!PaintOp::AreEqualEvenIfNaN(getTextSize(), other.getTextSize()))
+    return false;
+  if (getColor() != other.getColor())
+    return false;
+  if (!PaintOp::AreEqualEvenIfNaN(getStrokeWidth(), other.getStrokeWidth()))
+    return false;
+  if (!PaintOp::AreEqualEvenIfNaN(getStrokeMiter(), other.getStrokeMiter()))
+    return false;
+  if (getBlendMode() != other.getBlendMode())
+    return false;
+  if (getStrokeCap() != other.getStrokeCap())
+    return false;
+  if (getStrokeJoin() != other.getStrokeJoin())
+    return false;
+  if (getStyle() != other.getStyle())
+    return false;
+  if (getTextEncoding() != other.getTextEncoding())
+    return false;
+  if (getHinting() != other.getHinting())
+    return false;
+  if (getFilterQuality() != other.getFilterQuality())
+    return false;
+
+  // TODO(enne): compare typeface too
+  if (!PaintOp::AreSkFlattenablesEqual(getPathEffect().get(),
+                                       other.getPathEffect().get())) {
+    return false;
+  }
+  if (!PaintOp::AreSkFlattenablesEqual(getMaskFilter().get(),
+                                       other.getMaskFilter().get())) {
+    return false;
+  }
+  if (!PaintOp::AreSkFlattenablesEqual(getColorFilter().get(),
+                                       other.getColorFilter().get())) {
+    return false;
+  }
+  if (!PaintOp::AreSkFlattenablesEqual(getLooper().get(),
+                                       other.getLooper().get())) {
+    return false;
+  }
+
+  if (!getImageFilter() != !other.getImageFilter())
+    return false;
+  if (getImageFilter() && *getImageFilter() != *other.getImageFilter())
+    return false;
+
+  if (!getShader() != !other.getShader())
+    return false;
+  if (getShader() && *getShader() != *other.getShader())
+    return false;
+  return true;
+}
+
+bool PaintFlags::HasDiscardableImages() const {
+  if (!shader_)
+    return false;
+  else if (shader_->shader_type() == PaintShader::Type::kImage)
+    return shader_->paint_image().IsLazyGenerated();
+  else if (shader_->shader_type() == PaintShader::Type::kPaintRecord)
+    return shader_->paint_record()->HasDiscardableImages();
+  return false;
+}
+
+size_t PaintFlags::GetSerializedSize() const {
+  return sizeof(text_size_) + sizeof(color_) + sizeof(width_) +
+         sizeof(miter_limit_) + sizeof(blend_mode_) + sizeof(bitfields_uint_) +
+         PaintOpWriter::GetFlattenableSize(path_effect_.get()) +
+         PaintOpWriter::Alignment() +
+         PaintOpWriter::GetFlattenableSize(mask_filter_.get()) +
+         PaintOpWriter::Alignment() +
+         PaintOpWriter::GetFlattenableSize(color_filter_.get()) +
+         PaintOpWriter::Alignment() +
+         PaintOpWriter::GetFlattenableSize(draw_looper_.get()) +
+         PaintFilter::GetFilterSize(image_filter_.get()) +
+         PaintShader::GetSerializedSize(shader_.get());
 }
 
 }  // namespace cc

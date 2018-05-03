@@ -19,12 +19,12 @@
 
 #include <memory>
 #include "base/command_line.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/message_loop/message_loop.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "platform/SharedBuffer.h"
 #include "platform/image-decoders/ImageDecoder.h"
 #include "platform/wtf/PtrUtil.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/Platform.h"
 #include "ui/gfx/test/icc_profiles.h"
 
@@ -182,7 +182,7 @@ static double GetCurrentTime() {
 
 #endif
 
-RefPtr<SharedBuffer> ReadFile(const char* file_name) {
+scoped_refptr<SharedBuffer> ReadFile(const char* file_name) {
   FILE* fp = fopen(file_name, "rb");
   if (!fp) {
     fprintf(stderr, "Can't open file %s\n", file_name);
@@ -195,8 +195,7 @@ RefPtr<SharedBuffer> ReadFile(const char* file_name) {
   if (s.st_size <= 0)
     return SharedBuffer::Create();
 
-  std::unique_ptr<unsigned char[]> buffer =
-      WrapArrayUnique(new unsigned char[file_size]);
+  auto buffer = std::make_unique<unsigned char[]>(file_size);
   if (file_size != fread(buffer.get(), 1, file_size, fp)) {
     fprintf(stderr, "Error reading file %s\n", file_name);
     exit(2);
@@ -226,7 +225,7 @@ bool DecodeImageData(SharedBuffer* data,
     return !decoder->Failed();
   }
 
-  RefPtr<SharedBuffer> packet_data = SharedBuffer::Create();
+  scoped_refptr<SharedBuffer> packet_data = SharedBuffer::Create();
   size_t position = 0;
   size_t next_frame_to_decode = 0;
   while (true) {
@@ -314,7 +313,7 @@ int Main(int argc, char* argv[]) {
   // Read entire file content to data, and consolidate the SharedBuffer data
   // segments into one, contiguous block of memory.
 
-  RefPtr<SharedBuffer> data = ReadFile(argv[1]);
+  scoped_refptr<SharedBuffer> data = ReadFile(argv[1]);
   if (!data.get() || !data->size()) {
     fprintf(stderr, "Error reading image data from [%s]\n", argv[1]);
     exit(2);

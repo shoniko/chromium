@@ -31,7 +31,6 @@
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/IdTargetObserver.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/events/Event.h"
 #include "core/layout/svg/LayoutSVGTransformableContainer.h"
 #include "core/svg/SVGGElement.h"
@@ -46,6 +45,7 @@
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/wtf/Vector.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -86,10 +86,10 @@ SVGUseElement* SVGUseElement::Create(Document& document) {
   return use;
 }
 
-SVGUseElement::~SVGUseElement() {}
+SVGUseElement::~SVGUseElement() = default;
 
 void SVGUseElement::Dispose() {
-  SetDocumentResource(nullptr);
+  ClearResource();
 }
 
 void SVGUseElement::Trace(blink::Visitor* visitor) {
@@ -99,10 +99,9 @@ void SVGUseElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(height_);
   visitor->Trace(target_element_instance_);
   visitor->Trace(target_id_observer_);
-  visitor->Trace(resource_);
   SVGGraphicsElement::Trace(visitor);
   SVGURIReference::Trace(visitor);
-  DocumentResourceClient::Trace(visitor);
+  ResourceClient::Trace(visitor);
 }
 
 #if DCHECK_IS_ON()
@@ -180,14 +179,14 @@ static void TransferUseWidthAndHeightIfNeeded(
 void SVGUseElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   SVGAnimatedPropertyBase* property = PropertyFromAttribute(name);
   if (property == x_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                            x_->CssValue());
+                                            &x_->CssValue());
   } else if (property == y_) {
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
-                                            y_->CssValue());
+                                            &y_->CssValue());
   } else {
     SVGGraphicsElement::CollectStyleForPresentationAttribute(name, value,
                                                              style);
@@ -203,20 +202,19 @@ void SVGUseElement::UpdateTargetReference() {
   const String& url_string = HrefString();
   element_url_ = GetDocument().CompleteURL(url_string);
   element_url_is_local_ = url_string.StartsWith('#');
-  if (element_url_is_local_) {
-    SetDocumentResource(nullptr);
+  if (!IsStructurallyExternal()) {
+    ClearResource();
     return;
   }
   if (!element_url_.HasFragmentIdentifier() ||
-      (resource_ &&
-       EqualIgnoringFragmentIdentifier(element_url_, resource_->Url())))
+      (GetResource() &&
+       EqualIgnoringFragmentIdentifier(element_url_, GetResource()->Url())))
     return;
 
   ResourceLoaderOptions options;
   options.initiator_info.name = localName();
   FetchParameters params(ResourceRequest(element_url_), options);
-  SetDocumentResource(
-      DocumentResource::FetchSVGDocument(params, GetDocument().Fetcher()));
+  DocumentResource::FetchSVGDocument(params, GetDocument().Fetcher(), this);
 }
 
 void SVGUseElement::SvgAttributeChanged(const QualifiedName& attr_name) {
@@ -305,18 +303,21 @@ void SVGUseElement::ClearResourceReference() {
 Element* SVGUseElement::ResolveTargetElement(ObserveBehavior observe_behavior) {
   if (!element_url_.HasFragmentIdentifier())
     return nullptr;
-  AtomicString element_identifier(element_url_.FragmentIdentifier());
+  AtomicString element_identifier(
+      DecodeURLEscapeSequences(element_url_.FragmentIdentifier()));
   if (!IsStructurallyExternal()) {
     if (observe_behavior == kDontAddObserver)
       return GetTreeScope().getElementById(element_identifier);
-    return ObserveTarget(target_id_observer_, GetTreeScope(),
-                         element_identifier,
-                         WTF::Bind(&SVGUseElement::InvalidateShadowTree,
-                                   WrapWeakPersistent(this)));
+    return ObserveTarget(
+        target_id_observer_, GetTreeScope(), element_identifier,
+        WTF::BindRepeating(&SVGUseElement::InvalidateShadowTree,
+                           WrapWeakPersistent(this)));
   }
   if (!ResourceIsValid())
     return nullptr;
-  return resource_->GetDocument()->getElementById(element_identifier);
+  return ToDocumentResource(GetResource())
+      ->GetDocument()
+      ->getElementById(element_identifier);
 }
 
 void SVGUseElement::BuildPendingResource() {
@@ -481,7 +482,9 @@ void SVGUseElement::BuildShadowAndInstanceTree(SVGElement& target) {
   UpdateRelativeLengthsInformation();
 }
 
-LayoutObject* SVGUseElement::CreateLayoutObject(const ComputedStyle&) {
+LayoutObject* SVGUseElement::CreateLayoutObject(const ComputedStyle& style) {
+  if (style.Display() == EDisplay::kContents)
+    return nullptr;
   return new LayoutSVGTransformableContainer(this);
 }
 
@@ -492,22 +495,17 @@ static bool IsDirectReference(const SVGElement& element) {
          IsSVGTextElement(element);
 }
 
-void SVGUseElement::ToClipPath(Path& path) const {
-  DCHECK(path.IsEmpty());
-
+Path SVGUseElement::ToClipPath() const {
   const SVGGraphicsElement* element = VisibleTargetGraphicsElementForClipping();
+  if (!element || !element->IsSVGGeometryElement())
+    return Path();
 
-  if (!element)
-    return;
-
-  if (element->IsSVGGeometryElement()) {
-    ToSVGGeometryElement(*element).ToClipPath(path);
-    // FIXME: Avoid manual resolution of x/y here. Its potentially harmful.
-    SVGLengthContext length_context(this);
-    path.Translate(FloatSize(x_->CurrentValue()->Value(length_context),
-                             y_->CurrentValue()->Value(length_context)));
-    path.Transform(CalculateTransform(SVGElement::kIncludeMotionTransform));
-  }
+  DCHECK(GetLayoutObject());
+  Path path = ToSVGGeometryElement(*element).ToClipPath();
+  AffineTransform transform = GetLayoutObject()->LocalSVGTransform();
+  if (!transform.IsIdentity())
+    path.Transform(transform);
+  return path;
 }
 
 SVGGraphicsElement* SVGUseElement::VisibleTargetGraphicsElementForClipping()
@@ -707,7 +705,7 @@ void SVGUseElement::DispatchPendingEvent() {
 }
 
 void SVGUseElement::NotifyFinished(Resource* resource) {
-  DCHECK_EQ(resource_, resource);
+  DCHECK_EQ(GetResource(), resource);
   if (!isConnected())
     return;
 
@@ -721,20 +719,21 @@ void SVGUseElement::NotifyFinished(Resource* resource) {
       return;
     DCHECK(!have_fired_load_event_);
     have_fired_load_event_ = true;
-    TaskRunnerHelper::Get(TaskType::kDOMManipulation, &GetDocument())
-        ->PostTask(BLINK_FROM_HERE,
-                   WTF::Bind(&SVGUseElement::DispatchPendingEvent,
-                             WrapPersistent(this)));
+    GetDocument()
+        .GetTaskRunner(TaskType::kDOMManipulation)
+        ->PostTask(FROM_HERE, WTF::Bind(&SVGUseElement::DispatchPendingEvent,
+                                        WrapPersistent(this)));
   }
 }
 
 bool SVGUseElement::ResourceIsStillLoading() const {
-  return resource_ && resource_->IsLoading();
+  return GetResource() && GetResource()->IsLoading();
 }
 
 bool SVGUseElement::ResourceIsValid() const {
-  return resource_ && resource_->IsLoaded() && !resource_->ErrorOccurred() &&
-         resource_->GetDocument();
+  return GetResource() && GetResource()->IsLoaded() &&
+         !GetResource()->ErrorOccurred() &&
+         ToDocumentResource(GetResource())->GetDocument();
 }
 
 bool SVGUseElement::InstanceTreeIsLoading() const {
@@ -744,18 +743,6 @@ bool SVGUseElement::InstanceTreeIsLoading() const {
       return true;
   }
   return false;
-}
-
-void SVGUseElement::SetDocumentResource(DocumentResource* resource) {
-  if (resource_ == resource)
-    return;
-
-  if (resource_)
-    resource_->RemoveClient(this);
-
-  resource_ = resource;
-  if (resource_)
-    resource_->AddClient(this);
 }
 
 }  // namespace blink

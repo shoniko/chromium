@@ -10,10 +10,16 @@ namespace switches {
 // Disables the crash reporting.
 const char kDisableBreakpad[]               = "disable-breakpad";
 
+// Comma-separated list of feature names to disable. See also kEnableFeatures.
+const char kDisableFeatures[] = "disable-features";
+
 // Indicates that crash reporting should be enabled. On platforms where helper
 // processes cannot access to files needed to make this decision, this flag is
 // generated internally.
 const char kEnableCrashReporter[]           = "enable-crash-reporter";
+
+// Comma-separated list of feature names to enable. See also kDisableFeatures.
+const char kEnableFeatures[] = "enable-features";
 
 // Makes memory allocators keep track of their allocations and context, so a
 // detailed breakdown of memory usage can be presented in chrome://tracing when
@@ -106,11 +112,25 @@ const char kProfilingFile[] = "profiling-file";
 const char kDisableUsbKeyboardDetect[]      = "disable-usb-keyboard-detect";
 #endif
 
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// The /dev/shm partition is too small in certain VM environments, causing
+// Chrome to fail or crash (see http://crbug.com/715363). Use this flag to
+// work-around this issue (a temporary directory will always be used to create
+// anonymous shared memory files).
+const char kDisableDevShmUsage[] = "disable-dev-shm-usage";
+#endif
+
 #if defined(OS_POSIX)
 // Used for turning on Breakpad crash reporting in a debug environment where
 // crash reporting is typically compiled but disabled.
 const char kEnableCrashReporterForTesting[] =
     "enable-crash-reporter-for-testing";
+#endif
+
+#if defined(OS_ANDROID)
+// Calls madvise(MADV_RANDOM) on executable code right after the library is
+// loaded, from all processes.
+const char kMadviseRandomExecutableCode[] = "madvise-random-executable-code";
 #endif
 
 }  // namespace switches

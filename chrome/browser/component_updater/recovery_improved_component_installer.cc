@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/callback.h"
+#include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_updater_utils.h"
 
@@ -17,7 +18,7 @@ namespace component_updater {
 
 // The SHA256 of the SubjectPublicKeyInfo used to sign the component CRX.
 // The component id is: ihnlcenocehgdaegdmhbidjhnhdchfmm
-constexpr uint8_t kPublicKeySHA256[32] = {
+constexpr uint8_t kRecoveryImprovedPublicKeySHA256[32] = {
     0x87, 0xdb, 0x24, 0xde, 0x24, 0x76, 0x30, 0x46, 0x3c, 0x71, 0x83,
     0x97, 0xd7, 0x32, 0x75, 0xcc, 0xd5, 0x7f, 0xec, 0x09, 0x60, 0x6d,
     0x20, 0xc3, 0x81, 0xd7, 0xce, 0x7b, 0x10, 0x15, 0x44, 0xd1};
@@ -44,6 +45,8 @@ RecoveryImprovedInstallerPolicy::OnCustomInstall(
   return update_client::CrxInstaller::Result(0);
 }
 
+void RecoveryImprovedInstallerPolicy::OnCustomUninstall() {}
+
 void RecoveryImprovedInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
@@ -64,7 +67,8 @@ base::FilePath RecoveryImprovedInstallerPolicy::GetRelativeInstallDir() const {
 
 void RecoveryImprovedInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kPublicKeySHA256), std::end(kPublicKeySHA256));
+  hash->assign(std::begin(kRecoveryImprovedPublicKeySHA256),
+               std::end(kRecoveryImprovedPublicKeySHA256));
 }
 
 std::string RecoveryImprovedInstallerPolicy::GetName() const {
@@ -92,11 +96,10 @@ void RegisterRecoveryImprovedComponent(ComponentUpdateService* cus,
 
   DVLOG(1) << "Registering RecoveryImproved component.";
 
-  std::unique_ptr<ComponentInstallerPolicy> policy(
-      new RecoveryImprovedInstallerPolicy(prefs));
-  // |cus| will take ownership of |installer| during installer->Register(cus).
-  ComponentInstaller* installer = new ComponentInstaller(std::move(policy));
-  installer->Register(cus, base::Closure());
+  // |cus| takes ownership of |installer| through the CrxComponent instance.
+  auto installer = base::MakeRefCounted<ComponentInstaller>(
+      std::make_unique<RecoveryImprovedInstallerPolicy>(prefs));
+  installer->Register(cus, base::OnceClosure());
 #endif
 #endif
 }

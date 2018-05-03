@@ -68,7 +68,7 @@ const TreeScope* PositionTemplate<Strategy>::CommonAncestorTreeScope(
 
 template <typename Strategy>
 PositionTemplate<Strategy> PositionTemplate<Strategy>::EditingPositionOf(
-    Node* anchor_node,
+    const Node* anchor_node,
     int offset) {
   if (!anchor_node || anchor_node->IsTextNode())
     return PositionTemplate<Strategy>(anchor_node, offset);
@@ -540,24 +540,6 @@ PositionTemplate<Strategy> PositionTemplate<Strategy>::LastPositionInNode(
 // static
 template <typename Strategy>
 PositionTemplate<Strategy>
-PositionTemplate<Strategy>::FirstPositionInOrBeforeNodeDeprecated(Node* node) {
-  if (!node)
-    return PositionTemplate<Strategy>();
-  return FirstPositionInOrBeforeNode(*node);
-}
-
-// static
-template <typename Strategy>
-PositionTemplate<Strategy>
-PositionTemplate<Strategy>::LastPositionInOrAfterNodeDeprecated(Node* node) {
-  if (!node)
-    return PositionTemplate<Strategy>();
-  return LastPositionInOrAfterNode(*node);
-}
-
-// static
-template <typename Strategy>
-PositionTemplate<Strategy>
 PositionTemplate<Strategy>::FirstPositionInOrBeforeNode(const Node& node) {
   return EditingIgnoresContent(node) ? BeforeNode(node)
                                      : FirstPositionInNode(node);
@@ -579,7 +561,7 @@ PositionInFlatTree ToPositionInFlatTree(const Position& pos) {
   if (pos.IsOffsetInAnchor()) {
     if (anchor->IsCharacterDataNode())
       return PositionInFlatTree(anchor, pos.ComputeOffsetInContainerNode());
-    DCHECK(!anchor->IsActiveSlotOrActiveV0InsertionPoint());
+    DCHECK(!anchor->IsElementNode() || anchor->CanParticipateInFlatTree());
     int offset = pos.ComputeOffsetInContainerNode();
     Node* child = NodeTraversal::ChildAt(*anchor, offset);
     if (!child) {
@@ -589,7 +571,7 @@ PositionInFlatTree ToPositionInFlatTree(const Position& pos) {
       return PositionInFlatTree(anchor, PositionAnchorType::kAfterChildren);
     }
     child->UpdateDistribution();
-    if (child->IsActiveSlotOrActiveV0InsertionPoint()) {
+    if (!child->CanParticipateInFlatTree()) {
       if (anchor->IsShadowRoot())
         return PositionInFlatTree(anchor->OwnerShadowHost(), offset);
       return PositionInFlatTree(anchor, offset);

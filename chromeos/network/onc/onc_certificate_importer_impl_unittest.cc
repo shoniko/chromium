@@ -28,8 +28,8 @@ namespace onc {
 
 class ONCCertificateImporterImplTest : public testing::Test {
  public:
-  ONCCertificateImporterImplTest() {}
-  ~ONCCertificateImporterImplTest() override {}
+  ONCCertificateImporterImplTest() = default;
+  ~ONCCertificateImporterImplTest() override = default;
 
   void SetUp() override {
     ASSERT_TRUE(public_nssdb_.is_open());
@@ -150,9 +150,8 @@ class ONCCertificateImporterImplTest : public testing::Test {
     std::sort(result.begin(), result.end(),
               [](const net::ScopedCERTCertificate& lhs,
                  const net::ScopedCERTCertificate& rhs) {
-                return net::SHA256HashValueLessThan()(
-                    net::x509_util::CalculateFingerprint256(lhs.get()),
-                    net::x509_util::CalculateFingerprint256(rhs.get()));
+                return net::x509_util::CalculateFingerprint256(lhs.get()) <
+                       net::x509_util::CalculateFingerprint256(rhs.get());
               });
     return result;
   }

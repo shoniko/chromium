@@ -8,15 +8,14 @@
 
 #include <algorithm>
 #include <memory>
+#include <utility>
 
-#include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/time/time.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/url_database.h"
@@ -25,12 +24,10 @@
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/autocomplete_provider_listener.h"
 #include "components/omnibox/browser/autocomplete_result.h"
+#include "components/omnibox/browser/fake_autocomplete_provider_client.h"
 #include "components/omnibox/browser/history_quick_provider.h"
-#include "components/omnibox/browser/mock_autocomplete_provider_client.h"
-#include "components/omnibox/browser/test_scheme_classifier.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/default_search_manager.h"
-#include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/url_formatter/url_fixer.h"
@@ -170,37 +167,6 @@ struct TestURLInfo {
     {"https://www.wytih/file", "What you typed in history www file", 7, 7, 80},
 };
 
-class FakeAutocompleteProviderClient : public MockAutocompleteProviderClient {
- public:
-  FakeAutocompleteProviderClient(bool create_history_db) {
-    set_template_url_service(base::MakeUnique<TemplateURLService>(nullptr, 0));
-    if (history_dir_.CreateUniqueTempDir()) {
-      history_service_ = history::CreateHistoryService(history_dir_.GetPath(),
-                                                       create_history_db);
-    }
-  }
-
-  const AutocompleteSchemeClassifier& GetSchemeClassifier() const override {
-    return scheme_classifier_;
-  }
-
-  const SearchTermsData& GetSearchTermsData() const override {
-    return search_terms_data_;
-  }
-
-  history::HistoryService* GetHistoryService() override {
-    return history_service_.get();
-  }
-
- private:
-  TestSchemeClassifier scheme_classifier_;
-  SearchTermsData search_terms_data_;
-  base::ScopedTempDir history_dir_;
-  std::unique_ptr<history::HistoryService> history_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeAutocompleteProviderClient);
-};
-
 }  // namespace
 
 class HistoryURLProviderTest : public testing::Test,
@@ -263,7 +229,7 @@ class HistoryURLProviderTest : public testing::Test,
                                 size_t expected_match_location,
                                 size_t expected_match_length);
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   ACMatches matches_;
   std::unique_ptr<FakeAutocompleteProviderClient> client_;
   scoped_refptr<HistoryURLProvider> autocomplete_;
@@ -298,16 +264,18 @@ void HistoryURLProviderTest::OnProviderUpdate(bool updated_matches) {
 }
 
 bool HistoryURLProviderTest::SetUpImpl(bool create_history_db) {
-  client_.reset(new FakeAutocompleteProviderClient(create_history_db));
+  client_ = std::make_unique<FakeAutocompleteProviderClient>(create_history_db);
   if (!client_->GetHistoryService())
     return false;
-  autocomplete_ = new HistoryURLProvider(client_.get(), this);
+  autocomplete_ = base::MakeRefCounted<HistoryURLProvider>(client_.get(), this);
   FillData();
   return true;
 }
 
 void HistoryURLProviderTest::TearDown() {
   autocomplete_ = nullptr;
+  client_.reset();
+  scoped_task_environment_.RunUntilIdle();
 }
 
 void HistoryURLProviderTest::FillData() {
@@ -363,7 +331,7 @@ void HistoryURLProviderTest::RunTest(
     std::sort(matches_.begin(), matches_.end(),
               &AutocompleteMatch::MoreRelevant);
   }
-  SCOPED_TRACE(base::ASCIIToUTF16("input = ") + text);
+  SCOPED_TRACE(ASCIIToUTF16("input = ") + text);
   ASSERT_EQ(num_results, matches_.size()) << "Input text: " << text
                                           << "\nTLD: \"" << desired_tld << "\"";
   for (size_t i = 0; i < num_results; ++i) {
@@ -383,7 +351,7 @@ void HistoryURLProviderTest::ExpectFormattedFullMatch(
   ASSERT_FALSE(expected_match_contents_string.empty());
 
   SCOPED_TRACE("input = " + input_text);
-  SCOPED_TRACE(base::ASCIIToUTF16("expected_match_contents = ") +
+  SCOPED_TRACE(ASCIIToUTF16("expected_match_contents = ") +
                expected_match_contents_string);
 
   AutocompleteInput input(ASCIIToUTF16(input_text),
@@ -583,8 +551,8 @@ TEST_F(HistoryURLProviderTest, CullRedirects) {
   redirects_to_a.push_back(GURL(test_cases[2].url));
   redirects_to_a.push_back(GURL(test_cases[0].url));
   client_->GetHistoryService()->AddPage(
-      GURL(test_cases[0].url), base::Time::Now(), nullptr, 0, GURL(),
-      redirects_to_a, ui::PAGE_TRANSITION_TYPED, history::SOURCE_BROWSED, true);
+      GURL(test_cases[0].url), Time::Now(), nullptr, 0, GURL(), redirects_to_a,
+      ui::PAGE_TRANSITION_TYPED, history::SOURCE_BROWSED, true);
 
   // Because all the results are part of a redirect chain with other results,
   // all but the first one (A) should be culled. We should get the default
@@ -609,8 +577,8 @@ TEST_F(HistoryURLProviderTest, CullRedirects) {
 }
 
 TEST_F(HistoryURLProviderTestNoSearchProvider, WhatYouTypedNoSearchProvider) {
-  // When no search provider is available, make sure we provide WYT matches
-  // for text that could be a URL.
+  // When no search provider is available, make sure we provide what-you-typed
+  // matches for text that could be a URL.
 
   const UrlAndLegalDefault results_1[] = {
     { "http://wytmatch/", true }
@@ -869,19 +837,15 @@ TEST_F(HistoryURLProviderTest, IntranetURLCompletion) {
   EXPECT_LE(1400, matches_[0].relevance);
   EXPECT_LT(matches_[0].relevance, 1410);
 
-  const UrlAndLegalDefault expected3[] = {
-    { "http://intra/one", true },
-    { "http://intra/three", true },
-    { "http://intra/two", true }
-  };
+  const UrlAndLegalDefault expected3[] = {{"http://intra/three", true},
+                                          {"http://intra/one", true},
+                                          {"http://intra/two", true}};
   RunTest(ASCIIToUTF16("intra"), std::string(), false, expected3,
           arraysize(expected3));
 
-  const UrlAndLegalDefault expected4[] = {
-    { "http://intra/one", true },
-    { "http://intra/three", true },
-    { "http://intra/two", true }
-  };
+  const UrlAndLegalDefault expected4[] = {{"http://intra/three", true},
+                                          {"http://intra/one", true},
+                                          {"http://intra/two", true}};
   RunTest(ASCIIToUTF16("intra/"), std::string(), false, expected4,
           arraysize(expected4));
 
@@ -999,7 +963,7 @@ TEST_F(HistoryURLProviderTest, CullSearchResults) {
   data.SetURL("http://testsearch.com/?q={searchTerms}");
   TemplateURLService* template_url_service = client_->GetTemplateURLService();
   TemplateURL* template_url =
-      template_url_service->Add(base::MakeUnique<TemplateURL>(data));
+      template_url_service->Add(std::make_unique<TemplateURL>(data));
   template_url_service->SetUserSelectedDefaultSearchProvider(template_url);
   template_url_service->Load();
 
@@ -1229,7 +1193,7 @@ TEST_F(HistoryURLProviderTest, MatchURLFormatting) {
   ExpectFormattedFullMatch("abc", L"https://www.abc.def.com/path", 12, 3);
   ExpectFormattedFullMatch("hij", L"https://www.hij.com/path", 12, 3);
 
-  auto feature_list = base::MakeUnique<base::test::ScopedFeatureList>();
+  auto feature_list = std::make_unique<base::test::ScopedFeatureList>();
   feature_list->InitWithFeatures(
       {omnibox::kUIExperimentHideSuggestionUrlScheme,
        omnibox::kUIExperimentHideSuggestionUrlTrivialSubdomains,
@@ -1262,9 +1226,9 @@ TEST_F(HistoryURLProviderTest, MatchURLFormatting) {
   ExpectFormattedFullMatch("WWW.hij", L"www.hij.com/\x2026\x0000", 0, 7);
 
   // Verify that matching in the subdomain-only preserves the subdomain.
-  ExpectFormattedFullMatch("ww", L"www.abc.def.com/\x2026\x0000", 0, 2);
-  ExpectFormattedFullMatch("https://ww",
-                           L"https://www.abc.def.com/\x2026\x0000", 0, 10);
+  ExpectFormattedFullMatch("ww", L"www.hij.com/\x2026\x0000", 0, 2);
+  ExpectFormattedFullMatch("https://ww", L"https://www.hij.com/\x2026\x0000", 0,
+                           10);
 
   // Test individual feature flags as a sanity check.
   feature_list.reset(new base::test::ScopedFeatureList);
@@ -1281,4 +1245,85 @@ TEST_F(HistoryURLProviderTest, MatchURLFormatting) {
   feature_list->InitAndEnableFeature(
       omnibox::kUIExperimentElideSuggestionUrlAfterHost);
   ExpectFormattedFullMatch("hij", L"https://www.hij.com/\x2026\x0000", 12, 3);
+}
+
+std::unique_ptr<HistoryURLProviderParams> BuildHistoryURLProviderParams(
+    const std::string& input_text,
+    const std::string& url_text,
+    bool match_in_scheme) {
+  AutocompleteInput input(ASCIIToUTF16(input_text),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  history::HistoryMatch history_match;
+  history_match.url_info.set_url(GURL(url_text));
+  history_match.match_in_scheme = match_in_scheme;
+  auto params = std::make_unique<HistoryURLProviderParams>(
+      input, true, AutocompleteMatch(), nullptr, SearchTermsData());
+  params->matches.push_back(history_match);
+
+  return params;
+}
+
+// Make sure "http://" scheme is generally trimmed.
+TEST_F(HistoryURLProviderTest, DoTrimHttpScheme) {
+  auto params =
+      BuildHistoryURLProviderParams("face", "http://www.facebook.com", false);
+
+  AutocompleteMatch match = autocomplete_->HistoryMatchToACMatch(*params, 0, 0);
+  EXPECT_EQ(ASCIIToUTF16("www.facebook.com"), match.contents);
+}
+
+// Make sure "http://" scheme is not trimmed if input has a scheme too.
+TEST_F(HistoryURLProviderTest, DontTrimHttpSchemeIfInputHasScheme) {
+  auto params = BuildHistoryURLProviderParams("http://face",
+                                              "http://www.facebook.com", false);
+
+  AutocompleteMatch match = autocomplete_->HistoryMatchToACMatch(*params, 0, 0);
+  EXPECT_EQ(ASCIIToUTF16("http://www.facebook.com"), match.contents);
+}
+
+// Make sure "http://" scheme is not trimmed if input matches in scheme.
+TEST_F(HistoryURLProviderTest, DontTrimHttpSchemeIfInputMatchesInScheme) {
+  auto params =
+      BuildHistoryURLProviderParams("ht face", "http://www.facebook.com", true);
+
+  AutocompleteMatch match = autocomplete_->HistoryMatchToACMatch(*params, 0, 0);
+  EXPECT_EQ(ASCIIToUTF16("http://www.facebook.com"), match.contents);
+}
+
+// Make sure "https://" scheme is generally not trimmed.
+TEST_F(HistoryURLProviderTest, DontTrimHttpsScheme) {
+  auto params =
+      BuildHistoryURLProviderParams("face", "https://www.facebook.com", false);
+
+  AutocompleteMatch match = autocomplete_->HistoryMatchToACMatch(*params, 0, 0);
+  EXPECT_EQ(ASCIIToUTF16("https://www.facebook.com"), match.contents);
+}
+
+// Make sure "https://" scheme is not trimmed even when requested by flag
+// if the input has a scheme.
+TEST_F(HistoryURLProviderTest, DontTrimHttpsSchemeDespiteFlag) {
+  auto feature_list = std::make_unique<base::test::ScopedFeatureList>();
+  feature_list->InitWithFeatures(
+      {omnibox::kUIExperimentHideSuggestionUrlScheme}, {});
+
+  auto params = BuildHistoryURLProviderParams(
+      "https://face", "https://www.facebook.com", false);
+
+  AutocompleteMatch match = autocomplete_->HistoryMatchToACMatch(*params, 0, 0);
+  EXPECT_EQ(ASCIIToUTF16("https://www.facebook.com"), match.contents);
+}
+
+// Make sure "https://" scheme is trimmed if requested by flag, and nothing
+// else prevents it.
+TEST_F(HistoryURLProviderTest, DoTrimHttpsSchemeIfFlag) {
+  auto feature_list = std::make_unique<base::test::ScopedFeatureList>();
+  feature_list->InitWithFeatures(
+      {omnibox::kUIExperimentHideSuggestionUrlScheme}, {});
+
+  auto params =
+      BuildHistoryURLProviderParams("face", "https://www.facebook.com", false);
+
+  AutocompleteMatch match = autocomplete_->HistoryMatchToACMatch(*params, 0, 0);
+  EXPECT_EQ(ASCIIToUTF16("www.facebook.com"), match.contents);
 }

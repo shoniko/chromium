@@ -5,6 +5,7 @@
 #include "android_webview/browser/aw_contents.h"
 
 #include <limits>
+#include <memory>
 #include <utility>
 
 #include "android_webview/browser/aw_autofill_client.h"
@@ -47,7 +48,6 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/memory_pressure_listener.h"
-#include "base/memory/ptr_util.h"
 #include "base/pickle.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
@@ -67,6 +67,7 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -76,10 +77,12 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/mhtml_generation_params.h"
 #include "content/public/common/renderer_preferences.h"
+#include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "gpu/config/gpu_info.h"
 #include "jni/AwContents_jni.h"
 #include "net/base/auth.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -173,10 +176,11 @@ AwContents* AwContents::FromID(int render_process_id, int render_view_id) {
 }
 
 // static
-void UpdateDefaultLocale(JNIEnv* env,
-                         const JavaParamRef<jclass>&,
-                         const JavaParamRef<jstring>& locale,
-                         const JavaParamRef<jstring>& locale_list) {
+void JNI_AwContents_UpdateDefaultLocale(
+    JNIEnv* env,
+    const JavaParamRef<jclass>&,
+    const JavaParamRef<jstring>& locale,
+    const JavaParamRef<jstring>& locale_list) {
   *g_locale() = ConvertJavaStringToUTF8(env, locale);
   *g_locale_list() = ConvertJavaStringToUTF8(env, locale_list);
 }
@@ -227,7 +231,7 @@ AwContents::AwContents(std::unique_ptr<WebContents> web_contents)
   icon_helper_.reset(new IconHelper(web_contents_.get()));
   icon_helper_->SetListener(this);
   web_contents_->SetUserData(android_webview::kAwContentsUserDataKey,
-                             base::MakeUnique<AwContentsUserData>(this));
+                             std::make_unique<AwContentsUserData>(this));
   browser_view_renderer_.RegisterWithWebContents(web_contents_.get());
 
   CompositorID compositor_id;
@@ -281,11 +285,11 @@ void AwContents::SetJavaPeers(
   AwContentsIoThreadClient::Associate(web_contents_.get(), io_thread_client);
 
   InterceptNavigationDelegate::Associate(
-      web_contents_.get(), base::MakeUnique<InterceptNavigationDelegate>(
+      web_contents_.get(), std::make_unique<InterceptNavigationDelegate>(
                                env, intercept_navigation_delegate));
 
   if (!autofill_provider.is_null()) {
-    autofill_provider_ = base::MakeUnique<autofill::AutofillProviderAndroid>(
+    autofill_provider_ = std::make_unique<autofill::AutofillProviderAndroid>(
         autofill_provider, web_contents_.get());
   }
 
@@ -400,9 +404,9 @@ void AwContents::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   delete this;
 }
 
-static jlong Init(JNIEnv* env,
-                  const JavaParamRef<jclass>&,
-                  const JavaParamRef<jobject>& browser_context) {
+static jlong JNI_AwContents_Init(JNIEnv* env,
+                                 const JavaParamRef<jclass>&,
+                                 const JavaParamRef<jobject>& browser_context) {
   // TODO(joth): Use |browser_context| to get the native BrowserContext, rather
   // than hard-code the default instance lookup here.
   std::unique_ptr<WebContents> web_contents(content::WebContents::Create(
@@ -412,26 +416,28 @@ static jlong Init(JNIEnv* env,
   return reinterpret_cast<intptr_t>(new AwContents(std::move(web_contents)));
 }
 
-static jboolean HasRequiredHardwareExtensions(JNIEnv* env,
-                                              const JavaParamRef<jclass>&) {
+static jboolean JNI_AwContents_HasRequiredHardwareExtensions(
+    JNIEnv* env,
+    const JavaParamRef<jclass>&) {
   return content::GpuDataManager::GetInstance()
       ->GetGPUInfo()
       .can_support_threaded_texture_mailbox;
 }
 
-static void SetAwDrawSWFunctionTable(JNIEnv* env,
-                                     const JavaParamRef<jclass>&,
-                                     jlong function_table) {
+static void JNI_AwContents_SetAwDrawSWFunctionTable(JNIEnv* env,
+                                                    const JavaParamRef<jclass>&,
+                                                    jlong function_table) {
   RasterHelperSetAwDrawSWFunctionTable(
       reinterpret_cast<AwDrawSWFunctionTable*>(function_table));
 }
 
-static void SetAwDrawGLFunctionTable(JNIEnv* env,
-                                     const JavaParamRef<jclass>&,
-                                     jlong function_table) {}
+static void JNI_AwContents_SetAwDrawGLFunctionTable(JNIEnv* env,
+                                                    const JavaParamRef<jclass>&,
+                                                    jlong function_table) {}
 
 // static
-jint GetNativeInstanceCount(JNIEnv* env, const JavaParamRef<jclass>&) {
+jint JNI_AwContents_GetNativeInstanceCount(JNIEnv* env,
+                                           const JavaParamRef<jclass>&) {
   return base::subtle::NoBarrier_Load(&g_instance_count);
 }
 
@@ -837,9 +843,8 @@ base::android::ScopedJavaLocalRef<jbyteArray> AwContents::GetCertificate(
     return ScopedJavaLocalRef<jbyteArray>();
 
   // Convert the certificate and return it
-  std::string der_string;
-  net::X509Certificate::GetDEREncoded(
-      entry->GetSSL().certificate->os_cert_handle(), &der_string);
+  base::StringPiece der_string = net::x509_util::CryptoBufferAsStringPiece(
+      entry->GetSSL().certificate->cert_buffer());
   return base::android::ToJavaByteArray(
       env, reinterpret_cast<const uint8_t*>(der_string.data()),
       der_string.length());
@@ -1173,8 +1178,13 @@ void AwContents::OnWebLayoutContentsSizeChanged(
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
+  gfx::Size contents_size_css =
+      content::UseZoomForDSFEnabled()
+          ? ScaleToRoundedSize(contents_size,
+                               1 / browser_view_renderer_.dip_scale())
+          : contents_size;
   Java_AwContents_onWebLayoutContentsSizeChanged(
-      env, obj, contents_size.width(), contents_size.height());
+      env, obj, contents_size_css.width(), contents_size_css.height());
 }
 
 jlong AwContents::CapturePicture(JNIEnv* env,
@@ -1309,8 +1319,9 @@ jlong AwContents::GetAutofillProvider(
   return reinterpret_cast<jlong>(autofill_provider_.get());
 }
 
-void SetShouldDownloadFavicons(JNIEnv* env,
-                               const JavaParamRef<jclass>& jclazz) {
+void JNI_AwContents_SetShouldDownloadFavicons(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& jclazz) {
   g_should_download_favicons = true;
 }
 
@@ -1327,6 +1338,29 @@ void AwContents::RenderViewHostChanged(content::RenderViewHost* old_host,
   // new compositor is constructed.
   browser_view_renderer_.SetActiveCompositorID(
       CompositorID(process_id, routing_id));
+}
+
+void AwContents::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // If this request was blocked in any way, broadcast an error.
+  net::Error error_code = navigation_handle->GetNetErrorCode();
+  if (error_code != net::ERR_BLOCKED_BY_CLIENT &&
+      error_code != net::ERR_BLOCKED_BY_ADMINISTRATOR &&
+      error_code != net::ERR_ABORTED) {
+    return;
+  }
+  AwContentsClientBridge* client =
+      AwContentsClientBridge::FromWebContents(web_contents_.get());
+  if (!client)
+    return;
+
+  AwWebResourceRequest request(navigation_handle->GetURL().spec(),
+                               navigation_handle->IsPost() ? "POST" : "GET",
+                               navigation_handle->IsInMainFrame(),
+                               navigation_handle->HasUserGesture(),
+                               net::HttpRequestHeaders());
+
+  client->OnReceivedError(request, error_code, false);
 }
 
 void AwContents::DidAttachInterstitialPage() {

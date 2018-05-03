@@ -27,6 +27,7 @@ struct DisplayLayout;
 struct DisplayProperties;
 struct DisplayUnitInfo;
 struct Insets;
+struct MirrorModeInfo;
 struct TouchCalibrationPairQuad;
 }
 }
@@ -56,7 +57,8 @@ class DisplayInfoProvider {
 
   // Implements SetDisplayLayout methods. See system_display.idl. Returns
   // false if the layout input is invalid.
-  virtual bool SetDisplayLayout(const DisplayLayoutList& layouts);
+  virtual bool SetDisplayLayout(const DisplayLayoutList& layouts,
+                                std::string* error);
 
   // Enables the unified desktop feature.
   virtual void EnableUnifiedDesktop(bool enable);
@@ -92,6 +94,13 @@ class DisplayInfoProvider {
       std::string* error);
   virtual bool ClearTouchCalibration(const std::string& id, std::string* error);
   virtual bool IsNativeTouchCalibrationActive(std::string* error);
+
+  // Sets the display mode to the specified mirror mode. See system_display.idl.
+  // Returns false if the parameters are invalid.
+  // |info|: The information of the mirror mode that should be applied to the
+  //     display mode.
+  virtual bool SetMirrorMode(const api::system_display::MirrorModeInfo& info,
+                             std::string* out_error);
 
  protected:
   DisplayInfoProvider();

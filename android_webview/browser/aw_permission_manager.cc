@@ -12,7 +12,6 @@
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -256,7 +255,7 @@ int AwPermissionManager::RequestPermissions(
 
   const GURL& embedding_origin = LastCommittedOrigin(render_frame_host);
 
-  auto pending_request = base::MakeUnique<PendingRequest>(
+  auto pending_request = std::make_unique<PendingRequest>(
       permissions, requesting_origin, embedding_origin,
       GetRenderProcessID(render_frame_host),
       GetRenderFrameID(render_frame_host), callback);
@@ -321,12 +320,13 @@ int AwPermissionManager::RequestPermissions(
       case PermissionType::AUDIO_CAPTURE:
       case PermissionType::VIDEO_CAPTURE:
       case PermissionType::NOTIFICATIONS:
-      case PermissionType::PUSH_MESSAGING:
       case PermissionType::DURABLE_STORAGE:
       case PermissionType::BACKGROUND_SYNC:
       case PermissionType::SENSORS:
       case PermissionType::FLASH:
       case PermissionType::ACCESSIBILITY_EVENTS:
+      case PermissionType::CLIPBOARD_READ:
+      case PermissionType::CLIPBOARD_WRITE:
         NOTIMPLEMENTED() << "RequestPermissions is not implemented for "
                          << static_cast<int>(permissions[i]);
         pending_request_raw->SetPermissionStatus(permissions[i],
@@ -459,7 +459,6 @@ void AwPermissionManager::CancelPermissionRequest(int request_id) {
           delegate->CancelMIDISysexPermissionRequests(requesting_origin);
         break;
       case PermissionType::NOTIFICATIONS:
-      case PermissionType::PUSH_MESSAGING:
       case PermissionType::DURABLE_STORAGE:
       case PermissionType::AUDIO_CAPTURE:
       case PermissionType::VIDEO_CAPTURE:
@@ -467,6 +466,8 @@ void AwPermissionManager::CancelPermissionRequest(int request_id) {
       case PermissionType::SENSORS:
       case PermissionType::FLASH:
       case PermissionType::ACCESSIBILITY_EVENTS:
+      case PermissionType::CLIPBOARD_READ:
+      case PermissionType::CLIPBOARD_WRITE:
         NOTIMPLEMENTED() << "CancelPermission not implemented for "
                          << static_cast<int>(permission);
         break;
@@ -501,7 +502,8 @@ PermissionStatus AwPermissionManager::GetPermissionStatus(
   if (permission == PermissionType::PROTECTED_MEDIA_IDENTIFIER) {
     return result_cache_->GetResult(permission, requesting_origin,
                                     embedding_origin);
-  } else if (permission == PermissionType::MIDI) {
+  } else if (permission == PermissionType::MIDI ||
+             permission == PermissionType::SENSORS) {
     return PermissionStatus::GRANTED;
   }
 

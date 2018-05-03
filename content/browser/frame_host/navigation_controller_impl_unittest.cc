@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 #include <tuple>
 #include <utility>
 
@@ -31,8 +32,6 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/common/frame_owner_properties.h"
-#include "content/common/frame_policy.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -40,7 +39,6 @@
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/page_state.h"
 #include "content/public/common/page_type.h"
-#include "content/public/common/resource_request_body.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_side_navigation_test_utils.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -49,8 +47,10 @@
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "skia/ext/platform_canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/common/frame_policy.h"
 
 using base::Time;
 
@@ -235,29 +235,14 @@ class NavigationControllerTest
   }
 
   bool HasNavigationRequest() {
-    if (IsBrowserSideNavigationEnabled()) {
-      return contents()->GetFrameTree()->root()->navigation_request() !=
-             nullptr;
-    }
-    return process()->sink().GetFirstMessageMatching(FrameMsg_Navigate::ID)
-        != nullptr;
+    return contents()->GetFrameTree()->root()->navigation_request() != nullptr;
   }
 
   const GURL GetLastNavigationURL() {
-    if (IsBrowserSideNavigationEnabled()) {
-      NavigationRequest* navigation_request =
-          contents()->GetFrameTree()->root()->navigation_request();
-      CHECK(navigation_request);
-      return navigation_request->common_params().url;
-    }
-    const IPC::Message* message =
-        process()->sink().GetFirstMessageMatching(FrameMsg_Navigate::ID);
-    CHECK(message);
-    std::tuple<CommonNavigationParams, StartNavigationParams,
-               RequestNavigationParams>
-        nav_params;
-    FrameMsg_Navigate::Read(message, &nav_params);
-    return std::get<0>(nav_params).url;
+    NavigationRequest* navigation_request =
+        contents()->GetFrameTree()->root()->navigation_request();
+    CHECK(navigation_request);
+    return navigation_request->common_params().url;
   }
 
  protected:
@@ -271,9 +256,8 @@ class NavigationControllerTest
 
 class TestWebContentsDelegate : public WebContentsDelegate {
  public:
-  explicit TestWebContentsDelegate() :
-      navigation_state_change_count_(0),
-      repost_form_warning_count_(0) {}
+  TestWebContentsDelegate()
+      : navigation_state_change_count_(0), repost_form_warning_count_(0) {}
 
   int navigation_state_change_count() {
     return navigation_state_change_count_;
@@ -340,11 +324,11 @@ class LoadCommittedDetailsObserver : public WebContentsObserver {
 
 // PlzNavigate
 // A NavigationControllerTest run with --enable-browser-side-navigation.
+// TODO(clamy): Make those regular NavigationControllerTests.
 class NavigationControllerTestWithBrowserSideNavigation
     : public NavigationControllerTest {
  public:
   void SetUp() override {
-    EnableBrowserSideNavigation();
     NavigationControllerTest::SetUp();
   }
 };
@@ -675,7 +659,7 @@ TEST_F(NavigationControllerTest, LoadURLSameTime) {
 }
 
 void CheckNavigationEntryMatchLoadParams(
-    NavigationController::LoadURLParams& load_params,
+    const NavigationController::LoadURLParams& load_params,
     NavigationEntryImpl* entry) {
   EXPECT_EQ(load_params.url, entry->GetURL());
   EXPECT_EQ(load_params.referrer.url, entry->GetReferrer().url);
@@ -784,7 +768,7 @@ TEST_F(NavigationControllerTest, LoadURLWithExtraParams_HttpPost) {
   const char* raw_data = "d\n\0a2";
   const int length = 5;
   load_params.post_data =
-      ResourceRequestBody::CreateFromBytes(raw_data, length);
+      network::ResourceRequestBody::CreateFromBytes(raw_data, length);
 
   controller.LoadURLWithParams(load_params);
   NavigationEntryImpl* entry = controller.GetPendingEntry();
@@ -867,7 +851,8 @@ TEST_F(NavigationControllerTest, LoadURL_SamePage_DifferentMethod) {
   params.transition = ui::PAGE_TRANSITION_TYPED;
   params.method = "POST";
   params.post_id = 123;
-  params.page_state = PageState::CreateForTesting(url1, false, 0, 0);
+  params.page_state =
+      PageState::CreateForTesting(url1, false, nullptr, nullptr);
   main_test_rfh()->PrepareForCommit();
   main_test_rfh()->SendNavigateWithParams(&params);
 
@@ -1196,7 +1181,7 @@ TEST_F(NavigationControllerTest, LoadURL_IgnorePreemptsPending) {
   EXPECT_EQ(-1, controller.GetLastCommittedEntryIndex());
   EXPECT_EQ(2, delegate->navigation_state_change_count());
 
-  contents()->SetDelegate(NULL);
+  contents()->SetDelegate(nullptr);
 }
 
 // Tests that the pending entry state is correct after an abort.
@@ -1249,7 +1234,7 @@ TEST_F(NavigationControllerTest, LoadURL_AbortDoesntCancelPending) {
   EXPECT_EQ(pending_entry, controller.GetPendingEntry());
   EXPECT_EQ(-1, controller.GetLastCommittedEntryIndex());
 
-  contents()->SetDelegate(NULL);
+  contents()->SetDelegate(nullptr);
 }
 
 // Tests that the pending URL is not visible during a renderer-initiated
@@ -1316,7 +1301,7 @@ TEST_F(NavigationControllerTest, LoadURL_RedirectAbortDoesntShowPendingURL) {
   // so that no spoof is possible.
   EXPECT_EQ(kExistingURL, controller.GetVisibleEntry()->GetURL());
 
-  contents()->SetDelegate(NULL);
+  contents()->SetDelegate(nullptr);
 }
 
 // Ensure that NavigationEntries track which bindings their RenderViewHost had
@@ -1591,7 +1576,7 @@ TEST_F(NavigationControllerTest, ResetEntryValuesAfterCommit) {
   // Set non-persisted values on the pending entry.
   NavigationEntryImpl* pending_entry = controller.GetPendingEntry();
   pending_entry->SetPostData(
-      ResourceRequestBody::CreateFromBytes(raw_data, length));
+      network::ResourceRequestBody::CreateFromBytes(raw_data, length));
   pending_entry->set_is_renderer_initiated(true);
   pending_entry->set_transferred_global_request_id(transfer_id);
   pending_entry->set_should_replace_entry(true);
@@ -2221,9 +2206,11 @@ TEST_F(NavigationControllerTest, NewSubframe) {
   // Prereq: add a subframe with an initial auto-subframe navigation.
   std::string unique_name("uniqueName0");
   main_test_rfh()->OnCreateChildFrame(
-      process()->GetNextRoutingID(), blink::WebTreeScopeType::kDocument,
-      std::string(), unique_name, base::UnguessableToken::Create(),
-      FramePolicy(), FrameOwnerProperties());
+      process()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubInterfaceProviderRequest(),
+      blink::WebTreeScopeType::kDocument, std::string(), unique_name, false,
+      base::UnguessableToken::Create(), blink::FramePolicy(),
+      FrameOwnerProperties());
   TestRenderFrameHost* subframe = static_cast<TestRenderFrameHost*>(
       contents()->GetFrameTree()->root()->child_at(0)->current_frame_host());
   const GURL subframe_url("http://foo1/subframe");
@@ -2297,9 +2284,11 @@ TEST_F(NavigationControllerTest, AutoSubframe) {
   // Add a subframe and navigate it.
   std::string unique_name0("uniqueName0");
   main_test_rfh()->OnCreateChildFrame(
-      process()->GetNextRoutingID(), blink::WebTreeScopeType::kDocument,
-      std::string(), unique_name0, base::UnguessableToken::Create(),
-      FramePolicy(), FrameOwnerProperties());
+      process()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubInterfaceProviderRequest(),
+      blink::WebTreeScopeType::kDocument, std::string(), unique_name0, false,
+      base::UnguessableToken::Create(), blink::FramePolicy(),
+      FrameOwnerProperties());
   TestRenderFrameHost* subframe = static_cast<TestRenderFrameHost*>(
       contents()->GetFrameTree()->root()->child_at(0)->current_frame_host());
   const GURL url2("http://foo/2");
@@ -2341,9 +2330,11 @@ TEST_F(NavigationControllerTest, AutoSubframe) {
   // Add a second subframe and navigate.
   std::string unique_name1("uniqueName1");
   main_test_rfh()->OnCreateChildFrame(
-      process()->GetNextRoutingID(), blink::WebTreeScopeType::kDocument,
-      std::string(), unique_name1, base::UnguessableToken::Create(),
-      FramePolicy(), FrameOwnerProperties());
+      process()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubInterfaceProviderRequest(),
+      blink::WebTreeScopeType::kDocument, std::string(), unique_name1, false,
+      base::UnguessableToken::Create(), blink::FramePolicy(),
+      FrameOwnerProperties());
   TestRenderFrameHost* subframe2 = static_cast<TestRenderFrameHost*>(
       contents()->GetFrameTree()->root()->child_at(1)->current_frame_host());
   const GURL url3("http://foo/3");
@@ -2385,9 +2376,11 @@ TEST_F(NavigationControllerTest, AutoSubframe) {
   // Add a nested subframe and navigate.
   std::string unique_name2("uniqueName2");
   subframe->OnCreateChildFrame(
-      process()->GetNextRoutingID(), blink::WebTreeScopeType::kDocument,
-      std::string(), unique_name2, base::UnguessableToken::Create(),
-      FramePolicy(), FrameOwnerProperties());
+      process()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubInterfaceProviderRequest(),
+      blink::WebTreeScopeType::kDocument, std::string(), unique_name2, false,
+      base::UnguessableToken::Create(), blink::FramePolicy(),
+      FrameOwnerProperties());
   TestRenderFrameHost* subframe3 =
       static_cast<TestRenderFrameHost*>(contents()
                                             ->GetFrameTree()
@@ -2447,9 +2440,11 @@ TEST_F(NavigationControllerTest, BackSubframe) {
   // Prereq: add a subframe with an initial auto-subframe navigation.
   std::string unique_name("uniqueName0");
   main_test_rfh()->OnCreateChildFrame(
-      process()->GetNextRoutingID(), blink::WebTreeScopeType::kDocument,
-      std::string(), unique_name, base::UnguessableToken::Create(),
-      FramePolicy(), FrameOwnerProperties());
+      process()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubInterfaceProviderRequest(),
+      blink::WebTreeScopeType::kDocument, std::string(), unique_name, false,
+      base::UnguessableToken::Create(), blink::FramePolicy(),
+      FrameOwnerProperties());
   TestRenderFrameHost* subframe = static_cast<TestRenderFrameHost*>(
       contents()->GetFrameTree()->root()->child_at(0)->current_frame_host());
   const GURL subframe_url("http://foo1/subframe");
@@ -2611,11 +2606,12 @@ TEST_F(NavigationControllerTest, SameDocument) {
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
 
-  // Ensure main page navigation to same url respects the
-  // was_within_same_document hint provided in the params.
+  // Ensure renderer-initiated main frame navigation to same url replaces the
+  // current entry. This behavior differs from the browser-initiated case.
   FrameHostMsg_DidCommitProvisionalLoad_Params self_params;
   self_params.nav_entry_id = 0;
-  self_params.did_create_new_entry = false;
+  self_params.did_create_new_entry = true;
+  self_params.should_replace_current_entry = true;
   self_params.url = url1;
   self_params.transition = ui::PAGE_TRANSITION_LINK;
   self_params.should_update_history = false;
@@ -2626,7 +2622,7 @@ TEST_F(NavigationControllerTest, SameDocument) {
   self_params.page_state = PageState::CreateForTestingWithSequenceNumbers(
       url1, self_params.item_sequence_number,
       self_params.document_sequence_number);
-  self_params.was_within_same_document = true;
+  self_params.was_within_same_document = false;
 
   LoadCommittedDetailsObserver observer(contents());
   main_test_rfh()->SendRendererInitiatedNavigationRequest(url1, false);
@@ -2635,7 +2631,7 @@ TEST_F(NavigationControllerTest, SameDocument) {
   NavigationEntry* entry1 = controller.GetLastCommittedEntry();
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
-  EXPECT_TRUE(observer.is_same_document());
+  EXPECT_FALSE(observer.is_same_document());
   EXPECT_TRUE(observer.did_replace_entry());
   EXPECT_EQ(1, controller.GetEntryCount());
 
@@ -2669,6 +2665,7 @@ TEST_F(NavigationControllerTest, SameDocument) {
   controller.GoBack();
   back_params.nav_entry_id = entry1->GetUniqueID();
   back_params.did_create_new_entry = false;
+  back_params.was_within_same_document = true;
   main_test_rfh()->SendNavigateWithParams(&back_params);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
@@ -2732,11 +2729,12 @@ TEST_F(NavigationControllerTest, SameDocument_Replace) {
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
 
-  // First navigation.
+  // First navigation (using location.replace).
   const GURL url2("http://foo#a");
   FrameHostMsg_DidCommitProvisionalLoad_Params params;
   params.nav_entry_id = 0;
   params.did_create_new_entry = false;
+  params.should_replace_current_entry = true;
   params.url = url2;
   params.transition = ui::PAGE_TRANSITION_LINK;
   params.should_update_history = false;
@@ -2780,12 +2778,13 @@ TEST_F(NavigationControllerTest, ClientRedirectAfterInPageNavigation) {
     navigation_entry_committed_counter_ = 0;
   }
 
-  // Navigate within the page.
+  // Navigate within the page using location.replace.
   {
     const GURL url("http://foo2/#a");
     FrameHostMsg_DidCommitProvisionalLoad_Params params;
     params.nav_entry_id = 0;
     params.did_create_new_entry = false;
+    params.should_replace_current_entry = true;
     params.url = url;
     params.transition = ui::PAGE_TRANSITION_LINK;
     params.redirects.push_back(url);
@@ -2844,8 +2843,7 @@ TEST_F(NavigationControllerTest, ClientRedirectAfterInPageNavigation) {
   }
 }
 
-TEST_F(NavigationControllerTest, PushStateWithoutPreviousEntry)
-{
+TEST_F(NavigationControllerTest, PushStateWithoutPreviousEntry) {
   ASSERT_FALSE(controller_impl().GetLastCommittedEntry());
   FrameHostMsg_DidCommitProvisionalLoad_Params params;
   GURL url("http://foo");
@@ -3850,9 +3848,11 @@ TEST_F(NavigationControllerTest, SameSubframe) {
   // Add and navigate a subframe that would normally count as in-page.
   std::string unique_name("uniqueName0");
   main_test_rfh()->OnCreateChildFrame(
-      process()->GetNextRoutingID(), blink::WebTreeScopeType::kDocument,
-      std::string(), unique_name, base::UnguessableToken::Create(),
-      FramePolicy(), FrameOwnerProperties());
+      process()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubInterfaceProviderRequest(),
+      blink::WebTreeScopeType::kDocument, std::string(), unique_name, false,
+      base::UnguessableToken::Create(), blink::FramePolicy(),
+      FrameOwnerProperties());
   TestRenderFrameHost* subframe = static_cast<TestRenderFrameHost*>(
       contents()->GetFrameTree()->root()->child_at(0)->current_frame_host());
   const GURL subframe_url("http://www.google.com/#");
@@ -4024,9 +4024,11 @@ TEST_F(NavigationControllerTest, SubframeWhilePending) {
   // automatically loaded. Auto subframes don't increment the page ID.
   std::string unique_name("uniqueName0");
   main_test_rfh()->OnCreateChildFrame(
-      process()->GetNextRoutingID(), blink::WebTreeScopeType::kDocument,
-      std::string(), unique_name, base::UnguessableToken::Create(),
-      FramePolicy(), FrameOwnerProperties());
+      process()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubInterfaceProviderRequest(),
+      blink::WebTreeScopeType::kDocument, std::string(), unique_name, false,
+      base::UnguessableToken::Create(), blink::FramePolicy(),
+      FrameOwnerProperties());
   TestRenderFrameHost* subframe = static_cast<TestRenderFrameHost*>(
       contents()->GetFrameTree()->root()->child_at(0)->current_frame_host());
   const GURL url1_sub("http://foo/subframe");
@@ -4532,7 +4534,8 @@ TEST_F(NavigationControllerTest, HistoryNavigate) {
   EXPECT_EQ(0, controller.GetPendingEntryIndex());
   // The actual cross-navigation is suspended until the current RVH tells us
   // it unloaded, simulate that.
-  contents()->ProceedWithCrossSiteNavigation();
+  if (!IsBrowserSideNavigationEnabled())
+    contents()->GetMainFrame()->PrepareForCommitIfNecessary();
   // Also make sure we told the page to navigate.
   GURL nav_url = GetLastNavigationURL();
   EXPECT_EQ(url1, nav_url);
@@ -4544,7 +4547,8 @@ TEST_F(NavigationControllerTest, HistoryNavigate) {
   EXPECT_EQ(2, controller.GetPendingEntryIndex());
   // The actual cross-navigation is suspended until the current RVH tells us
   // it unloaded, simulate that.
-  contents()->ProceedWithCrossSiteNavigation();
+  if (!IsBrowserSideNavigationEnabled())
+    contents()->GetMainFrame()->PrepareForCommitIfNecessary();
   nav_url = GetLastNavigationURL();
   EXPECT_EQ(url3, nav_url);
   contents()->CommitPendingNavigation();

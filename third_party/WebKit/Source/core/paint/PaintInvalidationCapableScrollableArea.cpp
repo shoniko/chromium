@@ -190,12 +190,12 @@ void PaintInvalidationCapableScrollableArea::
           ScrollCornerNeedsPaintInvalidation(), box,
           paint_invalidation_container)) {
     SetScrollCornerAndResizerVisualRect(scroll_corner_and_resizer_visual_rect);
-    if (LayoutScrollbarPart* scroll_corner = this->ScrollCorner()) {
+    if (LayoutScrollbarPart* scroll_corner = ScrollCorner()) {
       ObjectPaintInvalidator(*scroll_corner)
           .InvalidateDisplayItemClientsIncludingNonCompositingDescendants(
               PaintInvalidationReason::kScrollControl);
     }
-    if (LayoutScrollbarPart* resizer = this->Resizer()) {
+    if (LayoutScrollbarPart* resizer = Resizer()) {
       ObjectPaintInvalidator(*resizer)
           .InvalidateDisplayItemClientsIncludingNonCompositingDescendants(
               PaintInvalidationReason::kScrollControl);
@@ -228,10 +228,10 @@ void PaintInvalidationCapableScrollableArea::SetVerticalScrollbarVisualRect(
 void PaintInvalidationCapableScrollableArea::
     SetScrollCornerAndResizerVisualRect(const LayoutRect& rect) {
   scroll_corner_and_resizer_visual_rect_ = rect;
-  if (LayoutScrollbarPart* scroll_corner = this->ScrollCorner())
-    scroll_corner->SetVisualRect(rect);
-  if (LayoutScrollbarPart* resizer = this->Resizer())
-    resizer->SetVisualRect(rect);
+  if (LayoutScrollbarPart* scroll_corner = ScrollCorner())
+    scroll_corner->GetMutableForPainting().FirstFragment().SetVisualRect(rect);
+  if (LayoutScrollbarPart* resizer = Resizer())
+    resizer->GetMutableForPainting().FirstFragment().SetVisualRect(rect);
 }
 
 void PaintInvalidationCapableScrollableArea::

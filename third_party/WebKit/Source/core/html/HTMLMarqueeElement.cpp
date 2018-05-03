@@ -23,6 +23,8 @@
 #include "core/html/HTMLMarqueeElement.h"
 
 #include <cstdlib>
+
+#include "base/macros.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8HTMLMarqueeElement.h"
 #include "core/CSSPropertyNames.h"
@@ -32,19 +34,18 @@
 #include "core/animation/KeyframeEffectOptions.h"
 #include "core/animation/StringKeyframe.h"
 #include "core/animation/TimingInput.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSStyleDeclaration.h"
-#include "core/css/StylePropertySet.h"
 #include "core/dom/Document.h"
 #include "core/dom/FrameRequestCallbackCollection.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/UseCounter.h"
-#include "core/html/HTMLContentElement.h"
 #include "core/html/HTMLDivElement.h"
+#include "core/html/HTMLSlotElement.h"
 #include "core/html/HTMLStyleElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html_names.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -55,7 +56,7 @@ inline HTMLMarqueeElement::HTMLMarqueeElement(Document& document)
 
 HTMLMarqueeElement* HTMLMarqueeElement::Create(Document& document) {
   HTMLMarqueeElement* marquee_element = new HTMLMarqueeElement(document);
-  marquee_element->EnsureUserAgentShadowRoot();
+  marquee_element->EnsureUserAgentShadowRootV1();
   return marquee_element;
 }
 
@@ -72,14 +73,13 @@ void HTMLMarqueeElement::DidAddUserAgentShadowRoot(ShadowRoot& shadow_root) {
   Element* mover = HTMLDivElement::Create(GetDocument());
   shadow_root.AppendChild(mover);
 
-  mover->AppendChild(HTMLContentElement::Create(GetDocument()));
+  mover->AppendChild(
+      HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument()));
   mover_ = mover;
 }
 
 class HTMLMarqueeElement::RequestAnimationFrameCallback final
     : public FrameRequestCallbackCollection::FrameCallback {
-  WTF_MAKE_NONCOPYABLE(RequestAnimationFrameCallback);
-
  public:
   explicit RequestAnimationFrameCallback(HTMLMarqueeElement* marquee)
       : marquee_(marquee) {}
@@ -96,11 +96,11 @@ class HTMLMarqueeElement::RequestAnimationFrameCallback final
 
  private:
   Member<HTMLMarqueeElement> marquee_;
+
+  DISALLOW_COPY_AND_ASSIGN(RequestAnimationFrameCallback);
 };
 
 class HTMLMarqueeElement::AnimationFinished final : public EventListener {
-  WTF_MAKE_NONCOPYABLE(AnimationFinished);
-
  public:
   explicit AnimationFinished(HTMLMarqueeElement* marquee)
       : EventListener(kCPPEventListenerType), marquee_(marquee) {}
@@ -121,6 +121,8 @@ class HTMLMarqueeElement::AnimationFinished final : public EventListener {
 
  private:
   Member<HTMLMarqueeElement> marquee_;
+
+  DISALLOW_COPY_AND_ASSIGN(AnimationFinished);
 };
 
 Node::InsertionNotificationRequest HTMLMarqueeElement::InsertedInto(
@@ -224,7 +226,7 @@ bool HTMLMarqueeElement::IsPresentationAttribute(
 void HTMLMarqueeElement::CollectStyleForPresentationAttribute(
     const QualifiedName& attr,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (attr == HTMLNames::bgcolorAttr) {
     AddHTMLColorToStyle(style, CSSPropertyBackgroundColor, value);
   } else if (attr == HTMLNames::heightAttr) {
@@ -246,21 +248,26 @@ StringKeyframeEffectModel* HTMLMarqueeElement::CreateEffectModel(
     const AnimationParameters& parameters) {
   StyleSheetContents* style_sheet_contents =
       mover_->GetDocument().ElementSheet().Contents();
-  MutableStylePropertySet::SetResult set_result;
+  MutableCSSPropertyValueSet::SetResult set_result;
+
+  SecureContextMode secure_context_mode =
+      mover_->GetDocument().GetSecureContextMode();
 
   scoped_refptr<StringKeyframe> keyframe1 = StringKeyframe::Create();
   set_result = keyframe1->SetCSSPropertyValue(
-      CSSPropertyTransform, parameters.transform_begin, style_sheet_contents);
+      CSSPropertyTransform, parameters.transform_begin, secure_context_mode,
+      style_sheet_contents);
   DCHECK(set_result.did_parse);
 
   scoped_refptr<StringKeyframe> keyframe2 = StringKeyframe::Create();
   set_result = keyframe2->SetCSSPropertyValue(
-      CSSPropertyTransform, parameters.transform_end, style_sheet_contents);
+      CSSPropertyTransform, parameters.transform_end, secure_context_mode,
+      style_sheet_contents);
   DCHECK(set_result.did_parse);
 
   return StringKeyframeEffectModel::Create(
       {std::move(keyframe1), std::move(keyframe2)},
-      LinearTimingFunction::Shared());
+      EffectModel::kCompositeReplace, LinearTimingFunction::Shared());
 }
 
 void HTMLMarqueeElement::ContinueAnimation() {
@@ -273,8 +280,8 @@ void HTMLMarqueeElement::ContinueAnimation() {
   }
 
   AnimationParameters parameters = GetAnimationParameters();
-  int scroll_delay = this->scrollDelay();
-  int scroll_amount = this->scrollAmount();
+  int scroll_delay = scrollDelay();
+  int scroll_amount = scrollAmount();
 
   if (scroll_delay < kMinimumScrollDelayMS &&
       !FastHasAttribute(HTMLNames::truespeedAttr))
@@ -350,10 +357,11 @@ HTMLMarqueeElement::Metrics HTMLMarqueeElement::GetMetrics() {
   }
 
   if (IsHorizontal()) {
-    mover_->style()->setProperty("width", "-webkit-max-content", "important",
-                                 ASSERT_NO_EXCEPTION);
+    mover_->style()->setProperty(&GetDocument(), "width", "-webkit-max-content",
+                                 "important", ASSERT_NO_EXCEPTION);
   } else {
-    mover_->style()->setProperty("height", "-webkit-max-content", "important",
+    mover_->style()->setProperty(&GetDocument(), "height",
+                                 "-webkit-max-content", "important",
                                  ASSERT_NO_EXCEPTION);
   }
   CSSStyleDeclaration* mover_style =

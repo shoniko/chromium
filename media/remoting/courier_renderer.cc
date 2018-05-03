@@ -40,7 +40,7 @@ constexpr base::TimeDelta kTrackingWindow = base::TimeDelta::FromSeconds(5);
 // poor and the controller is notified.
 constexpr base::TimeDelta kMediaPlaybackDelayThreshold =
     base::TimeDelta::FromMilliseconds(750);
-constexpr int kPlaybackDelayCountThreshold = 3;
+constexpr int kPlaybackDelayCountThreshold = 10;
 
 // The allowed percentage of the number of video frames dropped vs. the number
 // of the video frames decoded. When exceeds this limit, the user experience is
@@ -73,7 +73,7 @@ CourierRenderer::CourierRenderer(
       rpc_handle_(rpc_broker_->GetUniqueHandle()),
       remote_renderer_handle_(RpcBroker::kInvalidHandle),
       video_renderer_sink_(video_renderer_sink),
-      clock_(new base::DefaultTickClock()),
+      clock_(base::DefaultTickClock::GetInstance()),
       weak_factory_(this) {
   VLOG(2) << __func__;
   // Note: The constructor is running on the main thread, but will be destroyed

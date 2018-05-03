@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "ash/accessibility/accessibility_delegate.h"
+#include "ash/accessibility/accessibility_controller.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/config.h"
 #include "ash/public/cpp/stylus_utils.h"
@@ -86,10 +86,11 @@ class TitleView : public views::View, public views::ButtonListener {
   explicit TitleView(PaletteTray* palette_tray) : palette_tray_(palette_tray) {
     // TODO(tdanderson|jdufault): Use TriView to handle the layout of the title.
     // See crbug.com/614453.
-    auto* box_layout = new views::BoxLayout(views::BoxLayout::kHorizontal);
+    auto box_layout =
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal);
     box_layout->set_cross_axis_alignment(
         views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
-    SetLayoutManager(box_layout);
+    views::BoxLayout* layout_ptr = SetLayoutManager(std::move(box_layout));
 
     auto* title_label =
         new views::Label(l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
@@ -97,7 +98,7 @@ class TitleView : public views::View, public views::ButtonListener {
     AddChildView(title_label);
     TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::TITLE);
     style.SetupLabel(title_label);
-    box_layout->SetFlexForView(title_label, 1);
+    layout_ptr->SetFlexForView(title_label, 1);
     help_button_ =
         new SystemMenuButton(this, TrayPopupInkDropStyle::HOST_CENTERED,
                              kSystemMenuHelpIcon, IDS_ASH_STATUS_TRAY_HELP);
@@ -110,7 +111,7 @@ class TitleView : public views::View, public views::ButtonListener {
     AddChildView(settings_button_);
   }
 
-  ~TitleView() override {}
+  ~TitleView() override = default;
 
  private:
   // views::ButtonListener:
@@ -143,36 +144,6 @@ class TitleView : public views::View, public views::ButtonListener {
 
 }  // namespace
 
-// StylusWatcher is used to monitor for stylus events, since we only want to
-// make the palette tray visible for devices without internal styluses once they
-// start using the stylus.
-class PaletteTray::StylusWatcher : public views::PointerWatcher {
- public:
-  explicit StylusWatcher(PrefService* pref_service)
-      : local_state_pref_service_(pref_service) {
-    ShellPort::Get()->AddPointerWatcher(this,
-                                        views::PointerWatcherEventTypes::BASIC);
-  }
-
-  ~StylusWatcher() override { ShellPort::Get()->RemovePointerWatcher(this); }
-
-  // views::PointerWatcher:
-  void OnPointerEventObserved(const ui::PointerEvent& event,
-                              const gfx::Point& location_in_screen,
-                              gfx::NativeView target) override {
-    if (event.pointer_details().pointer_type ==
-        ui::EventPointerType::POINTER_TYPE_PEN) {
-      if (local_state_pref_service_)
-        local_state_pref_service_->SetBoolean(prefs::kHasSeenStylus, true);
-    }
-  }
-
- private:
-  PrefService* local_state_pref_service_ = nullptr;  // Not owned.
-
-  DISALLOW_COPY_AND_ASSIGN(StylusWatcher);
-};
-
 PaletteTray::PaletteTray(Shelf* shelf)
     : TrayBackgroundView(shelf),
       palette_tool_manager_(new PaletteToolManager(this)),
@@ -182,7 +153,7 @@ PaletteTray::PaletteTray(Shelf* shelf)
   PaletteTool::RegisterToolInstances(palette_tool_manager_.get());
 
   SetInkDropMode(InkDropMode::ON);
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
   icon_ = new views::ImageView();
   icon_->SetTooltipText(l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
   UpdateTrayIcon();
@@ -191,6 +162,8 @@ PaletteTray::PaletteTray(Shelf* shelf)
   tray_container()->AddChildView(icon_);
 
   Shell::Get()->AddShellObserver(this);
+  ShellPort::Get()->AddPointerWatcher(this,
+                                      views::PointerWatcherEventTypes::BASIC);
 }
 
 PaletteTray::~PaletteTray() {
@@ -199,6 +172,7 @@ PaletteTray::~PaletteTray() {
 
   ui::InputDeviceManager::GetInstance()->RemoveObserver(this);
   Shell::Get()->RemoveShellObserver(this);
+  ShellPort::Get()->RemovePointerWatcher(this);
 }
 
 // static
@@ -210,10 +184,10 @@ void PaletteTray::RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
 void PaletteTray::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(
       prefs::kEnableStylusTools, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
       prefs::kLaunchPaletteOnEjectEvent, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
 }
 
 bool PaletteTray::ContainsPointInScreen(const gfx::Point& point) {
@@ -229,8 +203,30 @@ bool PaletteTray::ShouldShowPalette() const {
           stylus_utils::IsPaletteEnabledOnEveryDisplay());
 }
 
+void PaletteTray::OnActiveUserPrefServiceChanged(PrefService* pref_service) {
+  active_user_pref_service_ = pref_service;
+  pref_change_registrar_user_ = std::make_unique<PrefChangeRegistrar>();
+  pref_change_registrar_user_->Init(pref_service);
+  pref_change_registrar_user_->Add(
+      prefs::kEnableStylusTools,
+      base::Bind(&PaletteTray::OnPaletteEnabledPrefChanged,
+                 base::Unretained(this)));
+
+  // Read the initial value.
+  OnPaletteEnabledPrefChanged();
+
+  // We may need to show the bubble upon switching users for devices with
+  // external stylus, but only if the device has seen a stylus before (avoid
+  // showing the bubble if the device has never and may never be used with
+  // stylus).
+  if (HasSeenStylus() && !stylus_utils::HasInternalStylus())
+    welcome_bubble_->ShowIfNeeded(false /* shown_by_stylus */);
+}
+
 void PaletteTray::OnSessionStateChanged(session_manager::SessionState state) {
   UpdateIconVisibility();
+  if (HasSeenStylus() && !stylus_utils::HasInternalStylus())
+    welcome_bubble_->ShowIfNeeded(false /* shown_by_stylus */);
 }
 
 void PaletteTray::OnLockStateChanged(bool locked) {
@@ -264,18 +260,6 @@ void PaletteTray::OnLocalStatePrefServiceInitialized(
                  base::Unretained(this)));
 
   OnHasSeenStylusPrefChanged();
-}
-
-void PaletteTray::OnActiveUserPrefServiceChanged(PrefService* prefs) {
-  pref_change_registrar_user_ = std::make_unique<PrefChangeRegistrar>();
-  pref_change_registrar_user_->Init(prefs);
-  pref_change_registrar_user_->Add(
-      prefs::kEnableStylusTools,
-      base::Bind(&PaletteTray::OnPaletteEnabledPrefChanged,
-                 base::Unretained(this)));
-
-  // Read the initial value.
-  OnPaletteEnabledPrefChanged();
 }
 
 void PaletteTray::ClickedOutsideBubble() {
@@ -323,7 +307,7 @@ void PaletteTray::OnStylusStateChanged(ui::StylusState stylus_state) {
     // Show the palette welcome bubble if the auto open palette setting is not
     // turned on, if the bubble has not been shown before (|welcome_bubble_|
     // will be nullptr if the bubble has been shown before).
-    welcome_bubble_->ShowIfNeeded();
+    welcome_bubble_->ShowIfNeeded(false /* shown_by_stylus */);
   }
 
   // Disable any active modes if the stylus has been inserted.
@@ -350,7 +334,7 @@ base::string16 PaletteTray::GetAccessibleNameForBubble() {
 }
 
 bool PaletteTray::ShouldEnableExtraKeyboardAccessibility() {
-  return Shell::Get()->accessibility_delegate()->IsSpokenFeedbackEnabled();
+  return Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled();
 }
 
 void PaletteTray::HideBubble(const views::TrayBubbleView* bubble_view) {
@@ -413,6 +397,29 @@ void PaletteTray::OnActiveToolChanged() {
 
 aura::Window* PaletteTray::GetWindow() {
   return shelf()->GetWindow();
+}
+
+void PaletteTray::OnPointerEventObserved(const ui::PointerEvent& event,
+                                         const gfx::Point& location_in_screen,
+                                         gfx::NativeView target) {
+  if (event.pointer_details().pointer_type !=
+      ui::EventPointerType::POINTER_TYPE_PEN) {
+    return;
+  }
+
+  // If a stylus has never been seen before and a stylus event is received, mark
+  // the |kHasSeenStylus| pref as true and attempt to show the welcome bubble.
+  if (!HasSeenStylus()) {
+    if (local_state_pref_service_)
+      local_state_pref_service_->SetBoolean(prefs::kHasSeenStylus, true);
+
+    if (active_user_pref_service_)
+      welcome_bubble_->ShowIfNeeded(true /* shown_by_stylus */);
+  } else if (GetBoundsInScreen().Contains(location_in_screen)) {
+    // If a stylus event is detected on the palette tray, the user already knows
+    // about the tray and there is no need to show them the welcome bubble.
+    welcome_bubble_->MarkAsShown();
+  }
 }
 
 void PaletteTray::AnchorUpdated() {
@@ -534,19 +541,6 @@ void PaletteTray::OnPaletteEnabledPrefChanged() {
 void PaletteTray::OnHasSeenStylusPrefChanged() {
   DCHECK(local_state_pref_service_);
 
-  has_seen_stylus_ =
-      local_state_pref_service_->GetBoolean(prefs::kHasSeenStylus);
-
-  // On reading the pref, do not bother monitoring stylus events if the device
-  // has seen a stylus event before, otherwise start monitoring for stylus
-  // events.
-  // TODO(sammiequon): Investigate if we can avoid starting the watcher if the
-  // device is not compatible with stylus.
-  if (has_seen_stylus_)
-    watcher_.reset();
-  else
-    watcher_ = std::make_unique<StylusWatcher>(local_state_pref_service_);
-
   UpdateIconVisibility();
 }
 
@@ -565,8 +559,13 @@ bool PaletteTray::DeactivateActiveTool() {
   return false;
 }
 
+bool PaletteTray::HasSeenStylus() {
+  return local_state_pref_service_ &&
+         local_state_pref_service_->GetBoolean(prefs::kHasSeenStylus);
+}
+
 void PaletteTray::UpdateIconVisibility() {
-  SetVisible(has_seen_stylus_ && is_palette_enabled_ &&
+  SetVisible(HasSeenStylus() && is_palette_enabled_ &&
              stylus_utils::HasStylusInput() && ShouldShowOnDisplay(this) &&
              palette_utils::IsInUserSession());
 }

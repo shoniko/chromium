@@ -48,7 +48,7 @@ unsigned s_last_stream_handle = 0;
 
 class TempFileStream : public DevToolsIOContext::RWStream {
  public:
-  TempFileStream();
+  explicit TempFileStream(bool binary);
 
   void Read(off_t position, size_t max_size, ReadCallback callback) override;
   void Close(bool invoke_pending_callbacks) override {}
@@ -67,16 +67,18 @@ class TempFileStream : public DevToolsIOContext::RWStream {
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   bool had_errors_;
   off_t last_read_pos_;
+  bool binary_;
 
   DISALLOW_COPY_AND_ASSIGN(TempFileStream);
 };
 
-TempFileStream::TempFileStream()
+TempFileStream::TempFileStream(bool binary)
     : DevToolsIOContext::RWStream(impl_task_runner()),
       handle_(base::UintToString(++s_last_stream_handle)),
       task_runner_(impl_task_runner()),
       had_errors_(false),
-      last_read_pos_(0) {}
+      last_read_pos_(0),
+      binary_(binary) {}
 
 TempFileStream::~TempFileStream() {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
@@ -129,6 +131,7 @@ void TempFileStream::ReadOnFileSequence(off_t position,
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   Status status = StatusFailure;
   std::unique_ptr<std::string> data;
+  bool base64_encoded = false;
 
   if (file_.IsValid()) {
     std::string buffer;
@@ -154,9 +157,14 @@ void TempFileStream::ReadOnFileSequence(off_t position,
       last_read_pos_ = position + size_got;
     }
   }
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::BindOnce(std::move(callback), std::move(data), false, status));
+  if (binary_) {
+    std::string raw_data(std::move(*data));
+    base::Base64Encode(raw_data, data.get());
+    base64_encoded = true;
+  }
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::BindOnce(std::move(callback), std::move(data),
+                                         base64_encoded, status));
 }
 
 void TempFileStream::AppendOnFileSequence(std::unique_ptr<std::string> data) {
@@ -206,7 +214,6 @@ class BlobStream : public DevToolsIOContext::ROStream {
   ~BlobStream() override = default;
 
   void OpenOnIO(scoped_refptr<ChromeBlobStorageContext> blob_context,
-                scoped_refptr<storage::FileSystemContext> fs_context,
                 const std::string& uuid,
                 OpenCallback callback);
   void ReadOnIO(std::unique_ptr<ReadRequest> request);
@@ -231,7 +238,6 @@ class BlobStream : public DevToolsIOContext::ROStream {
 
   std::unique_ptr<storage::BlobDataHandle> blob_handle_;
   OpenCallback open_callback_;
-  scoped_refptr<storage::FileSystemContext> fs_context_;
   std::unique_ptr<BlobReader> blob_reader_;
   base::queue<std::unique_ptr<ReadRequest>> pending_reads_;
   scoped_refptr<net::IOBufferWithSize> io_buf_;
@@ -265,12 +271,9 @@ void BlobStream::Open(scoped_refptr<ChromeBlobStorageContext> context,
                       StoragePartition* partition,
                       const std::string& handle,
                       OpenCallback callback) {
-  scoped_refptr<storage::FileSystemContext> fs_context =
-      partition->GetFileSystemContext();
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&BlobStream::OpenOnIO, this, context, fs_context, handle,
-                     std::move(callback)));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::BindOnce(&BlobStream::OpenOnIO, this, context,
+                                         handle, std::move(callback)));
 }
 
 void BlobStream::Read(off_t position, size_t max_size, ReadCallback callback) {
@@ -288,7 +291,6 @@ void BlobStream::Close(bool invoke_pending_callbacks) {
 }
 
 void BlobStream::OpenOnIO(scoped_refptr<ChromeBlobStorageContext> blob_context,
-                          scoped_refptr<storage::FileSystemContext> fs_context,
                           const std::string& uuid,
                           OpenCallback callback) {
   DCHECK(!blob_handle_);
@@ -302,7 +304,6 @@ void BlobStream::OpenOnIO(scoped_refptr<ChromeBlobStorageContext> blob_context,
   }
   is_binary_ = !IsTextMimeType(blob_handle_->content_type());
   open_callback_ = std::move(callback);
-  fs_context_ = std::move(fs_context);
   blob_handle_->RunOnConstructionComplete(
       base::Bind(&BlobStream::OnBlobConstructionComplete, this));
 }
@@ -426,7 +427,7 @@ void BlobStream::OnReadComplete(int bytes_read) {
 
 void BlobStream::CreateReader() {
   DCHECK(!blob_reader_);
-  blob_reader_ = blob_handle_->CreateReader(fs_context_.get());
+  blob_reader_ = blob_handle_->CreateReader();
   BlobReader::Status status = blob_reader_->CalculateSize(
       base::Bind(&BlobStream::OnCalculateSizeComplete, this));
   if (status != BlobReader::Status::IO_PENDING) {
@@ -479,8 +480,8 @@ DevToolsIOContext::~DevToolsIOContext() {
 }
 
 scoped_refptr<DevToolsIOContext::RWStream>
-DevToolsIOContext::CreateTempFileBackedStream() {
-  scoped_refptr<TempFileStream> result = new TempFileStream();
+DevToolsIOContext::CreateTempFileBackedStream(bool binary) {
+  scoped_refptr<TempFileStream> result = new TempFileStream(binary);
   bool inserted =
       streams_.insert(std::make_pair(result->handle(), result)).second;
   DCHECK(inserted);

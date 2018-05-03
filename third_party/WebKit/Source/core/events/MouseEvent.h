@@ -25,7 +25,6 @@
 #define MouseEvent_h
 
 #include "core/CoreExport.h"
-#include "core/dom/events/EventDispatchMediator.h"
 #include "core/events/MouseEventInit.h"
 #include "core/events/UIEventWithKeyState.h"
 #include "public/platform/WebMenuSourceType.h"
@@ -116,8 +115,6 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
   bool IsMouseEvent() const override;
   unsigned which() const override;
 
-  EventDispatchMediator* CreateMediator() override;
-
   int ClickCount() { return detail(); }
 
   const WebMouseEvent* NativeEvent() const { return native_event_.get(); }
@@ -132,20 +129,28 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
 
   // Note that these values are adjusted to counter the effects of zoom, so that
   // values exposed via DOM APIs are invariant under zooming.
-  // TODO(eirage): remove coordinates getter override when mouse event is
-  // fractional;
   virtual double screenX() const {
-    return static_cast<int>(screen_location_.X());
+    return (RuntimeEnabledFeatures::FractionalMouseEventEnabled())
+               ? screen_location_.X()
+               : static_cast<int>(screen_location_.X());
   }
+
   virtual double screenY() const {
-    return static_cast<int>(screen_location_.Y());
+    return (RuntimeEnabledFeatures::FractionalMouseEventEnabled())
+               ? screen_location_.Y()
+               : static_cast<int>(screen_location_.Y());
   }
 
   virtual double clientX() const {
-    return static_cast<int>(client_location_.X());
+    return (RuntimeEnabledFeatures::FractionalMouseEventEnabled())
+               ? client_location_.X()
+               : static_cast<int>(client_location_.X());
   }
+
   virtual double clientY() const {
-    return static_cast<int>(client_location_.Y());
+    return (RuntimeEnabledFeatures::FractionalMouseEventEnabled())
+               ? client_location_.Y()
+               : static_cast<int>(client_location_.Y());
   }
 
   int movementX() const { return movement_delta_.X(); }
@@ -157,8 +162,17 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
   int offsetX();
   int offsetY();
 
-  virtual double pageX() const { return static_cast<int>(page_location_.X()); }
-  virtual double pageY() const { return static_cast<int>(page_location_.Y()); }
+  virtual double pageX() const {
+    return (RuntimeEnabledFeatures::FractionalMouseEventEnabled())
+               ? page_location_.X()
+               : static_cast<int>(page_location_.X());
+  }
+
+  virtual double pageY() const {
+    return (RuntimeEnabledFeatures::FractionalMouseEventEnabled())
+               ? page_location_.Y()
+               : static_cast<int>(page_location_.Y());
+  }
 
   double x() const { return clientX(); }
   double y() const { return clientY(); }
@@ -171,6 +185,8 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
   // coords, usable with LayoutObject::absoluteToLocal) relative to view(), i.e.
   // the local frame.
   const DoublePoint& AbsoluteLocation() const { return absolute_location_; }
+
+  DispatchEventResult DispatchEvent(EventDispatcher&) override;
 
   virtual void Trace(blink::Visitor*);
 
@@ -207,7 +223,7 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
              const MouseEventInit&,
              TimeTicks platform_time_stamp);
   MouseEvent(const AtomicString& type, const MouseEventInit& init)
-      : MouseEvent(type, init, TimeTicks::Now()) {}
+      : MouseEvent(type, init, CurrentTimeTicks()) {}
 
   MouseEvent();
 
@@ -215,14 +231,13 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
 
   void ReceivedTarget() override;
 
-  // TODO(eirage): Move these coordinates to private when MouseEvent is
-  // fractional.
+  // TODO(eirage): Move these coordinates back to private when MouseEvent
+  // fractional flag is removed.
   DoublePoint screen_location_;
   DoublePoint client_location_;
   DoublePoint page_location_;
 
  private:
-  friend class MouseEventDispatchMediator;
   void InitMouseEventInternal(const AtomicString& type,
                               bool can_bubble,
                               bool cancelable,
@@ -261,17 +276,6 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
   WebMenuSourceType menu_source_type_;
 
   std::unique_ptr<WebMouseEvent> native_event_;
-};
-
-class MouseEventDispatchMediator final : public EventDispatchMediator {
- public:
-  static MouseEventDispatchMediator* Create(MouseEvent*);
-
- private:
-  explicit MouseEventDispatchMediator(MouseEvent*);
-  MouseEvent& Event() const;
-
-  DispatchEventResult DispatchEvent(EventDispatcher&) const override;
 };
 
 DEFINE_EVENT_TYPE_CASTS(MouseEvent);

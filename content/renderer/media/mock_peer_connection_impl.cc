@@ -36,7 +36,7 @@ class MockStreamCollection : public webrtc::StreamCollectionInterface {
       if (streams_[i]->label() == label)
         return streams_[i];
     }
-    return NULL;
+    return nullptr;
   }
   webrtc::MediaStreamTrackInterface* FindAudioTrack(
       const std::string& id) override {
@@ -46,7 +46,7 @@ class MockStreamCollection : public webrtc::StreamCollectionInterface {
       if (track)
         return track;
     }
-    return NULL;
+    return nullptr;
   }
   webrtc::MediaStreamTrackInterface* FindVideoTrack(
       const std::string& id) override {
@@ -56,7 +56,7 @@ class MockStreamCollection : public webrtc::StreamCollectionInterface {
       if (track)
         return track;
     }
-    return NULL;
+    return nullptr;
   }
   void AddStream(MediaStreamInterface* stream) {
     streams_.push_back(stream);
@@ -83,14 +83,11 @@ class MockStreamCollection : public webrtc::StreamCollectionInterface {
 class MockDtmfSender : public DtmfSenderInterface {
  public:
   explicit MockDtmfSender(AudioTrackInterface* track)
-      : track_(track),
-        observer_(NULL),
-        duration_(0),
-        inter_tone_gap_(0) {}
+      : track_(track), observer_(nullptr), duration_(0), inter_tone_gap_(0) {}
   void RegisterObserver(DtmfSenderObserverInterface* observer) override {
     observer_ = observer;
   }
-  void UnregisterObserver() override { observer_ = NULL; }
+  void UnregisterObserver() override { observer_ = nullptr; }
   bool CanInsertDtmf() override { return true; }
   bool InsertDtmf(const std::string& tones,
                   int duration,
@@ -117,14 +114,20 @@ class MockDtmfSender : public DtmfSenderInterface {
 };
 
 FakeRtpReceiver::FakeRtpReceiver(
-    rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track)
-    : track_(track) {}
+    rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track,
+    std::vector<rtc::scoped_refptr<webrtc::MediaStreamInterface>> streams)
+    : track_(std::move(track)), streams_(std::move(streams)) {}
 
 FakeRtpReceiver::~FakeRtpReceiver() {}
 
 rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> FakeRtpReceiver::track()
     const {
   return track_;
+}
+
+std::vector<rtc::scoped_refptr<webrtc::MediaStreamInterface>>
+FakeRtpReceiver::streams() const {
+  return streams_;
 }
 
 cricket::MediaType FakeRtpReceiver::media_type() const {
@@ -152,6 +155,11 @@ void FakeRtpReceiver::SetObserver(
   NOTIMPLEMENTED();
 }
 
+std::vector<webrtc::RtpSource> FakeRtpReceiver::GetSources() const {
+  NOTIMPLEMENTED();
+  return std::vector<webrtc::RtpSource>();
+}
+
 const char MockPeerConnectionImpl::kDummyOffer[] = "dummy offer";
 const char MockPeerConnectionImpl::kDummyAnswer[] = "dummy answer";
 
@@ -168,8 +176,17 @@ MockPeerConnectionImpl::MockPeerConnectionImpl(
       observer_(observer) {
   ON_CALL(*this, SetLocalDescription(_, _)).WillByDefault(testing::Invoke(
       this, &MockPeerConnectionImpl::SetLocalDescriptionWorker));
+  // TODO(hbos): Remove once no longer mandatory to implement.
   ON_CALL(*this, SetRemoteDescription(_, _)).WillByDefault(testing::Invoke(
       this, &MockPeerConnectionImpl::SetRemoteDescriptionWorker));
+  ON_CALL(*this, SetRemoteDescriptionForMock(_, _))
+      .WillByDefault(testing::Invoke(
+          [this](
+              std::unique_ptr<webrtc::SessionDescriptionInterface>* desc,
+              rtc::scoped_refptr<webrtc::SetRemoteDescriptionObserverInterface>*
+                  observer) {
+            SetRemoteDescriptionWorker(nullptr, desc->release());
+          }));
 }
 
 MockPeerConnectionImpl::~MockPeerConnectionImpl() {}
@@ -201,7 +218,7 @@ void MockPeerConnectionImpl::RemoveStream(
 rtc::scoped_refptr<DtmfSenderInterface>
 MockPeerConnectionImpl::CreateDtmfSender(AudioTrackInterface* track) {
   if (!track) {
-    return NULL;
+    return nullptr;
   }
   return new rtc::RefCountedObject<MockDtmfSender>(track);
 }
@@ -294,7 +311,7 @@ void MockPeerConnectionImpl::CreateOffer(
   DCHECK(observer);
   created_sessiondescription_.reset(
       dependency_factory_->CreateSessionDescription("unknown", kDummyOffer,
-                                                    NULL));
+                                                    nullptr));
 }
 
 void MockPeerConnectionImpl::CreateAnswer(
@@ -303,7 +320,7 @@ void MockPeerConnectionImpl::CreateAnswer(
   DCHECK(observer);
   created_sessiondescription_.reset(
       dependency_factory_->CreateSessionDescription("unknown", kDummyAnswer,
-                                                    NULL));
+                                                    nullptr));
 }
 
 void MockPeerConnectionImpl::SetLocalDescriptionWorker(

@@ -44,7 +44,8 @@ class MEDIA_EXPORT MimeUtil {
     VP9,
     THEORA,
     DOLBY_VISION,
-    LAST_CODEC = DOLBY_VISION
+    AV1,
+    LAST_CODEC = AV1
   };
 
   // Platform configuration structure.  Controls which codecs are supported at
@@ -172,12 +173,6 @@ class MEDIA_EXPORT MimeUtil {
                                 uint8_t video_level,
                                 const VideoColorSpace& eotf,
                                 bool is_encrypted) const;
-
-  // Wrapper around IsCodecSupported for simple codecs that are entirely
-  // described (or implied) by the container mime-type.
-  SupportsType IsSimpleCodecSupported(const std::string& mime_type_lower_case,
-                                      Codec codec,
-                                      bool is_encrypted) const;
 
   // Returns true if |codec| refers to a proprietary codec.
   bool IsCodecProprietary(Codec codec) const;

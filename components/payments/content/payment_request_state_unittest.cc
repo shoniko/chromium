@@ -33,10 +33,10 @@ class PaymentRequestStateTest : public testing::Test,
                         test_payment_request_delegate_.GetUkmRecorder()),
         address_(autofill::test::GetFullProfile()),
         credit_card_visa_(autofill::test::GetCreditCard()) {
-    test_personal_data_manager_.AddTestingProfile(&address_);
+    test_personal_data_manager_.AddProfile(address_);
     credit_card_visa_.set_billing_address_id(address_.guid());
     credit_card_visa_.set_use_count(5u);
-    test_personal_data_manager_.AddTestingCreditCard(&credit_card_visa_);
+    test_personal_data_manager_.AddCreditCard(credit_card_visa_);
   }
   ~PaymentRequestStateTest() override {}
 
@@ -237,11 +237,11 @@ TEST_F(PaymentRequestStateTest, ReadyToPay_DefaultSelections) {
   EXPECT_FALSE(state()->is_ready_to_pay());
 
   state()->SetSelectedShippingProfile(test_address());
-  EXPECT_EQ(1, num_on_selected_information_changed_called());
+  EXPECT_EQ(0, num_on_selected_information_changed_called());
 
   // Simulate that the merchant has validated the shipping address change.
   spec()->UpdateWith(CreateDefaultDetails());
-  EXPECT_EQ(2, num_on_selected_information_changed_called());
+  EXPECT_EQ(1, num_on_selected_information_changed_called());
 
   // Not ready to pay since there's no selected shipping option.
   EXPECT_FALSE(state()->is_ready_to_pay());
@@ -251,7 +251,7 @@ TEST_F(PaymentRequestStateTest, ReadyToPay_DefaultSelections) {
   auto details = CreateDefaultDetails();
   details->shipping_options[0]->selected = true;
   spec()->UpdateWith(std::move(details));
-  EXPECT_EQ(3, num_on_selected_information_changed_called());
+  EXPECT_EQ(2, num_on_selected_information_changed_called());
   EXPECT_TRUE(state()->is_ready_to_pay());
 }
 
@@ -308,19 +308,19 @@ TEST_F(PaymentRequestStateTest, SelectedShippingAddressMessage_Normalized) {
   // Select an address, nothing should happen until the normalization is
   // completed and the merchant has validated the address.
   state()->SetSelectedShippingProfile(test_address());
-  EXPECT_EQ(1, num_on_selected_information_changed_called());
+  EXPECT_EQ(0, num_on_selected_information_changed_called());
   EXPECT_FALSE(state()->is_ready_to_pay());
 
   // Complete the normalization.
   test_payment_request_delegate()
       ->test_address_normalizer()
       ->CompleteAddressNormalization();
-  EXPECT_EQ(1, num_on_selected_information_changed_called());
+  EXPECT_EQ(0, num_on_selected_information_changed_called());
   EXPECT_FALSE(state()->is_ready_to_pay());
 
   // Simulate that the merchant has validated the shipping address change.
   spec()->UpdateWith(CreateDefaultDetails());
-  EXPECT_EQ(2, num_on_selected_information_changed_called());
+  EXPECT_EQ(1, num_on_selected_information_changed_called());
   // Not ready to pay because there's no selected shipping option.
   EXPECT_FALSE(state()->is_ready_to_pay());
 
@@ -362,19 +362,19 @@ TEST_F(PaymentRequestStateTest, JaLatnShippingAddress) {
   profile.set_language_code("ja-Latn");
 
   state()->SetSelectedShippingProfile(&profile);
-  EXPECT_EQ(1, num_on_selected_information_changed_called());
+  EXPECT_EQ(0, num_on_selected_information_changed_called());
   EXPECT_FALSE(state()->is_ready_to_pay());
 
   // Complete the normalization.
   test_payment_request_delegate()
       ->test_address_normalizer()
       ->CompleteAddressNormalization();
-  EXPECT_EQ(1, num_on_selected_information_changed_called());
+  EXPECT_EQ(0, num_on_selected_information_changed_called());
   EXPECT_FALSE(state()->is_ready_to_pay());
 
   // Simulate that the merchant has validated the shipping address change.
   spec()->UpdateWith(CreateDefaultDetails());
-  EXPECT_EQ(2, num_on_selected_information_changed_called());
+  EXPECT_EQ(1, num_on_selected_information_changed_called());
   // Not ready to pay because there's no selected shipping option.
   EXPECT_FALSE(state()->is_ready_to_pay());
 

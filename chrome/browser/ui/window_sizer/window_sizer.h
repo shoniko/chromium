@@ -76,11 +76,12 @@ class WindowSizer {
   // An interface implemented by an object to identify on which
   // display a new window should be located.
   class TargetDisplayProvider {
-    public:
-      virtual ~TargetDisplayProvider() {}
-      virtual display::Display GetTargetDisplay(
-          const display::Screen* screen,
-          const gfx::Rect& bounds) const = 0;
+   public:
+    virtual ~TargetDisplayProvider() {}
+
+    virtual display::Display GetTargetDisplay(
+        const display::Screen* screen,
+        const gfx::Rect& bounds) const = 0;
   };
 
   // Determines the position and size for a window as it is created as well
@@ -117,6 +118,15 @@ class WindowSizer {
 
   // The maximum default window width. This value may differ between platforms.
   static const int kWindowMaxDefaultWidth;
+
+#if defined(OS_CHROMEOS)
+  // The number of pixels which are kept free top, left and right when a window
+  // gets positioned to its default location.
+  static const int kDesktopBorderSize = 16;
+
+  // Maximum width of a window even if there is more room on the desktop.
+  static const int kMaximumWindowWidth = 1100;
+#endif
 
  private:
   // The edge of the screen to check for out-of-bounds.
@@ -177,6 +187,9 @@ class WindowSizer {
   // if it was set to SHOW_STATE_DEFAULT.
   void GetTabbedBrowserBoundsAsh(gfx::Rect* bounds,
                                  ui::WindowShowState* show_state) const;
+
+  // Returns the default bounds for a browser window on |display|.
+  static gfx::Rect GetDefaultWindowBoundsAsh(const display::Display& display);
 #endif
 
   // Determine the default show state for the window - not looking at other
@@ -189,7 +202,7 @@ class WindowSizer {
   display::Screen* screen_;  // not owned.
 
   // Note that this browser handle might be NULL.
-  const Browser* browser_;
+  const Browser* const browser_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowSizer);
 };

@@ -70,12 +70,13 @@ blink_core_sources("frame") {
     "LocalFrameView.h",
     "Location.cpp",
     "Location.h",
+    "MessageReport.h",
     "Navigator.cpp",
     "Navigator.h",
-    "NavigatorClipboard.cpp",
-    "NavigatorClipboard.h",
     "NavigatorConcurrentHardware.cpp",
     "NavigatorConcurrentHardware.h",
+    "NavigatorDeviceMemory.cpp",
+    "NavigatorDeviceMemory.h",
     "NavigatorID.cpp",
     "NavigatorID.h",
     "NavigatorLanguage.cpp",
@@ -87,6 +88,12 @@ blink_core_sources("frame") {
     "PageScaleConstraints.h",
     "PageScaleConstraintsSet.cpp",
     "PageScaleConstraintsSet.h",
+    "PausableScriptExecutor.cpp",
+    "PausableScriptExecutor.h",
+    "PausableTask.cpp",
+    "PausableTask.h",
+    "PausableTimer.cpp",
+    "PausableTimer.h",
     "PerformanceMonitor.cpp",
     "PerformanceMonitor.h",
     "PlatformEventController.cpp",
@@ -126,10 +133,6 @@ blink_core_sources("frame") {
     "SettingsDelegate.h",
     "SmartClip.cpp",
     "SmartClip.h",
-    "SuspendableScriptExecutor.cpp",
-    "SuspendableScriptExecutor.h",
-    "SuspendableTimer.cpp",
-    "SuspendableTimer.h",
     "UseCounter.cpp",
     "UseCounter.h",
     "UserActivationState.cpp",
@@ -159,10 +162,5 @@ blink_core_sources("frame") {
     "csp/MediaListDirective.h",
     "csp/SourceListDirective.cpp",
     "csp/SourceListDirective.h",
-  ]
-
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
   ]
 }

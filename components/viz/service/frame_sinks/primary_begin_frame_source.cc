@@ -7,7 +7,7 @@
 namespace viz {
 
 PrimaryBeginFrameSource::PrimaryBeginFrameSource()
-    : begin_frame_source_(this) {}
+    : BeginFrameSource(kNotRestartableId), begin_frame_source_(this) {}
 
 PrimaryBeginFrameSource::~PrimaryBeginFrameSource() = default;
 
@@ -48,6 +48,11 @@ void PrimaryBeginFrameSource::OnBeginFrame(const BeginFrameArgs& args) {
 
 const BeginFrameArgs& PrimaryBeginFrameSource::LastUsedBeginFrameArgs() const {
   return last_begin_frame_args_;
+}
+
+bool PrimaryBeginFrameSource::WantsAnimateOnlyBeginFrames() const {
+  // Forward animate_only BeginFrames.
+  return true;
 }
 
 void PrimaryBeginFrameSource::OnBeginFrameSourcePausedChanged(bool paused) {}

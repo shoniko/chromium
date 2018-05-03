@@ -354,11 +354,9 @@ void MostVisitedSites::BuildCurrentTilesGivenSuggestionsProfile(
     tile.favicon_url = GURL(suggestion_pb.favicon_url());
     tile.data_generation_time = profile_timestamp;
 
-    if (AreNtpMostLikelyFaviconsFromServerEnabled()) {
-      icon_cacher_->StartFetchMostLikely(
-          url, base::Bind(&MostVisitedSites::OnIconMadeAvailable,
-                          base::Unretained(this), url));
-    }
+    icon_cacher_->StartFetchMostLikely(
+        url, base::Bind(&MostVisitedSites::OnIconMadeAvailable,
+                        base::Unretained(this), url));
 
     tiles.push_back(std::move(tile));
   }
@@ -565,8 +563,10 @@ void MostVisitedSites::SaveTilesAndNotify(NTPTilesVector personal_tiles) {
 
   int num_personal_tiles = 0;
   for (const auto& tile : *current_tiles_) {
-    if (tile.source != TileSource::POPULAR)
+    if (tile.source != TileSource::POPULAR &&
+        tile.source != TileSource::POPULAR_BAKED_IN) {
       num_personal_tiles++;
+    }
   }
   prefs_->SetInteger(prefs::kNumPersonalTiles, num_personal_tiles);
   if (!observer_)

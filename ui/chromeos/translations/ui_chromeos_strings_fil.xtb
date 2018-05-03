@@ -115,6 +115,7 @@
 <translation id="4694604912444486114">Unggoy</translation>
 <translation id="4711094779914110278">Turkish</translation>
 <translation id="4725511304875193254">Corgi</translation>
+<translation id="4737050008115666127">Landing</translation>
 <translation id="4747271164117300400">Macedonian</translation>
 <translation id="4749157430980974800">Georgian na keyboard</translation>
 <translation id="4755240240651974342">Finnish na keyboard</translation>
@@ -148,6 +149,7 @@
 <translation id="5465122519792752163">Nepali keyboard (InScript)</translation>
 <translation id="5469868506864199649">Italyano</translation>
 <translation id="5500122897333236901">Icelandic</translation>
+<translation id="5508696409934741614">Mga Dot</translation>
 <translation id="5533555070048896610">Transliteration (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">US Dvorak</translation>
 <translation id="5640179856859982418">Swiss na keyboard</translation>
@@ -161,6 +163,7 @@
 <translation id="5892290200158927959">French na BÉPO keyboard</translation>
 <translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">Latin American na keyboard</translation>
+<translation id="6012987430370760224">Marathi keyboard (Phonetic)</translation>
 <translation id="60357267506638014">Czech QWERTY</translation>
 <translation id="6054173164583630569">French na keyboard</translation>
 <translation id="6111770213269631447">Transliteration (namaskar → নমস্কার)</translation>
@@ -199,6 +202,7 @@
 <translation id="7222624196722476520">Bulgarian Phonetic keyboard</translation>
 <translation id="7348749398828259943">US Workman international na keyboard</translation>
 <translation id="7389722738210761877">Thai keyboard (TIS 820-2531)</translation>
+<translation id="7396038720194014279">Hindi keyboard (Phonetic)</translation>
 <translation id="7417453074306512035">Ethiopic keyboard</translation>
 <translation id="7419631653042041064">Catalan na keyboard</translation>
 <translation id="7434823369735508263">UK Dvorak na keyboard</translation>
@@ -206,12 +210,14 @@
 <translation id="7474889694310679759">Canadian English na keyboard</translation>
 <translation id="751507702149411736">Belarusian</translation>
 <translation id="7547811415869834682">Dutch</translation>
+<translation id="7603724359189955920">Mga Grid</translation>
 <translation id="770015031906360009">Greko</translation>
 <translation id="7706319470528945664">Portuguese na keyboard</translation>
 <translation id="7774365994322694683">Ibon</translation>
 <translation id="7825423931463735974">Tamil keyboard (Tamil99)</translation>
 <translation id="7853966320808728790">French na BÉPO</translation>
 <translation id="7896906914454843592">US Extended keyboard</translation>
+<translation id="7898607018410277265">Gujarati keyboard (New Phonetic)</translation>
 <translation id="7917972308273378936">Lithuanian na keyboard</translation>
 <translation id="7943385054491506837">US Colemak</translation>
 <translation id="7969525169268594403">Slovenian</translation>
@@ -235,6 +241,7 @@
 <translation id="8432745813735585631">US Colemak na keyboard</translation>
 <translation id="8437209419043462667">US</translation>
 <translation id="8467473010914675605">Paraan ng pag-input na Korean</translation>
+<translation id="8477649328507734757">Spin</translation>
 <translation id="8521441079177373948">UK</translation>
 <translation id="8551494947769799688">Latvian</translation>
 <translation id="8561206103590473338">Elepante</translation>
@@ -253,4 +260,5 @@
 <translation id="913758436357682283">Myanmar Myansan keyboard</translation>
 <translation id="9153744823707037316">Array na paraan ng pag-input</translation>
 <translation id="9206487995878691001">Cangjie na paraan ng pag-input</translation>
+<translation id="9219908252191632183">Lunar</translation>
 </translationbundle>

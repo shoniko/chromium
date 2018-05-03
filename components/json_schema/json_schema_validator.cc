@@ -172,9 +172,8 @@ bool IsValidSchema(const base::DictionaryValue* dict,
     }
 
     // Integer can be converted to double.
-    if (!(it.value().IsType(entry->type) ||
-          (it.value().IsType(base::Value::Type::INTEGER) &&
-           entry->type == base::Value::Type::DOUBLE))) {
+    if (!(it.value().type() == entry->type ||
+          (it.value().is_int() && entry->type == base::Value::Type::DOUBLE))) {
       *error = base::StringPrintf("Invalid value for %s attribute",
                                   it.key().c_str());
       return false;
@@ -182,7 +181,7 @@ bool IsValidSchema(const base::DictionaryValue* dict,
 
     // base::Value::Type::INTEGER attributes must be >= 0.
     // This applies to "minItems", "maxItems", "minLength" and "maxLength".
-    if (it.value().IsType(base::Value::Type::INTEGER)) {
+    if (it.value().is_int()) {
       int integer_value;
       it.value().GetAsInteger(&integer_value);
       if (integer_value < 0) {
@@ -355,9 +354,8 @@ std::string JSONSchemaValidator::GetJSONSchemaType(const base::Value* value) {
       if (std::abs(double_value) <= std::pow(2.0, DBL_MANT_DIG) &&
           double_value == floor(double_value)) {
         return schema::kInteger;
-      } else {
-        return schema::kNumber;
       }
+      return schema::kNumber;
     }
     case base::Value::Type::STRING:
       return schema::kString;
@@ -563,8 +561,7 @@ void JSONSchemaValidator::ValidateEnum(const base::Value* instance,
 
       case base::Value::Type::INTEGER:
       case base::Value::Type::DOUBLE:
-        if (instance->IsType(base::Value::Type::INTEGER) ||
-            instance->IsType(base::Value::Type::DOUBLE)) {
+        if (instance->is_int() || instance->is_double()) {
           if (GetNumberValue(choice) == GetNumberValue(instance))
             return;
         }
@@ -688,7 +685,7 @@ void JSONSchemaValidator::ValidateArray(const base::ListValue* instance,
     for (size_t i = 0; i < instance_size; ++i) {
       const base::Value* item = nullptr;
       CHECK(instance->Get(i, &item));
-      std::string i_str = base::Uint64ToString(i);
+      std::string i_str = base::NumberToString(i);
       std::string item_path = path.empty() ? i_str : (path + "." + i_str);
       Validate(item, single_type, item_path);
     }
@@ -709,7 +706,7 @@ void JSONSchemaValidator::ValidateTuple(const base::ListValue* instance,
   size_t tuple_size = tuple_type ? tuple_type->GetSize() : 0;
   if (tuple_type) {
     for (size_t i = 0; i < tuple_size; ++i) {
-      std::string i_str = base::Uint64ToString(i);
+      std::string i_str = base::NumberToString(i);
       std::string item_path = path.empty() ? i_str : (path + "." + i_str);
       const base::DictionaryValue* item_schema = nullptr;
       CHECK(tuple_type->GetDictionary(i, &item_schema));
@@ -737,15 +734,16 @@ void JSONSchemaValidator::ValidateTuple(const base::ListValue* instance,
     // Any additional properties must validate against the additionalProperties
     // schema.
     for (size_t i = tuple_size; i < instance_size; ++i) {
-      std::string i_str = base::Uint64ToString(i);
+      std::string i_str = base::NumberToString(i);
       std::string item_path = path.empty() ? i_str : (path + "." + i_str);
       const base::Value* item_value = nullptr;
       CHECK(instance->Get(i, &item_value));
       Validate(item_value, additional_properties_schema, item_path);
     }
   } else if (instance_size > tuple_size) {
-    errors_.push_back(Error(path, FormatErrorMessage(
-        kArrayMaxItems, base::Uint64ToString(tuple_size))));
+    errors_.push_back(Error(
+        path,
+        FormatErrorMessage(kArrayMaxItems, base::NumberToString(tuple_size))));
   }
 }
 
@@ -800,15 +798,17 @@ void JSONSchemaValidator::ValidateNumber(const base::Value* instance,
   double minimum = 0;
   if (schema->GetDouble(schema::kMinimum, &minimum)) {
     if (value < minimum)
-      errors_.push_back(Error(path, FormatErrorMessage(
-          kNumberMinimum, base::DoubleToString(minimum))));
+      errors_.push_back(Error(
+          path,
+          FormatErrorMessage(kNumberMinimum, base::NumberToString(minimum))));
   }
 
   double maximum = 0;
   if (schema->GetDouble(schema::kMaximum, &maximum)) {
     if (value > maximum)
-      errors_.push_back(Error(path, FormatErrorMessage(
-          kNumberMaximum, base::DoubleToString(maximum))));
+      errors_.push_back(Error(
+          path,
+          FormatErrorMessage(kNumberMaximum, base::NumberToString(maximum))));
   }
 }
 
@@ -819,15 +819,14 @@ bool JSONSchemaValidator::ValidateType(const base::Value* instance,
   if (expected_type == actual_type ||
       (expected_type == schema::kNumber && actual_type == schema::kInteger)) {
     return true;
-  } else if (expected_type == schema::kInteger &&
-             actual_type == schema::kNumber) {
+  }
+  if (expected_type == schema::kInteger && actual_type == schema::kNumber) {
     errors_.push_back(Error(path, kInvalidTypeIntegerNumber));
     return false;
-  } else {
-    errors_.push_back(Error(path, FormatErrorMessage(
-        kInvalidType, expected_type, actual_type)));
-    return false;
   }
+  errors_.push_back(Error(
+      path, FormatErrorMessage(kInvalidType, expected_type, actual_type)));
+  return false;
 }
 
 bool JSONSchemaValidator::SchemaAllowsAnyAdditionalItems(
@@ -843,7 +842,6 @@ bool JSONSchemaValidator::SchemaAllowsAnyAdditionalItems(
     CHECK((*additional_properties_schema)->GetString(
         schema::kType, &additional_properties_type));
     return additional_properties_type == schema::kAny;
-  } else {
-    return default_allow_additional_properties_;
   }
+  return default_allow_additional_properties_;
 }

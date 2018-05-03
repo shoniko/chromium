@@ -22,6 +22,12 @@ enum ChromeInsetsMetric {
 enum ChromeDistanceMetric {
   // Default minimum width of a button.
   DISTANCE_BUTTON_MINIMUM_WIDTH = views::VIEWS_DISTANCE_END,
+  // Vertical spacing at the beginning and end of a content list (a vertical
+  // stack of composite views that behaves like a menu) containing one item.
+  DISTANCE_CONTENT_LIST_VERTICAL_SINGLE,
+  // Same as |DISTANCE_CONTENT_LIST_VERTICAL_SINGLE|, but used at the beginning
+  // and end of a multi-item content list.
+  DISTANCE_CONTENT_LIST_VERTICAL_MULTI,
   // Vertical spacing between a list of multiple controls in one column.
   DISTANCE_CONTROL_LIST_VERTICAL,
   // Smaller horizontal spacing between other controls that are logically
@@ -45,13 +51,12 @@ enum ChromeDistanceMetric {
   DISTANCE_UNRELATED_CONTROL_HORIZONTAL_LARGE,
   // Larger vertical spacing between unrelated controls.
   DISTANCE_UNRELATED_CONTROL_VERTICAL_LARGE,
-  // Minimum size for modal dialogs. Used when multiline text won't wrap without
-  // a small container (because its preferred size defaults to the full
-  // unwrapped text length).
-  // TODO(pbos): Remove need for this hack by adding a reasonable text-wrap
-  // default preferred width (ideally smaller than this size). Also add a way of
-  // enforcing different snap points for modal dialogs (exclude 320px).
-  DISTANCE_MODAL_DIALOG_WIDTH_CONTAINING_MULTILINE_TEXT,
+  // Width of modal dialogs unless the content is too wide to make that
+  // feasible.
+  DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH,
+  // Width of a bubble unless the content is too wide to make that
+  // feasible.
+  DISTANCE_BUBBLE_PREFERRED_WIDTH,
 };
 
 class ChromeLayoutProvider : public views::LayoutProvider {

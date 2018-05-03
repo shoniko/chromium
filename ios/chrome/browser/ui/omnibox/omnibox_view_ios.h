@@ -8,7 +8,6 @@
 #import <UIKit/UIKit.h>
 
 #include <memory>
-#include "base/mac/scoped_nsobject.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/toolbar/toolbar_model.h"
 #include "ios/chrome/browser/ui/omnibox/omnibox_popup_provider.h"
@@ -27,6 +26,13 @@ namespace ios {
 class ChromeBrowserState;
 }
 
+// Allows setting left images.
+class LeftImageProvider {
+ public:
+  // Sets the left image.
+  virtual void SetLeftImage(int imageId) = 0;
+};
+
 // iOS implementation of OmniBoxView.  Wraps a UITextField and
 // interfaces with the rest of the autocomplete system.
 class OmniboxViewIOS : public OmniboxView,
@@ -35,6 +41,7 @@ class OmniboxViewIOS : public OmniboxView,
   // Retains |field|.
   OmniboxViewIOS(OmniboxTextFieldIOS* field,
                  WebOmniboxEditController* controller,
+                 LeftImageProvider* left_image_provider,
                  ios::ChromeBrowserState* browser_state);
   ~OmniboxViewIOS() override;
 
@@ -63,6 +70,7 @@ class OmniboxViewIOS : public OmniboxView,
   void RevertAll() override;
   void UpdatePopup() override;
   void OnTemporaryTextMaybeChanged(const base::string16& display_text,
+                                   const AutocompleteMatch& match,
                                    bool save_original_selection,
                                    bool notify_text_changed) override;
   bool OnInlineAutocompleteTextMaybeChanged(const base::string16& display_text,
@@ -169,12 +177,13 @@ class OmniboxViewIOS : public OmniboxView,
 
   ios::ChromeBrowserState* browser_state_;
 
-  base::scoped_nsobject<OmniboxTextFieldIOS> field_;
-  base::scoped_nsobject<OmniboxTextFieldPasteDelegate> paste_delegate_;
+  OmniboxTextFieldIOS* field_;
+  OmniboxTextFieldPasteDelegate* paste_delegate_;
   WebOmniboxEditController* controller_;  // weak, owns us
+  LeftImageProvider* left_image_provider_;  // weak
 
   State state_before_change_;
-  base::scoped_nsobject<NSString> marked_text_before_change_;
+  NSString* marked_text_before_change_;
   NSRange current_selection_;
   NSRange old_selection_;
 
@@ -189,7 +198,7 @@ class OmniboxViewIOS : public OmniboxView,
   BOOL use_strikethrough_workaround_;
 
   // Bridges delegate method calls from |field_| to C++ land.
-  base::scoped_nsobject<AutocompleteTextFieldDelegate> field_delegate_;
+  AutocompleteTextFieldDelegate* field_delegate_;
 
   // Temporary pointer to the attributed display string, stored as color and
   // other emphasis attributes are applied by the superclass.

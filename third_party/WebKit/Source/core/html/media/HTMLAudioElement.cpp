@@ -37,8 +37,8 @@ HTMLAudioElement::HTMLAudioElement(Document& document)
 
 HTMLAudioElement* HTMLAudioElement::Create(Document& document) {
   HTMLAudioElement* audio = new HTMLAudioElement(document);
-  audio->EnsureUserAgentShadowRoot();
-  audio->SuspendIfNeeded();
+  audio->EnsureUserAgentShadowRootV1();
+  audio->PauseIfNeeded();
   return audio;
 }
 
@@ -46,11 +46,11 @@ HTMLAudioElement* HTMLAudioElement::CreateForJSConstructor(
     Document& document,
     const AtomicString& src) {
   HTMLAudioElement* audio = new HTMLAudioElement(document);
-  audio->EnsureUserAgentShadowRoot();
+  audio->EnsureUserAgentShadowRootV1();
   audio->setPreload(AtomicString("auto"));
   if (!src.IsNull())
     audio->SetSrc(src);
-  audio->SuspendIfNeeded();
+  audio->PauseIfNeeded();
   return audio;
 }
 

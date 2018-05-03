@@ -23,7 +23,7 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   // them to the constructor below.
   NGConstraintSpaceBuilder(const NGConstraintSpace& parent_space);
 
-  NGConstraintSpaceBuilder(NGWritingMode writing_mode, NGPhysicalSize icb_size);
+  NGConstraintSpaceBuilder(WritingMode writing_mode, NGPhysicalSize icb_size);
 
   NGConstraintSpaceBuilder& SetAvailableSize(NGLogicalSize available_size);
 
@@ -53,9 +53,15 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
       bool is_block_direction_triggers_scrollbar);
 
   NGConstraintSpaceBuilder& SetFragmentationType(NGFragmentationType);
+
+  NGConstraintSpaceBuilder& SetSeparateLeadingFragmentainerMargins(bool val) {
+    separate_leading_fragmentainer_margins_ = val;
+    return *this;
+  }
+
   NGConstraintSpaceBuilder& SetIsNewFormattingContext(bool is_new_fc);
   NGConstraintSpaceBuilder& SetIsAnonymous(bool is_anonymous);
-  NGConstraintSpaceBuilder& SetUseFirstLineStyle(bool use_first_line_sytle);
+  NGConstraintSpaceBuilder& SetUseFirstLineStyle(bool use_first_line_style);
 
   NGConstraintSpaceBuilder& SetUnpositionedFloats(
       Vector<scoped_refptr<NGUnpositionedFloat>>& unpositioned_floats);
@@ -82,8 +88,8 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   //    updated.
   //  - Has its size is determined by its parent layout (flex, abs-pos).
   //
-  // NGWritingMode specifies the writing mode of the generated space.
-  scoped_refptr<NGConstraintSpace> ToConstraintSpace(NGWritingMode);
+  // WritingMode specifies the writing mode of the generated space.
+  scoped_refptr<NGConstraintSpace> ToConstraintSpace(WritingMode);
 
  private:
   // Relative to parent_writing_mode_.
@@ -102,9 +108,10 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   unsigned is_inline_direction_triggers_scrollbar_ : 1;
   unsigned is_block_direction_triggers_scrollbar_ : 1;
   unsigned fragmentation_type_ : 2;
+  unsigned separate_leading_fragmentainer_margins_ : 1;
   unsigned is_new_fc_ : 1;
   unsigned is_anonymous_ : 1;
-  unsigned use_first_line_sytle_ : 1;
+  unsigned use_first_line_style_ : 1;
   unsigned text_direction_ : 1;
 
   NGMarginStrut margin_strut_;

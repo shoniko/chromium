@@ -14,7 +14,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwDebug;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.parameter.SkipCommandLineParameterization;
 
@@ -30,11 +29,12 @@ import java.util.Scanner;
 @RunWith(AwJUnit4ClassRunner.class)
 @SkipCommandLineParameterization
 public class AwDebugTest {
-    @SuppressFBWarnings("URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD")
     @Rule
     public AwActivityTestRule mActivityTestRule = new AwActivityTestRule();
 
     private static final String TAG = "cr_AwDebugTest";
+
+    // These constants must match android_webview/browser/aw_debug.cc.
     private static final String WHITELISTED_DEBUG_KEY = "AW_WHITELISTED_DEBUG_KEY";
     private static final String NON_WHITELISTED_DEBUG_KEY = "AW_NONWHITELISTED_DEBUG_KEY";
     private static final String DEBUG_VALUE = "AW_DEBUG_VALUE";
@@ -60,7 +60,7 @@ public class AwDebugTest {
         File f = File.createTempFile("dump", ".dmp");
         try {
             AwDebug.initCrashKeysForTesting();
-            AwDebug.setCrashKeyValue(WHITELISTED_DEBUG_KEY, DEBUG_VALUE);
+            AwDebug.setWhiteListedKeyForTesting();
             Assert.assertTrue(AwDebug.dumpWithoutCrashing(f));
             assertContainsCrashKeyValue(f, WHITELISTED_DEBUG_KEY, DEBUG_VALUE);
         } finally {
@@ -75,7 +75,7 @@ public class AwDebugTest {
         File f = File.createTempFile("dump", ".dmp");
         try {
             AwDebug.initCrashKeysForTesting();
-            AwDebug.setCrashKeyValue(NON_WHITELISTED_DEBUG_KEY, DEBUG_VALUE);
+            AwDebug.setNonWhiteListedKeyForTesting();
             Assert.assertTrue(AwDebug.dumpWithoutCrashing(f));
             assertNotContainsCrashKeyValue(f, NON_WHITELISTED_DEBUG_KEY);
         } finally {

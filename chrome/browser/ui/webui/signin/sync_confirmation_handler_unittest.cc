@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/webui/signin/sync_confirmation_handler.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/test/user_action_tester.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
@@ -22,6 +23,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/signin/core/browser/account_fetcher_service.h"
+#include "components/signin/core/browser/avatar_icon_util.h"
 #include "components/signin/core/browser/fake_account_fetcher_service.h"
 #include "components/signin/core/browser/fake_signin_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -58,12 +60,11 @@ class TestingOneClickSigninSyncStarter : public OneClickSigninSyncStarter {
                                    const std::string& email,
                                    const std::string& password,
                                    const std::string& refresh_token,
+                                   signin_metrics::AccessPoint access_point,
+                                   signin_metrics::Reason signin_reason,
                                    ProfileMode profile_mode,
                                    StartSyncMode start_mode,
-                                   content::WebContents* web_contents,
                                    ConfirmationRequired display_confirmation,
-                                   const GURL& current_url,
-                                   const GURL& continue_url,
                                    Callback callback)
       : OneClickSigninSyncStarter(profile,
                                   browser,
@@ -71,12 +72,11 @@ class TestingOneClickSigninSyncStarter : public OneClickSigninSyncStarter {
                                   email,
                                   password,
                                   refresh_token,
+                                  access_point,
+                                  signin_reason,
                                   profile_mode,
                                   start_mode,
-                                  web_contents,
                                   display_confirmation,
-                                  current_url,
-                                  continue_url,
                                   callback) {}
 
  protected:
@@ -99,7 +99,7 @@ class SyncConfirmationHandlerTest : public BrowserWithTestWindowTest {
         browser()->tab_strip_model()->GetActiveWebContents());
 
     auto handler =
-        base::MakeUnique<TestingSyncConfirmationHandler>(browser(), web_ui());
+        std::make_unique<TestingSyncConfirmationHandler>(browser(), web_ui());
     handler_ = handler.get();
     sync_confirmation_ui_.reset(new SyncConfirmationUI(web_ui()));
     web_ui()->AddMessageHandler(std::move(handler));
@@ -108,9 +108,11 @@ class SyncConfirmationHandlerTest : public BrowserWithTestWindowTest {
     // SigninManager.
     new TestingOneClickSigninSyncStarter(
         profile(), browser(), "gaia", "foo@example.com", "password",
-        "refresh_token", OneClickSigninSyncStarter::CURRENT_PROFILE,
-        OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS, nullptr,
-        OneClickSigninSyncStarter::NO_CONFIRMATION, GURL(), GURL(),
+        "refresh_token", signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN,
+        signin_metrics::Reason::REASON_UNKNOWN_REASON,
+        OneClickSigninSyncStarter::CURRENT_PROFILE,
+        OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS,
+        OneClickSigninSyncStarter::NO_CONFIRMATION,
         OneClickSigninSyncStarter::Callback());
   }
 
@@ -157,13 +159,10 @@ class SyncConfirmationHandlerTest : public BrowserWithTestWindowTest {
     return new DialogTestBrowserWindow;
   }
 
-  TestingProfile* CreateProfile() override {
-    TestingProfile::Builder builder;
-    builder.AddTestingFactory(AccountFetcherServiceFactory::GetInstance(),
-                              FakeAccountFetcherServiceBuilder::BuildForTests);
-    builder.AddTestingFactory(
-        SigninManagerFactory::GetInstance(), BuildFakeSigninManagerBase);
-    return builder.Build().release();
+  TestingProfile::TestingFactories GetTestingFactories() override {
+    return {{AccountFetcherServiceFactory::GetInstance(),
+             FakeAccountFetcherServiceBuilder::BuildForTests},
+            {SigninManagerFactory::GetInstance(), BuildFakeSigninManagerBase}};
   }
 
  protected:
@@ -190,7 +189,7 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReady) {
       "http://picture.example.com/picture.jpg");
 
   base::ListValue args;
-  args.Set(0, base::MakeUnique<base::Value>(kDefaultDialogHeight));
+  args.Set(0, std::make_unique<base::Value>(kDefaultDialogHeight));
   handler()->HandleInitializedWithSize(&args);
   EXPECT_EQ(2U, web_ui()->call_data().size());
 
@@ -209,7 +208,7 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReady) {
   std::string original_picture_url =
       AccountTrackerServiceFactory::GetForProfile(profile())->
           GetAccountInfo("gaia").picture_url;
-  GURL picture_url_with_size = profiles::GetImageURLWithOptions(
+  GURL picture_url_with_size = signin::GetAvatarImageURLWithOptions(
       GURL(original_picture_url), kExpectedProfileImageSize,
       false /* no_silhouette */);
   EXPECT_EQ(picture_url_with_size.spec(), passed_picture_url);
@@ -217,7 +216,7 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReady) {
 
 TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReadyLater) {
   base::ListValue args;
-  args.Set(0, base::MakeUnique<base::Value>(kDefaultDialogHeight));
+  args.Set(0, std::make_unique<base::Value>(kDefaultDialogHeight));
   handler()->HandleInitializedWithSize(&args);
   EXPECT_EQ(2U, web_ui()->call_data().size());
 
@@ -257,7 +256,7 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReadyLater) {
   std::string original_picture_url =
       AccountTrackerServiceFactory::GetForProfile(profile())->
           GetAccountInfo("gaia").picture_url;
-  GURL picture_url_with_size = profiles::GetImageURLWithOptions(
+  GURL picture_url_with_size = signin::GetAvatarImageURLWithOptions(
       GURL(original_picture_url), kExpectedProfileImageSize,
       false /* no_silhouette */);
   EXPECT_EQ(picture_url_with_size.spec(), passed_picture_url);
@@ -266,7 +265,7 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReadyLater) {
 TEST_F(SyncConfirmationHandlerTest,
        TestSetImageIgnoredIfSecondaryAccountUpdated) {
   base::ListValue args;
-  args.Set(0, base::MakeUnique<base::Value>(kDefaultDialogHeight));
+  args.Set(0, std::make_unique<base::Value>(kDefaultDialogHeight));
   handler()->HandleInitializedWithSize(&args);
   EXPECT_EQ(2U, web_ui()->call_data().size());
 

@@ -46,8 +46,7 @@ TEST_F(ExceptionHandlerTest, TestBasicHandling) {
   v8::Local<v8::Context> context = MainContext();
 
   base::Optional<std::string> logged_error;
-  ExceptionHandler handler(base::Bind(&PopulateError, &logged_error),
-                           base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
+  ExceptionHandler handler(base::Bind(&PopulateError, &logged_error));
 
   ThrowException(context, "new Error('some error')", &handler);
 
@@ -61,8 +60,7 @@ TEST_F(ExceptionHandlerTest, PerContextHandlers) {
   v8::Local<v8::Context> context_b = AddContext();
 
   base::Optional<std::string> logged_error;
-  ExceptionHandler handler(base::Bind(&PopulateError, &logged_error),
-                           base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
+  ExceptionHandler handler(base::Bind(&PopulateError, &logged_error));
 
   v8::Local<v8::Function> custom_handler = FunctionFromString(
       context_a,
@@ -109,8 +107,7 @@ TEST_F(ExceptionHandlerTest, ThrowingNonErrors) {
   v8::Local<v8::Context> context = MainContext();
 
   base::Optional<std::string> logged_error;
-  ExceptionHandler handler(base::Bind(&PopulateError, &logged_error),
-                           base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
+  ExceptionHandler handler(base::Bind(&PopulateError, &logged_error));
 
   ThrowException(context, "'hello'", &handler);
   ASSERT_TRUE(logged_error);
@@ -148,8 +145,7 @@ TEST_F(ExceptionHandlerTest, StackTraces) {
   v8::Local<v8::Context> context = MainContext();
 
   base::Optional<std::string> logged_error;
-  ExceptionHandler handler(base::Bind(&PopulateError, &logged_error),
-                           base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
+  ExceptionHandler handler(base::Bind(&PopulateError, &logged_error));
 
   {
     v8::TryCatch try_catch(isolate());
@@ -158,7 +154,7 @@ TEST_F(ExceptionHandlerTest, StackTraces) {
                             gin::StringToV8(context->GetIsolate(),
                                             "throw new Error('simple');"))
             .ToLocalChecked();
-    script->Run();
+    ASSERT_TRUE(script->Run(context).IsEmpty());
     ASSERT_TRUE(try_catch.HasCaught());
     handler.HandleException(context, "handled", &try_catch);
 
@@ -193,7 +189,7 @@ TEST_F(ExceptionHandlerTest, StackTraces) {
         v8::Script::Compile(context,
                             gin::StringToV8(context->GetIsolate(), kNestedCall))
             .ToLocalChecked();
-    script->Run();
+    ASSERT_TRUE(script->Run(context).IsEmpty());
     ASSERT_TRUE(try_catch.HasCaught());
     handler.HandleException(context, "handled", &try_catch);
     ASSERT_TRUE(logged_error);

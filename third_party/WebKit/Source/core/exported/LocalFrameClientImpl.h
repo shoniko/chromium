@@ -32,21 +32,23 @@
 #ifndef LocalFrameClientImpl_h
 #define LocalFrameClientImpl_h
 
+#include <memory>
+
+#include "base/memory/scoped_refptr.h"
+
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/WebLocalFrameImpl.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
-
-#include <memory>
+#include "public/platform/WebScopedVirtualTimePauser.h"
 
 namespace blink {
 
 class WebDevToolsAgentImpl;
 class WebLocalFrameImpl;
 class WebSpellCheckPanelHostClient;
-struct WebRemoteScrollProperties;
+struct WebScrollIntoViewParams;
 
 class LocalFrameClientImpl final : public LocalFrameClient {
  public:
@@ -100,7 +102,9 @@ class LocalFrameClientImpl final : public LocalFrameClient {
                                        ResourceRequest&) override;
   void DispatchDidReceiveTitle(const String&) override;
   void DispatchDidChangeIcons(IconType) override;
-  void DispatchDidCommitLoad(HistoryItem*, HistoryCommitType) override;
+  void DispatchDidCommitLoad(HistoryItem*,
+                             HistoryCommitType,
+                             WebGlobalObjectReusePolicy) override;
   void DispatchDidFailProvisionalLoad(const ResourceError&,
                                       HistoryCommitType) override;
   void DispatchDidFailLoad(const ResourceError&, HistoryCommitType) override;
@@ -124,6 +128,7 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   void DidStartLoading(LoadStartType) override;
   void DidStopLoading() override;
   void ProgressEstimateChanged(double progress_estimate) override;
+  void ForwardResourceTimingToParent(const WebResourceTimingInfo&) override;
   void DownloadURL(const ResourceRequest&,
                    const String& suggested_name) override;
   void LoadErrorPage(int reason) override;
@@ -131,16 +136,17 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   void DidAccessInitialDocument() override;
   void DidDisplayInsecureContent() override;
   void DidContainInsecureFormAction() override;
-  void DidRunInsecureContent(SecurityOrigin*,
+  void DidRunInsecureContent(const SecurityOrigin*,
                              const KURL& insecure_url) override;
   void DidDetectXSS(const KURL&, bool did_block_entire_page) override;
   void DidDispatchPingLoader(const KURL&) override;
-  void DidDisplayContentWithCertificateErrors(const KURL&) override;
-  void DidRunContentWithCertificateErrors(const KURL&) override;
+  void DidDisplayContentWithCertificateErrors() override;
+  void DidRunContentWithCertificateErrors() override;
   void ReportLegacySymantecCert(const KURL&, Time) override;
   void DidChangePerformanceTiming() override;
   void DidObserveLoadingBehavior(WebLoadingBehaviorFlag) override;
   void DidObserveNewFeatureUsage(mojom::WebFeature) override;
+  bool ShouldTrackUseCounter(const KURL&) override;
   void SelectorMatchChanged(const Vector<String>& added_selectors,
                             const Vector<String>& removed_selectors) override;
 
@@ -148,23 +154,25 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   // - storage to store an extra data that can be used by the content layer
   // - wrapper methods to expose DocumentLoader's variables to the content
   //   layer
-  DocumentLoader* CreateDocumentLoader(LocalFrame*,
-                                       const ResourceRequest&,
-                                       const SubstituteData&,
-                                       ClientRedirectPolicy) override;
+  DocumentLoader* CreateDocumentLoader(
+      LocalFrame*,
+      const ResourceRequest&,
+      const SubstituteData&,
+      ClientRedirectPolicy,
+      const base::UnguessableToken& devtools_navigation_token) override;
   WTF::String UserAgent() override;
   WTF::String DoNotTrackValue() override;
   void TransitionToCommittedForNewPage() override;
   LocalFrame* CreateFrame(const WTF::AtomicString& name,
                           HTMLFrameOwnerElement*) override;
   virtual bool CanCreatePluginWithoutRenderer(const String& mime_type) const;
-  PluginView* CreatePlugin(HTMLPlugInElement&,
-                           const KURL&,
-                           const Vector<WTF::String>&,
-                           const Vector<WTF::String>&,
-                           const WTF::String&,
-                           bool load_manually,
-                           DetachedPluginPolicy) override;
+  WebPluginContainerImpl* CreatePlugin(HTMLPlugInElement&,
+                                       const KURL&,
+                                       const Vector<WTF::String>&,
+                                       const Vector<WTF::String>&,
+                                       const WTF::String&,
+                                       bool load_manually,
+                                       DetachedPluginPolicy) override;
   std::unique_ptr<WebMediaPlayer> CreateWebMediaPlayer(
       HTMLMediaElement&,
       const WebMediaPlayerSource&,
@@ -181,12 +189,13 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   void FrameFocused() const override;
   void DidChangeName(const String&) override;
   void DidEnforceInsecureRequestPolicy(WebInsecureRequestPolicy) override;
-  void DidUpdateToUniqueOrigin() override;
+  void DidEnforceInsecureNavigationsSet(const std::vector<unsigned>&) override;
   void DidChangeFramePolicy(Frame* child_frame,
                             SandboxFlags,
-                            const WebParsedFeaturePolicy&) override;
-  void DidSetFeaturePolicyHeader(
-      const WebParsedFeaturePolicy& parsed_header) override;
+                            const ParsedFeaturePolicy&) override;
+  void DidSetFramePolicyHeaders(
+      SandboxFlags,
+      const ParsedFeaturePolicy& parsed_header) override;
   void DidAddContentSecurityPolicies(
       const blink::WebVector<WebContentSecurityPolicy>&) override;
   void DidChangeFrameOwnerProperties(HTMLFrameOwnerElement*) override;
@@ -221,33 +230,47 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   void SetEffectiveConnectionTypeForTesting(
       WebEffectiveConnectionType) override;
 
-  bool IsClientLoFiActiveForFrame() override;
-
-  bool ShouldUseClientLoFiForRequest(const ResourceRequest&) override;
+  WebURLRequest::PreviewsState GetPreviewsStateForFrame() const override;
 
   KURL OverrideFlashEmbedWithHTML(const KURL&) override;
 
   void SetHasReceivedUserGesture(bool received_previously) override;
 
+  void SetHasReceivedUserGestureBeforeNavigation(bool value) override;
+
   void AbortClientNavigation() override;
 
   WebSpellCheckPanelHostClient* SpellCheckPanelHostClient() const override;
 
-  TextCheckerClient& GetTextCheckerClient() const override;
+  WebTextCheckClient* GetTextCheckerClient() const override;
 
   std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override;
 
   service_manager::InterfaceProvider* GetInterfaceProvider() override;
+  AssociatedInterfaceProvider* GetRemoteNavigationAssociatedInterfaces()
+      override;
 
   void AnnotatedRegionsChanged() override;
 
   void DidBlockFramebust(const KURL&) override;
 
-  String GetInstrumentationToken() override;
+  String GetDevToolsFrameToken() const override;
 
   void ScrollRectToVisibleInParentFrame(
       const WebRect&,
-      const WebRemoteScrollProperties&) override;
+      const WebScrollIntoViewParams&) override;
+
+  void SetVirtualTimePauser(WebScopedVirtualTimePauser) override;
+
+  String evaluateInInspectorOverlayForTesting(const String& script) override;
+
+  bool HandleCurrentKeyboardEvent() override;
+
+  void DidChangeSelection(bool is_selection_empty) override;
+
+  void DidChangeContents() override;
+
+  Frame* FindFrame(const AtomicString& name) const override;
 
  private:
   explicit LocalFrameClientImpl(WebLocalFrameImpl*);
@@ -266,6 +289,8 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   uint32_t num_certificate_warning_messages_;
   // The hosts for which a legacy certificate warning has been printed.
   HashSet<String> certificate_warning_hosts_;
+
+  mutable WebScopedVirtualTimePauser virtual_time_pauser_;
 };
 
 DEFINE_TYPE_CASTS(LocalFrameClientImpl,

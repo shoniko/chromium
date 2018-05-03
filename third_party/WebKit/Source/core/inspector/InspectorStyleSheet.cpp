@@ -33,12 +33,12 @@
 #include "core/css/CSSKeyframeRule.h"
 #include "core/css/CSSKeyframesRule.h"
 #include "core/css/CSSMediaRule.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSRuleList.h"
 #include "core/css/CSSStyleRule.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/css/CSSSupportsRule.h"
 #include "core/css/StyleEngine.h"
-#include "core/css/StylePropertySet.h"
 #include "core/css/StyleRule.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParser.h"
@@ -46,6 +46,7 @@
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
+#include "core/frame/LocalFrame.h"
 #include "core/html/HTMLStyleElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/inspector/IdentifiersFactory.h"
@@ -65,8 +66,9 @@ namespace blink {
 namespace {
 
 static const CSSParserContext* ParserContextForDocument(Document* document) {
+  // Fallback to an insecure context parser if no document is present.
   return document ? CSSParserContext::Create(*document)
-                  : StrictCSSParserContext();
+                  : StrictCSSParserContext(SecureContextMode::kInsecureContext);
 }
 
 String FindMagicComment(const String& content, const String& name) {
@@ -343,7 +345,7 @@ void StyleSheetHandler::ObserveComment(unsigned start_offset,
 bool VerifyRuleText(Document* document, const String& rule_text) {
   DEFINE_STATIC_LOCAL(String, bogus_property_name, ("-webkit-boguz-propertee"));
   StyleSheetContents* style_sheet =
-      StyleSheetContents::Create(StrictCSSParserContext());
+      StyleSheetContents::Create(ParserContextForDocument(document));
   CSSRuleSourceDataList* source_data = new CSSRuleSourceDataList();
   String text = rule_text + " div { " + bogus_property_name + ": none; }";
   StyleSheetHandler handler(text, document, source_data);
@@ -380,7 +382,7 @@ bool VerifyStyleText(Document* document, const String& text) {
 
 bool VerifyKeyframeKeyText(Document* document, const String& key_text) {
   StyleSheetContents* style_sheet =
-      StyleSheetContents::Create(StrictCSSParserContext());
+      StyleSheetContents::Create(ParserContextForDocument(document));
   CSSRuleSourceDataList* source_data = new CSSRuleSourceDataList();
   String text = "@keyframes boguzAnim { " + key_text +
                 " { -webkit-boguz-propertee : none; } }";
@@ -410,7 +412,7 @@ bool VerifyKeyframeKeyText(Document* document, const String& key_text) {
 bool VerifySelectorText(Document* document, const String& selector_text) {
   DEFINE_STATIC_LOCAL(String, bogus_property_name, ("-webkit-boguz-propertee"));
   StyleSheetContents* style_sheet =
-      StyleSheetContents::Create(StrictCSSParserContext());
+      StyleSheetContents::Create(ParserContextForDocument(document));
   CSSRuleSourceDataList* source_data = new CSSRuleSourceDataList();
   String text = selector_text + " { " + bogus_property_name + ": none; }";
   StyleSheetHandler handler(text, document, source_data);
@@ -439,7 +441,7 @@ bool VerifySelectorText(Document* document, const String& selector_text) {
 bool VerifyMediaText(Document* document, const String& media_text) {
   DEFINE_STATIC_LOCAL(String, bogus_property_name, ("-webkit-boguz-propertee"));
   StyleSheetContents* style_sheet =
-      StyleSheetContents::Create(StrictCSSParserContext());
+      StyleSheetContents::Create(ParserContextForDocument(document));
   CSSRuleSourceDataList* source_data = new CSSRuleSourceDataList();
   String text = "@media " + media_text + " { div { " + bogus_property_name +
                 ": none; } }";
@@ -729,7 +731,7 @@ InspectorStyle::InspectorStyle(CSSStyleDeclaration* style,
   DCHECK(style_);
 }
 
-InspectorStyle::~InspectorStyle() {}
+InspectorStyle::~InspectorStyle() = default;
 
 std::unique_ptr<protocol::CSS::CSSStyle> InspectorStyle::BuildObjectForStyle() {
   std::unique_ptr<protocol::CSS::CSSStyle> result = StyleWithProperties();
@@ -791,6 +793,9 @@ void InspectorStyle::PopulateAllProperties(
     String value = style_->getPropertyValue(name);
     if (value.IsEmpty())
       continue;
+    bool important = !style_->getPropertyPriority(name).IsEmpty();
+    if (important)
+      value.append(" !important");
     result.push_back(CSSPropertySourceData(
         name, value, !style_->getPropertyPriority(name).IsEmpty(), false, true,
         SourceRange()));
@@ -903,10 +908,10 @@ void InspectorStyle::Trace(blink::Visitor* visitor) {
 InspectorStyleSheetBase::InspectorStyleSheetBase(Listener* listener)
     : id_(IdentifiersFactory::CreateIdentifier()),
       listener_(listener),
-      line_endings_(WTF::MakeUnique<LineEndings>()) {}
+      line_endings_(std::make_unique<LineEndings>()) {}
 
 void InspectorStyleSheetBase::OnStyleSheetTextChanged() {
-  line_endings_ = WTF::MakeUnique<LineEndings>();
+  line_endings_ = std::make_unique<LineEndings>();
   if (GetListener())
     GetListener()->StyleSheetChanged(this);
 }
@@ -978,7 +983,7 @@ InspectorStyleSheet::InspectorStyleSheet(
     InnerSetText(text, false);
 }
 
-InspectorStyleSheet::~InspectorStyleSheet() {}
+InspectorStyleSheet::~InspectorStyleSheet() = default;
 
 void InspectorStyleSheet::Trace(blink::Visitor* visitor) {
   visitor->Trace(resource_container_);
@@ -1037,7 +1042,7 @@ CSSStyleRule* InspectorStyleSheet::SetRuleSelector(
   }
 
   CSSStyleRule* style_rule = InspectorCSSAgent::AsCSSStyleRule(rule);
-  style_rule->setSelectorText(text);
+  style_rule->setSelectorText(page_style_sheet_->OwnerDocument(), text);
 
   ReplaceText(source_data->rule_header_range, text, new_range, old_text);
   OnStyleSheetTextChanged();
@@ -1115,7 +1120,7 @@ CSSRule* InspectorStyleSheet::SetStyleText(const SourceRange& range,
     style = ToCSSStyleRule(rule)->style();
   else if (rule->type() == CSSRule::kKeyframeRule)
     style = ToCSSKeyframeRule(rule)->style();
-  style->setCSSText(text, exception_state);
+  style->setCSSText(page_style_sheet_->OwnerDocument(), text, exception_state);
 
   ReplaceText(source_data->rule_body_range, text, new_range, old_text);
   OnStyleSheetTextChanged();
@@ -1208,7 +1213,8 @@ CSSStyleRule* InspectorStyleSheet::InsertCSSOMRuleInMediaRule(
       break;
   }
 
-  media_rule->insertRule(rule_text, index, exception_state);
+  media_rule->insertRule(page_style_sheet_->OwnerDocument(), rule_text, index,
+                         exception_state);
   CSSRule* rule = media_rule->Item(index);
   CSSStyleRule* style_rule = InspectorCSSAgent::AsCSSStyleRule(rule);
   if (!style_rule) {
@@ -1884,6 +1890,7 @@ InspectorStyleSheetForInlineStyle::InspectorStyleSheetForInlineStyle(
 
 void InspectorStyleSheetForInlineStyle::DidModifyElementAttribute() {
   inspector_style_.Clear();
+  OnStyleSheetTextChanged();
 }
 
 bool InspectorStyleSheetForInlineStyle::SetText(

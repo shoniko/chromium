@@ -19,7 +19,7 @@
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/stub_install_attributes.h"
@@ -28,7 +28,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chromeos/chromeos_switches.h"
@@ -37,12 +36,12 @@
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_names.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_system.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/test/rect_test_util.h"
 
 using ::gfx::test::RectContains;
@@ -90,14 +89,8 @@ class LoginSigninTest : public InProcessBrowserTest {
     command_line->AppendSwitch(switches::kForceLoginManagerInTests);
   }
 
-  void TearDownOnMainThread() override {
-    // Close the login manager, which otherwise holds a KeepAlive that is not
-    // cleared in time by the end of the test.
-    LoginDisplayHost::default_host()->Finalize(base::OnceClosure());
-  }
-
   void SetUpOnMainThread() override {
-    LoginDisplayHostImpl::DisableRestrictiveProxyCheckForTest();
+    LoginDisplayHostWebUI::DisableRestrictiveProxyCheckForTest();
   }
 };
 
@@ -217,26 +210,12 @@ IN_PROC_BROWSER_TEST_F(LoginUserTest, UserPassed) {
   TestSystemTrayIsVisible(false);
 }
 
-// Verifies the cursor is not hidden at startup when user is logged in.
-IN_PROC_BROWSER_TEST_F(LoginUserTest, CursorShown) {
-  EXPECT_TRUE(ash::Shell::Get()->cursor_manager()->IsCursorVisible());
-
-  TestSystemTrayIsVisible(false);
-}
-
 // After a guest login, we should get the OTR default profile.
 IN_PROC_BROWSER_TEST_F(LoginGuestTest, GuestIsOTR) {
   Profile* profile = browser()->profile();
   EXPECT_TRUE(profile->IsOffTheRecord());
   // Ensure there's extension service for this profile.
   EXPECT_TRUE(extensions::ExtensionSystem::Get(profile)->extension_service());
-
-  TestSystemTrayIsVisible(true);
-}
-
-// Verifies the cursor is not hidden at startup when running guest session.
-IN_PROC_BROWSER_TEST_F(LoginGuestTest, CursorShown) {
-  EXPECT_TRUE(ash::Shell::Get()->cursor_manager()->IsCursorVisible());
 
   TestSystemTrayIsVisible(true);
 }
@@ -253,9 +232,6 @@ IN_PROC_BROWSER_TEST_F(LoginCursorTest, CursorHidden) {
   EXPECT_TRUE(ui_test_utils::SendMouseMoveSync(gfx::Point()));
   EXPECT_TRUE(ash::Shell::Get()->cursor_manager()->IsCursorVisible());
 
-  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(
-      FROM_HERE, LoginDisplayHost::default_host());
-
   TestSystemTrayIsVisible(false);
 }
 
@@ -268,7 +244,7 @@ IN_PROC_BROWSER_TEST_F(LoginSigninTest, WebUIVisible) {
 }
 
 IN_PROC_BROWSER_TEST_F(LoginTest, PRE_GaiaAuthOffline) {
-  RegisterUser(kTestUser);
+  RegisterUser(AccountId::FromUserEmailGaiaId(kTestUser, kGaiaId));
   StartupUtils::MarkOobeCompleted();
   CrosSettings::Get()->SetBoolean(kAccountsPrefShowUserNamesOnSignIn, false);
 }

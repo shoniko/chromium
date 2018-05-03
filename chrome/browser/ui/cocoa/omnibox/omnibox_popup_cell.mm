@@ -84,6 +84,9 @@ NSColor* DimTextColor(BOOL is_dark_theme) {
              ? skia::SkColorToSRGBNSColor(SkColorSetA(SK_ColorWHITE, 0x7F))
              : skia::SkColorToSRGBNSColor(SkColorSetRGB(0x64, 0x64, 0x64));
 }
+NSColor* InvisibleTextColor() {
+  return skia::SkColorToSRGBNSColor(SK_ColorTRANSPARENT);
+}
 NSColor* PositiveTextColor() {
   return skia::SkColorToSRGBNSColor(SkColorSetRGB(0x3d, 0x94, 0x00));
 }
@@ -350,6 +353,10 @@ NSAttributedString* CreateClassifiedAttributedString(
       [attributedString addAttribute:NSForegroundColorAttributeName
                                value:DimTextColor(is_dark_theme)
                                range:range];
+    } else if (0 != (i->style & ACMatchClassification::INVISIBLE)) {
+      [attributedString addAttribute:NSForegroundColorAttributeName
+                               value:InvisibleTextColor()
+                               range:range];
     }
   }
 
@@ -366,7 +373,8 @@ NSAttributedString* CreateClassifiedAttributedString(
                withFrame:(NSRect)cellFrame
                   origin:(NSPoint)origin
             withMaxWidth:(int)maxWidth
-            forDarkTheme:(BOOL)isDarkTheme;
+            forDarkTheme:(BOOL)isDarkTheme
+           withHeightCap:(BOOL)hasHeightCap;
 - (void)drawMatchWithFrame:(NSRect)cellFrame inView:(NSView*)controlView;
 @end
 
@@ -523,7 +531,8 @@ NSAttributedString* CreateClassifiedAttributedString(
                         withFrame:cellFrame
                            origin:origin
                      withMaxWidth:contentsMaxWidth
-                     forDarkTheme:isDarkTheme];
+                     forDarkTheme:isDarkTheme
+                    withHeightCap:true];
 
   if (descriptionMaxWidth > 0) {
     if ([cellData isAnswer]) {
@@ -556,14 +565,16 @@ NSAttributedString* CreateClassifiedAttributedString(
                               withFrame:cellFrame
                                  origin:origin
                            withMaxWidth:separatorWidth
-                           forDarkTheme:isDarkTheme];
+                           forDarkTheme:isDarkTheme
+                          withHeightCap:true];
       }
     }
     [self drawMatchPart:[cellData description]
               withFrame:cellFrame
                  origin:origin
            withMaxWidth:descriptionMaxWidth
-           forDarkTheme:isDarkTheme];
+           forDarkTheme:isDarkTheme
+          withHeightCap:false];
   }
 }
 
@@ -571,13 +582,15 @@ NSAttributedString* CreateClassifiedAttributedString(
                withFrame:(NSRect)cellFrame
                   origin:(NSPoint)origin
             withMaxWidth:(int)maxWidth
-            forDarkTheme:(BOOL)isDarkTheme {
+            forDarkTheme:(BOOL)isDarkTheme
+           withHeightCap:(BOOL)hasHeightCap {
   NSRect renderRect = NSIntersectionRect(
       cellFrame, NSOffsetRect(cellFrame, origin.x, origin.y));
   renderRect.size.width =
       std::min(NSWidth(renderRect), static_cast<CGFloat>(maxWidth));
-  renderRect.size.height =
-      std::min(NSHeight(renderRect), [attributedString size].height);
+  if (hasHeightCap)
+    renderRect.size.height =
+        std::min(NSHeight(renderRect), [attributedString size].height);
   if (!NSIsEmptyRect(renderRect)) {
     [attributedString drawWithRect:FlipIfRTL(renderRect, cellFrame)
                            options:NSStringDrawingUsesLineFragmentOrigin |

@@ -4,6 +4,8 @@
 
 #include "core/workers/MainThreadWorkletGlobalScope.h"
 
+#include "bindings/core/v8/V8BindingForCore.h"
+#include "bindings/core/v8/WorkerOrWorkletScriptController.h"
 #include "core/dom/Document.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/FrameConsole.h"
@@ -17,16 +19,26 @@ namespace blink {
 MainThreadWorkletGlobalScope::MainThreadWorkletGlobalScope(
     LocalFrame* frame,
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
-    v8::Isolate* isolate,
     WorkerReportingProxy& reporting_proxy)
-    : WorkletGlobalScope(std::move(creation_params), isolate, reporting_proxy),
+    : WorkletGlobalScope(std::move(creation_params),
+                         ToIsolate(frame),
+                         reporting_proxy),
       ContextClient(frame) {}
 
-MainThreadWorkletGlobalScope::~MainThreadWorkletGlobalScope() {}
+MainThreadWorkletGlobalScope::~MainThreadWorkletGlobalScope() = default;
 
 WorkerThread* MainThreadWorkletGlobalScope::GetThread() const {
   NOTREACHED();
   return nullptr;
+}
+
+scoped_refptr<WebTaskRunner> MainThreadWorkletGlobalScope::GetTaskRunner(
+    TaskType type) {
+  DCHECK(IsContextThread());
+  // MainThreadWorkletGlobalScope lives on the main thread and its GetThread()
+  // doesn't return a valid worker thread. Instead, retrieve a task runner
+  // from the frame.
+  return GetFrame()->FrameScheduler()->GetTaskRunner(type);
 }
 
 // TODO(nhiroki): Add tests for termination.

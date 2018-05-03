@@ -13,12 +13,11 @@
 #include "base/test/simple_test_tick_clock.h"
 #include "components/viz/test/ordered_simple_task_runner.h"
 #include "platform/scheduler/base/task_queue_impl.h"
-#include "platform/scheduler/base/test_time_source.h"
-#include "platform/scheduler/child/scheduler_tqm_delegate_for_test.h"
 #include "platform/scheduler/renderer/budget_pool.h"
 #include "platform/scheduler/renderer/cpu_time_budget_pool.h"
 #include "platform/scheduler/renderer/renderer_scheduler_impl.h"
 #include "platform/scheduler/renderer/wake_up_budget_pool.h"
+#include "platform/scheduler/test/create_task_queue_manager_for_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -27,19 +26,17 @@ namespace scheduler {
 
 class BudgetPoolTest : public ::testing::Test {
  public:
-  BudgetPoolTest() {}
-  ~BudgetPoolTest() override {}
+  BudgetPoolTest() = default;
+  ~BudgetPoolTest() override = default;
 
   void SetUp() override {
-    clock_.reset(new base::SimpleTestTickClock());
-    clock_->Advance(base::TimeDelta::FromMicroseconds(5000));
+    clock_.Advance(base::TimeDelta::FromMicroseconds(5000));
     mock_task_runner_ =
-        base::MakeRefCounted<cc::OrderedSimpleTaskRunner>(clock_.get(), true);
-    delegate_ = SchedulerTqmDelegateForTest::Create(
-        mock_task_runner_, std::make_unique<TestTimeSource>(clock_.get()));
-    scheduler_.reset(new RendererSchedulerImpl(delegate_));
+        base::MakeRefCounted<cc::OrderedSimpleTaskRunner>(&clock_, true);
+    scheduler_.reset(new RendererSchedulerImpl(
+        CreateTaskQueueManagerForTest(nullptr, mock_task_runner_, &clock_)));
     task_queue_throttler_ = scheduler_->task_queue_throttler();
-    start_time_ = clock_->NowTicks();
+    start_time_ = clock_.NowTicks();
   }
 
   void TearDown() override {
@@ -56,9 +53,8 @@ class BudgetPoolTest : public ::testing::Test {
   }
 
  protected:
-  std::unique_ptr<base::SimpleTestTickClock> clock_;
+  base::SimpleTestTickClock clock_;
   scoped_refptr<cc::OrderedSimpleTaskRunner> mock_task_runner_;
-  scoped_refptr<SchedulerTqmDelegate> delegate_;
   std::unique_ptr<RendererSchedulerImpl> scheduler_;
   TaskQueueThrottler* task_queue_throttler_;  // NOT OWNED
   base::TimeTicks start_time_;
@@ -133,7 +129,7 @@ TEST_F(BudgetPoolTest, WakeUpBudgetPool) {
       task_queue_throttler_->CreateWakeUpBudgetPool("test");
 
   scoped_refptr<TaskQueue> queue = scheduler_->NewTimerTaskQueue(
-      MainThreadTaskQueue::QueueType::FRAME_THROTTLEABLE);
+      MainThreadTaskQueue::QueueType::kFrameThrottleable);
 
   pool->SetWakeUpRate(0.1);
   pool->SetWakeUpDuration(base::TimeDelta::FromMilliseconds(10));

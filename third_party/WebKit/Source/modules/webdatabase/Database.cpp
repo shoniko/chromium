@@ -29,7 +29,6 @@
 #include "bindings/modules/v8/v8_database_callback.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/html/VoidCallback.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/probe/CoreProbes.h"
@@ -55,8 +54,9 @@
 #include "platform/WaitableEvent.h"
 #include "platform/heap/SafePoint.h"
 #include "platform/wtf/Atomics.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebDatabaseObserver.h"
 #include "public/platform/WebSecurityOrigin.h"
 
@@ -226,8 +226,7 @@ Database::Database(DatabaseContext* database_context,
                    const String& name,
                    const String& expected_version,
                    const String& display_name,
-                   unsigned estimated_size,
-                   V8DatabaseCallback* creation_callback)
+                   unsigned estimated_size)
     : database_context_(database_context),
       name_(name.IsolatedCopy()),
       expected_version_(expected_version.IsolatedCopy()),
@@ -236,7 +235,6 @@ Database::Database(DatabaseContext* database_context,
       guid_(0),
       opened_(0),
       new_(false),
-      creation_callback_(creation_callback),
       transaction_in_progress_(false),
       is_transaction_queue_enabled_(true) {
   DCHECK(IsMainThread());
@@ -263,7 +261,7 @@ Database::Database(DatabaseContext* database_context,
   DCHECK(database_context_->GetDatabaseThread());
   DCHECK(database_context_->IsContextThread());
   database_task_runner_ =
-      TaskRunnerHelper::Get(TaskType::kDatabaseAccess, GetExecutionContext());
+      GetExecutionContext()->GetTaskRunner(TaskType::kDatabaseAccess);
 }
 
 Database::~Database() {
@@ -283,17 +281,13 @@ void Database::Trace(blink::Visitor* visitor) {
   visitor->Trace(database_context_);
   visitor->Trace(sqlite_database_);
   visitor->Trace(database_authorizer_);
-  visitor->Trace(creation_callback_);
   ScriptWrappable::Trace(visitor);
-}
-
-void Database::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(creation_callback_);
 }
 
 bool Database::OpenAndVerifyVersion(bool set_version_in_new_database,
                                     DatabaseError& error,
-                                    String& error_message) {
+                                    String& error_message,
+                                    V8DatabaseCallback* creation_callback) {
   WaitableEvent event;
   if (!GetDatabaseContext()->DatabaseThreadAvailable())
     return false;
@@ -304,28 +298,27 @@ bool Database::OpenAndVerifyVersion(bool set_version_in_new_database,
       this, set_version_in_new_database, &event, error, error_message, success);
   GetDatabaseContext()->GetDatabaseThread()->ScheduleTask(std::move(task));
   event.Wait();
-  if (creation_callback_) {
+  if (creation_callback) {
     if (success && IsNew()) {
       STORAGE_DVLOG(1)
           << "Scheduling DatabaseCreationCallbackTask for database " << this;
       probe::AsyncTaskScheduled(GetExecutionContext(), "openDatabase",
-                                creation_callback_);
-      TaskRunnerHelper::Get(TaskType::kDatabaseAccess, GetExecutionContext())
-          ->PostTask(BLINK_FROM_HERE, WTF::Bind(&Database::RunCreationCallback,
-                                                WrapPersistent(this)));
-    } else {
-      creation_callback_ = nullptr;
+                                creation_callback);
+      GetExecutionContext()
+          ->GetTaskRunner(TaskType::kDatabaseAccess)
+          ->PostTask(
+              FROM_HERE,
+              WTF::Bind(&Database::RunCreationCallback, WrapPersistent(this),
+                        WrapPersistentCallbackFunction(creation_callback)));
     }
   }
 
   return success;
 }
 
-void Database::RunCreationCallback() {
-  probe::AsyncTask async_task(GetExecutionContext(), creation_callback_);
-  bool return_value;
-  creation_callback_->call(nullptr, this, return_value);
-  creation_callback_ = nullptr;
+void Database::RunCreationCallback(V8DatabaseCallback* creation_callback) {
+  probe::AsyncTask async_task(GetExecutionContext(), creation_callback);
+  creation_callback->InvokeAndReportException(nullptr, this);
 }
 
 void Database::Close() {
@@ -469,7 +462,7 @@ class DoneCreatingDatabaseOnExitCaller {
 bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
                                     DatabaseError& error,
                                     String& error_message) {
-  double call_start_time = WTF::MonotonicallyIncreasingTime();
+  double call_start_time = WTF::CurrentTimeTicksInSeconds();
   DoneCreatingDatabaseOnExitCaller on_exit_caller(this);
   DCHECK(error_message.IsEmpty());
   DCHECK_EQ(error,
@@ -482,7 +475,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
   if (!sqlite_database_.Open(filename_)) {
     ReportOpenDatabaseResult(
         1, kInvalidStateError, sqlite_database_.LastError(),
-        WTF::MonotonicallyIncreasingTime() - call_start_time);
+        WTF::CurrentTimeTicksInSeconds() - call_start_time);
     error_message = FormatErrorMessage("unable to open database",
                                        sqlite_database_.LastError(),
                                        sqlite_database_.LastErrorMsg());
@@ -530,7 +523,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
       if (!transaction.InProgress()) {
         ReportOpenDatabaseResult(
             2, kInvalidStateError, sqlite_database_.LastError(),
-            WTF::MonotonicallyIncreasingTime() - call_start_time);
+            WTF::CurrentTimeTicksInSeconds() - call_start_time);
         error_message = FormatErrorMessage(
             "unable to open database, failed to start transaction",
             sqlite_database_.LastError(), sqlite_database_.LastErrorMsg());
@@ -548,7 +541,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
                 "REPLACE,value TEXT NOT NULL ON CONFLICT FAIL);")) {
           ReportOpenDatabaseResult(
               3, kInvalidStateError, sqlite_database_.LastError(),
-              WTF::MonotonicallyIncreasingTime() - call_start_time);
+              WTF::CurrentTimeTicksInSeconds() - call_start_time);
           error_message = FormatErrorMessage(
               "unable to open database, failed to create 'info' table",
               sqlite_database_.LastError(), sqlite_database_.LastErrorMsg());
@@ -559,7 +552,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
       } else if (!GetVersionFromDatabase(current_version, false)) {
         ReportOpenDatabaseResult(
             4, kInvalidStateError, sqlite_database_.LastError(),
-            WTF::MonotonicallyIncreasingTime() - call_start_time);
+            WTF::CurrentTimeTicksInSeconds() - call_start_time);
         error_message = FormatErrorMessage(
             "unable to open database, failed to read current version",
             sqlite_database_.LastError(), sqlite_database_.LastErrorMsg());
@@ -578,7 +571,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
         if (!SetVersionInDatabase(expected_version_, false)) {
           ReportOpenDatabaseResult(
               5, kInvalidStateError, sqlite_database_.LastError(),
-              WTF::MonotonicallyIncreasingTime() - call_start_time);
+              WTF::CurrentTimeTicksInSeconds() - call_start_time);
           error_message = FormatErrorMessage(
               "unable to open database, failed to write current version",
               sqlite_database_.LastError(), sqlite_database_.LastErrorMsg());
@@ -608,7 +601,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
       expected_version_.length() && expected_version_ != current_version) {
     ReportOpenDatabaseResult(
         6, kInvalidStateError, 0,
-        WTF::MonotonicallyIncreasingTime() - call_start_time);
+        WTF::CurrentTimeTicksInSeconds() - call_start_time);
     error_message =
         "unable to open database, version mismatch, '" + expected_version_ +
         "' does not match the currentVersion of '" + current_version + "'";
@@ -634,7 +627,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
   }
 
   ReportOpenDatabaseResult(
-      0, -1, 0, WTF::MonotonicallyIncreasingTime() - call_start_time);  // OK
+      0, -1, 0, WTF::CurrentTimeTicksInSeconds() - call_start_time);  // OK
 
   if (GetDatabaseContext()->GetDatabaseThread())
     GetDatabaseContext()->GetDatabaseThread()->RecordDatabaseOpen(this);
@@ -919,7 +912,7 @@ void Database::RunTransaction(SQLTransactionCallback* callback,
       std::unique_ptr<SQLErrorData> error = SQLErrorData::Create(
           SQLError::kUnknownErr, "database has been closed");
       GetDatabaseTaskRunner()->PostTask(
-          BLINK_FROM_HERE,
+          FROM_HERE,
           WTF::Bind(&CallTransactionErrorCallback, WrapPersistent(callback),
                     WTF::Passed(std::move(error))));
     }
@@ -929,9 +922,9 @@ void Database::RunTransaction(SQLTransactionCallback* callback,
 void Database::ScheduleTransactionCallback(SQLTransaction* transaction) {
   // The task is constructed in a database thread, and destructed in the
   // context thread.
-  GetDatabaseTaskRunner()->PostTask(
-      BLINK_FROM_HERE, CrossThreadBind(&SQLTransaction::PerformPendingCallback,
-                                       WrapCrossThreadPersistent(transaction)));
+  PostCrossThreadTask(*GetDatabaseTaskRunner(), FROM_HERE,
+                      CrossThreadBind(&SQLTransaction::PerformPendingCallback,
+                                      WrapCrossThreadPersistent(transaction)));
 }
 
 Vector<String> Database::PerformGetTableNames() {
@@ -981,7 +974,7 @@ Vector<String> Database::TableNames() {
   return result;
 }
 
-SecurityOrigin* Database::GetSecurityOrigin() const {
+const SecurityOrigin* Database::GetSecurityOrigin() const {
   if (!GetExecutionContext())
     return nullptr;
   if (GetExecutionContext()->IsContextThread())

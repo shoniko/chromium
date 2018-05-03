@@ -45,7 +45,6 @@ namespace blink {
 
 class Document;
 class DocumentLoader;
-class EncodedFormData;
 class ExecutionContext;
 struct FetchInitiatorInfo;
 class LocalFrame;
@@ -67,7 +66,9 @@ class CORE_EXPORT InspectorNetworkAgent final
  public:
   // TODO(horo): Extract the logic for frames and for workers into different
   // classes.
-  InspectorNetworkAgent(InspectedFrames*, WorkerGlobalScope*);
+  InspectorNetworkAgent(InspectedFrames*,
+                        WorkerGlobalScope*,
+                        v8_inspector::V8InspectorSession*);
   ~InspectorNetworkAgent() override;
   void Trace(blink::Visitor*) override;
 
@@ -80,7 +81,8 @@ class CORE_EXPORT InspectorNetworkAgent final
                        const FetchInitiatorInfo&,
                        ResourceRequestBlockedReason,
                        Resource::Type);
-  void DidChangeResourcePriority(unsigned long identifier,
+  void DidChangeResourcePriority(DocumentLoader*,
+                                 unsigned long identifier,
                                  ResourceLoadPriority);
   void WillSendRequest(ExecutionContext*,
                        unsigned long identifier,
@@ -89,7 +91,7 @@ class CORE_EXPORT InspectorNetworkAgent final
                        const ResourceResponse& redirect_response,
                        const FetchInitiatorInfo&,
                        Resource::Type);
-  void MarkResourceAsCached(unsigned long identifier);
+  void MarkResourceAsCached(DocumentLoader*, unsigned long identifier);
   void DidReceiveResourceResponse(unsigned long identifier,
                                   DocumentLoader*,
                                   const ResourceResponse&,
@@ -98,13 +100,15 @@ class CORE_EXPORT InspectorNetworkAgent final
                       DocumentLoader*,
                       const char* data,
                       int data_length);
-  void DidReceiveEncodedDataLength(unsigned long identifier,
+  void DidReceiveEncodedDataLength(DocumentLoader*,
+                                   unsigned long identifier,
                                    int encoded_data_length);
   void DidFinishLoading(unsigned long identifier,
                         DocumentLoader*,
                         double monotonic_finish_time,
                         int64_t encoded_data_length,
-                        int64_t decoded_body_length);
+                        int64_t decoded_body_length,
+                        bool blocked_cross_site_document);
   void DidReceiveCORSRedirectResponse(unsigned long identifier,
                                       DocumentLoader*,
                                       const ResourceResponse&,
@@ -128,7 +132,6 @@ class CORE_EXPORT InspectorNetworkAgent final
                    const AtomicString& method,
                    const KURL&,
                    bool async,
-                   scoped_refptr<EncodedFormData> body,
                    const HTTPHeaderMap& headers,
                    bool include_crendentials);
   void DidFailXHRLoading(ExecutionContext*,
@@ -197,13 +200,23 @@ class CORE_EXPORT InspectorNetworkAgent final
 
   // Called from frontend
   protocol::Response enable(Maybe<int> total_buffer_size,
-                            Maybe<int> resource_buffer_size) override;
+                            Maybe<int> resource_buffer_size,
+                            Maybe<int> max_post_data_size) override;
   protocol::Response disable() override;
   protocol::Response setUserAgentOverride(const String&) override;
   protocol::Response setExtraHTTPHeaders(
       std::unique_ptr<protocol::Network::Headers>) override;
   void getResponseBody(const String& request_id,
                        std::unique_ptr<GetResponseBodyCallback>) override;
+  protocol::Response searchInResponseBody(
+      const String& request_id,
+      const String& query,
+      Maybe<bool> case_sensitive,
+      Maybe<bool> is_regex,
+      std::unique_ptr<
+          protocol::Array<v8_inspector::protocol::Debugger::API::SearchMatch>>*
+          matches) override;
+
   protocol::Response setBlockedURLs(
       std::unique_ptr<protocol::Array<String>> urls) override;
   protocol::Response replayXHR(const String& request_id) override;
@@ -223,6 +236,9 @@ class CORE_EXPORT InspectorNetworkAgent final
       const String& origin,
       std::unique_ptr<protocol::Array<String>>* certificate) override;
 
+  protocol::Response getRequestPostData(const String& request_id,
+                                        String* post_data) override;
+
   // Called from other agents.
   protocol::Response GetResponseBody(const String& request_id,
                                      String* content,
@@ -231,10 +247,11 @@ class CORE_EXPORT InspectorNetworkAgent final
                             const KURL&,
                             String* content,
                             bool* base64_encoded);
-  bool CacheDisabled();
 
  private:
-  void Enable(int total_buffer_size, int resource_buffer_size);
+  void Enable(int total_buffer_size,
+              int resource_buffer_size,
+              int max_post_data_size);
   void WillSendRequestInternal(ExecutionContext*,
                                unsigned long identifier,
                                DocumentLoader*,
@@ -260,6 +277,7 @@ class CORE_EXPORT InspectorNetworkAgent final
   Member<InspectedFrames> inspected_frames_;
   // This is null while inspecting frames.
   Member<WorkerGlobalScope> worker_global_scope_;
+  v8_inspector::V8InspectorSession* v8_session_;
   Member<NetworkResourcesData> resources_data_;
 
   typedef HashMap<ThreadableLoaderClient*, unsigned long>
@@ -283,6 +301,7 @@ class CORE_EXPORT InspectorNetworkAgent final
   HeapHashSet<Member<XMLHttpRequest>> replay_xhrs_;
   HeapHashSet<Member<XMLHttpRequest>> replay_xhrs_to_be_deleted_;
   TaskRunnerTimer<InspectorNetworkAgent> remove_finished_replay_xhr_timer_;
+  int max_post_data_size_;
 };
 
 }  // namespace blink

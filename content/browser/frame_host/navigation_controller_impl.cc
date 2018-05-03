@@ -62,7 +62,6 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"  // Temporary
 #include "content/browser/site_instance_impl.h"
 #include "content/common/frame_messages.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
@@ -72,10 +71,12 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/replaced_navigation_entry_data.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_features.h"
+#include "content/public/common/url_utils.h"
 #include "media/base/mime_util.h"
 #include "net/base/escape.h"
 #include "skia/ext/platform_canvas.h"
@@ -138,6 +139,10 @@ bool ShouldTreatNavigationAsReload(const NavigationEntry* entry) {
   if (!entry)
     return false;
 
+  // Skip navigations initiated by external applications.
+  if (entry->GetTransitionType() & ui::PAGE_TRANSITION_FROM_API)
+    return false;
+
   // We treat (PAGE_TRANSITION_RELOAD | PAGE_TRANSITION_FROM_ADDRESS_BAR),
   // PAGE_TRANSITION_TYPED or PAGE_TRANSITION_LINK transitions as navigations
   // which should be treated as reloads.
@@ -159,24 +164,21 @@ bool ShouldTreatNavigationAsReload(const NavigationEntry* entry) {
   return false;
 }
 
-// Returns true if the error code indicates an error condition that is not
-// recoverable or navigation is blocked. In such cases, session history
-// navigations to the same NavigationEntry should not attempt to load the
-// original URL.
-// TODO(nasko): Find a better way to distinguish blocked vs failed navigations,
-// as this is a very hacky way of accomplishing this. For now, a handful of
-// error codes are considered, which are more or less known to be cases of
-// blocked navigations.
-bool IsBlockedNavigation(net::Error error_code) {
-  switch (error_code) {
-    case net::ERR_BLOCKED_BY_CLIENT:
-    case net::ERR_BLOCKED_BY_RESPONSE:
-    case net::ERR_BLOCKED_BY_XSS_AUDITOR:
-    case net::ERR_UNSAFE_REDIRECT:
-      return true;
-    default:
-      return false;
-  }
+// See replaced_navigation_entry_data.h for details: this information is meant
+// to ensure |*output_entry| keeps track of its original URL (landing page in
+// case of server redirects) as it gets replaced (e.g. history.replaceState()),
+// without overwriting it later, for main frames.
+void CopyReplacedNavigationEntryDataIfPreviouslyEmpty(
+    const NavigationEntryImpl& replaced_entry,
+    NavigationEntryImpl* output_entry) {
+  if (output_entry->GetReplacedEntryData().has_value())
+    return;
+
+  ReplacedNavigationEntryData data;
+  data.first_committed_url = replaced_entry.GetURL();
+  data.first_timestamp = replaced_entry.GetTimestamp();
+  data.first_transition_type = replaced_entry.GetTransitionType();
+  output_entry->SetReplacedEntryData(data);
 }
 
 }  // namespace
@@ -217,12 +219,9 @@ std::unique_ptr<NavigationEntry> NavigationController::CreateNavigationEntry(
       &loaded_url, browser_context, &reverse_on_redirect);
 
   NavigationEntryImpl* entry = new NavigationEntryImpl(
-      NULL,  // The site instance for tabs is sent on navigation
-             // (WebContents::GetSiteInstance).
-      loaded_url,
-      referrer,
-      base::string16(),
-      transition,
+      nullptr,  // The site instance for tabs is sent on navigation
+                // (WebContents::GetSiteInstance).
+      loaded_url, referrer, base::string16(), transition,
       is_renderer_initiated);
   entry->SetVirtualURL(dest_url);
   entry->set_user_typed_url(dest_url);
@@ -329,7 +328,7 @@ void NavigationControllerImpl::Reload(ReloadType reload_type,
     return;
   }
 
-  NavigationEntryImpl* entry = NULL;
+  NavigationEntryImpl* entry = nullptr;
   int current_index = -1;
 
   // If we are reloading the initial navigation, just use the current
@@ -536,7 +535,7 @@ int NavigationControllerImpl::GetCurrentEntryIndex() const {
 
 NavigationEntryImpl* NavigationControllerImpl::GetLastCommittedEntry() const {
   if (last_committed_entry_index_ == -1)
-    return NULL;
+    return nullptr;
   return entries_[last_committed_entry_index_].get();
 }
 
@@ -709,7 +708,7 @@ void NavigationControllerImpl::LoadURLWithParams(const LoadURLParams& params) {
     default:
       NOTREACHED();
       break;
-  };
+  }
 
   // The user initiated a load, we don't need to reload anymore.
   needs_reload_ = false;
@@ -767,6 +766,7 @@ void NavigationControllerImpl::LoadURLWithParams(const LoadURLParams& params) {
     entry->set_source_site_instance(
         static_cast<SiteInstanceImpl*>(params.source_site_instance.get()));
     entry->SetRedirectChain(params.redirect_chain);
+    entry->set_suggested_filename(params.suggested_filename);
   }
 
   // Set the FTN ID (only used in non-site-per-process, for tests).
@@ -807,7 +807,7 @@ void NavigationControllerImpl::LoadURLWithParams(const LoadURLParams& params) {
     default:
       NOTREACHED();
       break;
-  };
+  }
 
   entry->set_started_from_context_menu(params.started_from_context_menu);
   LoadEntry(std::move(entry));
@@ -881,7 +881,6 @@ bool NavigationControllerImpl::RendererDidNavigate(
                                    navigation_handle);
       break;
     case NAVIGATION_TYPE_EXISTING_PAGE:
-      details->did_replace_entry = details->is_same_document;
       RendererDidNavigateToExistingPage(rfh, params, details->is_same_document,
                                         was_restored, navigation_handle);
       break;
@@ -948,24 +947,6 @@ bool NavigationControllerImpl::RendererDidNavigate(
   // TODO(creis): Remove the "if" once https://crbug.com/522193 is fixed.
   if (frame_entry) {
     DCHECK(params.page_state == frame_entry->page_state());
-  }
-
-  // When a navigation in the main frame is blocked, it will display an error
-  // page. To avoid loading the blocked URL on back/forward navigations,
-  // do not store it in the FrameNavigationEntry's URL or PageState. Instead,
-  // make it visible to the user as the virtual URL. Store a safe URL
-  // (about:blank) as the one to load if the entry is revisited.
-  // TODO(nasko): Consider supporting similar behavior for subframe
-  // navigations, including AUTO_SUBFRAME.
-  if (!rfh->GetParent() &&
-      IsBlockedNavigation(navigation_handle->GetNetErrorCode())) {
-    DCHECK(params.url_is_unreachable);
-    active_entry->SetURL(GURL(url::kAboutBlankURL));
-    active_entry->SetVirtualURL(params.url);
-    if (frame_entry) {
-      frame_entry->SetPageState(
-          PageState::CreateFromURL(active_entry->GetURL()));
-    }
   }
 
   // Use histogram to track memory impact of redirect chain because it's now
@@ -1039,18 +1020,6 @@ NavigationType NavigationControllerImpl::ClassifyNavigation(
     return NAVIGATION_TYPE_NEW_SUBFRAME;
   }
 
-  // Cross-process location.replace navigations should be classified as New with
-  // replacement rather than ExistingPage, since it is not safe to reuse the
-  // NavigationEntry.
-  // TODO(creis): Have the renderer classify location.replace as
-  // did_create_new_entry for all cases and eliminate this special case.  This
-  // requires updating several test expectations.  See https://crbug.com/596707.
-  if (!rfh->GetParent() && GetLastCommittedEntry() &&
-      GetLastCommittedEntry()->site_instance() != rfh->GetSiteInstance() &&
-      params.should_replace_current_entry) {
-    return NAVIGATION_TYPE_NEW_PAGE;
-  }
-
   // We only clear the session history when navigating to a new page.
   DCHECK(!params.history_list_was_cleared);
 
@@ -1077,8 +1046,7 @@ NavigationType NavigationControllerImpl::ClassifyNavigation(
     if (!last_committed)
       return NAVIGATION_TYPE_NAV_IGNORE;
 
-    // This is history.replaceState(), history.reload(), or a client-side
-    // redirect.
+    // This is history.replaceState() or history.reload().
     return NAVIGATION_TYPE_EXISTING_PAGE;
   }
 
@@ -1202,7 +1170,7 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
     new_entry = pending_entry_->Clone();
 
     update_virtual_url = new_entry->update_virtual_url_with_url();
-    new_entry->GetSSL() = handle->ssl_status();
+    new_entry->GetSSL() = SSLStatus(handle->GetSSLInfo());
 
     if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
         handle->GetNetErrorCode() == net::OK) {
@@ -1230,7 +1198,7 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
     // to show chrome://bookmarks/#1 when the bookmarks webui extension changes
     // the URL.
     update_virtual_url = needs_update;
-    new_entry->GetSSL() = handle->ssl_status();
+    new_entry->GetSSL() = SSLStatus(handle->GetSSLInfo());
 
     if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
         handle->GetNetErrorCode() == net::OK) {
@@ -1299,9 +1267,6 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
   // We should only get here for main frame navigations.
   DCHECK(!rfh->GetParent());
 
-  // TODO(creis): Classify location.replace as NEW_PAGE instead of EXISTING_PAGE
-  // in https://crbug.com/596707.
-
   NavigationEntryImpl* entry;
   if (params.intended_as_new_entry) {
     // This was intended as a new entry but the pending entry was lost in the
@@ -1311,7 +1276,7 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
     // If this is a same document navigation, then there's no SSLStatus in the
     // NavigationHandle so don't overwrite the existing entry's SSLStatus.
     if (!is_same_document)
-      entry->GetSSL() = handle->ssl_status();
+      entry->GetSSL() = SSLStatus(handle->GetSSLInfo());
 
     if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
         handle->GetNetErrorCode() == net::OK) {
@@ -1345,12 +1310,14 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
         entry->GetSSL() = last_entry->GetSSL();
       }
     } else {
-      // When restoring a tab, the serialized NavigationEntry doesn't have the
-      // SSL state.
-      // Only copy in the restore case since this code path can be taken during
-      // navigation. See http://crbug.com/727892
-      if (was_restored)
-        entry->GetSSL() = handle->ssl_status();
+      // In rapid back/forward navigations |handle| sometimes won't have a cert
+      // (http://crbug.com/727892). So we use the handle's cert if it exists,
+      // otherwise we only reuse the existing cert if the origins match.
+      if (handle->GetSSLInfo().is_valid()) {
+        entry->GetSSL() = SSLStatus(handle->GetSSLInfo());
+      } else if (entry->GetURL().GetOrigin() != handle->GetURL().GetOrigin()) {
+        entry->GetSSL() = SSLStatus();
+      }
     }
 
     if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
@@ -1379,14 +1346,22 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
     }
   } else {
     // This is renderer-initiated. The only kinds of renderer-initated
-    // navigations that are EXISTING_PAGE are reloads and location.replace,
+    // navigations that are EXISTING_PAGE are reloads and history.replaceState,
     // which land us at the last committed entry.
     entry = GetLastCommittedEntry();
+
+    // TODO(crbug.com/751023): Set page transition type to PAGE_TRANSITION_LINK
+    // to avoid misleading interpretations (e.g. URLs paired with
+    // PAGE_TRANSITION_TYPED that haven't actually been typed) as well as to fix
+    // the inconsistency with what we report to observers (PAGE_TRANSITION_LINK
+    // | PAGE_TRANSITION_CLIENT_REDIRECT).
+
+    CopyReplacedNavigationEntryDataIfPreviouslyEmpty(*entry, entry);
 
     // If this is a same document navigation, then there's no SSLStatus in the
     // NavigationHandle so don't overwrite the existing entry's SSLStatus.
     if (!is_same_document)
-      entry->GetSSL() = handle->ssl_status();
+      entry->GetSSL() = SSLStatus(handle->GetSSLInfo());
 
     if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
         handle->GetNetErrorCode() == net::OK) {
@@ -1478,7 +1453,7 @@ void NavigationControllerImpl::RendererDidNavigateToSamePage(
   // If a user presses enter in the omnibox and the server redirects, the URL
   // might change (but it's still considered a SAME_PAGE navigation). So we must
   // update the SSL status.
-  existing_entry->GetSSL() = handle->ssl_status();
+  existing_entry->GetSSL() = SSLStatus(handle->GetSSLInfo());
 
   if (existing_entry->GetURL().SchemeIs(url::kHttpsScheme) &&
       !rfh->GetParent() && handle->GetNetErrorCode() == net::OK) {
@@ -1514,6 +1489,12 @@ void NavigationControllerImpl::RendererDidNavigateNewSubframe(
   // band with the actual navigations.
   DCHECK(GetLastCommittedEntry()) << "ClassifyNavigation should guarantee "
                                   << "that a last committed entry exists.";
+
+  // The DCHECK below documents the fact that we don't know of any situation
+  // where |replace_entry| is true for subframe navigations. This simplifies
+  // reasoning about the replacement struct for subframes (see
+  // CopyReplacedNavigationEntryDataIfPreviouslyEmpty()).
+  DCHECK(!replace_entry);
 
   // Make sure we don't leak frame_entry if new_entry doesn't take ownership.
   scoped_refptr<FrameNavigationEntry> frame_entry(new FrameNavigationEntry(
@@ -1843,7 +1824,7 @@ NavigationControllerImpl::GetSessionStorageNamespace(SiteInstance* instance) {
 SessionStorageNamespace*
 NavigationControllerImpl::GetDefaultSessionStorageNamespace() {
   // TODO(ajwong): Remove if statement in GetSessionStorageNamespace().
-  return GetSessionStorageNamespace(NULL);
+  return GetSessionStorageNamespace(nullptr);
 }
 
 const SessionStorageNamespaceMap&
@@ -1926,6 +1907,8 @@ void NavigationControllerImpl::InsertOrReplaceEntry(
 
   // When replacing, don't prune the forward history.
   if (replace && current_size > 0) {
+    CopyReplacedNavigationEntryDataIfPreviouslyEmpty(
+        *entries_[last_committed_entry_index_], entry.get());
     entries_[last_committed_entry_index_] = std::move(entry);
     return;
   }
@@ -2147,7 +2130,7 @@ void NavigationControllerImpl::FindFramesToNavigate(
     if (old_item &&
         new_item->document_sequence_number() ==
             old_item->document_sequence_number() &&
-        !frame->current_frame_host()->last_committed_url().is_empty()) {
+        !frame->current_frame_host()->GetLastCommittedURL().is_empty()) {
       same_document_loads->push_back(std::make_pair(frame, new_item));
 
       // TODO(avi, creis): This is a bug; we should not return here. Rather, we
@@ -2301,7 +2284,7 @@ int NavigationControllerImpl::GetEntryIndexWithUniqueID(
 
 NavigationEntryImpl* NavigationControllerImpl::GetTransientEntry() const {
   if (transient_entry_index_ == -1)
-    return NULL;
+    return nullptr;
   return entries_[transient_entry_index_].get();
 }
 

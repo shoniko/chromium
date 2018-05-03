@@ -14,15 +14,11 @@ namespace features {
 // application will also be considered matches for, and be filled into
 // corresponding Web applications.
 const base::Feature kAffiliationBasedMatching = {
-    "affiliation-based-matching", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Drop the sync credential if captured for saving, do not offer it for saving.
-const base::Feature kDropSyncCredential = {"drop-sync-credential",
-                                           base::FEATURE_ENABLED_BY_DEFAULT};
+    "AffiliationBasedMatching", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Use HTML based username detector.
 const base::Feature kEnableHtmlBasedUsernameDetector = {
-    "EnableHtmlBaseUsernameDetector", base::FEATURE_DISABLED_BY_DEFAULT};
+    "EnableHtmlBaseUsernameDetector", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enable additional elements in the form popup UI, which will allow the user to
 // view all saved passwords.
@@ -48,23 +44,15 @@ const base::Feature kEnableManualSaving = {"EnableManualSaving",
 
 // Enable a context menu item in the password field that allows the user
 // to manually enforce saving of their password.
-const base::Feature kEnablePasswordForceSaving = {
-    "enable-password-force-saving", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kPasswordForceSaving = {
+    "PasswordForceSaving", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enable the user to trigger password generation manually.
-extern const base::Feature kEnableManualPasswordGeneration = {
+const base::Feature kEnableManualPasswordGeneration = {
     "enable-manual-password-generation", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Enables username correction while saving username and password details.
-extern const base::Feature kEnableUsernameCorrection{
-    "EnableUsernameCorrection", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Enables password selection while saving username and password details.
-extern const base::Feature kEnablePasswordSelection{
-    "EnablePasswordSelection", base::FEATURE_ENABLED_BY_DEFAULT};
-
 // Enables the "Show all saved passwords" option in Context Menu.
-extern const base::Feature kEnableShowAllSavedPasswordsContextMenu{
+const base::Feature kEnableShowAllSavedPasswordsContextMenu{
     "kEnableShowAllSavedPasswordsContextMenu",
     base::FEATURE_ENABLED_BY_DEFAULT};
 
@@ -75,15 +63,20 @@ const base::Feature kProtectSyncCredential = {
 // Disallow autofilling of the sync credential only for transactional reauth
 // pages.
 const base::Feature kProtectSyncCredentialOnReauth = {
-    "protect-sync-credential-on-reauth", base::FEATURE_DISABLED_BY_DEFAULT};
+    "ProtectSyncCredentialOnReauth", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kPasswordImportExport = {"password-import-export",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+// Controls the ability to export passwords from Chrome's settings page.
+const base::Feature kPasswordExport = {"PasswordExport",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Controls the ability to import passwords from Chrome's settings page.
+const base::Feature kPasswordImport = {"PasswordImport",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Control whether users can view and copy passwords. This is only used for
 // mobile, the desktop version of Chrome always allows users to view
 // passwords.
-const base::Feature kViewPasswords = {"view-passwords",
+const base::Feature kViewPasswords = {"ViewPasswords",
                                       base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables the experiment for the password manager to only fill on account

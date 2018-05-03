@@ -15,8 +15,8 @@
 #include "content/browser/android/synchronous_compositor_browser_filter.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/android/sync_compositor_messages.h"
 #include "content/common/android/sync_compositor_statics.h"
+#include "content/common/input/sync_compositor_messages.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
@@ -89,7 +89,7 @@ SynchronousCompositorHost::DemandDrawHwAsync(
   scoped_refptr<FrameFuture> frame_future = new FrameFuture();
   if (compute_scroll_needs_synchronous_draw_) {
     compute_scroll_needs_synchronous_draw_ = false;
-    auto frame_ptr = base::MakeUnique<Frame>();
+    auto frame_ptr = std::make_unique<Frame>();
     *frame_ptr = DemandDrawHw(viewport_size, viewport_rect_for_tile_priority,
                               transform_for_tile_priority);
     frame_future->SetFrame(std::move(frame_ptr));

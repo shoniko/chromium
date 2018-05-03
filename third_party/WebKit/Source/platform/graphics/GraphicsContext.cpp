@@ -33,7 +33,6 @@
 #include "platform/geometry/FloatRoundedRect.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
-#include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/InterpolationSpace.h"
 #include "platform/graphics/Path.h"
 #include "platform/graphics/paint/PaintController.h"
@@ -51,7 +50,6 @@
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/effects/SkHighContrastFilter.h"
 #include "third_party/skia/include/effects/SkLumaColorFilter.h"
-#include "third_party/skia/include/effects/SkPictureImageFilter.h"
 #include "third_party/skia/include/effects/SkTableColorFilter.h"
 #include "third_party/skia/include/pathops/SkPathOps.h"
 #include "third_party/skia/include/utils/SkNullCanvas.h"
@@ -265,7 +263,7 @@ void GraphicsContext::BeginLayer(float opacity,
                                  SkBlendMode xfermode,
                                  const FloatRect* bounds,
                                  ColorFilter color_filter,
-                                 sk_sp<SkImageFilter> image_filter) {
+                                 sk_sp<PaintFilter> image_filter) {
   if (ContextDisabled())
     return;
 
@@ -351,17 +349,17 @@ void GraphicsContext::CompositeRecord(sk_sp<PaintRecord> record,
 
   PaintFlags flags;
   flags.setBlendMode(op);
+  flags.setFilterQuality(
+      static_cast<SkFilterQuality>(ImageInterpolationQuality()));
   canvas_->save();
-  SkRect source_bounds = src;
-  SkRect sk_bounds = dest;
-  SkMatrix transform;
-  transform.setRectToRect(source_bounds, sk_bounds, SkMatrix::kFill_ScaleToFit);
-  canvas_->concat(transform);
-  flags.setImageFilter(SkPictureImageFilter::MakeForLocalSpace(
-      ToSkPicture(record, source_bounds), source_bounds,
-      static_cast<SkFilterQuality>(ImageInterpolationQuality())));
-  canvas_->saveLayer(&source_bounds, &flags);
-  canvas_->restore();
+  canvas_->concat(
+      SkMatrix::MakeRectToRect(src, dest, SkMatrix::kFill_ScaleToFit));
+  canvas_->drawImage(PaintImageBuilder::WithDefault()
+                         .set_paint_record(record, RoundedIntRect(src),
+                                           PaintImage::GetNextContentId())
+                         .set_id(PaintImage::GetNextId())
+                         .TakePaintImage(),
+                     0, 0, &flags);
   canvas_->restore();
 }
 
@@ -744,10 +742,8 @@ void GraphicsContext::DrawTextInternal(const Font& font,
   if (ContextDisabled())
     return;
 
-  if (font.DrawText(canvas_, text_info, point, device_scale_factor_,
-                    ApplyHighContrastFilter(&flags))) {
-    paint_controller_.SetTextPainted();
-  }
+  font.DrawText(canvas_, text_info, point, device_scale_factor_,
+                ApplyHighContrastFilter(&flags));
 }
 
 void GraphicsContext::DrawText(const Font& font,
@@ -791,9 +787,8 @@ void GraphicsContext::DrawTextInternal(const Font& font,
     return;
 
   DrawTextPasses([&font, &text_info, &point, this](const PaintFlags& flags) {
-    if (font.DrawText(canvas_, text_info, point, device_scale_factor_,
-                      ApplyHighContrastFilter(&flags)))
-      paint_controller_.SetTextPainted();
+    font.DrawText(canvas_, text_info, point, device_scale_factor_,
+                  ApplyHighContrastFilter(&flags));
   });
 }
 
@@ -955,7 +950,7 @@ SkFilterQuality GraphicsContext::ComputeFilterQuality(
   if (Printing()) {
     resampling = kInterpolationNone;
   } else if (image->CurrentFrameIsLazyDecoded()) {
-    resampling = kInterpolationHigh;
+    resampling = kInterpolationDefault;
   } else {
     resampling = ComputeInterpolationQuality(
         SkScalarToFloat(src.Width()), SkScalarToFloat(src.Height()),
@@ -970,7 +965,7 @@ SkFilterQuality GraphicsContext::ComputeFilterQuality(
     }
   }
   return static_cast<SkFilterQuality>(
-      LimitInterpolationQuality(*this, resampling));
+      std::min(resampling, ImageInterpolationQuality()));
 }
 
 void GraphicsContext::DrawTiledImage(Image* image,
@@ -1446,7 +1441,7 @@ PaintFlags GraphicsContext::ApplyHighContrastFilter(
   PaintFlags output;
   if (input)
     output = *input;
-  if (output.getSkShader()) {
+  if (output.HasShader()) {
     output.setColorFilter(high_contrast_filter_);
   } else {
     output.setColor(high_contrast_filter_->filterColor(output.getColor()));

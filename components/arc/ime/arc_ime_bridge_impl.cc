@@ -76,20 +76,12 @@ std::vector<mojom::CompositionSegmentPtr> ConvertSegments(
 
 ArcImeBridgeImpl::ArcImeBridgeImpl(Delegate* delegate,
                                    ArcBridgeService* bridge_service)
-    : binding_(this), delegate_(delegate), bridge_service_(bridge_service) {
-  bridge_service_->ime()->AddObserver(this);
+    : delegate_(delegate), bridge_service_(bridge_service) {
+  bridge_service_->ime()->SetHost(this);
 }
 
 ArcImeBridgeImpl::~ArcImeBridgeImpl() {
-  bridge_service_->ime()->RemoveObserver(this);
-}
-
-void ArcImeBridgeImpl::OnInstanceReady() {
-  auto* instance = ARC_GET_INSTANCE_FOR_METHOD(bridge_service_->ime(), Init);
-  DCHECK(instance);
-  mojom::ImeHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  instance->Init(std::move(host_proxy));
+  bridge_service_->ime()->SetHost(nullptr);
 }
 
 void ArcImeBridgeImpl::SendSetCompositionText(
@@ -121,16 +113,6 @@ void ArcImeBridgeImpl::SendInsertText(const base::string16& text) {
   ime_instance->InsertText(base::UTF16ToUTF8(text));
 }
 
-void ArcImeBridgeImpl::SendOnKeyboardBoundsChanging(
-    const gfx::Rect& new_bounds) {
-  auto* ime_instance = ARC_GET_INSTANCE_FOR_METHOD(bridge_service_->ime(),
-                                                   OnKeyboardBoundsChanging);
-  if (!ime_instance)
-    return;
-
-  ime_instance->OnKeyboardBoundsChanging(new_bounds);
-}
-
 void ArcImeBridgeImpl::SendExtendSelectionAndDelete(
     size_t before, size_t after) {
   auto* ime_instance = ARC_GET_INSTANCE_FOR_METHOD(bridge_service_->ime(),
@@ -139,6 +121,17 @@ void ArcImeBridgeImpl::SendExtendSelectionAndDelete(
     return;
 
   ime_instance->ExtendSelectionAndDelete(before, after);
+}
+
+void ArcImeBridgeImpl::SendOnKeyboardAppearanceChanging(
+    const gfx::Rect& new_bounds,
+    bool is_available) {
+  auto* ime_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      bridge_service_->ime(), OnKeyboardAppearanceChanging);
+  if (!ime_instance)
+    return;
+
+  ime_instance->OnKeyboardAppearanceChanging(new_bounds, is_available);
 }
 
 void ArcImeBridgeImpl::OnTextInputTypeChanged(mojom::TextInputType type) {

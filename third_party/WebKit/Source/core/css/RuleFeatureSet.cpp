@@ -32,16 +32,17 @@
 
 #include "core/css/CSSCustomIdentValue.h"
 #include "core/css/CSSFunctionValue.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSSelector.h"
 #include "core/css/CSSSelectorList.h"
 #include "core/css/CSSValueList.h"
 #include "core/css/RuleSet.h"
-#include "core/css/StylePropertySet.h"
 #include "core/css/StyleRule.h"
 #include "core/css/invalidation/InvalidationSet.h"
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
 #include "core/inspector/InspectorTraceEvents.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/BitVector.h"
 
 namespace blink {
@@ -90,6 +91,8 @@ bool SupportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::kPseudoLink:
     case CSSSelector::kPseudoVisited:
     case CSSSelector::kPseudoAny:
+    case CSSSelector::kPseudoMatches:
+    case CSSSelector::kPseudoWebkitAnyLink:
     case CSSSelector::kPseudoAnyLink:
     case CSSSelector::kPseudoAutofill:
     case CSSSelector::kPseudoHover:
@@ -180,6 +183,8 @@ bool SupportsInvalidationWithSelectorList(CSSSelector::PseudoType pseudo) {
          pseudo == CSSSelector::kPseudoCue ||
          pseudo == CSSSelector::kPseudoHost ||
          pseudo == CSSSelector::kPseudoHostContext ||
+         ((pseudo == CSSSelector::kPseudoMatches) &&
+          RuntimeEnabledFeatures::CSSMatchesEnabled()) ||
          pseudo == CSSSelector::kPseudoNot ||
          pseudo == CSSSelector::kPseudoSlotted;
 }
@@ -223,7 +228,7 @@ InvalidationSet& RuleFeatureSet::StoredInvalidationSet(
     // Note that we also construct a DescendantInvalidationSet instead of using
     // the SelfInvalidationSet() when we create a SiblingInvalidationSet. We may
     // be able to let SiblingInvalidationSets reference the singleton set for
-    // descendants as well. TODO(rune@opera.com)
+    // descendants as well. TODO(futhark@chromium.org)
     invalidation_set = DescendantInvalidationSet::Create();
     invalidation_set->SetInvalidatesSelf();
   }
@@ -383,7 +388,7 @@ void RuleFeatureSet::ExtractInvalidationSetFeaturesFromSimpleSelector(
     const CSSSelector& selector,
     InvalidationSetFeatures& features) {
   if (selector.Match() == CSSSelector::kTag &&
-      selector.TagQName().LocalName() != g_star_atom) {
+      selector.TagQName().LocalName() != CSSSelector::UniversalSelectorAtom()) {
     features.tag_names.push_back(selector.TagQName().LocalName());
     return;
   }
@@ -436,6 +441,7 @@ InvalidationSet* RuleFeatureSet::InvalidationSetForSimpleSelector(
       case CSSSelector::kPseudoOnlyChild:
       case CSSSelector::kPseudoLink:
       case CSSSelector::kPseudoVisited:
+      case CSSSelector::kPseudoWebkitAnyLink:
       case CSSSelector::kPseudoAnyLink:
       case CSSSelector::kPseudoAutofill:
       case CSSSelector::kPseudoHover:
@@ -551,14 +557,14 @@ void RuleFeatureSet::UpdateInvalidationSetsForContentAttribute(
   // need to create invalidation sets for those attributes to have content
   // changes applied through style recalc.
 
-  const StylePropertySet& property_set = rule_data.Rule()->Properties();
+  const CSSPropertyValueSet& property_set = rule_data.Rule()->Properties();
 
   int property_index = property_set.FindPropertyIndex(CSSPropertyContent);
 
   if (property_index == -1)
     return;
 
-  StylePropertySet::PropertyReference content_property =
+  CSSPropertyValueSet::PropertyReference content_property =
       property_set.PropertyAt(property_index);
   const CSSValue& content_value = content_property.Value();
 

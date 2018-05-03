@@ -43,10 +43,11 @@ struct CONTENT_EXPORT AudioProcessingProperties {
   ~AudioProcessingProperties();
 
   // Disables properties that are enabled by default.
-  void DisableDefaultPropertiesForTesting();
+  void DisableDefaultProperties();
 
   bool enable_sw_echo_cancellation = true;
   bool disable_hw_echo_cancellation = false;
+  bool disable_hw_noise_suppression = false;
   bool goog_audio_mirroring = false;
   bool goog_auto_gain_control = true;
   bool goog_experimental_echo_cancellation =

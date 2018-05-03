@@ -24,6 +24,7 @@
 #include "extensions/renderer/extension_frame_helper.h"
 #include "extensions/renderer/extension_port.h"
 #include "extensions/renderer/gc_callback.h"
+#include "extensions/renderer/messaging_util.h"
 #include "extensions/renderer/script_context.h"
 #include "extensions/renderer/script_context_set.h"
 #include "extensions/renderer/v8_helpers.h"
@@ -116,26 +117,11 @@ void MessagingBindings::PostMessage(
 
   ExtensionPort& port = *iter->second;
 
-  auto message = std::make_unique<Message>(
-      *v8::String::Utf8Value(args[1]),
-      blink::WebUserGestureIndicator::IsProcessingUserGesture());
-
-  size_t message_length = message->data.length();
-
-  // Max bucket at 512 MB - anything over that, and we don't care.
-  static constexpr int kMaxUmaLength = 1024 * 1024 * 512;
-  static constexpr int kMinUmaLength = 1;
-  static constexpr int kBucketCount = 50;
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Extensions.Messaging.MessageSize",
-                              message_length, kMinUmaLength, kMaxUmaLength,
-                              kBucketCount);
-
-  // IPC messages will fail at > 128 MB. Restrict extension messages to 64 MB.
-  // A 64 MB JSON-ifiable object is scary enough as is.
-  static constexpr size_t kMaxMessageLength = 1024 * 1024 * 64;
-  if (message_length > kMaxMessageLength) {
-    args.GetReturnValue().Set(gin::StringToV8(
-        args.GetIsolate(), "Message length exceeded maximum allowed length."));
+  std::string error;
+  std::unique_ptr<Message> message =
+      messaging_util::MessageFromJSONString(args[1].As<v8::String>(), &error);
+  if (!message) {
+    args.GetReturnValue().Set(gin::StringToV8(args.GetIsolate(), error));
     return;
   }
 
@@ -200,9 +186,10 @@ void MessagingBindings::OpenChannelToExtension(
   if (extension && !extension->is_hosted_app())
     info.source_id = extension->id();
 
-  info.target_id = *v8::String::Utf8Value(args[0]);
+  v8::Isolate* isolate = args.GetIsolate();
+  info.target_id = *v8::String::Utf8Value(isolate, args[0]);
   info.source_url = context()->url();
-  std::string channel_name = *v8::String::Utf8Value(args[1]);
+  std::string channel_name = *v8::String::Utf8Value(isolate, args[1]);
   // TODO(devlin): Why is this not part of info?
   bool include_tls_channel_id =
       args.Length() > 2 ? args[2]->BooleanValue() : false;
@@ -231,7 +218,8 @@ void MessagingBindings::OpenChannelToNativeApp(
   if (!render_frame)
     return;
 
-  std::string native_app_name = *v8::String::Utf8Value(args[0]);
+  std::string native_app_name =
+      *v8::String::Utf8Value(args.GetIsolate(), args[0]);
 
   int js_id = GetNextJsId();
   PortId port_id(context()->context_id(), js_id, true);
@@ -274,8 +262,9 @@ void MessagingBindings::OpenChannelToTab(
   info.tab_id = args[0]->Int32Value();
   info.frame_id = args[1]->Int32Value();
   // TODO(devlin): Why is this not part of info?
-  std::string extension_id = *v8::String::Utf8Value(args[2]);
-  std::string channel_name = *v8::String::Utf8Value(args[3]);
+  v8::Isolate* isolate = args.GetIsolate();
+  std::string extension_id = *v8::String::Utf8Value(isolate, args[2]);
+  std::string channel_name = *v8::String::Utf8Value(isolate, args[3]);
 
   ExtensionFrameHelper* frame_helper = ExtensionFrameHelper::Get(render_frame);
   DCHECK(frame_helper);

@@ -49,7 +49,7 @@ LayoutTextControlSingleLine::LayoutTextControlSingleLine(
     HTMLInputElement* element)
     : LayoutTextControl(element), should_draw_caps_lock_indicator_(false) {}
 
-LayoutTextControlSingleLine::~LayoutTextControlSingleLine() {}
+LayoutTextControlSingleLine::~LayoutTextControlSingleLine() = default;
 
 inline Element* LayoutTextControlSingleLine::ContainerElement() const {
   return InputElement()->UserAgentShadowRoot()->getElementById(
@@ -94,7 +94,7 @@ void LayoutTextControlSingleLine::Paint(const PaintInfo& paint_info,
     contents_rect.MoveBy(adjustment.AdjustedPaintOffset());
     IntRect snapped_rect = PixelSnappedIntRect(contents_rect);
     DrawingRecorder recorder(local_paint_info.context, *this,
-                             local_paint_info.phase, snapped_rect);
+                             local_paint_info.phase);
     LayoutTheme::GetTheme().Painter().PaintCapsLockIndicator(
         *this, local_paint_info, snapped_rect);
   }
@@ -320,8 +320,10 @@ LayoutTextControlSingleLine::CreateInnerEditorStyle(
   int computed_line_height =
       LineHeight(true, kHorizontalLine, kPositionOfInteriorLineBoxes).ToInt();
   // Do not allow line-height to be smaller than our default.
-  if (text_block_style->FontSize() >= computed_line_height)
-    text_block_style->SetLineHeight(ComputedStyle::InitialLineHeight());
+  if (text_block_style->FontSize() >= computed_line_height) {
+    text_block_style->SetLineHeight(
+        ComputedStyleInitialValues::InitialLineHeight());
+  }
 
   // We'd like to remove line-height if it's unnecessary because
   // overflow:scroll clips editing text by line-height.
@@ -334,8 +336,10 @@ LayoutTextControlSingleLine::CreateInnerEditorStyle(
   // TODO(tkent): This should be done during layout.
   if (logical_height.IsPercentOrCalc() ||
       (logical_height.IsFixed() &&
-       logical_height.GetFloatValue() > computed_line_height))
-    text_block_style->SetLineHeight(ComputedStyle::InitialLineHeight());
+       logical_height.GetFloatValue() > computed_line_height)) {
+    text_block_style->SetLineHeight(
+        ComputedStyleInitialValues::InitialLineHeight());
+  }
 
   text_block_style->SetDisplay(EDisplay::kBlock);
   text_block_style->SetUnique();

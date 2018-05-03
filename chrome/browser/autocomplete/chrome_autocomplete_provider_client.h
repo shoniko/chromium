@@ -45,9 +45,13 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   std::string GetEmbedderRepresentationOfAboutScheme() override;
   std::vector<base::string16> GetBuiltinURLs() override;
   std::vector<base::string16> GetBuiltinsToProvideAsUserTypes() override;
+  // GetCurrentVisitTimestamp is only implemented for desktop users. For mobile
+  // users, the function returns base::Time().
+  base::Time GetCurrentVisitTimestamp() const override;
   bool IsOffTheRecord() const override;
   bool SearchSuggestEnabled() const override;
   bool TabSyncEnabledAndUnencrypted() const override;
+  bool IsAuthenticated() const override;
   void Classify(
       const base::string16& text,
       bool prefer_keyword,
@@ -62,6 +66,7 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   void StartServiceWorker(const GURL& destination_url) override;
   void OnAutocompleteControllerResultReady(
       AutocompleteController* controller) override;
+  bool IsTabOpenWithURL(const GURL& url) override;
 
   // For testing.
   void set_storage_partition(content::StoragePartition* storage_partition) {

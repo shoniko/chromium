@@ -58,6 +58,29 @@ idl_compiler_files =
         ],
         "abspath")
 
+web_idl_scripts = get_path_info([
+                                  "web_idl/argument.py",
+                                  "web_idl/attribute.py",
+                                  "web_idl/callback_function.py",
+                                  "web_idl/collection.py",
+                                  "web_idl/collector.py",
+                                  "web_idl/constant.py",
+                                  "web_idl/dictionary.py",
+                                  "web_idl/ecma_script_types.py",
+                                  "web_idl/enumeration.py",
+                                  "web_idl/extended_attribute.py",
+                                  "web_idl/idl_types.py",
+                                  "web_idl/implements.py",
+                                  "web_idl/interface.py",
+                                  "web_idl/literal_token.py",
+                                  "web_idl/namespace.py",
+                                  "web_idl/operation.py",
+                                  "web_idl/typedef.py",
+                                  "web_idl/utilities.py",
+                                  "web_idl/idl_definition_builder.py",
+                                ],
+                                "abspath")
+
 # Calls the compute_interfaces_info_individual script.
 #
 # Parameters:
@@ -485,18 +508,18 @@ template("generate_global_constructors") {
   }
 }
 
-# Calls the generate_conditional_features script.
+# Calls the generate_origin_trial_features script.
 #
 # Parameters:
 #   sources = a list of source IDL files.
-#   component = component for which to generate conditional feature bindings
+#   component = component for which to generate origin trial feature bindings
 #       ("Core" or "Modules")
 #   output_dir = output directory to generate cpp file and header file.
 #   deps = dependencies
 #
-template("generate_conditional_features") {
+template("generate_origin_trial_features") {
   action(target_name) {
-    script = "//third_party/WebKit/Source/bindings/scripts/generate_conditional_features.py"
+    script = "//third_party/WebKit/Source/bindings/scripts/generate_origin_trial_features.py"
 
     # Write the file list to a unique temp file to avoid blowing out the
     # command line length limit.
@@ -505,8 +528,8 @@ template("generate_conditional_features") {
 
     inputs = [
                "//third_party/WebKit/Source/bindings/scripts/utilities.py",
-               "//third_party/WebKit/Source/bindings/templates/ConditionalFeaturesFor${invoker.component}.cpp.tmpl",
-               "//third_party/WebKit/Source/bindings/templates/ConditionalFeaturesFor${invoker.component}.h.tmpl",
+               "//third_party/WebKit/Source/bindings/templates/OriginTrialFeaturesFor${invoker.component}.cpp.tmpl",
+               "//third_party/WebKit/Source/bindings/templates/OriginTrialFeaturesFor${invoker.component}.h.tmpl",
                idl_files_list,
              ] + invoker.sources
 
@@ -528,8 +551,8 @@ template("generate_conditional_features") {
     ]
 
     outputs = [
-      "${invoker.output_dir}/ConditionalFeaturesFor${invoker.component}.cpp",
-      "${invoker.output_dir}/ConditionalFeaturesFor${invoker.component}.h",
+      "${invoker.output_dir}/OriginTrialFeaturesFor${invoker.component}.cpp",
+      "${invoker.output_dir}/OriginTrialFeaturesFor${invoker.component}.h",
     ]
 
     # TODO: This should not always require modules; For core features, this
@@ -538,5 +561,32 @@ template("generate_conditional_features") {
     # http://crbug.com/358074
     deps = invoker.deps +
            [ "//third_party/WebKit/Source/bindings/modules:interfaces_info" ]
+  }
+}
+
+template("generate_web_idl_collection") {
+  action(target_name) {
+    script = "${bindings_scripts_dir}/generate_web_idl_collection.py"
+    output_dir = invoker.output_dir
+    output_file_name = invoker.output
+    output_path = "${output_dir}/${output_file_name}"
+    inputs = [
+               script,
+               "${bindings_scripts_dir}/utilities.py",
+             ] + web_idl_scripts + invoker.sources
+    outputs = [
+      output_path,
+    ]
+
+    # List input file names in a temporary file.
+    response_file_contents = rebase_path(invoker.sources, root_build_dir)
+    args = [
+      "--idl-list-file",
+      "{{response_file_name}}",
+      "--component",
+      invoker.component,
+      "--output",
+      rebase_path(output_path, root_build_dir),
+    ]
   }
 }

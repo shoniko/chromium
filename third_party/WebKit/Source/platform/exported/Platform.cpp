@@ -49,7 +49,6 @@
 #include "platform/wtf/HashMap.h"
 #include "public/platform/InterfaceProvider.h"
 #include "public/platform/WebCanvasCaptureHandler.h"
-#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebGestureCurve.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
 #include "public/platform/WebImageCaptureFrameGrabber.h"
@@ -65,6 +64,7 @@
 #include "public/platform/modules/serviceworker/WebServiceWorkerCacheStorage.h"
 #include "public/platform/modules/webmidi/WebMIDIAccessor.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "third_party/WebKit/Source/platform/exported/WebClipboardImpl.h"
 #include "third_party/WebKit/common/origin_trials/trial_policy.h"
 
 namespace blink {
@@ -104,8 +104,8 @@ static void MaxObservedSizeFunction(size_t size_in_mb) {
 
 static void CallOnMainThreadFunction(WTF::MainThreadFunction function,
                                      void* context) {
-  Platform::Current()->MainThread()->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE,
+  PostCrossThreadTask(
+      *Platform::Current()->MainThread()->GetWebTaskRunner(), FROM_HERE,
       CrossThreadBind(function, CrossThreadUnretained(context)));
 }
 
@@ -113,7 +113,7 @@ Platform::Platform() : main_thread_(nullptr) {
   WTF::Partitions::Initialize(MaxObservedSizeFunction);
 }
 
-Platform::~Platform() {}
+Platform::~Platform() = default;
 
 void Platform::Initialize(Platform* platform) {
   DCHECK(!g_platform);
@@ -187,7 +187,8 @@ WebTaskRunner* Platform::FileTaskRunner() const {
   return file_thread_ ? file_thread_->GetWebTaskRunner() : nullptr;
 }
 
-SingleThreadTaskRunnerRefPtr Platform::BaseFileTaskRunner() const {
+scoped_refptr<base::SingleThreadTaskRunner> Platform::BaseFileTaskRunner()
+    const {
   return file_thread_ ? file_thread_->GetSingleThreadTaskRunner() : nullptr;
 }
 
@@ -206,6 +207,11 @@ std::unique_ptr<WebMIDIAccessor> Platform::CreateMIDIAccessor(
 }
 
 std::unique_ptr<WebStorageNamespace> Platform::CreateLocalStorageNamespace() {
+  return nullptr;
+}
+
+std::unique_ptr<WebStorageNamespace> Platform::CreateSessionStorageNamespace(
+    int64_t namespace_id) {
   return nullptr;
 }
 
@@ -244,7 +250,9 @@ std::unique_ptr<WebGestureCurve> Platform::CreateFlingAnimationCurve(
 }
 
 std::unique_ptr<WebRTCPeerConnectionHandler>
-Platform::CreateRTCPeerConnectionHandler(WebRTCPeerConnectionHandlerClient*) {
+Platform::CreateRTCPeerConnectionHandler(
+    WebRTCPeerConnectionHandlerClient*,
+    scoped_refptr<base::SingleThreadTaskRunner>) {
   return nullptr;
 }
 
@@ -280,25 +288,14 @@ Platform::CreateImageCaptureFrameGrabber() {
   return nullptr;
 }
 
-std::unique_ptr<WebTrialTokenValidator> Platform::TrialTokenValidator() {
-  return std::unique_ptr<WebTrialTokenValidator>{};
-}
-std::unique_ptr<TrialPolicy> Platform::OriginTrialPolicy() {
-  return std::unique_ptr<TrialPolicy>{};
-}
-
-std::unique_ptr<WebFeaturePolicy> Platform::CreateFeaturePolicy(
-    const WebFeaturePolicy* parent_policy,
-    const WebParsedFeaturePolicy& container_policy,
-    const WebParsedFeaturePolicy& policy_header,
-    const WebSecurityOrigin&) {
+std::unique_ptr<WebTrialTokenValidator> Platform::CreateTrialTokenValidator() {
   return nullptr;
 }
 
-std::unique_ptr<WebFeaturePolicy> Platform::DuplicateFeaturePolicyWithOrigin(
-    const WebFeaturePolicy&,
-    const WebSecurityOrigin&) {
-  return nullptr;
+// TODO(slangley): Remove this once we can get pepper to use mojo directly.
+WebClipboard* Platform::Clipboard() {
+  DEFINE_STATIC_LOCAL(WebClipboardImpl, clipboard, ());
+  return &clipboard;
 }
 
 }  // namespace blink

@@ -61,13 +61,9 @@ PasswordFormMetricsRecorder::BubbleDismissalReason GetBubbleDismissalReason(
 
 PasswordFormMetricsRecorder::PasswordFormMetricsRecorder(
     bool is_main_frame_secure,
-    ukm::UkmRecorder* ukm_recorder,
-    ukm::SourceId source_id,
-    const GURL& main_frame_url)
+    ukm::SourceId source_id)
     : is_main_frame_secure_(is_main_frame_secure),
-      ukm_recorder_(ukm_recorder),
       source_id_(source_id),
-      main_frame_url_(main_frame_url),
       ukm_entry_builder_(source_id) {}
 
 PasswordFormMetricsRecorder::~PasswordFormMetricsRecorder() {
@@ -109,16 +105,31 @@ PasswordFormMetricsRecorder::~PasswordFormMetricsRecorder() {
   ukm_entry_builder_.SetUpdating_Prompt_Shown(update_prompt_shown_);
   ukm_entry_builder_.SetSaving_Prompt_Shown(save_prompt_shown_);
 
-  // TODO(crbug/755407): This shouldn't depend on UKM keeping repeated metrics.
-  for (const DetailedUserAction& action : one_time_report_user_actions_)
-    ukm_entry_builder_.SetUser_Action(static_cast<int64_t>(action));
+  for (const auto& action : detailed_user_actions_counts_) {
+    switch (action.first) {
+      case DetailedUserAction::kEditedUsernameInBubble:
+        ukm_entry_builder_.SetUser_Action_EditedUsernameInBubble(action.second);
+        break;
+      case DetailedUserAction::kSelectedDifferentPasswordInBubble:
+        ukm_entry_builder_.SetUser_Action_SelectedDifferentPasswordInBubble(
+            action.second);
+        break;
+      case DetailedUserAction::kTriggeredManualFallbackForSaving:
+        ukm_entry_builder_.SetUser_Action_TriggeredManualFallbackForSaving(
+            action.second);
+        break;
+      case DetailedUserAction::kTriggeredManualFallbackForUpdating:
+        ukm_entry_builder_.SetUser_Action_TriggeredManualFallbackForUpdating(
+            action.second);
+        break;
+      case DetailedUserAction::kCorrectedUsernameInForm:
+        ukm_entry_builder_.SetUser_Action_CorrectedUsernameInForm(
+            action.second);
+        break;
+    }
+  }
 
-  ukm_entry_builder_.Record(ukm_recorder_);
-
-  // Bind |main_frame_url_| to |source_id_| directly before sending the content
-  // of |ukm_recorder_| to ensure that the binding has not been purged already.
-  if (ukm_recorder_)
-    ukm_recorder_->UpdateSourceURL(source_id_, main_frame_url_);
+  ukm_entry_builder_.Record(ukm::UkmRecorder::Get());
 }
 
 void PasswordFormMetricsRecorder::MarkGenerationAvailable() {
@@ -204,15 +215,7 @@ int PasswordFormMetricsRecorder::GetActionsTakenNew() const {
 
 void PasswordFormMetricsRecorder::RecordDetailedUserAction(
     PasswordFormMetricsRecorder::DetailedUserAction action) {
-  // One-time actions are collected and reported during destruction of the
-  // PasswordFormMetricsRecorder.
-  if (!IsRepeatedUserAction(action)) {
-    one_time_report_user_actions_.insert(action);
-    return;
-  }
-  // Repeated actions can be reported immediately.
-  // TODO(crbug/755407): This shouldn't depend on UKM keeping repeated metrics.
-  ukm_entry_builder_.SetUser_Action(static_cast<int64_t>(action));
+  detailed_user_actions_counts_[action]++;
 }
 
 int PasswordFormMetricsRecorder::GetActionsTaken() const {
@@ -342,6 +345,7 @@ void PasswordFormMetricsRecorder::RecordPasswordBubbleShown(
     // Other reasons to show a bubble:
     case metrics_util::MANUAL_MANAGE_PASSWORDS:
     case metrics_util::AUTOMATIC_GENERATED_PASSWORD_CONFIRMATION:
+    case metrics_util::MANUAL_GENERATED_PASSWORD_CONFIRMATION:
     case metrics_util::AUTOMATIC_SIGNIN_TOAST:
       // Do nothing.
       return;
@@ -412,21 +416,6 @@ int PasswordFormMetricsRecorder::GetHistogramSampleForSuppressedAccounts(
   mixed_base_encoding += GetActionsTakenNew();
   DCHECK_LT(mixed_base_encoding, kMaxSuppressedAccountStats);
   return mixed_base_encoding;
-}
-
-// static
-bool PasswordFormMetricsRecorder::IsRepeatedUserAction(
-    DetailedUserAction action) {
-  switch (action) {
-    case DetailedUserAction::kUnknown:
-      return true;
-    case DetailedUserAction::kEditedUsernameInBubble:
-    case DetailedUserAction::kSelectedDifferentPasswordInBubble:
-    case DetailedUserAction::kCorrectedUsernameInForm:
-      return false;
-  }
-  NOTREACHED();
-  return true;
 }
 
 }  // namespace password_manager

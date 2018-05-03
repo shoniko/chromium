@@ -33,12 +33,7 @@ ContentHashReader::ContentHashReader(const std::string& extension_id,
       extension_version_(extension_version.GetString()),
       extension_root_(extension_root),
       relative_path_(relative_path),
-      key_(key),
-      status_(NOT_INITIALIZED),
-      have_verified_contents_(false),
-      have_computed_hashes_(false),
-      file_missing_from_verified_contents_(false),
-      block_size_(0) {}
+      key_(key) {}
 
 ContentHashReader::~ContentHashReader() {
 }
@@ -60,8 +55,6 @@ bool ContentHashReader::Init() {
     return false;
   }
 
-  have_verified_contents_ = true;
-
   base::FilePath computed_hashes_path =
       file_util::GetComputedHashesPath(extension_root_);
   if (!base::PathExists(computed_hashes_path))
@@ -71,7 +64,7 @@ bool ContentHashReader::Init() {
   if (!reader.InitFromFile(computed_hashes_path))
     return false;
 
-  have_computed_hashes_ = true;
+  has_content_hashes_ = true;
 
   // Extensions sometimes request resources that do not have an entry in
   // verified_contents.json. This can happen when an extension sends an XHR to a
@@ -79,7 +72,11 @@ bool ContentHashReader::Init() {
   if (!verified_contents.HasTreeHashRoot(relative_path_)) {
     // Making a request to a non-existent resource should not result in
     // content verification failure.
-    if (!base::PathExists(extension_root_.Append(relative_path_)))
+    // TODO(proberge): The relative_path_.empty() check should be moved higher
+    // in the execution flow for performance wins by saving on costly IO
+    // operations and calculations.
+    if (relative_path_.empty() ||
+        !base::PathExists(extension_root_.Append(relative_path_)))
       file_missing_from_verified_contents_ = true;
 
     return false;

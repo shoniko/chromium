@@ -15,7 +15,6 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
 #include "base/process/memory.h"
 #include "base/process/process_handle.h"
@@ -41,7 +40,6 @@
 #include "chrome/common/profiling.h"
 #include "chrome/common/profiling/memlog_allocator_shim.h"
 #include "chrome/common/profiling/memlog_stream.h"
-#include "chrome/common/switch_utils.h"
 #include "chrome/common/trace_event_args_whitelist.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/gpu/chrome_content_gpu_client.h"
@@ -50,6 +48,8 @@
 #include "components/component_updater/component_updater_paths.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/crash/content/app/crash_reporter_client.h"
+#include "components/crash/core/common/crash_key.h"
+#include "components/crash/core/common/crash_keys.h"
 #include "components/nacl/common/features.h"
 #include "components/version_info/version_info.h"
 #include "content/public/common/content_client.h"
@@ -178,7 +178,10 @@ base::LazyInstance<ChromeCrashReporterClient>::Leaky g_chrome_crash_client =
 #endif
 
 extern int NaClMain(const content::MainFunctionParams&);
+
+#if !defined(OS_CHROMEOS)
 extern int CloudPrintServiceProcessMain(const content::MainFunctionParams&);
+#endif
 
 const char* const ChromeMainDelegate::kNonWildcardDomainNonPortSchemes[] = {
     extensions::kExtensionScheme, chrome::kChromeSearchScheme};
@@ -300,7 +303,7 @@ void AdjustLinuxOOMScore(const std::string& process_type) {
 // and resources loaded.
 bool SubprocessNeedsResourceBundle(const std::string& process_type) {
   return
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_LINUX)
       // The zygote process opens the resources for the renderers.
       process_type == switches::kZygoteProcess ||
 #endif
@@ -340,7 +343,7 @@ bool HandleVersionSwitches(const base::CommandLine& command_line) {
   return false;
 }
 
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 // Show the man page if --help or -h is on the command line.
 void HandleHelpSwitches(const base::CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kHelp) ||
@@ -350,7 +353,7 @@ void HandleHelpSwitches(const base::CommandLine& command_line) {
     PLOG(FATAL) << "execlp failed";
   }
 }
-#endif
+#endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
 
 #if !defined(OS_MACOSX) && !defined(OS_ANDROID)
 void SIGTERMProfilingShutdown(int signal) {
@@ -484,7 +487,8 @@ void RecordMainStartupMetrics(base::TimeTicks exe_entry_point_ticks) {
 // from the Java side until it has initialized the JNI. See
 // ChromeMainDelegateAndroid.
 #if !defined(OS_ANDROID)
-  startup_metric_utils::RecordMainEntryPointTime(base::Time::Now());
+  startup_metric_utils::RecordMainEntryPointTime(base::Time::Now(),
+                                                 base::TimeTicks::Now());
 #endif
 }
 #endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
@@ -554,7 +558,7 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
     *exit_code = 0;
     return true;  // Got a --version switch; exit with a success error code.
   }
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // This will directly exit if the user asked for help.
   HandleHelpSwitches(command_line);
 #endif
@@ -627,16 +631,13 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
         base::DIR_HOME, homedir, true, false);
   }
 
-  // If we are recovering from a crash on ChromeOS, then we will do some
-  // recovery using the diagnostics module, and then continue on. We fake up a
-  // command line to tell it that we want it to recover, and to preserve the
-  // original command line.
-  if (command_line.HasSwitch(chromeos::switches::kLoginUser) ||
+  // If we are recovering from a crash on a ChromeOS device, then we will do
+  // some recovery using the diagnostics module, and then continue on. We fake
+  // up a command line to tell it that we want it to recover, and to preserve
+  // the original command line. Note: logging at this point is to /var/log/ui.
+  if ((base::SysInfo::IsRunningOnChromeOS() &&
+       command_line.HasSwitch(chromeos::switches::kLoginUser)) ||
       command_line.HasSwitch(switches::kDiagnosticsRecovery)) {
-    // The statistics subsystem needs get initialized soon enough for the
-    // statistics to be collected.  It's safe to call this more than once.
-    base::StatisticsRecorder::Initialize();
-
     base::CommandLine interim_command_line(command_line.GetProgram());
     const char* const kSwitchNames[] = {switches::kUserDataDir, };
     interim_command_line.CopySwitchesFrom(
@@ -769,6 +770,8 @@ void ChromeMainDelegate::PreSandboxStartup() {
       *base::CommandLine::ForCurrentProcess();
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
+
+  crash_reporter::InitializeCrashKeys();
 
 #if defined(OS_POSIX)
   crash_reporter::SetCrashReporterClient(g_chrome_crash_client.Pointer());
@@ -907,7 +910,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
     ChromeContentUtilityClient::PreSandboxStartup();
   }
 
-  chrome::InitializePDF();
+  InitializePDF();
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -968,7 +971,8 @@ int ChromeMainDelegate::RunProcess(
 // Android.
 #if !defined(OS_ANDROID)
   static const MainFunction kMainFunctions[] = {
-#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(CHROME_MULTIPLE_DLL_CHILD)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(CHROME_MULTIPLE_DLL_CHILD) && \
+    !defined(OS_CHROMEOS)
     {switches::kCloudPrintServiceProcess, CloudPrintServiceProcessMain},
 #endif
 
@@ -1032,7 +1036,7 @@ bool ChromeMainDelegate::DelaySandboxInitialization(
 #endif
   return process_type == switches::kRelauncherProcess;
 }
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
+#elif defined(OS_LINUX)
 void ChromeMainDelegate::ZygoteStarting(
     std::vector<std::unique_ptr<content::ZygoteForkDelegate>>* delegates) {
 #if defined(OS_CHROMEOS)
@@ -1064,7 +1068,7 @@ void ChromeMainDelegate::ZygoteForked() {
   crash_keys::SetCrashKeysFromCommandLine(*command_line);
 }
 
-#endif  // OS_MACOSX
+#endif  // defined(OS_LINUX)
 
 content::ContentBrowserClient*
 ChromeMainDelegate::CreateContentBrowserClient() {

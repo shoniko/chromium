@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -138,13 +137,13 @@ class ContentSubresourceFilterThrottleManagerTest
     // Make the blocking task runner run on the current task runner for the
     // tests, to ensure that the NavigationSimulator properly runs all necessary
     // tasks while waiting for throttle checks to finish.
-    dealer_handle_ = base::MakeUnique<VerifiedRulesetDealer::Handle>(
+    dealer_handle_ = std::make_unique<VerifiedRulesetDealer::Handle>(
         base::MessageLoop::current()->task_runner());
     dealer_handle_->SetRulesetFile(
         testing::TestRuleset::Open(test_ruleset_pair_.indexed));
 
     throttle_manager_ =
-        base::MakeUnique<ContentSubresourceFilterThrottleManager>(
+        std::make_unique<ContentSubresourceFilterThrottleManager>(
             this, dealer_handle_.get(),
             RenderViewHostTestHarness::web_contents());
     Observe(RenderViewHostTestHarness::web_contents());
@@ -266,7 +265,7 @@ class ContentSubresourceFilterThrottleManagerTest
         ::testing::UnitTest::GetInstance()->current_test_info()->value_param()
             ? GetParam()
             : WILL_PROCESS_RESPONSE;
-    throttles.push_back(base::MakeUnique<MockPageStateActivationThrottle>(
+    throttles.push_back(std::make_unique<MockPageStateActivationThrottle>(
         navigation_handle, state));
     throttle_manager_->MaybeAppendNavigationThrottles(navigation_handle,
                                                       &throttles);
@@ -279,14 +278,9 @@ class ContentSubresourceFilterThrottleManagerTest
   void OnFirstSubresourceLoadDisallowed() override {
     ++disallowed_notification_count_;
   }
-  bool AllowRulesetRules() override { return allow_ruleset_rules_; }
 
   ContentSubresourceFilterThrottleManager* throttle_manager() {
     return throttle_manager_.get();
-  }
-
-  void set_allow_ruleset_rules(bool allow_ruleset_rules) {
-    allow_ruleset_rules_ = allow_ruleset_rules;
   }
 
  private:
@@ -301,8 +295,6 @@ class ContentSubresourceFilterThrottleManagerTest
 
   // Incremented on every OnFirstSubresourceLoadDisallowed call.
   int disallowed_notification_count_ = 0;
-
-  bool allow_ruleset_rules_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSubresourceFilterThrottleManagerTest);
 };
@@ -721,37 +713,6 @@ TEST_F(ContentSubresourceFilterThrottleManagerTest, LogActivation) {
   // supported.
   tester.ExpectTotalCount("SubresourceFilter.PageLoad.Activation.CPUDuration",
                           base::ThreadTicks::IsSupported() ? 2 : 0);
-}
-
-// If ruleset rules are disabled, should never map the ruleset into memory.
-TEST_F(ContentSubresourceFilterThrottleManagerTest,
-       DisableRulesetRules_NoRuleset) {
-  set_allow_ruleset_rules(false);
-  NavigateAndCommitMainFrame(GURL(kTestURLWithActivation));
-  ExpectActivationSignalForFrame(main_rfh(), false /* expect_activation */);
-  EXPECT_FALSE(ManagerHasRulesetHandle());
-}
-
-TEST_F(ContentSubresourceFilterThrottleManagerTest,
-       DisableRulesAfterActivation_NoRuleset) {
-  NavigateAndCommitMainFrame(GURL(kTestURLWithActivation));
-  ExpectActivationSignalForFrame(main_rfh(), true /* expect_activation */);
-  EXPECT_TRUE(ManagerHasRulesetHandle());
-
-  // Navigate a subframe that is not filtered, but should still activate.
-  CreateSubframeWithTestNavigation(GURL("https://whitelist.com"), main_rfh());
-  SimulateStartAndExpectResult(content::NavigationThrottle::PROCEED);
-  content::RenderFrameHost* subframe1 =
-      SimulateCommitAndExpectResult(content::NavigationThrottle::PROCEED);
-  ExpectActivationSignalForFrame(subframe1, true /* expect_activation */);
-
-  // Simulate a commit of a page which should disallow ruleset rules. This
-  // should cause the subframe to detach.
-  set_allow_ruleset_rules(false);
-  content::RenderFrameHostTester::For(subframe1)->Detach();
-  NavigateAndCommitMainFrame(GURL(kTestURLWithActivation2));
-  ExpectActivationSignalForFrame(main_rfh(), false /* expect_activation */);
-  EXPECT_FALSE(ManagerHasRulesetHandle());
 }
 
 // TODO(csharrison): Make sure the following conditions are exercised in tests:

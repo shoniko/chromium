@@ -66,7 +66,6 @@ class Manager(object):
     """A class for managing running a series of layout tests."""
 
     HTTP_SUBDIR = 'http'
-    INSPECTOR_SUBDIR = 'inspector'
     PERF_SUBDIR = 'perf'
     WEBSOCKET_SUBDIR = 'websocket'
     ARCHIVED_RESULTS_LIMIT = 25
@@ -185,17 +184,16 @@ class Manager(object):
 
             self._upload_json_files()
 
-            results_path = self._filesystem.join(self._results_directory, 'results.html')
-            self._copy_results_html_file(results_path)
-            expectations_path = self._filesystem.join(self._results_directory, 'test-expectations.html')
-            self._copy_testexpectations_html_file(expectations_path)
+            self._copy_results_html_file(self._results_directory, 'results.html')
+            self._copy_results_html_file(self._results_directory, 'legacy-results.html')
             if initial_results.keyboard_interrupted:
                 exit_code = exit_codes.INTERRUPTED_EXIT_STATUS
             else:
                 if initial_results.interrupted:
                     exit_code = exit_codes.EARLY_EXIT_STATUS
                 if self._options.show_results and (exit_code or initial_results.total_failures):
-                    self._port.show_results_html_file(results_path)
+                    self._port.show_results_html_file(
+                        self._filesystem.join(self._results_directory, 'results.html'))
                 self._printer.print_results(time.time() - start_time, initial_results)
 
         return test_run_results.RunDetails(
@@ -277,9 +275,6 @@ class Manager(object):
             self._is_websocket_test(test) or
             self._port.TEST_PATH_SEPARATOR + self.HTTP_SUBDIR + self._port.TEST_PATH_SEPARATOR in test
         )
-
-    def _is_inspector_test(self, test):
-        return self.INSPECTOR_SUBDIR + self._port.TEST_PATH_SEPARATOR in test
 
     def _is_websocket_test(self, test):
         if self._port.should_use_wptserve(test):
@@ -400,8 +395,7 @@ class Manager(object):
             self._port.start_wptserve()
             self._wptserve_started = True
 
-        if self._port.requires_http_server() or any((self._is_http_test(test) or self._is_inspector_test(test))
-                                                    for test in tests_to_run):
+        if self._port.requires_http_server() or any(self._is_http_test(test) for test in tests_to_run):
             self._printer.write_update('Starting HTTP server ...')
             self._port.start_http_server(additional_dirs={}, number_of_drivers=self._options.max_locked_shards)
             self._http_server_started = True
@@ -572,19 +566,16 @@ class Manager(object):
         except IOError as err:
             _log.error('Upload failed: %s', err)
 
-    def _copy_results_html_file(self, destination_path):
-        base_dir = self._path_finder.path_from_layout_tests('fast', 'harness')
-        results_file = self._filesystem.join(base_dir, 'results.html')
-        # Note that the results.html template file won't exist when we're using a MockFileSystem during unit tests,
-        # so make sure it exists before we try to copy it.
-        if self._filesystem.exists(results_file):
-            self._filesystem.copyfile(results_file, destination_path)
-
-    def _copy_testexpectations_html_file(self, destination_path):
-        base_dir = self._path_finder.path_from_layout_tests('fast', 'harness')
-        expectations_file = self._filesystem.join(base_dir, 'test-expectations.html')
-        if self._filesystem.exists(expectations_file):
-            self._filesystem.copyfile(expectations_file, destination_path)
+    def _copy_results_html_file(self, destination_dir, filename):
+        """Copies a file from the template directory to the results directory."""
+        template_dir = self._path_finder.path_from_layout_tests('fast', 'harness')
+        source_path = self._filesystem.join(template_dir, filename)
+        destination_path = self._filesystem.join(destination_dir, filename)
+        # Note that the results.html template file won't exist when
+        # we're using a MockFileSystem during unit tests, so make sure
+        # it exists before we try to copy it.
+        if self._filesystem.exists(source_path):
+            self._filesystem.copyfile(source_path, destination_path)
 
     def _stats_trie(self, initial_results):
         def _worker_number(worker_name):

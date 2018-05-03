@@ -103,111 +103,12 @@ var testParams = [
 ];
 
 test(() => {
+  // Wrong number of arguments.
   assert_throws(new TypeError(), () => { new CSSRotation(); });
   assert_throws(new TypeError(), () => { new CSSRotation(null); });
-  // Wrong number of arguments.
   assert_throws(new TypeError(), () => {
     new CSSRotation(1, 2, new CSSUnitValue(10, 'deg'));
   });
-  // Length instead of angle.
-  assert_throws(new TypeError(), () => {
-    new CSSRotation(new CSSUnitValue(10, 'px'));
-  });
-  assert_throws(new TypeError(), () => {
-    new CSSRotation(1, 2, 3, new CSSUnitValue(10, 'px'));
-  });
 }, "Invalid arguments to constructor should throw");
-
-for (let params of testParams) {
-  test(() => {
-    assert_equals(params.input.angle.value, params.angle);
-    assert_equals(params.input.x, params.x);
-    assert_equals(params.input.y, params.y);
-    assert_equals(params.input.z, params.z);
-  }, "x, y, z and angle values are correct for " + params.cssText);
-}
-
-for (let params of testParams) {
-  test(() => {
-    assert_equals(params.input.is2D, params.is2D);
-  }, "is2D value is correct for " + params.cssText);
-}
-
-for (let params of testParams) {
-  test(() => {
-    assert_equals(params.input.toString(), params.cssText);
-  }, "toString value is correct for " + params.cssText);
-}
-
-test(() => {
-  let rotation = new CSSRotation(1, 2, 3, CSS.deg(10));
-  assert_equals(rotation.toString(), 'rotate3d(1, 2, 3, 10deg)');
-  rotation.is2D = true;
-  assert_true(rotation.is2D);
-  assert_equals(rotation.toString(), 'rotate(10deg)');
-}, "x, y, and z components are not included in toString when is2D is true");
-
-for (let params of testParams) {
-  let input = params.input;
-  test(() => {
-    var transformValue = new CSSTransformValue([input]);
-    var result = transformValue.toMatrix();
-    assert_matrix_approx_equals(result, params.asMatrix, EPSILON);
-  }, "toMatrix works for " + params.cssText + " in a CSSTransformValue");
-}
-
-test(() => {
-  // Obtained by doing the following in a console:
-  // $0.style.transform = 'rotate3d(1, 2, 3, 10rad)';
-  // getComputedStyle($0).transform
-  let expected3DMatrix = new DOMMatrixReadOnly(
-      [-0.707709, -0.173463, 0.684878, 0,
-      0.698912, -0.313623, 0.642778, 0,
-      0.103295, 0.933569, 0.343189, 0,
-      0, 0, 0, 1]);
-  let expected2DMatrix = new DOMMatrixReadOnly(
-      [Math.cos(10), Math.sin(10), -Math.sin(10), Math.cos(10), 0, 0]);
-
-  let rotation = new CSSRotation(1, 2, 3, CSS.rad(10));
-  let transformValue = new CSSTransformValue([rotation]);
-
-  assert_matrix_approx_equals(
-      transformValue.toMatrix(), expected3DMatrix, EPSILON);
-
-  rotation.is2D = true;
-
-  assert_matrix_approx_equals(
-      transformValue.toMatrix(), expected2DMatrix, EPSILON);
-}, "x, y, and z attributes have no effect on toMatrix if is2D is set to true");
-
-for (let attribute of ["x", "y", "z"]) {
-  test(() => {
-    let rotation = new CSSRotation(1, 2, 3, new CSSUnitValue(10, 'deg'));
-    assert_equals(rotation.x, 1);
-    assert_equals(rotation.y, 2);
-    assert_equals(rotation.z, 3);
-
-    rotation[attribute] = 4;
-    assert_equals(rotation[attribute], 4);
-  }, "Setting " + attribute + " with valid values");
-}
-
-test(() => {
-  let rotation = new CSSRotation(new CSSUnitValue(10, 'deg'));
-  assert_equals(rotation.angle.value, 10);
-  assert_equals(rotation.angle.unit, 'deg');
-
-  rotation.angle = new CSSUnitValue(20, 'rad');
-  assert_equals(rotation.angle.value, 20);
-  assert_equals(rotation.angle.unit, 'rad');
-}, "Setting angle with valid value");
-
-test(() => {
-  let rotation = new CSSRotation(new CSSUnitValue(10, 'deg'));
-
-  assert_throws(new TypeError(), () => {
-    rotation.angle = new CSSUnitValue(20, 'px');
-  });
-}, "Setting angle with invalid value");
 
 </script>

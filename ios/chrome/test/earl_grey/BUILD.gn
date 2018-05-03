@@ -7,6 +7,8 @@ import("//ios/chrome/test/earl_grey/chrome_ios_eg_test.gni")
 group("all_tests") {
   testonly = true
   deps = [
+    ":ios_chrome_adaptive_toolbar_egtests",
+    ":ios_chrome_bookmarks_egtests",
     ":ios_chrome_device_check_egtests",
     ":ios_chrome_external_url_egtests",
     ":ios_chrome_flaky_egtests",
@@ -24,14 +26,26 @@ group("all_tests") {
 chrome_ios_eg_test("ios_chrome_integration_egtests") {
   deps = [
     "//ios/chrome/browser/autofill:eg_tests",
+    "//ios/chrome/browser/browser_state:eg_tests",
     "//ios/chrome/browser/context_menu:eg_tests",
     "//ios/chrome/browser/device_sharing:eg_tests",
+    "//ios/chrome/browser/feature_engagement:eg_tests",
     "//ios/chrome/browser/metrics:eg_tests",
     "//ios/chrome/browser/net:eg_tests",
     "//ios/chrome/browser/ntp_tiles:eg_tests",
     "//ios/chrome/browser/passwords:eg_tests",
+    "//ios/chrome/browser/prerender:eg_tests",
   ]
 }
+
+chrome_ios_eg_test("ios_chrome_adaptive_toolbar_egtests") {
+  deps = [
+    ":test_support",
+    "//ios/chrome/browser/ui/toolbar/adaptive:eg_tests",
+  ]
+  hooks_target = "//ios/chrome/browser/ui/toolbar/adaptive:hooks"
+}
+
 chrome_ios_eg_test("ios_chrome_payments_egtests") {
   deps = [
     ":test_support",
@@ -47,6 +61,12 @@ chrome_ios_eg_test("ios_chrome_reading_list_egtests") {
   ]
 }
 
+chrome_ios_eg_test("ios_chrome_bookmarks_egtests") {
+  deps = [
+    "//ios/chrome/browser/ui/bookmarks:eg_tests",
+  ]
+}
+
 chrome_ios_eg_test("ios_chrome_settings_egtests") {
   deps = [
     "//ios/chrome/browser/ui/settings:eg_tests",
@@ -58,11 +78,12 @@ chrome_ios_eg_test("ios_chrome_ui_egtests") {
     "//ios/chrome/browser/ui:eg_tests",
     "//ios/chrome/browser/ui/activity_services:eg_tests",
     "//ios/chrome/browser/ui/alert_coordinator:eg_tests",
-    "//ios/chrome/browser/ui/bookmarks:eg_tests",
     "//ios/chrome/browser/ui/content_suggestions:eg_tests",
     "//ios/chrome/browser/ui/dialogs:eg_tests",
+    "//ios/chrome/browser/ui/download:eg_tests",
     "//ios/chrome/browser/ui/find_bar:eg_tests",
     "//ios/chrome/browser/ui/first_run:eg_tests",
+    "//ios/chrome/browser/ui/fullscreen:eg_tests",
     "//ios/chrome/browser/ui/history:eg_tests",
     "//ios/chrome/browser/ui/history_popup:eg_tests",
     "//ios/chrome/browser/ui/infobars:eg_tests",
@@ -103,6 +124,7 @@ chrome_ios_eg_test("ios_chrome_multitasking_egtests") {
     "//ios/chrome/app/application_delegate:application_delegate_internal",
 
     # Depends on all EarlGrey test suites to create multitasking tests suite.
+    ":ios_chrome_bookmarks_egtests_deps_group",
     ":ios_chrome_integration_egtests_deps_group",
     ":ios_chrome_settings_egtests_deps_group",
     ":ios_chrome_ui_egtests_deps_group",
@@ -137,6 +159,7 @@ chrome_ios_eg_test("ios_chrome_flaky_egtests") {
 
     # Depends on all EarlGrey test suites to run all the FLAKY_ tests found.
     # When adding a new test application, please follow the same pattern.
+    ":ios_chrome_bookmarks_egtests_deps_group",
     ":ios_chrome_integration_egtests_deps_group",
     ":ios_chrome_settings_egtests_deps_group",
     ":ios_chrome_ui_egtests_deps_group",
@@ -186,7 +209,7 @@ source_set("test_support") {
   deps = [
     "//base",
     "//base/test:test_support",
-    "//components/signin/core/common",
+    "//components/signin/core/browser",
     "//components/strings",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser/ui",
@@ -194,13 +217,15 @@ source_set("test_support") {
     "//ios/chrome/browser/ui/authentication:authentication_ui",
     "//ios/chrome/browser/ui/collection_view/cells",
     "//ios/chrome/browser/ui/commands:commands",
-    "//ios/chrome/browser/ui/content_suggestions:content_suggestions",
+    "//ios/chrome/browser/ui/content_suggestions:content_suggestions_ui",
     "//ios/chrome/browser/ui/omnibox:omnibox_internal",
     "//ios/chrome/browser/ui/payments:payments_ui",
     "//ios/chrome/browser/ui/settings:settings",
+    "//ios/chrome/browser/ui/settings/cells",
     "//ios/chrome/browser/ui/static_content",
-    "//ios/chrome/browser/ui/toolbar",
+    "//ios/chrome/browser/ui/toolbar/public",
     "//ios/chrome/browser/ui/tools_menu",
+    "//ios/chrome/browser/ui/tools_menu/public",
     "//ios/chrome/test/app:test_support",
     "//ios/testing:ios_test_support",
     "//ios/testing/earl_grey:earl_grey_support",

@@ -35,7 +35,6 @@ MediaControlCastButtonElement::MediaControlCastButtonElement(
     bool is_overlay_button)
     : MediaControlInputElement(media_controls, kMediaCastOnButton),
       is_overlay_button_(is_overlay_button) {
-  EnsureUserAgentShadowRoot();
   SetShadowPseudoId(is_overlay_button
                         ? "-internal-media-controls-overlay-cast-button"
                         : "-internal-media-controls-cast-button");
@@ -79,8 +78,6 @@ bool MediaControlCastButtonElement::WillRespondToMouseClickEvents() {
 
 WebLocalizedString::Name MediaControlCastButtonElement::GetOverflowStringName()
     const {
-  if (IsPlayingRemotely())
-    return WebLocalizedString::kOverflowMenuStopCast;
   return WebLocalizedString::kOverflowMenuCast;
 }
 

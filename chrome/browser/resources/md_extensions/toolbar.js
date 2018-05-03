@@ -13,17 +13,21 @@ cr.define('extensions', function() {
      */
     setProfileInDevMode(inDevMode) {}
 
-    /** Opens the dialog to load unpacked extensions. */
+    /**
+     * Opens the dialog to load unpacked extensions.
+     * @return {!Promise}
+     */
     loadUnpacked() {}
 
-    /** Updates all extensions. */
+    /**
+     * Updates all extensions.
+     * @return {!Promise}
+     */
     updateAllExtensions() {}
   }
 
   const Toolbar = Polymer({
     is: 'extensions-toolbar',
-
-    behaviors: [I18nBehavior],
 
     properties: {
       /** @type {extensions.ToolbarDelegate} */
@@ -32,32 +36,89 @@ cr.define('extensions', function() {
       inDevMode: {
         type: Boolean,
         value: false,
+        observer: 'onInDevModeChanged_',
       },
+
+      devModeControlledByPolicy: Boolean,
+
+      isSupervised: Boolean,
 
       isGuest: Boolean,
 
       // <if expr="chromeos">
       kioskEnabled: Boolean,
       // </if>
+
+      canLoadUnpacked: Boolean,
+
+      /** @private */
+      expanded_: Boolean,
     },
+
+    behaviors: [I18nBehavior],
 
     hostAttributes: {
       role: 'banner',
     },
 
-    /** @private */
-    onDevModeChange_: function() {
-      this.delegate.setProfileInDevMode(this.$['dev-mode'].checked);
+    /**
+     * @return {boolean}
+     * @private
+     */
+    shouldDisableDevMode_: function() {
+      return this.devModeControlledByPolicy || this.isSupervised;
+    },
+
+    /**
+     * @param {!CustomEvent} e
+     * @private
+     */
+    onDevModeToggleChange_: function(e) {
+      this.delegate.setProfileInDevMode(/** @type {boolean} */ (e.detail));
+      chrome.metricsPrivate.recordUserAction(
+          'Options_ToggleDeveloperMode_' + (e.detail ? 'Enabled' : 'Disabled'));
+    },
+
+    /**
+     * @param {boolean} current
+     * @param {boolean} previous
+     * @private
+     */
+    onInDevModeChanged_: function(current, previous) {
+      const drawer = this.$.devDrawer;
+      if (this.inDevMode) {
+        if (drawer.hidden) {
+          drawer.hidden = false;
+          // Requesting the offsetTop will cause a reflow (to account for
+          // hidden).
+          /** @suppress {suspiciousCode} */ drawer.offsetTop;
+        }
+      } else {
+        if (previous == undefined) {
+          drawer.hidden = true;
+          return;
+        }
+
+        listenOnce(drawer, 'transitionend', e => {
+          if (!this.inDevMode)
+            drawer.hidden = true;
+        });
+      }
+      this.expanded_ = !this.expanded_;
     },
 
     /** @private */
     onLoadUnpackedTap_: function() {
-      this.delegate.loadUnpacked();
+      this.delegate.loadUnpacked().catch(loadError => {
+        this.fire('load-error', loadError);
+      });
+      chrome.metricsPrivate.recordUserAction('Options_LoadUnpackedExtension');
     },
 
     /** @private */
     onPackTap_: function() {
       this.fire('pack-tap');
+      chrome.metricsPrivate.recordUserAction('Options_PackExtension');
     },
 
     // <if expr="chromeos">
@@ -69,7 +130,12 @@ cr.define('extensions', function() {
 
     /** @private */
     onUpdateNowTap_: function() {
-      this.delegate.updateAllExtensions();
+      this.delegate.updateAllExtensions().then(() => {
+        Polymer.IronA11yAnnouncer.requestAvailability();
+        this.fire('iron-announce', {
+          text: this.i18n('toolbarUpdateDone'),
+        });
+      });
     },
   });
 

@@ -29,8 +29,6 @@
 #define IDC_RELOAD_BYPASSING_CACHE      33007
 #define IDC_LOAD_NEW_TAB_PAGE           33008
 #define IDC_RELOAD_CLEARING_CACHE       33009
-#define IDC_BACKSPACE_BACK              33010
-#define IDC_BACKSPACE_FORWARD           33011
 
 // Window management commands
 #define IDC_NEW_WINDOW                  34000
@@ -69,7 +67,14 @@
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #define IDC_USE_SYSTEM_TITLE_BAR        34051
+#define IDC_RESTORE_WINDOW              34052
 #endif
+
+// Hosted app commands
+#define IDC_COPY_URL                    34060
+#define IDC_OPEN_IN_CHROME              34061
+#define IDC_SITE_SETTINGS               34062
+#define IDC_APP_INFO                    34063
 
 // Page-related commands
 #define IDC_BOOKMARK_PAGE               35000
@@ -83,7 +88,7 @@
 #define IDC_TRANSLATE_PAGE              35009
 #define IDC_MANAGE_PASSWORDS_FOR_PAGE   35010
 #define IDC_ROUTE_MEDIA                 35011
-#define IDC_WINDOW_MUTE_TAB             35012
+#define IDC_WINDOW_MUTE_SITE            35012
 #define IDC_WINDOW_PIN_TAB              35013
 
 // Clipboard commands
@@ -173,6 +178,7 @@
 #define IDC_TOGGLE_FULLSCREEN_TOOLBAR   40250
 #define IDC_CUSTOMIZE_TOUCH_BAR         40251
 #define IDC_SHOW_BETA_FORUM             40252
+#define IDC_TOGGLE_JAVASCRIPT_APPLE_EVENTS 40253
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -211,7 +217,6 @@
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
-#define IDC_TOUCH_HUD_PROJECTION_TOGGLE 46400     // ChromeOS only
 
 // The range of command ids reserved for context menus added by web content.
 #define IDC_CONTENT_CONTEXT_CUSTOM_FIRST 47000

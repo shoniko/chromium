@@ -31,7 +31,7 @@ class GL_EXPORT GLSurfaceOSMesa : public GLSurface {
               ColorSpace color_space,
               bool has_alpha) override;
   bool IsOffscreen() override;
-  gfx::SwapResult SwapBuffers() override;
+  gfx::SwapResult SwapBuffers(const PresentationCallback& callback) override;
   gfx::Size GetSize() override;
   void* GetHandle() override;
   GLSurfaceFormat GetFormat() override;
@@ -54,8 +54,10 @@ class GL_EXPORT GLSurfaceOSMesaHeadless : public GLSurfaceOSMesa {
  public:
   GLSurfaceOSMesaHeadless();
 
+  // GLSurfaceOSMesa overrides:
   bool IsOffscreen() override;
-  gfx::SwapResult SwapBuffers() override;
+  gfx::SwapResult SwapBuffers(const PresentationCallback& callback) override;
+  bool SupportsPresentationCallback() override;
 
  protected:
   ~GLSurfaceOSMesaHeadless() override;

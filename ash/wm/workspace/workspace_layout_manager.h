@@ -72,7 +72,8 @@ class ASH_EXPORT WorkspaceLayoutManager
   void OnWindowDestroying(aura::Window* window) override;
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override;
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override;
 
   // wm::ActivationChangeObserver overrides:
   void OnWindowActivating(ActivationReason reason,
@@ -84,7 +85,8 @@ class ASH_EXPORT WorkspaceLayoutManager
       aura::Window* lost_active) override;
 
   // keyboard::KeyboardControllerObserver overrides:
-  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
+  void OnKeyboardWorkspaceDisplacingBoundsChanging(
+      const gfx::Rect& new_bounds) override;
   void OnKeyboardClosed() override;
 
   // WindowStateObserver overrides:

@@ -12,9 +12,11 @@
 #include "core/animation/ComputedTimingProperties.h"
 #include "core/animation/EffectModel.h"
 #include "core/animation/ElementAnimation.h"
+#include "core/animation/ElementAnimations.h"
 #include "core/animation/KeyframeEffectModel.h"
 #include "core/animation/KeyframeEffectReadOnly.h"
 #include "core/animation/StringKeyframe.h"
+#include "core/animation/css/CSSAnimations.h"
 #include "core/css/CSSKeyframeRule.h"
 #include "core/css/CSSKeyframesRule.h"
 #include "core/css/CSSRuleList.h"
@@ -103,13 +105,9 @@ BuildObjectForAnimationEffect(KeyframeEffectReadOnly* effect,
   if (is_transition) {
     // Obtain keyframes and convert keyframes back to delay
     DCHECK(effect->Model()->IsKeyframeEffectModel());
-    const KeyframeEffectModelBase* model =
-        ToKeyframeEffectModelBase(effect->Model());
-    Vector<scoped_refptr<Keyframe>> keyframes =
-        KeyframeEffectModelBase::NormalizedKeyframesForInspector(
-            model->GetFrames());
+    const KeyframeVector& keyframes = effect->Model()->GetFrames();
     if (keyframes.size() == 3) {
-      delay = keyframes.at(1)->Offset() * duration;
+      delay = keyframes.at(1)->CheckedOffset() * duration;
       duration -= delay;
       easing = keyframes.at(1)->Easing().ToString();
     } else {
@@ -134,9 +132,9 @@ BuildObjectForAnimationEffect(KeyframeEffectReadOnly* effect,
 }
 
 static std::unique_ptr<protocol::Animation::KeyframeStyle>
-BuildObjectForStringKeyframe(const StringKeyframe* keyframe) {
-  Decimal decimal = Decimal::FromDouble(keyframe->Offset() * 100);
-  String offset = decimal.ToString();
+BuildObjectForStringKeyframe(const StringKeyframe* keyframe,
+                             double computed_offset) {
+  String offset = String::NumberToStringECMAScript(computed_offset * 100);
   offset.append('%');
 
   std::unique_ptr<protocol::Animation::KeyframeStyle> keyframe_object =
@@ -151,20 +149,20 @@ static std::unique_ptr<protocol::Animation::KeyframesRule>
 BuildObjectForAnimationKeyframes(const KeyframeEffectReadOnly* effect) {
   if (!effect || !effect->Model() || !effect->Model()->IsKeyframeEffectModel())
     return nullptr;
-  const KeyframeEffectModelBase* model =
-      ToKeyframeEffectModelBase(effect->Model());
-  Vector<scoped_refptr<Keyframe>> normalized_keyframes =
-      KeyframeEffectModelBase::NormalizedKeyframesForInspector(
-          model->GetFrames());
+  const KeyframeEffectModelBase* model = effect->Model();
+  Vector<double> computed_offsets =
+      KeyframeEffectModelBase::GetComputedOffsets(model->GetFrames());
   std::unique_ptr<protocol::Array<protocol::Animation::KeyframeStyle>>
       keyframes = protocol::Array<protocol::Animation::KeyframeStyle>::create();
 
-  for (const auto& keyframe : normalized_keyframes) {
+  for (size_t i = 0; i < model->GetFrames().size(); i++) {
+    const Keyframe* keyframe = model->GetFrames().at(i).get();
     // Ignore CSS Transitions
-    if (!keyframe.get()->IsStringKeyframe())
+    if (!keyframe->IsStringKeyframe())
       continue;
-    const StringKeyframe* string_keyframe = ToStringKeyframe(keyframe.get());
-    keyframes->addItem(BuildObjectForStringKeyframe(string_keyframe));
+    const StringKeyframe* string_keyframe = ToStringKeyframe(keyframe);
+    keyframes->addItem(
+        BuildObjectForStringKeyframe(string_keyframe, computed_offsets.at(i)));
   }
   return protocol::Animation::KeyframesRule::create()
       .setKeyframes(std::move(keyframes))
@@ -294,9 +292,8 @@ blink::Animation* InspectorAnimationAgent::AnimationClone(
     KeyframeEffectReadOnly* old_effect =
         ToKeyframeEffectReadOnly(animation->effect());
     DCHECK(old_effect->Model()->IsKeyframeEffectModel());
-    KeyframeEffectModelBase* old_model =
-        ToKeyframeEffectModelBase(old_effect->Model());
-    EffectModel* new_model = nullptr;
+    KeyframeEffectModelBase* old_model = old_effect->Model();
+    KeyframeEffectModelBase* new_model = nullptr;
     // Clone EffectModel.
     // TODO(samli): Determine if this is an animations bug.
     if (old_model->IsStringKeyframeEffectModel()) {
@@ -384,9 +381,8 @@ Response InspectorAnimationAgent::setTiming(const String& animation_id,
   String type = id_to_animation_type_.at(animation_id);
   if (type == AnimationType::CSSTransition) {
     KeyframeEffect* effect = ToKeyframeEffect(animation->effect());
-    KeyframeEffectModelBase* model = ToKeyframeEffectModelBase(effect->Model());
     const TransitionKeyframeEffectModel* old_model =
-        ToTransitionKeyframeEffectModel(model);
+        ToTransitionKeyframeEffectModel(effect->Model());
     // Refer to CSSAnimations::calculateTransitionUpdateForProperty() for the
     // structure of transitions.
     const KeyframeVector& frames = old_model->GetFrames();
@@ -397,7 +393,7 @@ Response InspectorAnimationAgent::setTiming(const String& animation_id,
     // Update delay, represented by the distance between the first two
     // keyframes.
     new_frames[1]->SetOffset(delay / (delay + duration));
-    model->SetFrames(new_frames);
+    effect->Model()->SetFrames(new_frames);
 
     AnimationEffectTiming* timing = effect->timing();
     UnrestrictedDoubleOrString unrestricted_duration;
@@ -441,37 +437,41 @@ Response InspectorAnimationAgent::resolveAnimation(
       script_state->GetContext(),
       ToV8(animation, script_state->GetContext()->Global(),
            script_state->GetIsolate()),
-      ToV8InspectorStringView(kAnimationObjectGroup));
+      ToV8InspectorStringView(kAnimationObjectGroup),
+      false /* generatePreview */);
   if (!*result)
     return Response::Error("Element not associated with a document.");
   return Response::OK();
 }
 
-static CSSPropertyID g_animation_properties[] = {
-    CSSPropertyAnimationDelay,          CSSPropertyAnimationDirection,
-    CSSPropertyAnimationDuration,       CSSPropertyAnimationFillMode,
-    CSSPropertyAnimationIterationCount, CSSPropertyAnimationName,
-    CSSPropertyAnimationTimingFunction};
-
-static CSSPropertyID g_transition_properties[] = {
-    CSSPropertyTransitionDelay, CSSPropertyTransitionDuration,
-    CSSPropertyTransitionProperty, CSSPropertyTransitionTimingFunction,
-};
-
 String InspectorAnimationAgent::CreateCSSId(blink::Animation& animation) {
+  static const CSSProperty* g_animation_properties[] = {
+      &GetCSSPropertyAnimationDelay(),
+      &GetCSSPropertyAnimationDirection(),
+      &GetCSSPropertyAnimationDuration(),
+      &GetCSSPropertyAnimationFillMode(),
+      &GetCSSPropertyAnimationIterationCount(),
+      &GetCSSPropertyAnimationName(),
+      &GetCSSPropertyAnimationTimingFunction(),
+  };
+  static const CSSProperty* g_transition_properties[] = {
+      &GetCSSPropertyTransitionDelay(), &GetCSSPropertyTransitionDuration(),
+      &GetCSSPropertyTransitionProperty(),
+      &GetCSSPropertyTransitionTimingFunction(),
+  };
   String type =
       id_to_animation_type_.at(String::Number(animation.SequenceNumber()));
   DCHECK_NE(type, AnimationType::WebAnimation);
 
   KeyframeEffectReadOnly* effect = ToKeyframeEffectReadOnly(animation.effect());
-  Vector<CSSPropertyID> css_properties;
+  Vector<const CSSProperty*> css_properties;
   if (type == AnimationType::CSSAnimation) {
-    for (CSSPropertyID property : g_animation_properties)
+    for (const CSSProperty* property : g_animation_properties)
       css_properties.push_back(property);
   } else {
-    for (CSSPropertyID property : g_transition_properties)
+    for (const CSSProperty* property : g_transition_properties)
       css_properties.push_back(property);
-    css_properties.push_back(cssPropertyID(animation.id()));
+    css_properties.push_back(&CSSProperty::Get(cssPropertyID(animation.id())));
   }
 
   Element* element = effect->Target();
@@ -481,14 +481,14 @@ String InspectorAnimationAgent::CreateCSSId(blink::Animation& animation) {
       CreateDigestor(kHashAlgorithmSha1);
   AddStringToDigestor(digestor.get(), type);
   AddStringToDigestor(digestor.get(), animation.id());
-  for (CSSPropertyID property : css_properties) {
+  for (const CSSProperty* property : css_properties) {
     CSSStyleDeclaration* style =
-        css_agent_->FindEffectiveDeclaration(property, styles);
+        css_agent_->FindEffectiveDeclaration(*property, styles);
     // Ignore inline styles.
     if (!style || !style->ParentStyleSheet() || !style->parentRule() ||
         style->parentRule()->type() != CSSRule::kStyleRule)
       continue;
-    AddStringToDigestor(digestor.get(), getPropertyNameString(property));
+    AddStringToDigestor(digestor.get(), property->GetPropertyNameString());
     AddStringToDigestor(digestor.get(),
                         css_agent_->StyleSheetId(style->ParentStyleSheet()));
     AddStringToDigestor(digestor.get(),

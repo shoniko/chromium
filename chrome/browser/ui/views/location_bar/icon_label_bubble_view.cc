@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 
+#include <memory>
+
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/location_bar/background_with_1_px_border.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -96,8 +98,7 @@ void IconLabelBubbleView::SeparatorView::UpdateOpacity() {
 //////////////////////////////////////////////////////////////////
 // IconLabelBubbleView class
 
-IconLabelBubbleView::IconLabelBubbleView(const gfx::FontList& font_list,
-                                         bool elide_in_middle)
+IconLabelBubbleView::IconLabelBubbleView(const gfx::FontList& font_list)
     : Button(nullptr),
       image_(new views::ImageView()),
       label_(new views::Label(base::string16(), {font_list})),
@@ -113,8 +114,6 @@ IconLabelBubbleView::IconLabelBubbleView(const gfx::FontList& font_list,
 
   label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
-  if (elide_in_middle)
-    label_->SetElideBehavior(gfx::ELIDE_MIDDLE);
   AddChildView(label_);
 
   separator_view_->SetVisible(ShouldShowLabel());
@@ -279,7 +278,7 @@ std::unique_ptr<views::InkDropRipple> IconLabelBubbleView::CreateInkDropRipple()
   center_point.SetToMax(ink_drop_container_->origin());
   center_point.SetToMin(ink_drop_container_->bounds().bottom_right());
 
-  return base::MakeUnique<views::FloodFillInkDropRipple>(
+  return std::make_unique<views::FloodFillInkDropRipple>(
       ink_drop_container_->size(), center_point, GetInkDropBaseColor(),
       ink_drop_visible_opacity());
 }

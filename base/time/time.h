@@ -15,7 +15,7 @@
 //
 // TimeTicks and ThreadTicks represent an abstract time that is most of the time
 // incrementing, for use in measuring time durations. Internally, they are
-// represented in microseconds. They can not be converted to a human-readable
+// represented in microseconds. They cannot be converted to a human-readable
 // time, but are guaranteed not to decrease (unlike the Time class). Note that
 // TimeTicks may "stand still" (e.g., if the computer is suspended), and
 // ThreadTicks will "stand still" whenever the thread has been de-scheduled by
@@ -33,11 +33,11 @@
 //
 // So many choices!  Which time class should you use?  Examples:
 //
-//   Time:        Interpreting the wall-clock time provided by a remote
-//                system. Detecting whether cached resources have
-//                expired. Providing the user with a display of the current date
-//                and time. Determining the amount of time between events across
-//                re-boots of the machine.
+//   Time:        Interpreting the wall-clock time provided by a remote system.
+//                Detecting whether cached resources have expired. Providing the
+//                user with a display of the current date and time. Determining
+//                the amount of time between events across re-boots of the
+//                machine.
 //
 //   TimeTicks:   Tracking the amount of time a task runs. Executing delayed
 //                tasks at the right time. Computing presentation timestamps.
@@ -79,10 +79,8 @@
 #endif
 
 #if defined(OS_WIN)
-// For FILETIME in FromFileTime, until it moves to a new converter class.
-// See TODO(iyengar) below.
-#include <windows.h>
 #include "base/gtest_prod_util.h"
+#include "base/win/windows_types.h"
 #endif
 
 namespace base {
@@ -106,8 +104,7 @@ BASE_EXPORT int64_t SaturatedSub(TimeDelta delta, int64_t value);
 
 class BASE_EXPORT TimeDelta {
  public:
-  TimeDelta() : delta_(0) {
-  }
+  constexpr TimeDelta() : delta_(0) {}
 
   // Converts units of time to TimeDeltas.
   static constexpr TimeDelta FromDays(int days);
@@ -360,7 +357,8 @@ class TimeBase {
   // use this and do arithmetic on it, as it is more error prone than using the
   // provided operators.
   //
-  // DEPRECATED - Do not use in new code. http://crbug.com/634507
+  // DEPRECATED - Do not use in new code. For serializing Time values, prefer
+  // Time::ToDeltaSinceWindowsEpoch().InMicroseconds(). http://crbug.com/634507
   int64_t ToInternalValue() const { return us_; }
 
   // The amount of time since the origin (or "zero") point. This is a syntactic
@@ -417,12 +415,13 @@ class TimeBase {
     return us_ >= other.us_;
   }
 
-  // Converts an integer value representing TimeClass to a class. This is used
-  // when deserializing a |TimeClass| structure, using a value known to be
+  // Converts an integer value representing TimeClass to a class. This may be
+  // used when deserializing a |TimeClass| structure, using a value known to be
   // compatible. It is not provided as a constructor because the integer type
   // may be unclear from the perspective of a caller.
   //
-  // DEPRECATED - Do not use in new code. http://crbug.com/634507
+  // DEPRECATED - Do not use in new code. For deserializing Time values, prefer
+  // Time::FromDeltaSinceWindowsEpoch(). http://crbug.com/634507
   static TimeClass FromInternalValue(int64_t us) { return TimeClass(us); }
 
  protected:
@@ -460,6 +459,33 @@ class BASE_EXPORT Time : public time_internal::TimeBase<Time> {
   static constexpr int64_t kQPCOverflowThreshold = INT64_C(0x8637BD05AF7);
 #endif
 
+// kExplodedMinYear and kExplodedMaxYear define the platform-specific limits
+// for values passed to FromUTCExploded() and FromLocalExploded(). Those
+// functions will return false if passed values outside these limits. The limits
+// are inclusive, meaning that the API should support all dates within a given
+// limit year.
+#if defined(OS_WIN)
+  static constexpr int kExplodedMinYear = 1601;
+  static constexpr int kExplodedMaxYear = 30827;
+#elif defined(OS_IOS)
+  static constexpr int kExplodedMinYear = std::numeric_limits<int>::min();
+  static constexpr int kExplodedMaxYear = std::numeric_limits<int>::max();
+#elif defined(OS_MACOSX)
+  static constexpr int kExplodedMinYear = 1902;
+  static constexpr int kExplodedMaxYear = std::numeric_limits<int>::max();
+#elif defined(OS_ANDROID)
+  // Though we use 64-bit time APIs on both 32 and 64 bit Android, some OS
+  // versions like KitKat (ARM but not x86 emulator) can't handle some early
+  // dates (e.g. before 1170). So we set min conservatively here.
+  static constexpr int kExplodedMinYear = 1902;
+  static constexpr int kExplodedMaxYear = std::numeric_limits<int>::max();
+#else
+  static constexpr int kExplodedMinYear =
+      (sizeof(time_t) == 4 ? 1902 : std::numeric_limits<int>::min());
+  static constexpr int kExplodedMaxYear =
+      (sizeof(time_t) == 4 ? 2037 : std::numeric_limits<int>::max());
+#endif
+
   // Represents an exploded time that can be formatted nicely. This is kind of
   // like the Win32 SYSTEMTIME structure or the Unix "struct tm" with a few
   // additions and changes to prevent errors.
@@ -481,8 +507,7 @@ class BASE_EXPORT Time : public time_internal::TimeBase<Time> {
   };
 
   // Contains the NULL time. Use Time::Now() to get the current time.
-  Time() : TimeBase(0) {
-  }
+  constexpr Time() : TimeBase(0) {}
 
   // Returns the time for epoch in Unix-like system (Jan 1, 1970).
   static Time UnixEpoch();
@@ -497,6 +522,20 @@ class BASE_EXPORT Time : public time_internal::TimeBase<Time> {
   // time and system time even on virtual environments including our test bot.
   // For timing sensitive unittests, this function should be used.
   static Time NowFromSystemTime();
+
+  // Converts to/from TimeDeltas relative to the Windows epoch (1601-01-01
+  // 00:00:00 UTC). Prefer these methods for opaque serialization and
+  // deserialization of time values, e.g.
+  //
+  //   // Serialization:
+  //   base::Time last_updated = ...;
+  //   SaveToDatabase(last_updated.ToDeltaSinceWindowsEpoch().InMicroseconds());
+  //
+  //   // Deserialization:
+  //   base::Time last_updated = base::Time::FromDeltaSinceWindowsEpoch(
+  //       base::TimeDelta::FromMicroseconds(LoadFromDatabase()));
+  static Time FromDeltaSinceWindowsEpoch(TimeDelta delta);
+  TimeDelta ToDeltaSinceWindowsEpoch() const;
 
   // Converts to/from time_t in UTC and a Time class.
   static Time FromTimeT(time_t tt);

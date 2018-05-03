@@ -79,8 +79,8 @@ public class CustomNotificationBuilder extends NotificationBuilderBase {
 
     private final Context mContext;
 
-    public CustomNotificationBuilder(Context context, String channelId) {
-        super(context.getResources(), channelId);
+    public CustomNotificationBuilder(Context context) {
+        super(context.getResources());
         mContext = context;
     }
 
@@ -150,6 +150,7 @@ public class CustomNotificationBuilder extends NotificationBuilderBase {
         builder.setDefaults(mDefaults);
         if (mVibratePattern != null) builder.setVibrate(mVibratePattern);
         builder.setWhen(mTimestamp);
+        builder.setShowWhen(true);
         builder.setOnlyAlertOnce(!mRenotify);
         builder.setContent(compactView);
 

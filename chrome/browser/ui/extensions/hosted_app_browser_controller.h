@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/optional.h"
+#include "chrome/browser/engagement/site_engagement_observer.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 class Browser;
@@ -19,8 +20,12 @@ class ImageSkia;
 
 namespace extensions {
 
+extern const char kPwaWindowEngagementTypeHistogram[];
+
+class Extension;
+
 // Class to encapsulate logic to control the browser UI for hosted apps.
-class HostedAppBrowserController {
+class HostedAppBrowserController : public SiteEngagementObserver {
  public:
   // Indicates whether |browser| is a hosted app browser.
   static bool IsForHostedApp(const Browser* browser);
@@ -29,7 +34,10 @@ class HostedAppBrowserController {
   static bool IsForExperimentalHostedAppBrowser(const Browser* browser);
 
   explicit HostedAppBrowserController(Browser* browser);
-  ~HostedAppBrowserController();
+  ~HostedAppBrowserController() override;
+
+  // Returns whether the associated browser is for an installed PWA window.
+  bool IsForInstalledPwa(content::WebContents* web_contents) const;
 
   // Whether the browser being controlled should be currently showing the
   // location bar.
@@ -49,8 +57,26 @@ class HostedAppBrowserController {
   // Returns the color of the title bar.
   base::Optional<SkColor> GetThemeColor() const;
 
+  // Returns the title to be displayed in the window title bar.
+  base::string16 GetTitle() const;
+
+  // Gets the short name of the app.
+  std::string GetAppShortName() const;
+
+  // Gets the domain and registry of the app start url (e.g example.com.au).
+  std::string GetDomainAndRegistry() const;
+
+  // Gets the extension for this controller.
+  const Extension* GetExtension() const;
+
+  // SiteEngagementObserver overrides.
+  void OnEngagementEvent(content::WebContents* web_contents,
+                         const GURL& url,
+                         double score,
+                         SiteEngagementService::EngagementType type) override;
+
  private:
-  Browser* browser_;
+  Browser* const browser_;
   const std::string extension_id_;
 
   DISALLOW_COPY_AND_ASSIGN(HostedAppBrowserController);

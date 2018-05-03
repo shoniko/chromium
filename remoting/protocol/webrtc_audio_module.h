@@ -62,8 +62,6 @@ class WebrtcAudioModule : public webrtc::AudioDeviceModule {
   int32_t StartRecording() override;
   int32_t StopRecording() override;
   bool Recording() const override;
-  int32_t SetAGC(bool enable) override;
-  bool AGC() const override;
   int32_t InitSpeaker() override;
   bool SpeakerIsInitialized() const override;
   int32_t InitMicrophone() override;
@@ -90,15 +88,7 @@ class WebrtcAudioModule : public webrtc::AudioDeviceModule {
   int32_t StereoRecordingIsAvailable(bool* available) const override;
   int32_t SetStereoRecording(bool enable) override;
   int32_t StereoRecording(bool* enabled) const override;
-  int32_t SetRecordingChannel(const ChannelType channel) override;
-  int32_t RecordingChannel(ChannelType* channel) const override;
   int32_t PlayoutDelay(uint16_t* delay_ms) const override;
-  int32_t SetRecordingSampleRate(const uint32_t samples_per_sec) override;
-  int32_t RecordingSampleRate(uint32_t* samples_per_sec) const override;
-  int32_t SetPlayoutSampleRate(const uint32_t samples_per_sec) override;
-  int32_t PlayoutSampleRate(uint32_t* samples_per_sec) const override;
-  int32_t SetLoudspeakerStatus(bool enable) override;
-  int32_t GetLoudspeakerStatus(bool* enabled) const override;
   bool BuiltInAECIsAvailable() const override;
   bool BuiltInAGCIsAvailable() const override;
   bool BuiltInNSIsAvailable() const override;

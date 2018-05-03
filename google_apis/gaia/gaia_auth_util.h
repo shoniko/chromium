@@ -25,13 +25,13 @@ struct ListedAccount {
   std::string email;
   std::string gaia_id;
   std::string raw_email;
-  bool valid;
-  bool signed_out;
+  bool valid = true;
+  bool signed_out = false;
+  bool verified = true;
 
   ListedAccount();
   ListedAccount(const ListedAccount& other);
   ~ListedAccount();
-  bool operator==(const ListedAccount& other) const;
 };
 
 // Perform basic canonicalization of |email_address|, taking into account that
@@ -52,7 +52,12 @@ bool AreEmailsSame(const std::string& email1, const std::string& email2);
 // Extract the domain part from the canonical form of the given email.
 std::string ExtractDomainName(const std::string& email);
 
+// Returns true if |url| matches the GAIA origin URL.
 bool IsGaiaSignonRealm(const GURL& url);
+
+// Returns true if the URL corresponds to a URL used during a Chrome sign-in
+// flow.
+bool ShouldSkipSavePasswordForGaiaURL(const GURL& url);
 
 // Parses JSON data returned by /ListAccounts call, returning a vector of
 // email/valid pairs.  An email addresses is considered valid if a passive

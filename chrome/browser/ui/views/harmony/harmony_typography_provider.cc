@@ -10,6 +10,7 @@
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/platform_font.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/views/view.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -30,10 +31,9 @@ namespace {
 // in Windows 10 still has black text, but (since the user wants high contrast)
 // the grey text shades in Harmony should not be used.
 bool ShouldIgnoreHarmonySpec(const ui::NativeTheme& theme) {
-#if defined(OS_WIN)
-  if (ui::NativeThemeWin::IsUsingHighContrastTheme())
+  if (theme.UsesHighContrastColors())
     return true;
-#endif
+
   constexpr auto kTestColorId = ui::NativeTheme::kColorId_LabelEnabledColor;
   return theme.GetSystemColor(kTestColorId) != SK_ColorBLACK;
 }
@@ -95,6 +95,7 @@ int HarmonyTypographyProvider::GetPlatformFontHeight(int font_context) {
     case views::style::CONTEXT_DIALOG_TITLE:
       return windows_10 || !direct_write_enabled ? 20 : 21;
     case CONTEXT_BODY_TEXT_LARGE:
+    case views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT:
       return direct_write_enabled ? 18 : 17;
     case CONTEXT_BODY_TEXT_SMALL:
       return windows_10 && direct_write_enabled ? 16 : 15;
@@ -129,6 +130,7 @@ const gfx::FontList& HarmonyTypographyProvider::GetFont(int context,
       size_delta = kTitleSize - gfx::PlatformFont::kDefaultBaseFontSize;
       break;
     case CONTEXT_BODY_TEXT_LARGE:
+    case views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT:
       size_delta = kBodyTextLargeSize - gfx::PlatformFont::kDefaultBaseFontSize;
       break;
     case CONTEXT_HEADLINE:
@@ -138,18 +140,34 @@ const gfx::FontList& HarmonyTypographyProvider::GetFont(int context,
       break;
   }
 
-  // Ignore |style| since it only affects color in the Harmony spec.
+  // Use a bold style for emphasized text in body contexts, and ignore |style|
+  // otherwise.
+  if (style == STYLE_EMPHASIZED) {
+    switch (context) {
+      case CONTEXT_BODY_TEXT_SMALL:
+      case CONTEXT_BODY_TEXT_LARGE:
+      case views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT:
+        font_weight = gfx::Font::Weight::BOLD;
+        break;
+
+      default:
+        break;
+    }
+  }
 
   return ui::ResourceBundle::GetSharedInstance().GetFontListWithDelta(
       size_delta, gfx::Font::NORMAL, font_weight);
 }
 
-SkColor HarmonyTypographyProvider::GetColor(
-    int context,
-    int style,
-    const ui::NativeTheme& theme) const {
-  if (ShouldIgnoreHarmonySpec(theme))
-    return GetHarmonyTextColorForNonStandardNativeTheme(context, style, theme);
+SkColor HarmonyTypographyProvider::GetColor(const views::View& view,
+                                            int context,
+                                            int style) const {
+  const ui::NativeTheme* native_theme = view.GetNativeTheme();
+  DCHECK(native_theme);
+  if (ShouldIgnoreHarmonySpec(*native_theme)) {
+    return GetHarmonyTextColorForNonStandardNativeTheme(context, style,
+                                                        *native_theme);
+  }
 
   if (context == views::style::CONTEXT_BUTTON_MD) {
     switch (style) {
@@ -160,6 +178,12 @@ SkColor HarmonyTypographyProvider::GetColor(
       default:
         return SkColorSetRGB(0x75, 0x75, 0x75);
     }
+  }
+
+  // Use the secondary style instead of primary for message box body text.
+  if (context == views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT &&
+      style == views::style::STYLE_PRIMARY) {
+    style = STYLE_SECONDARY;
   }
 
   switch (style) {
@@ -177,6 +201,7 @@ SkColor HarmonyTypographyProvider::GetColor(
     case STYLE_GREEN:
       return gfx::kGoogleGreen700;
   }
+
   return SkColorSetRGB(0x21, 0x21, 0x21);  // Primary for everything else.
 }
 
@@ -243,6 +268,7 @@ int HarmonyTypographyProvider::GetLineHeight(int context, int style) const {
     case views::style::CONTEXT_DIALOG_TITLE:
       return title_height;
     case CONTEXT_BODY_TEXT_LARGE:
+    case views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT:
     case views::style::CONTEXT_TABLE_ROW:
       return body_large_height;
     case CONTEXT_HEADLINE:

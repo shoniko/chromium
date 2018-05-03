@@ -5,6 +5,7 @@
 #include "content/browser/gpu/compositor_util.h"
 
 #include <stddef.h>
+#include <memory>
 
 #include <utility>
 
@@ -12,7 +13,6 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/numerics/ranges.h"
 #include "base/strings/string_number_conversions.h"
@@ -22,6 +22,7 @@
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "gpu/command_buffer/common/gpu_memory_buffer_support.h"
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/config/gpu_switches.h"
@@ -32,14 +33,6 @@
 namespace content {
 
 namespace {
-
-const char kGpuCompositingFeatureName[] = "gpu_compositing";
-const char kWebGLFeatureName[] = "webgl";
-const char kRasterizationFeatureName[] = "rasterization";
-const char kMultipleRasterThreadsFeatureName[] = "multiple_raster_threads";
-const char kNativeGpuMemoryBuffersFeatureName[] = "native_gpu_memory_buffers";
-const char kWebGL2FeatureName[] = "webgl2";
-const char kCheckerImagingFeatureName[] = "checker_imaging";
 
 const int kMinRasterThreads = 1;
 const int kMaxRasterThreads = 4;
@@ -63,80 +56,76 @@ const GpuFeatureData GetGpuFeatureData(size_t index, bool* eof) {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   GpuDataManagerImpl* manager = GpuDataManagerImpl::GetInstance();
+  DCHECK(manager->IsGpuFeatureInfoAvailable());
 
   const GpuFeatureData kGpuFeatureData[] = {
-    {"2d_canvas",
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS),
-     command_line.HasSwitch(switches::kDisableAccelerated2dCanvas),
-     "Accelerated 2D canvas is unavailable: either disabled via blacklist or"
-     " the command line.",
-     true},
-    {kGpuCompositingFeatureName,
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_GPU_COMPOSITING),
-     command_line.HasSwitch(switches::kDisableGpuCompositing),
-     "Gpu compositing has been disabled, either via blacklist, about:flags"
-     " or the command line. The browser will fall back to software compositing"
-     " and hardware acceleration will be unavailable.",
-     true},
-    {kWebGLFeatureName,
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL),
-     command_line.HasSwitch(switches::kDisableWebGL),
-     "WebGL has been disabled via blacklist or the command line.", false},
-    {"flash_3d", manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_FLASH3D),
-     command_line.HasSwitch(switches::kDisableFlash3d),
-     "Using 3d in flash has been disabled, either via blacklist, about:flags or"
-     " the command line.",
-     true},
-    {"flash_stage3d",
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_FLASH_STAGE3D),
-     command_line.HasSwitch(switches::kDisableFlashStage3d),
-     "Using Stage3d in Flash has been disabled, either via blacklist,"
-     " about:flags or the command line.",
-     true},
-    {"flash_stage3d_baseline",
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_FLASH_STAGE3D_BASELINE),
-     command_line.HasSwitch(switches::kDisableFlashStage3d),
-     "Using Stage3d Baseline profile in Flash has been disabled, either"
-     " via blacklist, about:flags or the command line.",
-     true},
-    {"video_decode",
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE),
-     command_line.HasSwitch(switches::kDisableAcceleratedVideoDecode),
-     "Accelerated video decode has been disabled, either via blacklist,"
-     " about:flags or the command line.",
-     true},
-#if defined(OS_CHROMEOS)
-    {"panel_fitting",
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_PANEL_FITTING),
-     command_line.HasSwitch(switches::kDisablePanelFitting),
-     "Panel fitting has been disabled, either via blacklist, about:flags or"
-     " the command line.",
-     false},
-#endif
-    {kRasterizationFeatureName,
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_GPU_RASTERIZATION),
-     (command_line.HasSwitch(switches::kDisableGpuRasterization) &&
-      !IsForceGpuRasterizationEnabled()),
-     "Accelerated rasterization has been disabled, either via blacklist,"
-     " about:flags or the command line.",
-     true},
-    {kMultipleRasterThreadsFeatureName, gpu::kGpuFeatureStatusEnabled,
-     NumberOfRendererRasterThreads() == 1, "Raster is using a single thread.",
-     false},
-    {kNativeGpuMemoryBuffersFeatureName, gpu::kGpuFeatureStatusEnabled,
-     !gpu::AreNativeGpuMemoryBuffersEnabled(),
-     "Native GpuMemoryBuffers have been disabled, either via about:flags"
-     " or command line.",
-     true},
-    {kWebGL2FeatureName,
-     manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL2),
-     (command_line.HasSwitch(switches::kDisableWebGL) ||
-      command_line.HasSwitch(switches::kDisableWebGL2)),
-     "WebGL2 has been disabled via blacklist or the command line.", false},
-    {kCheckerImagingFeatureName, gpu::kGpuFeatureStatusEnabled,
-     !IsCheckerImagingEnabled(),
-     "Checker-imaging has been disabled via finch trial or the command line.",
-     false},
+      {"2d_canvas",
+       manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS),
+       command_line.HasSwitch(switches::kDisableAccelerated2dCanvas),
+       "Accelerated 2D canvas is unavailable: either disabled via blacklist or"
+       " the command line.",
+       true},
+      {"gpu_compositing",
+       manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_GPU_COMPOSITING),
+       command_line.HasSwitch(switches::kDisableGpuCompositing),
+       "Gpu compositing has been disabled, either via blacklist, about:flags"
+       " or the command line. The browser will fall back to software "
+       "compositing"
+       " and hardware acceleration will be unavailable.",
+       true},
+      {"webgl",
+       manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL),
+       command_line.HasSwitch(switches::kDisableWebGL),
+       "WebGL has been disabled via blacklist or the command line.", false},
+      {"flash_3d", manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_FLASH3D),
+       command_line.HasSwitch(switches::kDisableFlash3d),
+       "Using 3d in flash has been disabled, either via blacklist, about:flags "
+       "or"
+       " the command line.",
+       true},
+      {"flash_stage3d",
+       manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_FLASH_STAGE3D),
+       command_line.HasSwitch(switches::kDisableFlashStage3d),
+       "Using Stage3d in Flash has been disabled, either via blacklist,"
+       " about:flags or the command line.",
+       true},
+      {"flash_stage3d_baseline",
+       manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_FLASH_STAGE3D_BASELINE),
+       command_line.HasSwitch(switches::kDisableFlashStage3d),
+       "Using Stage3d Baseline profile in Flash has been disabled, either"
+       " via blacklist, about:flags or the command line.",
+       true},
+      {"video_decode",
+       manager->GetFeatureStatus(
+           gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE),
+       command_line.HasSwitch(switches::kDisableAcceleratedVideoDecode),
+       "Accelerated video decode has been disabled, either via blacklist,"
+       " about:flags or the command line.",
+       true},
+      {"rasterization",
+       manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_GPU_RASTERIZATION),
+       (command_line.HasSwitch(switches::kDisableGpuRasterization) &&
+        !IsForceGpuRasterizationEnabled()),
+       "Accelerated rasterization has been disabled, either via blacklist,"
+       " about:flags or the command line.",
+       true},
+      {"multiple_raster_threads", gpu::kGpuFeatureStatusEnabled,
+       NumberOfRendererRasterThreads() == 1, "Raster is using a single thread.",
+       false},
+      {"native_gpu_memory_buffers", gpu::kGpuFeatureStatusEnabled,
+       !gpu::AreNativeGpuMemoryBuffersEnabled(),
+       "Native GpuMemoryBuffers have been disabled, either via about:flags"
+       " or command line.",
+       true},
+      {"webgl2",
+       manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL2),
+       (command_line.HasSwitch(switches::kDisableWebGL) ||
+        command_line.HasSwitch(switches::kDisableWebGL2)),
+       "WebGL2 has been disabled via blacklist or the command line.", false},
+      {"checker_imaging", gpu::kGpuFeatureStatusEnabled,
+       !IsCheckerImagingEnabled(),
+       "Checker-imaging has been disabled via finch trial or the command line.",
+       false},
   };
   DCHECK(index < arraysize(kGpuFeatureData));
   *eof = (index == arraysize(kGpuFeatureData) - 1);
@@ -270,17 +259,6 @@ bool IsCheckerImagingEnabled() {
   return false;
 }
 
-bool IsGpuAsyncWorkerContextEnabled() {
-  if (!base::FeatureList::IsEnabled(features::kGpuScheduler))
-    return false;
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableGpuAsyncWorkerContext))
-    return false;
-
-  return true;
-}
-
 bool IsCompositorImageAnimationEnabled() {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableCompositorImageAnimations))
@@ -298,13 +276,14 @@ std::unique_ptr<base::DictionaryValue> GetFeatureStatus() {
   bool gpu_access_blocked =
       !manager->GpuAccessAllowed(&gpu_access_blocked_reason);
 
-  auto feature_status_dict = base::MakeUnique<base::DictionaryValue>();
+  auto feature_status_dict = std::make_unique<base::DictionaryValue>();
 
   bool eof = false;
   for (size_t i = 0; !eof; ++i) {
     const GpuFeatureData gpu_feature_data = GetGpuFeatureData(i, &eof);
     std::string status;
-    if (gpu_feature_data.disabled || gpu_access_blocked) {
+    if (gpu_feature_data.disabled || gpu_access_blocked ||
+        gpu_feature_data.status == gpu::kGpuFeatureStatusDisabled) {
       status = "disabled";
       if (gpu_feature_data.fallback_to_software)
         status += "_software";
@@ -316,25 +295,23 @@ std::unique_ptr<base::DictionaryValue> GetFeatureStatus() {
       status = "unavailable_software";
     } else {
       status = "enabled";
-      if ((gpu_feature_data.name == kWebGLFeatureName ||
-           gpu_feature_data.name == kWebGL2FeatureName) &&
+      if ((gpu_feature_data.name == "webgl" ||
+           gpu_feature_data.name == "webgl2") &&
           (manager->GetFeatureStatus(gpu::GPU_FEATURE_TYPE_GPU_COMPOSITING) !=
-           gpu::kGpuFeatureStatusEnabled)) {
+           gpu::kGpuFeatureStatusEnabled))
         status += "_readback";
-      }
-      if (gpu_feature_data.name == kRasterizationFeatureName) {
+      if (gpu_feature_data.name == "rasterization") {
         if (IsForceGpuRasterizationEnabled())
           status += "_force";
       }
-      if (gpu_feature_data.name == kMultipleRasterThreadsFeatureName) {
+      if (gpu_feature_data.name == "multiple_raster_threads") {
         const base::CommandLine& command_line =
             *base::CommandLine::ForCurrentProcess();
         if (command_line.HasSwitch(switches::kNumRasterThreads))
           status += "_force";
-      }
-      if (gpu_feature_data.name == kMultipleRasterThreadsFeatureName)
         status += "_on";
-      if (gpu_feature_data.name == kCheckerImagingFeatureName) {
+      }
+      if (gpu_feature_data.name == "checker_imaging") {
         const base::CommandLine& command_line =
             *base::CommandLine::ForCurrentProcess();
         if (command_line.HasSwitch(cc::switches::kEnableCheckerImaging))
@@ -353,15 +330,15 @@ std::unique_ptr<base::ListValue> GetProblems() {
   bool gpu_access_blocked =
       !manager->GpuAccessAllowed(&gpu_access_blocked_reason);
 
-  auto problem_list = base::MakeUnique<base::ListValue>();
+  auto problem_list = std::make_unique<base::ListValue>();
   manager->GetBlacklistReasons(problem_list.get());
 
   if (gpu_access_blocked) {
-    auto problem = base::MakeUnique<base::DictionaryValue>();
+    auto problem = std::make_unique<base::DictionaryValue>();
     problem->SetString("description",
         "GPU process was unable to boot: " + gpu_access_blocked_reason);
-    problem->Set("crBugs", base::MakeUnique<base::ListValue>());
-    auto disabled_features = base::MakeUnique<base::ListValue>();
+    problem->Set("crBugs", std::make_unique<base::ListValue>());
+    auto disabled_features = std::make_unique<base::ListValue>();
     disabled_features->AppendString("all");
     problem->Set("affectedGpuSettings", std::move(disabled_features));
     problem->SetString("tag", "disabledFeatures");
@@ -372,10 +349,10 @@ std::unique_ptr<base::ListValue> GetProblems() {
   for (size_t i = 0; !eof; ++i) {
     const GpuFeatureData gpu_feature_data = GetGpuFeatureData(i, &eof);
     if (gpu_feature_data.disabled) {
-      auto problem = base::MakeUnique<base::DictionaryValue>();
+      auto problem = std::make_unique<base::DictionaryValue>();
       problem->SetString("description", gpu_feature_data.disabled_description);
-      problem->Set("crBugs", base::MakeUnique<base::ListValue>());
-      auto disabled_features = base::MakeUnique<base::ListValue>();
+      problem->Set("crBugs", std::make_unique<base::ListValue>());
+      auto disabled_features = std::make_unique<base::ListValue>();
       disabled_features->AppendString(gpu_feature_data.name);
       problem->Set("affectedGpuSettings", std::move(disabled_features));
       problem->SetString("tag", "disabledFeatures");
@@ -389,8 +366,9 @@ std::vector<std::string> GetDriverBugWorkarounds() {
   return GpuDataManagerImpl::GetInstance()->GetDriverBugWorkarounds();
 }
 
-viz::BufferToTextureTargetMap CreateBufferToTextureTargetMap() {
-  viz::BufferToTextureTargetMap image_targets;
+std::vector<gfx::BufferUsageAndFormat>
+CreateBufferUsageAndFormatExceptionList() {
+  std::vector<gfx::BufferUsageAndFormat> usage_format_list;
   for (int usage_idx = 0; usage_idx <= static_cast<int>(gfx::BufferUsage::LAST);
        ++usage_idx) {
     gfx::BufferUsage usage = static_cast<gfx::BufferUsage>(usage_idx);
@@ -398,11 +376,11 @@ viz::BufferToTextureTargetMap CreateBufferToTextureTargetMap() {
          format_idx <= static_cast<int>(gfx::BufferFormat::LAST);
          ++format_idx) {
       gfx::BufferFormat format = static_cast<gfx::BufferFormat>(format_idx);
-      uint32_t target = gpu::GetImageTextureTarget(format, usage);
-      image_targets[std::make_pair(usage, format)] = target;
+      if (gpu::GetImageNeedsPlatformSpecificTextureTarget(format, usage))
+        usage_format_list.push_back(gfx::BufferUsageAndFormat(usage, format));
     }
   }
-  return image_targets;
+  return usage_format_list;
 }
 
 }  // namespace content

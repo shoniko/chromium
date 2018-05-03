@@ -71,7 +71,8 @@ class ServerWindow : public viz::HostFrameSinkClient {
       gfx::AcceleratedWidget widget,
       viz::mojom::CompositorFrameSinkAssociatedRequest sink_request,
       viz::mojom::CompositorFrameSinkClientPtr client,
-      viz::mojom::DisplayPrivateAssociatedRequest display_request);
+      viz::mojom::DisplayPrivateAssociatedRequest display_request,
+      viz::mojom::DisplayClientPtr display_client);
 
   void CreateCompositorFrameSink(
       viz::mojom::CompositorFrameSinkRequest request,
@@ -80,13 +81,21 @@ class ServerWindow : public viz::HostFrameSinkClient {
   const WindowId& id() const { return id_; }
 
   const viz::FrameSinkId& frame_sink_id() const { return frame_sink_id_; }
+  void UpdateFrameSinkId(const viz::FrameSinkId& frame_sink_id);
 
   const base::Optional<viz::LocalSurfaceId>& current_local_surface_id() const {
     return current_local_surface_id_;
   }
 
+  // Add the child to this window.
   void Add(ServerWindow* child);
+
+  // Removes the child window, but does not delete it.
   void Remove(ServerWindow* child);
+
+  // Removes all child windows from this window, but does not delete them.
+  void RemoveAllChildren();
+
   void Reorder(ServerWindow* relative, mojom::OrderDirection diretion);
   void StackChildAtBottom(ServerWindow* child);
   void StackChildAtTop(ServerWindow* child);
@@ -240,6 +249,7 @@ class ServerWindow : public viz::HostFrameSinkClient {
  private:
   // viz::HostFrameSinkClient implementation.
   void OnFirstSurfaceActivation(const viz::SurfaceInfo& surface_info) override;
+  void OnFrameTokenChanged(uint32_t frame_token) override;
 
   // Implementation of removing a window. Doesn't send any notification.
   void RemoveImpl(ServerWindow* window);
@@ -249,7 +259,8 @@ class ServerWindow : public viz::HostFrameSinkClient {
 
   ServerWindowDelegate* const delegate_;
   const WindowId id_;
-  const viz::FrameSinkId frame_sink_id_;
+  // This may change for embed windows.
+  viz::FrameSinkId frame_sink_id_;
   base::Optional<viz::LocalSurfaceId> current_local_surface_id_;
 
   ServerWindow* parent_;

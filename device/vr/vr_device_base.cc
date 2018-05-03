@@ -46,6 +46,10 @@ void VRDeviceBase::OnExitPresent() {
   SetPresentingDisplay(nullptr);
 }
 
+bool VRDeviceBase::IsFallbackDevice() {
+  return false;
+};
+
 mojom::VRDisplayInfoPtr VRDeviceBase::GetVRDisplayInfo() {
   DCHECK(display_info_);
   return display_info_.Clone();
@@ -55,17 +59,27 @@ void VRDeviceBase::RequestPresent(
     VRDisplayImpl* display,
     mojom::VRSubmitFrameClientPtr submit_client,
     mojom::VRPresentationProviderRequest request,
+    mojom::VRRequestPresentOptionsPtr present_options,
     mojom::VRDisplayHost::RequestPresentCallback callback) {
-  std::move(callback).Run(false);
+  std::move(callback).Run(false, nullptr);
 }
 
 void VRDeviceBase::ExitPresent() {
   NOTREACHED();
 }
 
-void VRDeviceBase::GetPose(
+void VRDeviceBase::SetMagicWindowEnabled(bool enabled) {
+  magic_window_enabled_ = enabled;
+}
+
+void VRDeviceBase::GetMagicWindowPose(
     mojom::VRMagicWindowProvider::GetPoseCallback callback) {
-  std::move(callback).Run(nullptr);
+  if (!magic_window_enabled_) {
+    std::move(callback).Run(nullptr);
+    return;
+  }
+
+  OnMagicWindowPoseRequest(std::move(callback));
 }
 
 void VRDeviceBase::AddDisplay(VRDisplayImpl* display) {
@@ -131,6 +145,11 @@ void VRDeviceBase::OnActivate(mojom::VRDisplayEventReason reason,
 }
 
 void VRDeviceBase::OnListeningForActivate(bool listening) {}
+
+void VRDeviceBase::OnMagicWindowPoseRequest(
+    mojom::VRMagicWindowProvider::GetPoseCallback callback) {
+  std::move(callback).Run(nullptr);
+}
 
 void VRDeviceBase::UpdateListeningForActivate(VRDisplayImpl* display) {
   if (display->ListeningForActivate() && display->InFocusedFrame()) {

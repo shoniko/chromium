@@ -24,18 +24,18 @@ class CORE_EXPORT ThreadedWorkletMessagingProxy
   void FetchAndInvokeScript(
       const KURL& module_url_record,
       WorkletModuleResponsesMap*,
-      WebURLRequest::FetchCredentialsMode,
+      network::mojom::FetchCredentialsMode,
       scoped_refptr<WebTaskRunner> outside_settings_task_runner,
       WorkletPendingTasks*) final;
   void WorkletObjectDestroyed() final;
   void TerminateWorkletGlobalScope() final;
 
-  void Initialize();
+  void Initialize(WorkerClients*);
 
   void Trace(blink::Visitor*) override;
 
  protected:
-  ThreadedWorkletMessagingProxy(ExecutionContext*, WorkerClients*);
+  explicit ThreadedWorkletMessagingProxy(ExecutionContext*);
 
   ThreadedWorkletObjectProxy& WorkletObjectProxy();
 

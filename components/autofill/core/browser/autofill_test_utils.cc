@@ -11,6 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "components/autofill/core/browser/autofill_external_delegate.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
@@ -27,8 +28,9 @@
 #include "components/prefs/testing_pref_store.h"
 #include "components/signin/core/browser/account_fetcher_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/geometry/rect.h"
 
 using base::ASCIIToUTF16;
 
@@ -132,6 +134,8 @@ void CreateTestAddressFormData(FormData* form,
   form->name = ASCIIToUTF16("MyForm");
   form->origin = GURL("http://myform.com/form.html");
   form->action = GURL("http://myform.com/submit.html");
+  form->main_frame_origin =
+      url::Origin::Create(GURL("https://myform_root.com/form.html"));
   types->clear();
 
   FormFieldData field;
@@ -199,11 +203,19 @@ inline void check_and_set(
     profile->SetRawInfo(type, base::UTF8ToUTF16(value));
 }
 
-AutofillProfile GetFullValidProfile() {
+AutofillProfile GetFullValidProfileForCanada() {
   AutofillProfile profile(base::GenerateGUID(), "http://www.example.com/");
   SetProfileInfo(&profile, "Alice", "", "Wonderland", "alice@wonderland.ca",
                  "Fiction", "666 Notre-Dame Ouest", "Apt 8", "Montreal", "QC",
                  "H3B 2T9", "CA", "15141112233");
+  return profile;
+}
+
+AutofillProfile GetFullValidProfileForChina() {
+  AutofillProfile profile(base::GenerateGUID(), "http://www.example.com/");
+  SetProfileInfo(&profile, "John", "H.", "Doe", "johndoe@google.cn", "Google",
+                 "100 Century Avenue", "", "赫章县", "毕节地区", "贵州省",
+                 "200120", "CN", "+86-21-6133-7666");
   return profile;
 }
 
@@ -352,11 +364,47 @@ CreditCard GetRandomCreditCard(CreditCard::RecordType record_type) {
 }
 
 void SetProfileInfo(AutofillProfile* profile,
-    const char* first_name, const char* middle_name,
-    const char* last_name, const char* email, const char* company,
-    const char* address1, const char* address2, const char* city,
-    const char* state, const char* zipcode, const char* country,
-    const char* phone) {
+                    const char* first_name,
+                    const char* middle_name,
+                    const char* last_name,
+                    const char* email,
+                    const char* company,
+                    const char* address1,
+                    const char* address2,
+                    const char* dependent_locality,
+                    const char* city,
+                    const char* state,
+                    const char* zipcode,
+                    const char* country,
+                    const char* phone) {
+  check_and_set(profile, NAME_FIRST, first_name);
+  check_and_set(profile, NAME_MIDDLE, middle_name);
+  check_and_set(profile, NAME_LAST, last_name);
+  check_and_set(profile, EMAIL_ADDRESS, email);
+  check_and_set(profile, COMPANY_NAME, company);
+  check_and_set(profile, ADDRESS_HOME_LINE1, address1);
+  check_and_set(profile, ADDRESS_HOME_LINE2, address2);
+  check_and_set(profile, ADDRESS_HOME_DEPENDENT_LOCALITY, dependent_locality);
+  check_and_set(profile, ADDRESS_HOME_CITY, city);
+  check_and_set(profile, ADDRESS_HOME_STATE, state);
+  check_and_set(profile, ADDRESS_HOME_ZIP, zipcode);
+  check_and_set(profile, ADDRESS_HOME_COUNTRY, country);
+  check_and_set(profile, PHONE_HOME_WHOLE_NUMBER, phone);
+}
+
+void SetProfileInfo(AutofillProfile* profile,
+                    const char* first_name,
+                    const char* middle_name,
+                    const char* last_name,
+                    const char* email,
+                    const char* company,
+                    const char* address1,
+                    const char* address2,
+                    const char* city,
+                    const char* state,
+                    const char* zipcode,
+                    const char* country,
+                    const char* phone) {
   check_and_set(profile, NAME_FIRST, first_name);
   check_and_set(profile, NAME_MIDDLE, middle_name);
   check_and_set(profile, NAME_LAST, last_name);
@@ -448,6 +496,21 @@ void FillQueryField(AutofillQueryContents::Form::Field* field,
     field->set_name(name);
   if (control_type)
     field->set_type(control_type);
+}
+
+void GenerateTestAutofillPopup(
+    AutofillExternalDelegate* autofill_external_delegate) {
+  int query_id = 1;
+  FormData form;
+  FormFieldData field;
+  field.is_focusable = true;
+  field.should_autocomplete = true;
+  gfx::RectF bounds(100.f, 100.f);
+  autofill_external_delegate->OnQuery(query_id, form, field, bounds);
+
+  std::vector<Suggestion> suggestions;
+  suggestions.push_back(Suggestion());
+  autofill_external_delegate->OnSuggestionsReturned(query_id, suggestions);
 }
 
 }  // namespace test

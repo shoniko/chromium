@@ -29,11 +29,10 @@
 
 #include "core/fullscreen/Fullscreen.h"
 
+#include "base/macros.h"
 #include "core/css/StyleEngine.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
-#include "core/dom/TaskRunnerHelper.h"
-#include "core/dom/UserGestureIndicator.h"
 #include "core/dom/events/Event.h"
 #include "core/frame/HostsUsingFeatures.h"
 #include "core/frame/LocalFrame.h"
@@ -46,12 +45,12 @@
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutFullScreen.h"
-#include "core/layout/api/LayoutFullScreenItem.h"
 #include "core/page/ChromeClient.h"
 #include "core/svg/SVGSVGElement.h"
 #include "platform/ScopedOrientationChangeIndicator.h"
 #include "platform/bindings/Microtask.h"
 #include "platform/feature_policy/FeaturePolicy.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -66,7 +65,7 @@ bool AllowedToUseFullscreen(const Frame* frame) {
   if (!frame)
     return false;
 
-  if (!IsSupportedInFeaturePolicy(WebFeaturePolicyFeature::kFullscreen)) {
+  if (!IsSupportedInFeaturePolicy(FeaturePolicyFeature::kFullscreen)) {
     // 2. If |document|'s browsing context is a top-level browsing context, then
     // return true.
     if (frame->IsMainFrame())
@@ -85,7 +84,7 @@ bool AllowedToUseFullscreen(const Frame* frame) {
 
   // 2. If Feature Policy is enabled, return the policy for "fullscreen"
   // feature.
-  return frame->IsFeatureEnabled(WebFeaturePolicyFeature::kFullscreen);
+  return frame->IsFeatureEnabled(FeaturePolicyFeature::kFullscreen);
 }
 
 bool AllowedToRequestFullscreen(Document& document) {
@@ -93,7 +92,7 @@ bool AllowedToRequestFullscreen(Document& document) {
   // true:
 
   //  The algorithm is triggered by a user activation.
-  if (UserGestureIndicator::ProcessingUserGesture())
+  if (Frame::HasTransientUserActivation(document.GetFrame()))
     return true;
 
   //  The algorithm is triggered by a user generated orientation change.
@@ -194,7 +193,6 @@ bool RequestFullscreenConditionsMet(Element& pending, Document& document) {
 // deferring changes in |DidEnterFullscreen()|.
 class RequestFullscreenScope {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(RequestFullscreenScope);
 
  public:
   RequestFullscreenScope() {
@@ -211,6 +209,7 @@ class RequestFullscreenScope {
 
  private:
   static bool running_request_fullscreen_;
+  DISALLOW_COPY_AND_ASSIGN(RequestFullscreenScope);
 };
 
 bool RequestFullscreenScope::running_request_fullscreen_ = false;
@@ -411,7 +410,7 @@ Fullscreen::Fullscreen(Document& document)
   document.SetHasFullscreenSupplement();
 }
 
-Fullscreen::~Fullscreen() {}
+Fullscreen::~Fullscreen() = default;
 
 Document* Fullscreen::GetDocument() {
   return ToDocument(LifecycleContext());
@@ -899,10 +898,21 @@ void Fullscreen::FullscreenElementChanged(Element* old_element,
       if (LocalFrameView* frame_view = frame->View())
         frame_view->SetNeedsPaintPropertyUpdate();
     }
+
+    // Descendant frames may have been inert because their owner iframes were
+    // outside of fullscreen element. SetIsInert recurses through subframes to
+    // propagate the inert bit as needed.
+    frame->SetIsInert(GetDocument()->LocalOwner() &&
+                      GetDocument()->LocalOwner()->IsInert());
   }
 
   // TODO(foolip): This should not call |UpdateStyleAndLayoutTree()|.
   GetDocument()->UpdateStyleAndLayoutTree();
+
+  // Any element not contained by the fullscreen element is inert (see
+  // |Node::IsInert()|), so changing the fullscreen element will typically
+  // change the inertness of most elements. Clear the entire cache.
+  GetDocument()->ClearAXObjectCache();
 }
 
 void Fullscreen::Trace(blink::Visitor* visitor) {

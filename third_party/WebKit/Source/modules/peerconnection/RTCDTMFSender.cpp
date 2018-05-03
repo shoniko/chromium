@@ -26,14 +26,15 @@
 #include "modules/peerconnection/RTCDTMFSender.h"
 
 #include <memory>
+
+#include "base/memory/ptr_util.h"
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "modules/mediastream/MediaStreamTrack.h"
 #include "modules/peerconnection/RTCDTMFToneChangeEvent.h"
-#include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebMediaStreamTrack.h"
 #include "public/platform/WebRTCDTMFSenderHandler.h"
 #include "public/platform/WebRTCPeerConnectionHandler.h"
@@ -51,7 +52,7 @@ RTCDTMFSender* RTCDTMFSender::Create(
     WebRTCPeerConnectionHandler* peer_connection_handler,
     MediaStreamTrack* track,
     ExceptionState& exception_state) {
-  std::unique_ptr<WebRTCDTMFSenderHandler> handler = WTF::WrapUnique(
+  std::unique_ptr<WebRTCDTMFSenderHandler> handler = base::WrapUnique(
       peer_connection_handler->CreateDTMFSender(track->Component()));
   if (!handler) {
     exception_state.ThrowDOMException(kNotSupportedError,
@@ -73,14 +74,13 @@ RTCDTMFSender::RTCDTMFSender(ExecutionContext* context,
       inter_tone_gap_(kDefaultInterToneGapMs),
       handler_(std::move(handler)),
       stopped_(false),
-      scheduled_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kNetworking, context),
-          this,
-          &RTCDTMFSender::ScheduledEventTimerFired) {
+      scheduled_event_timer_(context->GetTaskRunner(TaskType::kNetworking),
+                             this,
+                             &RTCDTMFSender::ScheduledEventTimerFired) {
   handler_->SetClient(this);
 }
 
-RTCDTMFSender::~RTCDTMFSender() {}
+RTCDTMFSender::~RTCDTMFSender() = default;
 
 void RTCDTMFSender::Dispose() {
   // Promptly clears a raw reference from content/ to an on-heap object
@@ -170,7 +170,7 @@ void RTCDTMFSender::ScheduleDispatchEvent(Event* event) {
   scheduled_events_.push_back(event);
 
   if (!scheduled_event_timer_.IsActive())
-    scheduled_event_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    scheduled_event_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void RTCDTMFSender::ScheduledEventTimerFired(TimerBase*) {

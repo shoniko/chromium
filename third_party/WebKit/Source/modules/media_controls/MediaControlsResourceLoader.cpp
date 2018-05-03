@@ -28,7 +28,7 @@ namespace blink {
 MediaControlsResourceLoader::MediaControlsResourceLoader()
     : UAStyleSheetLoader() {}
 
-MediaControlsResourceLoader::~MediaControlsResourceLoader() {}
+MediaControlsResourceLoader::~MediaControlsResourceLoader() = default;
 
 // Official Android builds that have enable_resource_whitelist_generation
 // turned on will fail to compile due to an unknown-pragmas warning. In
@@ -54,10 +54,28 @@ String MediaControlsResourceLoader::GetMediaControlsAndroidCSS() const {
       IDR_UASTYLE_LEGACY_MEDIA_CONTROLS_ANDROID_CSS);
 };
 
-// static.
+// static
 String MediaControlsResourceLoader::GetShadowTimelineStyleSheet() {
   return ResourceBundleHelper::UncompressResourceAsString(
       IDR_SHADOWSTYLE_MODERN_MEDIA_CONTROLS_TIMELINE_CSS);
+};
+
+// static
+String MediaControlsResourceLoader::GetShadowLoadingStyleSheet() {
+  return ResourceBundleHelper::UncompressResourceAsString(
+      IDR_SHADOWSTYLE_MODERN_MEDIA_CONTROLS_LOADING_CSS);
+};
+
+// static
+String MediaControlsResourceLoader::GetJumpSVGImage() {
+  return ResourceBundleHelper::UncompressResourceAsString(
+      IDR_MODERN_MEDIA_CONTROLS_JUMP_SVG);
+};
+
+// static
+String MediaControlsResourceLoader::GetOverlayPlayStyleSheet() {
+  return ResourceBundleHelper::UncompressResourceAsString(
+      IDR_SHADOWSTYLE_MODERN_MEDIA_CONTROLS_OVERLAY_PLAY_CSS);
 };
 // Re-enable the warnings.
 #if defined(OS_WIN)

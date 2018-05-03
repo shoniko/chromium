@@ -61,42 +61,43 @@ std::string GetDefaultPrinterAsync() {
 
 }  // namespace
 
-LocalPrinterHandlerDefault::LocalPrinterHandlerDefault() {}
+LocalPrinterHandlerDefault::LocalPrinterHandlerDefault(
+    content::WebContents* preview_web_contents)
+    : preview_web_contents_(preview_web_contents) {}
 
 LocalPrinterHandlerDefault::~LocalPrinterHandlerDefault() {}
 
 void LocalPrinterHandlerDefault::Reset() {}
 
-void LocalPrinterHandlerDefault::GetDefaultPrinter(
-    const DefaultPrinterCallback& cb) {
+void LocalPrinterHandlerDefault::GetDefaultPrinter(DefaultPrinterCallback cb) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
-      base::Bind(&GetDefaultPrinterAsync), cb);
+      base::BindOnce(&GetDefaultPrinterAsync), std::move(cb));
 }
 
 void LocalPrinterHandlerDefault::StartGetPrinters(
     const AddedPrintersCallback& callback,
-    const GetPrintersDoneCallback& done_callback) {
+    GetPrintersDoneCallback done_callback) {
   VLOG(1) << "Enumerate printers start";
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
-      base::Bind(&EnumeratePrintersAsync),
-      base::Bind(&printing::ConvertPrinterListForCallback, callback,
-                 done_callback));
+      base::BindOnce(&EnumeratePrintersAsync),
+      base::BindOnce(&printing::ConvertPrinterListForCallback, callback,
+                     std::move(done_callback)));
 }
 
 void LocalPrinterHandlerDefault::StartGetCapability(
     const std::string& device_name,
-    const GetCapabilityCallback& cb) {
+    GetCapabilityCallback cb) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
-      base::Bind(&FetchCapabilitiesAsync, device_name), cb);
+      base::BindOnce(&FetchCapabilitiesAsync, device_name), std::move(cb));
 }
 
 void LocalPrinterHandlerDefault::StartPrint(
@@ -106,6 +107,7 @@ void LocalPrinterHandlerDefault::StartPrint(
     const std::string& ticket_json,
     const gfx::Size& page_size,
     const scoped_refptr<base::RefCountedBytes>& print_data,
-    const PrintCallback& callback) {
-  NOTREACHED();
+    PrintCallback callback) {
+  printing::StartLocalPrint(ticket_json, print_data, preview_web_contents_,
+                            std::move(callback));
 }

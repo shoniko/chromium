@@ -4,6 +4,7 @@
 
 #include "core/dom/Range.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8BindingForTesting.h"
 #include "bindings/core/v8/string_or_array_buffer_or_array_buffer_view.h"
@@ -27,27 +28,12 @@
 #include "platform/heap/Handle.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/Compiler.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
 class RangeTest : public EditingTestBase {};
-
-TEST_F(RangeTest, createAdjustedToTreeScopeWithPositionInShadowTree) {
-  GetDocument().body()->SetInnerHTMLFromString(
-      "<div><select><option>012</option></div>");
-  Element* const select_element = GetDocument().QuerySelector("select");
-  const Position& position =
-      Position::AfterNode(*select_element->UserAgentShadowRoot());
-  Range* const range =
-      Range::CreateAdjustedToTreeScope(GetDocument(), position);
-  EXPECT_EQ(range->startContainer(), select_element->parentNode());
-  EXPECT_EQ(static_cast<unsigned>(range->startOffset()),
-            select_element->NodeIndex());
-  EXPECT_TRUE(range->collapsed());
-}
 
 TEST_F(RangeTest, extractContentsWithDOMMutationEvent) {
   GetDocument().body()->SetInnerHTMLFromString("<span><b>abc</b>def</span>");
@@ -274,9 +260,10 @@ TEST_F(RangeTest, BoundingRectMustIndependentFromSelection) {
   const FloatRect rect_before = range->BoundingRect();
   EXPECT_GT(rect_before.Width(), 0);
   EXPECT_GT(rect_before.Height(), 0);
-  Selection().SetSelection(SelectionInDOMTree::Builder()
-                               .SetBaseAndExtent(EphemeralRange(range))
-                               .Build());
+  Selection().SetSelectionAndEndTyping(
+      SelectionInDOMTree::Builder()
+          .SetBaseAndExtent(EphemeralRange(range))
+          .Build());
   GetDocument().View()->UpdateAllLifecyclePhases();
   EXPECT_EQ(Selection().SelectedText(), "x x");
   const FloatRect rect_after = range->BoundingRect();
@@ -317,13 +304,14 @@ static Vector<IntSize> ComputeSizesOfQuads(const Vector<FloatQuad>& quads) {
 }
 
 TEST_F(RangeTest, GetBorderAndTextQuadsWithFirstLetterOne) {
-  GetDocument().body()->SetInnerHTMLFromString(
-      "<style>"
-      "  body { font-size: 20px; }"
-      "  #sample::first-letter { font-size: 500%; }"
-      "</style>"
-      "<p id=sample>abc</p>"
-      "<p id=expected><span style='font-size: 500%'>a</span>bc</p>");
+  GetDocument().body()->SetInnerHTMLFromString(R"HTML(
+    <style>
+      body { font-size: 20px; }
+      #sample::first-letter { font-size: 500%; }
+    </style>
+    <p id=sample>abc</p>
+    <p id=expected><span style='font-size: 500%'>a</span>bc</p>
+  )HTML");
   GetDocument().UpdateStyleAndLayout();
 
   Element* const expected = GetDocument().getElementById("expected");
@@ -361,13 +349,14 @@ TEST_F(RangeTest, GetBorderAndTextQuadsWithFirstLetterOne) {
 }
 
 TEST_F(RangeTest, GetBorderAndTextQuadsWithFirstLetterThree) {
-  GetDocument().body()->SetInnerHTMLFromString(
-      "<style>"
-      "  body { font-size: 20px; }"
-      "  #sample::first-letter { font-size: 500%; }"
-      "</style>"
-      "<p id=sample>(a)bc</p>"
-      "<p id=expected><span style='font-size: 500%'>(a)</span>bc</p>");
+  GetDocument().body()->SetInnerHTMLFromString(R"HTML(
+    <style>
+      body { font-size: 20px; }
+      #sample::first-letter { font-size: 500%; }
+    </style>
+    <p id=sample>(a)bc</p>
+    <p id=expected><span style='font-size: 500%'>(a)</span>bc</p>
+  )HTML");
   GetDocument().UpdateStyleAndLayout();
 
   Element* const expected = GetDocument().getElementById("expected");

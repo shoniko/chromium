@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/guid.h"
-#include "base/memory/ptr_util.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/download/content/public/all_download_item_notifier.h"
@@ -67,7 +66,7 @@ class DownloadDriverImplTest : public testing::Test {
   void SetUp() override {
     EXPECT_CALL(mock_client_, IsTrackingDownload(_))
         .WillRepeatedly(Return(true));
-    driver_ = base::MakeUnique<DownloadDriverImpl>(&mock_manager_);
+    driver_ = std::make_unique<DownloadDriverImpl>(&mock_manager_);
   }
 
   // TODO(xingliu): implements test download manager for embedders to test.
@@ -104,6 +103,42 @@ TEST_F(DownloadDriverImplTest, TestHardRecover) {
   EXPECT_CALL(mock_client_, OnDriverHardRecoverComplete(true)).Times(1);
   driver_->HardRecover();
   task_runner_->RunUntilIdle();
+}
+// Ensure driver remove call before download created will result in content
+// layer remove call and not propagating the event to driver's client.
+TEST_F(DownloadDriverImplTest, RemoveBeforeCreated) {
+  using DownloadState = content::DownloadItem::DownloadState;
+
+  EXPECT_CALL(mock_manager_, IsManagerInitialized())
+      .Times(1)
+      .WillOnce(Return(false));
+  driver_->Initialize(&mock_client_);
+
+  EXPECT_CALL(mock_client_, OnDriverReady(true));
+  static_cast<AllDownloadItemNotifier::Observer*>(driver_.get())
+      ->OnManagerInitialized(&mock_manager_);
+
+  const std::string kTestGuid = "abc";
+  content::FakeDownloadItem fake_item;
+  fake_item.SetGuid(kTestGuid);
+  fake_item.SetState(DownloadState::IN_PROGRESS);
+
+  // Download is not created yet in content layer.
+  ON_CALL(mock_manager_, GetDownloadByGuid(kTestGuid))
+      .WillByDefault(Return(nullptr));
+  driver_->Remove(kTestGuid);
+  task_runner_->RunUntilIdle();
+
+  // Download is created in content layer.
+  ON_CALL(mock_manager_, GetDownloadByGuid(kTestGuid))
+      .WillByDefault(Return(&fake_item));
+  EXPECT_CALL(mock_client_, OnDownloadCreated(_)).Times(0);
+  static_cast<AllDownloadItemNotifier::Observer*>(driver_.get())
+      ->OnDownloadCreated(&mock_manager_, &fake_item);
+  task_runner_->RunUntilIdle();
+
+  // Expect a remove call down to content layer download item.
+  EXPECT_TRUE(fake_item.removed());
 }
 
 // Ensures download updates from download items are propagated correctly.

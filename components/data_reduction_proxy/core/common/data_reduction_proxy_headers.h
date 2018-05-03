@@ -112,14 +112,6 @@ const char* compressed_video_directive();
 // a specific page policy.
 const char* page_policies_directive();
 
-// Gets the Chrome-Proxy experiment ("exp") value to force a lite page preview
-// for requests that accept lite pages.
-const char* chrome_proxy_experiment_force_lite_page();
-
-// Gets the Chrome-Proxy experiment ("exp") value to force an empty image
-// preview for requests that enable server provided previews.
-const char* chrome_proxy_experiment_force_empty_image();
-
 // Returns true if the Chrome-Proxy-Content-Transform response header indicates
 // that an empty image has been provided.
 bool IsEmptyImagePreview(const net::HttpResponseHeaders& headers);
@@ -184,30 +176,9 @@ bool ParseHeadersAndSetBypassDuration(const net::HttpResponseHeaders* headers,
                                       base::StringPiece action_prefix,
                                       base::TimeDelta* bypass_duration);
 
-// Gets the fingerprint of the Chrome-Proxy header.
-bool GetDataReductionProxyActionFingerprintChromeProxy(
-    const net::HttpResponseHeaders* headers,
-    std::string* chrome_proxy_fingerprint);
-
-// Gets the fingerprint of the Via header.
-bool GetDataReductionProxyActionFingerprintVia(
-    const net::HttpResponseHeaders* headers,
-    std::string* via_fingerprint);
-
-// Gets the fingerprint of a list of headers.
-bool GetDataReductionProxyActionFingerprintOtherHeaders(
-    const net::HttpResponseHeaders* headers,
-    std::string* other_headers_fingerprint);
-
-// Gets the fingerprint of Content-Length header.
-bool GetDataReductionProxyActionFingerprintContentLength(
-    const net::HttpResponseHeaders* headers,
-    std::string* content_length_fingerprint);
-
-// Returns values of the Chrome-Proxy header, but with its fingerprint removed.
-void GetDataReductionProxyHeaderWithFingerprintRemoved(
-    const net::HttpResponseHeaders* headers,
-    std::vector<std::string>* values);
+// Returns the OFCL value in the Chrome-Proxy header. Returns -1 in case of
+// of error or if OFCL does not exist. |headers| must be non-null.
+int64_t GetDataReductionProxyOFCL(const net::HttpResponseHeaders* headers);
 
 }  // namespace data_reduction_proxy
 #endif  // COMPONENTS_DATA_REDUCTION_PROXY_CORE_COMMON_DATA_REDUCTION_PROXY_HEADERS_H_

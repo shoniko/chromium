@@ -27,6 +27,7 @@
 #define InputMethodController_h
 
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/DocumentShutdownObserver.h"
 #include "core/editing/Forward.h"
@@ -47,7 +48,6 @@ enum class TypingContinuation;
 class CORE_EXPORT InputMethodController final
     : public GarbageCollectedFinalized<InputMethodController>,
       public DocumentShutdownObserver {
-  WTF_MAKE_NONCOPYABLE(InputMethodController);
   USING_GARBAGE_COLLECTED_MIXIN(InputMethodController);
 
  public:
@@ -86,7 +86,6 @@ class CORE_EXPORT InputMethodController final
   void CancelComposition();
 
   EphemeralRange CompositionEphemeralRange() const;
-  Range* CompositionRange() const;
 
   void Clear();
   void DocumentAttached(Document*);
@@ -111,6 +110,8 @@ class CORE_EXPORT InputMethodController final
   void WillChangeFocus();
 
  private:
+  friend class InputMethodControllerTest;
+
   Document& GetDocument() const;
   bool IsAvailable() const;
 
@@ -145,7 +146,7 @@ class CORE_EXPORT InputMethodController final
 
   // Inserts the given text string in the place of the existing composition.
   // Returns true if did replace.
-  bool ReplaceComposition(const String& text);
+  bool ReplaceComposition(const String& text) WARN_UNUSED_RESULT;
   // Inserts the given text string in the place of the existing composition
   // and moves caret. Returns true if did replace and moved caret successfully.
   bool ReplaceCompositionAndMoveCaret(
@@ -153,8 +154,14 @@ class CORE_EXPORT InputMethodController final
       int relative_caret_position,
       const Vector<ImeTextSpan>& ime_text_spans);
 
+  // Returns false if the frame was destroyed, true otherwise.
+  bool DeleteSelection() WARN_UNUSED_RESULT;
+
   // Returns true if moved caret successfully.
   bool MoveCaret(int new_caret_position);
+
+  // Returns false if the frame is destroyed, true otherwise.
+  bool DispatchCompositionStartEvent(const String& text) WARN_UNUSED_RESULT;
 
   PlainTextRange CreateSelectionRangeForSetComposition(
       int selection_start,
@@ -166,6 +173,8 @@ class CORE_EXPORT InputMethodController final
   // Implements |DocumentShutdownObserver|.
   void ContextDestroyed(Document*) final;
 
+  enum class TypingContinuation;
+
   // Returns true if setting selection to specified offsets, otherwise false.
   bool SetEditableSelectionOffsets(const PlainTextRange&, TypingContinuation);
 
@@ -174,6 +183,8 @@ class CORE_EXPORT InputMethodController final
 
   FRIEND_TEST_ALL_PREFIXES(InputMethodControllerTest,
                            InputModeOfFocusedElement);
+
+  DISALLOW_COPY_AND_ASSIGN(InputMethodController);
 };
 
 }  // namespace blink

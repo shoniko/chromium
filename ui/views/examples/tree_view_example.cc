@@ -29,6 +29,11 @@ class ExampleTreeViewDrawingProvider : public views::TreeViewDrawingProvider {
     return views::TreeViewDrawingProvider::GetAuxiliaryTextForNode(tree_view,
                                                                    node);
   }
+
+  bool ShouldDrawIconForNode(views::TreeView* tree_view,
+                             ui::TreeModelNode* node) override {
+    return tree_view->GetSelectedNode() != node;
+  }
 };
 
 }  // namespace
@@ -75,7 +80,8 @@ void TreeViewExample::CreateExampleView(View* container) {
   change_title_->SetFocusForPlatform();
   change_title_->set_request_focus_on_press(true);
 
-  GridLayout* layout = GridLayout::CreateAndInstall(container);
+  GridLayout* layout = container->SetLayoutManager(
+      std::make_unique<views::GridLayout>(container));
 
   const int tree_view_column = 0;
   ColumnSet* column_set = layout->AddColumnSet(tree_view_column);

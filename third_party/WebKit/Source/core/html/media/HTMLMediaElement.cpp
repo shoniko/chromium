@@ -37,7 +37,6 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/events/Event.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
@@ -47,7 +46,6 @@
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/fullscreen/Fullscreen.h"
 #include "core/html/HTMLSourceElement.h"
-#include "core/html/HTMLTrackElement.h"
 #include "core/html/TimeRanges.h"
 #include "core/html/media/AutoplayPolicy.h"
 #include "core/html/media/HTMLMediaElementControlsList.h"
@@ -59,6 +57,7 @@
 #include "core/html/track/AudioTrackList.h"
 #include "core/html/track/AutomaticTrackSelection.h"
 #include "core/html/track/CueTimeline.h"
+#include "core/html/track/HTMLTrackElement.h"
 #include "core/html/track/InbandTextTrack.h"
 #include "core/html/track/TextTrackContainer.h"
 #include "core/html/track/TextTrackList.h"
@@ -68,7 +67,7 @@
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/IntersectionGeometry.h"
 #include "core/layout/LayoutMedia.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/paint/compositing/PaintLayerCompositor.h"
@@ -86,11 +85,12 @@
 #include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/AutoReset.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/MathExtras.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/CString.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebAudioSourceProvider.h"
 #include "public/platform/WebContentDecryptionModule.h"
 #include "public/platform/WebInbandTextTrack.h"
@@ -129,7 +129,8 @@ using DocumentElementSetMap =
 namespace {
 
 constexpr float kMostlyFillViewportThreshold = 0.85f;
-constexpr double kCheckViewportIntersectionIntervalSeconds = 1;
+constexpr TimeDelta kCheckViewportIntersectionInterval =
+    TimeDelta::FromSeconds(1);
 
 // This enum is used to record histograms. Do not reorder.
 enum MediaControlsShow {
@@ -441,24 +442,21 @@ void HTMLMediaElement::OnMediaControlsEnabledChange(Document* document) {
 HTMLMediaElement::HTMLMediaElement(const QualifiedName& tag_name,
                                    Document& document)
     : HTMLElement(tag_name, document),
-      SuspendableObject(&document),
-      load_timer_(TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
+      PausableObject(&document),
+      load_timer_(document.GetTaskRunner(TaskType::kUnthrottled),
                   this,
                   &HTMLMediaElement::LoadTimerFired),
-      progress_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
-          this,
-          &HTMLMediaElement::ProgressEventTimerFired),
-      playback_progress_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
-          this,
-          &HTMLMediaElement::PlaybackProgressTimerFired),
-      audio_tracks_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
-          this,
-          &HTMLMediaElement::AudioTracksTimerFired),
+      progress_event_timer_(document.GetTaskRunner(TaskType::kUnthrottled),
+                            this,
+                            &HTMLMediaElement::ProgressEventTimerFired),
+      playback_progress_timer_(document.GetTaskRunner(TaskType::kUnthrottled),
+                               this,
+                               &HTMLMediaElement::PlaybackProgressTimerFired),
+      audio_tracks_timer_(document.GetTaskRunner(TaskType::kUnthrottled),
+                          this,
+                          &HTMLMediaElement::AudioTracksTimerFired),
       check_viewport_intersection_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
+          document.GetTaskRunner(TaskType::kUnthrottled),
           this,
           &HTMLMediaElement::CheckViewportIntersectionTimerFired),
       played_time_ranges_(),
@@ -472,16 +470,14 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tag_name,
       last_seek_time_(0),
       previous_progress_time_(std::numeric_limits<double>::max()),
       duration_(std::numeric_limits<double>::quiet_NaN()),
-      last_time_update_event_wall_time_(0),
       last_time_update_event_media_time_(
           std::numeric_limits<double>::quiet_NaN()),
       default_playback_start_position_(0),
       load_state_(kWaitingForSource),
       deferred_load_state_(kNotDeferred),
-      deferred_load_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
-          this,
-          &HTMLMediaElement::DeferredLoadTimerFired),
+      deferred_load_timer_(document.GetTaskRunner(TaskType::kUnthrottled),
+                           this,
+                           &HTMLMediaElement::DeferredLoadTimerFired),
       web_layer_(nullptr),
       display_mode_(kUnknown),
       official_playback_position_(0),
@@ -552,17 +548,17 @@ void HTMLMediaElement::DidMoveToNewDocument(Document& old_document) {
   BLINK_MEDIA_LOG << "didMoveToNewDocument(" << (void*)this << ")";
 
   load_timer_.MoveToNewTaskRunner(
-      TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
+      GetDocument().GetTaskRunner(TaskType::kUnthrottled));
   progress_event_timer_.MoveToNewTaskRunner(
-      TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
+      GetDocument().GetTaskRunner(TaskType::kUnthrottled));
   playback_progress_timer_.MoveToNewTaskRunner(
-      TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
+      GetDocument().GetTaskRunner(TaskType::kUnthrottled));
   audio_tracks_timer_.MoveToNewTaskRunner(
-      TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
+      GetDocument().GetTaskRunner(TaskType::kUnthrottled));
   check_viewport_intersection_timer_.MoveToNewTaskRunner(
-      TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
+      GetDocument().GetTaskRunner(TaskType::kUnthrottled));
   deferred_load_timer_.MoveToNewTaskRunner(
-      TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
+      GetDocument().GetTaskRunner(TaskType::kUnthrottled));
 
   autoplay_policy_->DidMoveToNewDocument(old_document);
 
@@ -594,7 +590,7 @@ void HTMLMediaElement::DidMoveToNewDocument(Document& old_document) {
   // load event from within the destructor.
   old_document.DecrementLoadEventDelayCount();
 
-  SuspendableObject::DidMoveToNewExecutionContext(&GetDocument());
+  PausableObject::DidMoveToNewExecutionContext(&GetDocument());
   HTMLElement::DidMoveToNewDocument(old_document);
 }
 
@@ -654,6 +650,25 @@ void HTMLMediaElement::ParseAttribute(
   }
 }
 
+void HTMLMediaElement::ParserDidSetAttributes() {
+  HTMLElement::ParserDidSetAttributes();
+
+  if (FastHasAttribute(mutedAttr))
+    muted_ = true;
+}
+
+// This method is being used as a way to know that cloneNode finished cloning
+// attribute as there is no callback notifying about the end of a cloning
+// operation. Indeed, it is required per spec to set the muted state based on
+// the content attribute when the object is created.
+void HTMLMediaElement::CopyNonAttributePropertiesFromElement(
+    const Element& other) {
+  HTMLElement::CopyNonAttributePropertiesFromElement(other);
+
+  if (FastHasAttribute(mutedAttr))
+    muted_ = true;
+}
+
 void HTMLMediaElement::FinishParsingChildren() {
   HTMLElement::FinishParsingChildren();
 
@@ -710,7 +725,7 @@ void HTMLMediaElement::AttachLayoutTree(AttachContext& context) {
     GetLayoutObject()->UpdateFromElement();
 }
 
-void HTMLMediaElement::DidRecalcStyle() {
+void HTMLMediaElement::DidRecalcStyle(StyleRecalcChange) {
   if (GetLayoutObject())
     GetLayoutObject()->UpdateFromElement();
 }
@@ -721,14 +736,14 @@ void HTMLMediaElement::ScheduleTextTrackResourceLoad() {
   pending_action_flags_ |= kLoadTextTrackResource;
 
   if (!load_timer_.IsActive())
-    load_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    load_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void HTMLMediaElement::ScheduleNextSourceChild() {
   // Schedule the timer to try the next <source> element WITHOUT resetting state
   // ala invokeLoadAlgorithm.
   pending_action_flags_ |= kLoadMediaResource;
-  load_timer_.StartOneShot(0, BLINK_FROM_HERE);
+  load_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void HTMLMediaElement::ScheduleEvent(const AtomicString& event_name) {
@@ -740,7 +755,7 @@ void HTMLMediaElement::ScheduleEvent(Event* event) {
   BLINK_MEDIA_LOG << "ScheduleEvent(" << (void*)this << ")"
                   << " - scheduling '" << event->type() << "'";
 #endif
-  async_event_queue_->EnqueueEvent(BLINK_FROM_HERE, event);
+  async_event_queue_->EnqueueEvent(FROM_HERE, event);
 }
 
 void HTMLMediaElement::LoadTimerFired(TimerBase*) {
@@ -1015,9 +1030,19 @@ void HTMLMediaElement::SelectMediaResource() {
     // has neither a src attribute nor a source element child: set the
     // networkState to kNetworkEmpty, and abort these steps; the synchronous
     // section ends.
+    // TODO(mlamouri): Setting the network state to empty implies that there
+    // should be no |web_media_player_|. However, if a previous playback ended
+    // due to an error, we can get here and still have one. Decide on a plan
+    // to deal with this properly. https://crbug.com/789737
     load_state_ = kWaitingForSource;
     SetShouldDelayLoadEvent(false);
-    SetNetworkState(kNetworkEmpty);
+    if (!GetWebMediaPlayer() || (ready_state_ < kHaveFutureData &&
+                                 ready_state_maximum_ < kHaveFutureData)) {
+      SetNetworkState(kNetworkEmpty);
+    } else {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kHTMLMediaElementEmptyLoadWithFutureData);
+    }
     UpdateDisplayState();
 
     BLINK_MEDIA_LOG << "selectMediaResource(" << (void*)this
@@ -1149,9 +1174,6 @@ void HTMLMediaElement::LoadResource(const WebMediaPlayerSource& source,
   SetDisplayMode(kUnknown);
 
   SetPlayerPreload();
-
-  if (FastHasAttribute(mutedAttr))
-    muted_ = true;
 
   DCHECK(!media_source_);
 
@@ -1293,7 +1315,7 @@ void HTMLMediaElement::DeferLoad() {
   ChangeNetworkStateFromLoadingToIdle();
   // 3. Queue a task to set the element's delaying-the-load-event
   // flag to false. This stops delaying the load event.
-  deferred_load_timer_.StartOneShot(0, BLINK_FROM_HERE);
+  deferred_load_timer_.StartOneShot(TimeDelta(), FROM_HERE);
   // 4. Wait for the task to be run.
   deferred_load_state_ = kWaitingForStopDelayingLoadEventTask;
   // Continued in executeDeferredLoad().
@@ -1444,7 +1466,8 @@ bool HTMLMediaElement::IsSafeToLoadURL(const KURL& url,
   return true;
 }
 
-bool HTMLMediaElement::IsMediaDataCORSSameOrigin(SecurityOrigin* origin) const {
+bool HTMLMediaElement::IsMediaDataCORSSameOrigin(
+    const SecurityOrigin* origin) const {
   // hasSingleSecurityOrigin() tells us whether the origin in the src is
   // the same as the actual request (i.e. after redirect).
   // didPassCORSAccessCheck() means it was a successful CORS-enabled fetch
@@ -1468,7 +1491,8 @@ void HTMLMediaElement::StartProgressEventTimer() {
 
   previous_progress_time_ = WTF::CurrentTime();
   // 350ms is not magic, it is in the spec!
-  progress_event_timer_.StartRepeating(0.350, BLINK_FROM_HERE);
+  progress_event_timer_.StartRepeating(TimeDelta::FromMilliseconds(350),
+                                       FROM_HERE);
 }
 
 void HTMLMediaElement::WaitForSourceChange() {
@@ -1879,7 +1903,41 @@ void HTMLMediaElement::AddPlayedRange(double start, double end) {
 }
 
 bool HTMLMediaElement::SupportsSave() const {
-  return GetWebMediaPlayer() && GetWebMediaPlayer()->SupportsSave();
+  // Check if download is disabled per settings.
+  if (GetDocument().GetSettings() &&
+      GetDocument().GetSettings()->GetHideDownloadUI()) {
+    return false;
+  }
+
+  // URLs that lead to nowhere are ignored.
+  if (current_src_.IsNull() || current_src_.IsEmpty())
+    return false;
+
+  // If we have no source, we can't download.
+  if (network_state_ == kNetworkEmpty || network_state_ == kNetworkNoSource)
+    return false;
+
+  // It is not useful to offer a save feature on local files.
+  if (current_src_.IsLocalFile())
+    return false;
+
+  // MediaStream can't be downloaded.
+  if (IsMediaStreamURL(current_src_.GetString()))
+    return false;
+
+  // MediaSource can't be downloaded.
+  if (HasMediaSource())
+    return false;
+
+  // HLS stream shouldn't have a download button.
+  if (IsHLSURL(current_src_))
+    return false;
+
+  // Infinite streams don't have a clear end at which to finish the download.
+  if (duration() == std::numeric_limits<double>::infinity())
+    return false;
+
+  return true;
 }
 
 void HTMLMediaElement::SetIgnorePreloadNone() {
@@ -2145,25 +2203,19 @@ void HTMLMediaElement::setPlaybackRate(double rate,
                                        ExceptionState& exception_state) {
   BLINK_MEDIA_LOG << "setPlaybackRate(" << (void*)this << ", " << rate << ")";
 
-  // TODO(apacible): While visible clamping is currently experimental, do NOT
-  // clamp the values of |playback_rate_| in |this|. Instead, clamp these
-  // values in WebMediaPlayerImpl until .
   if (rate != 0.0 && (rate < kMinRate || rate > kMaxRate)) {
     UseCounter::Count(GetDocument(),
                       WebFeature::kHTMLMediaElementMediaPlaybackRateOutOfRange);
 
-    // Experimental: crbug/747082.
     // When the proposed playbackRate is unsupported, throw a NotSupportedError
     // DOMException and don't update the value.
-    if (RuntimeEnabledFeatures::PreloadDefaultIsMetadataEnabled()) {
-      exception_state.ThrowDOMException(
-          kNotSupportedError, "The provided playback rate (" +
-                                  String::Number(rate) + ") is not in the " +
-                                  "supported playback range.");
+    exception_state.ThrowDOMException(
+        kNotSupportedError, "The provided playback rate (" +
+                                String::Number(rate) + ") is not in the " +
+                                "supported playback range.");
 
-      // Do not update |playback_rate_|.
-      return;
-    }
+    // Do not update |playback_rate_|.
+    return;
   }
 
   if (playback_rate_ != rate) {
@@ -2217,7 +2269,7 @@ WebMediaPlayer::Preload HTMLMediaElement::PreloadType() const {
   // If the source scheme is requires network, force preload to 'none' on Data
   // Saver and for low end devices.
   if (GetDocument().GetSettings() &&
-      (GetDocument().GetSettings()->GetDataSaverEnabled() ||
+      (GetNetworkStateNotifier().SaveDataEnabled() ||
        GetDocument().GetSettings()->GetForcePreloadNoneForMediaElements()) &&
       (current_src_.Protocol() != "blob" && current_src_.Protocol() != "data" &&
        current_src_.Protocol() != "file")) {
@@ -2322,11 +2374,6 @@ Nullable<ExceptionCode> HTMLMediaElement::Play() {
       PlayInternal();
       return nullptr;
     }
-    String message = ExceptionMessages::FailedToExecute(
-        "play", "HTMLMediaElement",
-        "API can only be initiated by a user gesture.");
-    GetDocument().AddConsoleMessage(ConsoleMessage::Create(
-        kJSMessageSource, kWarningMessageLevel, message));
     return exception_code;
   }
 
@@ -2541,7 +2588,8 @@ double HTMLMediaElement::EffectiveMediaVolume() const {
 
 // The spec says to fire periodic timeupdate events (those sent while playing)
 // every "15 to 250ms", we choose the slowest frequency
-static const double kMaxTimeupdateEventFrequency = 0.25;
+static const TimeDelta kMaxTimeupdateEventFrequency =
+    TimeDelta::FromMilliseconds(250);
 
 void HTMLMediaElement::StartPlaybackProgressTimer() {
   if (playback_progress_timer_.IsActive())
@@ -2549,7 +2597,7 @@ void HTMLMediaElement::StartPlaybackProgressTimer() {
 
   previous_progress_time_ = WTF::CurrentTime();
   playback_progress_timer_.StartRepeating(kMaxTimeupdateEventFrequency,
-                                          BLINK_FROM_HERE);
+                                          FROM_HERE);
 }
 
 void HTMLMediaElement::PlaybackProgressTimerFired(TimerBase*) {
@@ -2577,7 +2625,7 @@ void HTMLMediaElement::PlaybackProgressTimerFired(TimerBase*) {
 void HTMLMediaElement::ScheduleTimeupdateEvent(bool periodic_event) {
   // Per spec, consult current playback position to check for changing time.
   double media_time = CurrentPlaybackPosition();
-  double now = WTF::CurrentTime();
+  TimeTicks now = CurrentTimeTicks();
 
   bool have_not_recently_fired_timeupdate =
       (now - last_time_update_event_wall_time_) >= kMaxTimeupdateEventFrequency;
@@ -2618,7 +2666,7 @@ void HTMLMediaElement::AudioTrackChanged(AudioTrack* track) {
     media_source_->OnTrackChanged(track);
 
   if (!audio_tracks_timer_.IsActive())
-    audio_tracks_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    audio_tracks_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void HTMLMediaElement::AudioTracksTimerFired(TimerBase*) {
@@ -2764,7 +2812,7 @@ void HTMLMediaElement::ForgetResourceSpecificTracks() {
   // algorithm.  The order is explicitly specified as text, then audio, and
   // finally video.  Also 'removetrack' events should not be fired.
   if (text_tracks_) {
-    TrackDisplayUpdateScope scope(this->GetCueTimeline());
+    TrackDisplayUpdateScope scope(GetCueTimeline());
     text_tracks_->RemoveAllInbandTracks();
   }
 
@@ -3523,7 +3571,7 @@ void HTMLMediaElement::DidEnterFullscreen() {
   // Cache this in case the player is destroyed before leaving fullscreen.
   in_overlay_fullscreen_video_ = UsesOverlayFullscreenVideo();
   if (in_overlay_fullscreen_video_) {
-    GetDocument().GetLayoutViewItem().Compositor()->SetNeedsCompositingUpdate(
+    GetDocument().GetLayoutView()->Compositor()->SetNeedsCompositingUpdate(
         kCompositingUpdateRebuildTree);
   }
 }
@@ -3537,7 +3585,7 @@ void HTMLMediaElement::DidExitFullscreen() {
   }
 
   if (in_overlay_fullscreen_video_) {
-    GetDocument().GetLayoutViewItem().Compositor()->SetNeedsCompositingUpdate(
+    GetDocument().GetLayoutView()->Compositor()->SetNeedsCompositingUpdate(
         kCompositingUpdateRebuildTree);
   }
   in_overlay_fullscreen_video_ = false;
@@ -3595,7 +3643,7 @@ void HTMLMediaElement::AssertShadowRootChildren(ShadowRoot& shadow_root) {
 }
 
 TextTrackContainer& HTMLMediaElement::EnsureTextTrackContainer() {
-  ShadowRoot& shadow_root = EnsureUserAgentShadowRoot();
+  ShadowRoot& shadow_root = EnsureUserAgentShadowRootV1();
   AssertShadowRootChildren(shadow_root);
 
   Node* first_child = shadow_root.firstChild();
@@ -3724,7 +3772,7 @@ void HTMLMediaElement::EnsureMediaControls() {
   if (GetMediaControls())
     return;
 
-  ShadowRoot& shadow_root = EnsureUserAgentShadowRoot();
+  ShadowRoot& shadow_root = EnsureUserAgentShadowRootV1();
   media_controls_ =
       CoreInitializer::GetInstance().CreateMediaControls(*this, shadow_root);
 
@@ -3880,7 +3928,7 @@ void HTMLMediaElement::Trace(blink::Visitor* visitor) {
       this);
   Supplementable<HTMLMediaElement>::Trace(visitor);
   HTMLElement::Trace(visitor);
-  SuspendableObject::Trace(visitor);
+  PausableObject::Trace(visitor);
 }
 
 void HTMLMediaElement::TraceWrappers(
@@ -3889,6 +3937,7 @@ void HTMLMediaElement::TraceWrappers(
   visitor->TraceWrappers(audio_tracks_);
   visitor->TraceWrappers(text_tracks_);
   HTMLElement::TraceWrappers(visitor);
+  Supplementable<HTMLMediaElement>::TraceWrappers(visitor);
 }
 
 void HTMLMediaElement::CreatePlaceholderTracksIfNecessary() {
@@ -3956,12 +4005,10 @@ void HTMLMediaElement::ScheduleResolvePlayPromises() {
   if (play_promise_resolve_task_handle_.IsActive())
     return;
 
-  play_promise_resolve_task_handle_ =
-      TaskRunnerHelper::Get(TaskType::kMediaElementEvent, &GetDocument())
-          ->PostCancellableTask(
-              BLINK_FROM_HERE,
-              WTF::Bind(&HTMLMediaElement::ResolveScheduledPlayPromises,
-                        WrapWeakPersistent(this)));
+  play_promise_resolve_task_handle_ = PostCancellableTask(
+      *GetDocument().GetTaskRunner(TaskType::kMediaElementEvent), FROM_HERE,
+      WTF::Bind(&HTMLMediaElement::ResolveScheduledPlayPromises,
+                WrapWeakPersistent(this)));
 }
 
 void HTMLMediaElement::ScheduleRejectPlayPromises(ExceptionCode code) {
@@ -3985,12 +4032,10 @@ void HTMLMediaElement::ScheduleRejectPlayPromises(ExceptionCode code) {
   // TODO(nhiroki): Bind this error code to a cancellable task instead of a
   // member field.
   play_promise_error_code_ = code;
-  play_promise_reject_task_handle_ =
-      TaskRunnerHelper::Get(TaskType::kMediaElementEvent, &GetDocument())
-          ->PostCancellableTask(
-              BLINK_FROM_HERE,
-              WTF::Bind(&HTMLMediaElement::RejectScheduledPlayPromises,
-                        WrapWeakPersistent(this)));
+  play_promise_reject_task_handle_ = PostCancellableTask(
+      *GetDocument().GetTaskRunner(TaskType::kMediaElementEvent), FROM_HERE,
+      WTF::Bind(&HTMLMediaElement::RejectScheduledPlayPromises,
+                WrapWeakPersistent(this)));
 }
 
 void HTMLMediaElement::ScheduleNotifyPlaying() {
@@ -4122,7 +4167,7 @@ void HTMLMediaElement::AudioSourceProviderImpl::Trace(blink::Visitor* visitor) {
 void HTMLMediaElement::ActivateViewportIntersectionMonitoring(bool activate) {
   if (activate && !check_viewport_intersection_timer_.IsActive()) {
     check_viewport_intersection_timer_.StartRepeating(
-        kCheckViewportIntersectionIntervalSeconds, BLINK_FROM_HERE);
+        kCheckViewportIntersectionInterval, FROM_HERE);
   } else if (!activate) {
     check_viewport_intersection_timer_.Stop();
   }

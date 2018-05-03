@@ -4,7 +4,8 @@
 
 #include "chrome/browser/vr/elements/vector_icon.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "chrome/browser/vr/elements/ui_texture.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/scoped_canvas.h"
@@ -17,18 +18,12 @@ class VectorIconTexture : public UiTexture {
   VectorIconTexture() {}
   ~VectorIconTexture() override {}
 
-  void SetColor(SkColor color) {
-    if (color == color_)
-      return;
-    color_ = color;
-    set_dirty();
-  }
+  void SetColor(SkColor color) { SetAndDirty(&color_, color); }
+
+  SkColor GetColor() const { return color_; }
 
   void SetIcon(const gfx::VectorIcon& icon) {
-    if (icon_no_1x_.path == icon.path)
-      return;
-    icon_no_1x_.path = icon.path;
-    set_dirty();
+    SetAndDirty(&icon_no_1x_.path, icon.path);
   }
 
  private:
@@ -62,11 +57,15 @@ class VectorIconTexture : public UiTexture {
 
 VectorIcon::VectorIcon(int maximum_width_pixels)
     : TexturedElement(maximum_width_pixels),
-      texture_(base::MakeUnique<VectorIconTexture>()) {}
+      texture_(std::make_unique<VectorIconTexture>()) {}
 VectorIcon::~VectorIcon() {}
 
 void VectorIcon::SetColor(SkColor color) {
   texture_->SetColor(color);
+}
+
+SkColor VectorIcon::GetColor() const {
+  return texture_->GetColor();
 }
 
 void VectorIcon::SetIcon(const gfx::VectorIcon& icon) {

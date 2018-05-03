@@ -33,6 +33,7 @@
 #include "core/frame/DOMTimer.h"
 #include "core/frame/EventHandlerRegistry.h"
 #include "core/frame/FrameConsole.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/PageScaleConstraints.h"
 #include "core/frame/PageScaleConstraintsSet.h"
@@ -63,6 +64,7 @@
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/plugins/PluginData.h"
 #include "platform/scroll/ScrollbarTheme.h"
+#include "platform/scroll/ScrollbarThemeOverlay.h"
 #include "platform/scroll/SmoothScrollSequencer.h"
 #include "public/platform/Platform.h"
 #include "public/web/WebKit.h"
@@ -88,6 +90,16 @@ Page::PageSet& Page::OrdinaryPages() {
   return pages;
 }
 
+HeapVector<Member<Page>> Page::RelatedPages() {
+  HeapVector<Member<Page>> result;
+  Page* ptr = this->next_related_page_;
+  while (ptr != this) {
+    result.push_back(ptr);
+    ptr = ptr->next_related_page_;
+  }
+  return result;
+}
+
 float DeviceScaleFactorDeprecated(LocalFrame* frame) {
   if (!frame)
     return 1;
@@ -97,8 +109,19 @@ float DeviceScaleFactorDeprecated(LocalFrame* frame) {
   return page->DeviceScaleFactorDeprecated();
 }
 
-Page* Page::CreateOrdinary(PageClients& page_clients) {
+Page* Page::CreateOrdinary(PageClients& page_clients, Page* opener) {
   Page* page = Create(page_clients);
+
+  if (opener) {
+    // Before: ... -> opener -> next -> ...
+    // After: ... -> opener -> page -> next -> ...
+    Page* next = opener->next_related_page_;
+    opener->next_related_page_ = page;
+    page->prev_related_page_ = opener;
+    page->next_related_page_ = next;
+    next->prev_related_page_ = page;
+  }
+
   OrdinaryPages().insert(page);
   if (ScopedPagePauser::IsActive())
     page->SetPaused(true);
@@ -113,9 +136,7 @@ Page::Page(PageClients& page_clients)
       drag_caret_(DragCaret::Create()),
       drag_controller_(DragController::Create(this)),
       focus_controller_(FocusController::Create(this)),
-      context_menu_controller_(
-          ContextMenuController::Create(this,
-                                        page_clients.context_menu_client)),
+      context_menu_controller_(ContextMenuController::Create(this)),
       page_scale_constraints_set_(PageScaleConstraintsSet::Create()),
       pointer_lock_controller_(PointerLockController::Create(this)),
       browser_controls_(BrowserControls::Create(*this)),
@@ -128,8 +149,6 @@ Page::Page(PageClients& page_clients)
           OverscrollController::Create(GetVisualViewport(), GetChromeClient())),
       main_frame_(nullptr),
       plugin_data_(nullptr),
-      editor_client_(page_clients.editor_client),
-      spell_checker_client_(page_clients.spell_checker_client),
       use_counter_(page_clients.chrome_client &&
                            page_clients.chrome_client->IsSVGImageChromeClient()
                        ? UseCounter::kSVGImageContext
@@ -138,11 +157,12 @@ Page::Page(PageClients& page_clients)
       tab_key_cycles_through_elements_(true),
       paused_(false),
       device_scale_factor_(1),
-      visibility_state_(kPageVisibilityStateVisible),
+      visibility_state_(mojom::PageVisibilityState::kVisible),
+      page_lifecycle_state_(PageLifecycleState::kUnknown),
       is_cursor_visible_(true),
-      subframe_count_(0) {
-  DCHECK(editor_client_);
-
+      subframe_count_(0),
+      next_related_page_(this),
+      prev_related_page_(this) {
   DCHECK(!AllPages().Contains(this));
   AllPages().insert(this);
 }
@@ -239,12 +259,10 @@ const OverscrollController& Page::GetOverscrollController() const {
 }
 
 DOMRectList* Page::NonFastScrollableRects(const LocalFrame* frame) {
-  DisableCompositingQueryAsserts disabler;
-  if (ScrollingCoordinator* scrolling_coordinator =
-          this->GetScrollingCoordinator()) {
-    // Hits in compositing/iframes/iframe-composited-scrolling.html
-    scrolling_coordinator->UpdateAfterCompositingChangeIfNeeded();
-  }
+  // Update lifecycle to kPrePaintClean.  This includes the compositing update
+  // and ScrollingCoordinator::UpdateAfterCompositingChangeIfNeeded, which
+  // computes the non-fast scrollable region.
+  frame->View()->UpdateAllLifecyclePhasesExceptPaint();
 
   GraphicsLayer* layer =
       frame->View()->LayoutViewportScrollableArea()->LayerForScrolling();
@@ -301,7 +319,7 @@ void Page::RefreshPlugins() {
   PluginData::RefreshBrowserSidePluginCache();
 }
 
-PluginData* Page::GetPluginData(SecurityOrigin* main_frame_origin) {
+PluginData* Page::GetPluginData(const SecurityOrigin* main_frame_origin) {
   if (!plugin_data_)
     plugin_data_ = PluginData::Create();
 
@@ -426,7 +444,7 @@ void Page::VisitedStateChanged(LinkHash link_hash) {
   }
 }
 
-void Page::SetVisibilityState(PageVisibilityState visibility_state,
+void Page::SetVisibilityState(mojom::PageVisibilityState visibility_state,
                               bool is_initial_state) {
   if (visibility_state_ == visibility_state)
     return;
@@ -439,12 +457,40 @@ void Page::SetVisibilityState(PageVisibilityState visibility_state,
     main_frame_->DidChangeVisibilityState();
 }
 
-PageVisibilityState Page::VisibilityState() const {
+mojom::PageVisibilityState Page::VisibilityState() const {
   return visibility_state_;
 }
 
 bool Page::IsPageVisible() const {
-  return VisibilityState() == kPageVisibilityStateVisible;
+  return VisibilityState() == mojom::PageVisibilityState::kVisible;
+}
+
+void Page::SetLifecycleState(PageLifecycleState state) {
+  if (state == page_lifecycle_state_)
+    return;
+
+  if (RuntimeEnabledFeatures::PageLifecycleEnabled()) {
+    if (state == PageLifecycleState::kStopped) {
+      for (Frame* frame = main_frame_.Get(); frame;
+           frame = frame->Tree().TraverseNext()) {
+        frame->DidFreeze();
+      }
+    } else if (state == PageLifecycleState::kActive ||
+               state == PageLifecycleState::kHidden) {
+      // TODO(fmeawad): Only resume the page that just became visible, blocked
+      // on task queues per frame.
+      DCHECK(page_lifecycle_state_ == PageLifecycleState::kStopped);
+      for (Frame* frame = main_frame_.Get(); frame;
+           frame = frame->Tree().TraverseNext()) {
+        frame->DidResume();
+      }
+    }
+  }
+  page_lifecycle_state_ = state;
+}
+
+PageLifecycleState Page::LifecycleState() const {
+  return page_lifecycle_state_;
 }
 
 bool Page::IsCursorVisible() const {
@@ -483,6 +529,9 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
                 DeprecatedLocalMainFrame()->GetDocument()->GetTextAutosizer())
           text_autosizer->UpdatePageInfoInAllFrames();
       }
+      break;
+    case SettingsDelegate::kViewportScrollbarChange:
+      GetVisualViewport().InitializeScrollbars();
       break;
     case SettingsDelegate::kDNSPrefetchingChange:
       for (Frame* frame = MainFrame(); frame;
@@ -534,7 +583,7 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         break;
       DeprecatedLocalMainFrame()
           ->GetDocument()
-          ->AxObjectCacheOwner()
+          ->AXObjectCacheOwner()
           .ClearAXObjectCache();
       break;
     case SettingsDelegate::kViewportRuleChange: {
@@ -609,17 +658,12 @@ void Page::UpdateAcceleratedCompositingSettings() {
 
 void Page::DidCommitLoad(LocalFrame* frame) {
   if (main_frame_ == frame) {
-    KURL url;
-    if (frame->GetDocument())
-      url = frame->GetDocument()->Url();
-
+    GetConsoleMessageStorage().Clear();
+    GetUseCounter().DidCommitLoad(frame);
     // TODO(rbyers): Most of this doesn't appear to take into account that each
     // SVGImage gets it's own Page instance.
-    GetConsoleMessageStorage().Clear();
-    GetUseCounter().DidCommitLoad(url);
     GetDeprecation().ClearSuppression();
     GetVisualViewport().SendUMAMetrics();
-
     // Need to reset visual viewport position here since before commit load we
     // would update the previous history item, Page::didCommitLoad is called
     // after a new history item is created in FrameLoader.
@@ -666,6 +710,8 @@ void Page::Trace(blink::Visitor* visitor) {
   visitor->Trace(validation_message_client_);
   visitor->Trace(use_counter_);
   visitor->Trace(plugins_changed_observers_);
+  visitor->Trace(next_related_page_);
+  visitor->Trace(prev_related_page_);
   Supplementable<Page>::Trace(visitor);
   PageVisibilityNotifier::Trace(visitor);
 }
@@ -694,6 +740,18 @@ void Page::WillBeDestroyed() {
   AllPages().erase(this);
   OrdinaryPages().erase(this);
 
+  {
+    // Before: ... -> prev -> this -> next -> ...
+    // After: ... -> prev -> next -> ...
+    // (this is ok even if |this| is the only element on the list).
+    Page* prev = this->prev_related_page_;
+    Page* next = this->next_related_page_;
+    next->prev_related_page_ = prev;
+    prev->next_related_page_ = next;
+    this->prev_related_page_ = nullptr;
+    this->next_related_page_ = nullptr;
+  }
+
   if (scrolling_coordinator_)
     scrolling_coordinator_->WillBeDestroyed();
 
@@ -710,16 +768,14 @@ void Page::RegisterPluginsChangedObserver(PluginsChangedObserver* observer) {
 }
 
 ScrollbarTheme& Page::GetScrollbarTheme() const {
+  if (settings_->GetForceAndroidOverlayScrollbar())
+    return ScrollbarThemeOverlay::MobileTheme();
   return ScrollbarTheme::DeprecatedStaticGetTheme();
 }
 
-Page::PageClients::PageClients()
-    : chrome_client(nullptr),
-      context_menu_client(nullptr),
-      editor_client(nullptr),
-      spell_checker_client(nullptr) {}
+Page::PageClients::PageClients() : chrome_client(nullptr) {}
 
-Page::PageClients::~PageClients() {}
+Page::PageClients::~PageClients() = default;
 
 template class CORE_TEMPLATE_EXPORT Supplement<Page>;
 

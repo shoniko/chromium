@@ -187,7 +187,7 @@ bool PaymentManifestWebDataServiceAndroid::GetPaymentMethodManifest(
       web_data_service->GetPaymentMethodManifest(
           base::android::ConvertJavaStringToUTF8(env, jmethod_name), this);
   web_data_service_requests_[handle] =
-      base::MakeUnique<base::android::ScopedJavaGlobalRef<jobject>>(jcallback);
+      std::make_unique<base::android::ScopedJavaGlobalRef<jobject>>(jcallback);
 
   return true;
 }
@@ -208,13 +208,14 @@ bool PaymentManifestWebDataServiceAndroid::GetPaymentWebAppManifest(
       web_data_service->GetPaymentWebAppManifest(
           base::android::ConvertJavaStringToUTF8(env, japp_package_name), this);
   web_data_service_requests_[handle] =
-      base::MakeUnique<base::android::ScopedJavaGlobalRef<jobject>>(jcallback);
+      std::make_unique<base::android::ScopedJavaGlobalRef<jobject>>(jcallback);
 
   return true;
 }
 
-static jlong Init(JNIEnv* env,
-                  const base::android::JavaParamRef<jobject>& obj) {
+static jlong JNI_PaymentManifestWebDataService_Init(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
   PaymentManifestWebDataServiceAndroid* manifest_web_data_service_android =
       new PaymentManifestWebDataServiceAndroid(env, obj);
   return reinterpret_cast<intptr_t>(manifest_web_data_service_android);

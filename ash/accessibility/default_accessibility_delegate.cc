@@ -11,13 +11,9 @@
 
 namespace ash {
 
-DefaultAccessibilityDelegate::DefaultAccessibilityDelegate() {}
+DefaultAccessibilityDelegate::DefaultAccessibilityDelegate() = default;
 
-DefaultAccessibilityDelegate::~DefaultAccessibilityDelegate() {}
-
-bool DefaultAccessibilityDelegate::IsSpokenFeedbackEnabled() const {
-  return spoken_feedback_enabled_;
-}
+DefaultAccessibilityDelegate::~DefaultAccessibilityDelegate() = default;
 
 void DefaultAccessibilityDelegate::SetMagnifierEnabled(bool enabled) {
   screen_magnifier_enabled_ = enabled;
@@ -27,28 +23,12 @@ bool DefaultAccessibilityDelegate::IsMagnifierEnabled() const {
   return screen_magnifier_enabled_;
 }
 
-void DefaultAccessibilityDelegate::SetAutoclickEnabled(bool enabled) {
-  autoclick_enabled_ = enabled;
-}
-
-bool DefaultAccessibilityDelegate::IsAutoclickEnabled() const {
-  return autoclick_enabled_;
-}
-
 void DefaultAccessibilityDelegate::SetVirtualKeyboardEnabled(bool enabled) {
   virtual_keyboard_enabled_ = enabled;
 }
 
 bool DefaultAccessibilityDelegate::IsVirtualKeyboardEnabled() const {
   return virtual_keyboard_enabled_;
-}
-
-void DefaultAccessibilityDelegate::SetMonoAudioEnabled(bool enabled) {
-  mono_audio_enabled_ = enabled;
-}
-
-bool DefaultAccessibilityDelegate::IsMonoAudioEnabled() const {
-  return mono_audio_enabled_;
 }
 
 void DefaultAccessibilityDelegate::SetCaretHighlightEnabled(bool enabled) {
@@ -110,9 +90,10 @@ bool DefaultAccessibilityDelegate::IsSwitchAccessEnabled() const {
 bool DefaultAccessibilityDelegate::ShouldShowAccessibilityMenu() const {
   AccessibilityController* controller =
       Shell::Get()->accessibility_controller();
-  return spoken_feedback_enabled_ || screen_magnifier_enabled_ ||
-         autoclick_enabled_ || virtual_keyboard_enabled_ ||
-         mono_audio_enabled_ || controller->IsLargeCursorEnabled() ||
+  return controller->IsSpokenFeedbackEnabled() || screen_magnifier_enabled_ ||
+         controller->IsAutoclickEnabled() || virtual_keyboard_enabled_ ||
+         controller->IsMonoAudioEnabled() ||
+         controller->IsLargeCursorEnabled() ||
          controller->IsHighContrastEnabled();
 }
 
@@ -122,24 +103,10 @@ bool DefaultAccessibilityDelegate::IsBrailleDisplayConnected() const {
 
 void DefaultAccessibilityDelegate::SilenceSpokenFeedback() const {}
 
-void DefaultAccessibilityDelegate::ToggleSpokenFeedback(
-    AccessibilityNotificationVisibility notify) {
-  spoken_feedback_enabled_ = !spoken_feedback_enabled_;
-}
-
 void DefaultAccessibilityDelegate::SaveScreenMagnifierScale(double scale) {}
 
 double DefaultAccessibilityDelegate::GetSavedScreenMagnifierScale() {
   return std::numeric_limits<double>::min();
-}
-
-void DefaultAccessibilityDelegate::TriggerAccessibilityAlert(
-    AccessibilityAlert alert) {
-  accessibility_alert_ = alert;
-}
-
-AccessibilityAlert DefaultAccessibilityDelegate::GetLastAccessibilityAlert() {
-  return accessibility_alert_;
 }
 
 bool DefaultAccessibilityDelegate::ShouldToggleSpokenFeedbackViaTouch() {
@@ -148,14 +115,5 @@ bool DefaultAccessibilityDelegate::ShouldToggleSpokenFeedbackViaTouch() {
 
 void DefaultAccessibilityDelegate::PlaySpokenFeedbackToggleCountdown(
     int tick_count) {}
-
-void DefaultAccessibilityDelegate::PlayEarcon(int sound_key) {}
-
-base::TimeDelta DefaultAccessibilityDelegate::PlayShutdownSound() const {
-  return base::TimeDelta();
-}
-
-void DefaultAccessibilityDelegate::HandleAccessibilityGesture(
-    ui::AXGesture gesture) {}
 
 }  // namespace ash

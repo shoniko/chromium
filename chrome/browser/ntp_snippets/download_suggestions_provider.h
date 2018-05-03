@@ -51,7 +51,7 @@ class DownloadSuggestionsProvider
       content::DownloadManager* download_manager,
       DownloadHistory* download_history,
       PrefService* pref_service,
-      std::unique_ptr<base::Clock> clock);
+      base::Clock* clock);
   ~DownloadSuggestionsProvider() override;
 
   // ContentSuggestionsProvider implementation.
@@ -71,7 +71,7 @@ class DownloadSuggestionsProvider
       base::Time begin,
       base::Time end,
       const base::Callback<bool(const GURL& url)>& filter) override;
-  void ClearCachedSuggestions(ntp_snippets::Category category) override;
+  void ClearCachedSuggestions() override;
   void GetDismissedSuggestionsForDebugging(
       ntp_snippets::Category category,
       ntp_snippets::DismissedSuggestionsCallback callback) override;
@@ -217,7 +217,7 @@ class DownloadSuggestionsProvider
   content::DownloadManager* download_manager_;
   DownloadHistory* download_history_;
   PrefService* pref_service_;
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
 
   // Cached offline page downloads. If there are not enough asset downloads, all
   // of these could be shown (they are the most recently visited, not dismissed

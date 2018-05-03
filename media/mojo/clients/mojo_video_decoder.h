@@ -9,6 +9,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/video_decoder.h"
+#include "media/base/video_frame.h"
 #include "media/mojo/clients/mojo_media_log_service.h"
 #include "media/mojo/interfaces/video_decoder.mojom.h"
 #include "media/video/video_decode_accelerator.h"
@@ -23,6 +24,7 @@ namespace media {
 class GpuVideoAcceleratorFactories;
 class MediaLog;
 class MojoDecoderBufferWriter;
+class MojoVideoFrameHandleReleaser;
 
 // A VideoDecoder, for use in the renderer process, that proxies to a
 // mojom::VideoDecoder. It is assumed that the other side will be implemented by
@@ -59,6 +61,10 @@ class MojoVideoDecoder final : public VideoDecoder,
       const base::Optional<base::UnguessableToken>& release_token) final;
   void RequestOverlayInfo(bool restart_for_transitions) final;
 
+  void set_writer_capacity_for_testing(uint32_t capacity) {
+    writer_capacity_ = capacity;
+  }
+
  private:
   void OnInitializeDone(bool status,
                         bool needs_bitstream_conversion,
@@ -67,9 +73,6 @@ class MojoVideoDecoder final : public VideoDecoder,
   void OnResetDone();
 
   void BindRemoteDecoder();
-
-  void OnReleaseMailbox(const base::UnguessableToken& release_token,
-                        const gpu::SyncToken& release_sync_token);
 
   // Forwards |overlay_info| to the remote decoder.
   void OnOverlayInfoChanged(const OverlayInfo& overlay_info);
@@ -84,6 +87,9 @@ class MojoVideoDecoder final : public VideoDecoder,
   // to Initialize() (on the media thread).
   mojom::VideoDecoderPtrInfo remote_decoder_info_;
 
+  // Manages VideoFrame destruction callbacks.
+  scoped_refptr<MojoVideoFrameHandleReleaser> mojo_video_frame_handle_releaser_;
+
   GpuVideoAcceleratorFactories* gpu_factories_ = nullptr;
 
   InitCB init_cb_;
@@ -94,6 +100,9 @@ class MojoVideoDecoder final : public VideoDecoder,
 
   mojom::VideoDecoderPtr remote_decoder_;
   std::unique_ptr<MojoDecoderBufferWriter> mojo_decoder_buffer_writer_;
+
+  uint32_t writer_capacity_ = 0;
+
   bool remote_decoder_bound_ = false;
   bool has_connection_error_ = false;
   mojo::AssociatedBinding<mojom::VideoDecoderClient> client_binding_;

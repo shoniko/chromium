@@ -27,15 +27,16 @@ constexpr uint64_t BeginFrameArgs::kInvalidFrameNumber;
 constexpr uint64_t BeginFrameArgs::kStartingFrameNumber;
 
 BeginFrameArgs::BeginFrameArgs()
-    : frame_time(base::TimeTicks()),
-      deadline(base::TimeTicks()),
+    : frame_time(base::TimeTicks::Min()),
+      deadline(base::TimeTicks::Min()),
       interval(base::TimeDelta::FromMicroseconds(-1)),
-      sequence_number(kInvalidFrameNumber),
       source_id(0),
+      sequence_number(kInvalidFrameNumber),
       type(BeginFrameArgs::INVALID),
-      on_critical_path(true) {}
+      on_critical_path(true),
+      animate_only(false) {}
 
-BeginFrameArgs::BeginFrameArgs(uint32_t source_id,
+BeginFrameArgs::BeginFrameArgs(uint64_t source_id,
                                uint64_t sequence_number,
                                base::TimeTicks frame_time,
                                base::TimeTicks deadline,
@@ -44,15 +45,16 @@ BeginFrameArgs::BeginFrameArgs(uint32_t source_id,
     : frame_time(frame_time),
       deadline(deadline),
       interval(interval),
-      sequence_number(sequence_number),
       source_id(source_id),
+      sequence_number(sequence_number),
       type(type),
-      on_critical_path(true) {
+      on_critical_path(true),
+      animate_only(false) {
   DCHECK_LE(kStartingFrameNumber, sequence_number);
 }
 
 BeginFrameArgs BeginFrameArgs::Create(BeginFrameArgs::CreationLocation location,
-                                      uint32_t source_id,
+                                      uint64_t source_id,
                                       uint64_t sequence_number,
                                       base::TimeTicks frame_time,
                                       base::TimeTicks deadline,
@@ -91,6 +93,7 @@ void BeginFrameArgs::AsValueInto(base::trace_event::TracedValue* state) const {
   state->SetString("created_from", created_from.ToString());
 #endif
   state->SetBoolean("on_critical_path", on_critical_path);
+  state->SetBoolean("animate_only", animate_only);
 }
 
 // This is a hard-coded deadline adjustment that assumes 60Hz, to be used in
@@ -108,15 +111,15 @@ base::TimeDelta BeginFrameArgs::DefaultInterval() {
 }
 
 BeginFrameAck::BeginFrameAck()
-    : sequence_number(BeginFrameArgs::kInvalidFrameNumber),
-      source_id(0),
+    : source_id(0),
+      sequence_number(BeginFrameArgs::kInvalidFrameNumber),
       has_damage(false) {}
 
-BeginFrameAck::BeginFrameAck(uint32_t source_id,
+BeginFrameAck::BeginFrameAck(uint64_t source_id,
                              uint64_t sequence_number,
                              bool has_damage)
-    : sequence_number(sequence_number),
-      source_id(source_id),
+    : source_id(source_id),
+      sequence_number(sequence_number),
       has_damage(has_damage) {
   DCHECK_LT(BeginFrameArgs::kInvalidFrameNumber, sequence_number);
 }

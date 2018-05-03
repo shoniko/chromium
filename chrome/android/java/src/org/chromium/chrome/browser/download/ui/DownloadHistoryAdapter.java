@@ -263,7 +263,7 @@ public class DownloadHistoryAdapter extends DateDividedAdapter
 
         if (wrapper.hasBeenExternallyRemoved()) {
             sDeletedFileTracker.add(wrapper);
-            wrapper.remove();
+            wrapper.removePermanently();
             mFilePathsToItemsMap.removeItem(wrapper);
             RecordUserAction.record("Android.DownloadManager.Item.ExternallyDeleted");
             return true;
@@ -428,6 +428,9 @@ public class DownloadHistoryAdapter extends DateDividedAdapter
                     }
                     if (TextUtils.equals(item.getId(), wrapper.getId())) {
                         view.displayItem(mBackendProvider, existingWrapper);
+                        if (item.getDownloadInfo().state() == DownloadState.COMPLETE) {
+                            mSpaceDisplay.onChanged();
+                        }
                     }
                 }
 
@@ -470,6 +473,7 @@ public class DownloadHistoryAdapter extends DateDividedAdapter
     public void onAddOrReplaceDownloadSharedPreferenceEntry(final ContentId id) {
         // Alert DownloadItemViews displaying information about the item that it has changed.
         for (DownloadItemView view : mViews) {
+            if (view.getItem() == null) continue;
             if (TextUtils.equals(id.id, view.getItem().getId())) {
                 view.displayItem(mBackendProvider, view.getItem());
             }
@@ -734,15 +738,16 @@ public class DownloadHistoryAdapter extends DateDividedAdapter
 
     @Override
     public void onItemsAvailable() {
-        List<OfflineItem> offlineItems = getOfflineContentProvider().getAllItems();
-        for (OfflineItem item : offlineItems) {
-            if (item.isTransient) continue;
-            DownloadHistoryItemWrapper wrapper = createDownloadHistoryItemWrapper(item);
-            addDownloadHistoryItemWrapper(wrapper);
-        }
+        getOfflineContentProvider().getAllItems(offlineItems -> {
+            for (OfflineItem item : offlineItems) {
+                if (item.isTransient) continue;
+                DownloadHistoryItemWrapper wrapper = createDownloadHistoryItemWrapper(item);
+                addDownloadHistoryItemWrapper(wrapper);
+            }
 
-        recordOfflineItemCountHistograms();
-        onItemsRetrieved(LoadingStateDelegate.OFFLINE_ITEMS);
+            recordOfflineItemCountHistograms();
+            onItemsRetrieved(LoadingStateDelegate.OFFLINE_ITEMS);
+        });
     }
 
     private void recordOfflineItemCountHistograms() {
@@ -829,6 +834,9 @@ public class DownloadHistoryAdapter extends DateDividedAdapter
                 for (DownloadItemView view : mViews) {
                     if (TextUtils.equals(item.id.id, view.getItem().getId())) {
                         view.displayItem(mBackendProvider, existingWrapper);
+                        if (item.state == OfflineItemState.COMPLETE) {
+                            mSpaceDisplay.onChanged();
+                        }
                     }
                 }
 

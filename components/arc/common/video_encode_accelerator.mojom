@@ -16,52 +16,6 @@ enum VideoPixelFormat {
   PIXEL_FORMAT_I420 = 1,
 };
 
-[Extensible]
-enum VideoCodecProfile {
-  // The values must match to the values in media::VideoCodecProfile.
-  VIDEO_CODEC_PROFILE_UNKNOWN = -1,
-  VIDEO_CODEC_PROFILE_MIN = VIDEO_CODEC_PROFILE_UNKNOWN,
-  H264PROFILE_MIN = 0,
-
-  // Including profile Constrained Baseline (CBP).
-  H264PROFILE_BASELINE = H264PROFILE_MIN,
-  H264PROFILE_MAIN = 1,
-  H264PROFILE_EXTENDED = 2,
-  H264PROFILE_HIGH = 3,
-  H264PROFILE_HIGH10PROFILE = 4,
-  H264PROFILE_HIGH422PROFILE = 5,
-  H264PROFILE_HIGH444PREDICTIVEPROFILE = 6,
-  H264PROFILE_SCALABLEBASELINE = 7,
-  H264PROFILE_SCALABLEHIGH = 8,
-  H264PROFILE_STEREOHIGH = 9,
-  H264PROFILE_MULTIVIEWHIGH = 10,
-  H264PROFILE_MAX = H264PROFILE_MULTIVIEWHIGH,
-  VP8PROFILE_MIN = 11,
-  VP8PROFILE_ANY = VP8PROFILE_MIN,
-  VP8PROFILE_MAX = VP8PROFILE_ANY,
-  VP9PROFILE_MIN = 12,
-  VP9PROFILE_PROFILE0 = VP9PROFILE_MIN,
-  VP9PROFILE_PROFILE1 = 13,
-  VP9PROFILE_PROFILE2 = 14,
-  VP9PROFILE_PROFILE3 = 15,
-  VP9PROFILE_MAX = VP9PROFILE_PROFILE3,
-  HEVCPROFILE_MIN = 16,
-  HEVCPROFILE_MAIN = HEVCPROFILE_MIN,
-  HEVCPROFILE_MAIN10 = 17,
-  HEVCPROFILE_MAIN_STILL_PICTURE = 18,
-  HEVCPROFILE_MAX = HEVCPROFILE_MAIN_STILL_PICTURE,
-  DOLBYVISION_MIN = 19,
-  DOLBYVISION_PROFILE0 = DOLBYVISION_MIN,
-  DOLBYVISION_PROFILE4 = 20,
-  DOLBYVISION_PROFILE5 = 21,
-  DOLBYVISION_PROFILE7 = 22,
-  DOLBYVISION_MAX = DOLBYVISION_PROFILE7,
-  THEORAPROFILE_MIN = 23,
-  THEORAPROFILE_ANY = THEORAPROFILE_MIN,
-  THEORAPROFILE_MAX = THEORAPROFILE_ANY,
-  VIDEO_CODEC_PROFILE_MAX = THEORAPROFILE_ANY,
-};
-
 // Specification of an encoding profile supported by an encoder.
 struct VideoEncodeProfile {
   VideoCodecProfile profile;
@@ -72,7 +26,7 @@ struct VideoEncodeProfile {
 
 // Video encoder IPC interface.
 // Next MinVersion: 1
-// Next Method ID: 5
+// Next Method ID: 6
 interface VideoEncodeAccelerator {
 
   // The input buffer storage type.
@@ -162,6 +116,14 @@ interface VideoEncodeAccelerator {
   //  |framerate| is the requested new framerate, in frames per second.
   RequestEncodingParametersChange@4(uint32 bitrate,
                                     uint32 framerate);
+
+  // Flushes the encoder: all pending inputs will be encoded and all bitstreams
+  // handed back to the client. The client should not invoke Flush() or
+  // Encode() before the previous Flush() is finished.
+  // Callback:
+  //  Called with |true| if Flush() is complete; with |false| if Flush() is
+  //  canceled.
+  Flush@5() => (bool flush_done);
 };
 
 // Interface for clients that use VideoEncodeAccelerator. These callbacks will

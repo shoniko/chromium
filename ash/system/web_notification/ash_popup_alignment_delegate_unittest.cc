@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
@@ -27,8 +26,8 @@ namespace ash {
 
 class AshPopupAlignmentDelegateTest : public AshTestBase {
  public:
-  AshPopupAlignmentDelegateTest() {}
-  ~AshPopupAlignmentDelegateTest() override {}
+  AshPopupAlignmentDelegateTest() = default;
+  ~AshPopupAlignmentDelegateTest() override = default;
 
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -166,10 +165,6 @@ TEST_F(AshPopupAlignmentDelegateTest, DisplayResize) {
 }
 
 TEST_F(AshPopupAlignmentDelegateTest, DockedMode) {
-  // TODO: needs unified mode. http://crbug.com/698024.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   const gfx::Rect toast_size(0, 0, 10, 10);
   UpdateDisplay("600x600");
   int origin_x = alignment_delegate()->GetToastOriginX(toast_size);
@@ -199,7 +194,7 @@ TEST_F(AshPopupAlignmentDelegateTest, TrayHeight) {
   alignment_delegate()->SetTrayBubbleHeight(kTrayHeight);
 
   EXPECT_EQ(origin_x, alignment_delegate()->GetToastOriginX(toast_size));
-  EXPECT_EQ(baseline - kTrayHeight - message_center::kMarginBetweenItems,
+  EXPECT_EQ(baseline - kTrayHeight - message_center::kMarginBetweenPopups,
             alignment_delegate()->GetBaseLine());
 }
 
@@ -220,10 +215,6 @@ TEST_F(AshPopupAlignmentDelegateTest, Extended) {
 }
 
 TEST_F(AshPopupAlignmentDelegateTest, Unified) {
-  // TODO: needs unified mode. http://crbug.com/698024.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   display_manager()->SetUnifiedDesktopEnabled(true);
 
   // Reset the delegate as the primary display's shelf will be destroyed during

@@ -19,13 +19,12 @@
 #include "base/strings/string16.h"
 #include "base/time/default_clock.h"
 #include "build/build_config.h"
-#include "chrome/browser/ui/app_list/speech_recognizer_delegate.h"
+#include "chrome/browser/speech/speech_recognizer_delegate.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "net/base/backoff_entry.h"
 #include "net/url_request/url_fetcher_delegate.h"
-#include "ui/app_list/speech_ui_model_observer.h"
 
 namespace content {
 struct SpeechRecognitionSessionPreamble;
@@ -40,11 +39,11 @@ class URLFetcher;
 }
 
 class Profile;
+class SpeechRecognizer;
 
 namespace app_list {
 
 class SpeechAuthHelper;
-class SpeechRecognizer;
 class StartPageObserver;
 
 // StartPageService collects data to be displayed in app list's start page
@@ -77,9 +76,6 @@ class StartPageService : public KeyedService,
   // Called when the WebUI has finished loading.
   void WebUILoaded();
 
-  // Returns true if the hotword is enabled in the app-launcher.
-  bool HotwordEnabled();
-
   // They return essentially the same web contents but might return NULL when
   // some flag disables the feature.
   content::WebContents* GetStartPageContents();
@@ -89,15 +85,15 @@ class StartPageService : public KeyedService,
     search_engine_is_google_ = search_engine_is_google;
   }
   Profile* profile() { return profile_; }
-  SpeechRecognitionState state() { return state_; }
+  SpeechRecognizerState state() { return state_; }
 
   // Overridden from app_list::SpeechRecognizerDelegate:
   void OnSpeechResult(const base::string16& query, bool is_final) override;
   void OnSpeechSoundLevelChanged(int16_t level) override;
   void OnSpeechRecognitionStateChanged(
-      SpeechRecognitionState new_state) override;
+      SpeechRecognizerState new_state) override;
   void GetSpeechAuthParameters(std::string* auth_scope,
-                               std::string* auth_token) override;
+                               std::string* auth_token) override {}
 
  protected:
   // Protected for testing.
@@ -159,7 +155,7 @@ class StartPageService : public KeyedService,
   std::unique_ptr<content::WebContents> contents_;
   std::unique_ptr<StartPageWebContentsDelegate> contents_delegate_;
   std::unique_ptr<ProfileDestroyObserver> profile_destroy_observer_;
-  SpeechRecognitionState state_;
+  SpeechRecognizerState state_;
   base::ObserverList<StartPageObserver> observers_;
   bool speech_button_toggled_manually_;
   bool speech_result_obtained_;

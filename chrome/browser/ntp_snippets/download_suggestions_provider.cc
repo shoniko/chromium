@@ -150,7 +150,7 @@ DownloadSuggestionsProvider::DownloadSuggestionsProvider(
     content::DownloadManager* download_manager,
     DownloadHistory* download_history,
     PrefService* pref_service,
-    std::unique_ptr<base::Clock> clock)
+    base::Clock* clock)
     : ContentSuggestionsProvider(observer),
       category_status_(CategoryStatus::AVAILABLE_LOADING),
       provided_category_(Category::FromKnownCategory(
@@ -159,7 +159,7 @@ DownloadSuggestionsProvider::DownloadSuggestionsProvider(
       download_manager_(download_manager),
       download_history_(download_history),
       pref_service_(pref_service),
-      clock_(std::move(clock)),
+      clock_(clock),
       is_asset_downloads_initialization_complete_(false),
       weak_ptr_factory_(this) {
   observer->OnCategoryStatusChanged(this, provided_category_, category_status_);
@@ -265,8 +265,7 @@ void DownloadSuggestionsProvider::ClearHistory(
   ClearDismissedSuggestionsForDebugging(provided_category_);
 }
 
-void DownloadSuggestionsProvider::ClearCachedSuggestions(Category category) {
-  DCHECK_EQ(provided_category_, category);
+void DownloadSuggestionsProvider::ClearCachedSuggestions() {
   // Ignored. The internal caches are not stored on disk and they are just
   // partial copies of the data stored at OfflinePage model and DownloadManager.
   // If it is cleared there, it will be cleared in these caches as well.
@@ -722,7 +721,6 @@ void DownloadSuggestionsProvider::UpdateOfflinePagesCache(
     bool notify,
     const std::vector<offline_pages::OfflinePageItem>&
         all_download_offline_pages) {
-  DCHECK(!offline_page_model_ || offline_page_model_->is_loaded());
 
   std::set<std::string> old_dismissed_ids =
       ReadOfflinePageDismissedIDsFromPrefs();

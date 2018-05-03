@@ -42,7 +42,7 @@ LayoutFrameSet::LayoutFrameSet(HTMLFrameSetElement* frame_set)
   SetInline(false);
 }
 
-LayoutFrameSet::~LayoutFrameSet() {}
+LayoutFrameSet::~LayoutFrameSet() = default;
 
 LayoutFrameSet::GridAxis::GridAxis() : split_being_resized_(kNoSplit) {}
 
@@ -508,7 +508,7 @@ void LayoutFrameSet::SetIsResizing(bool is_resizing) {
     if (ancestor->IsFrameSet())
       ToLayoutFrameSet(ancestor)->is_child_resizing_ = is_resizing;
   }
-  if (LocalFrame* frame = this->GetFrame()) {
+  if (LocalFrame* frame = GetFrame()) {
     frame->GetEventHandler().SetResizingFrameSet(is_resizing ? FrameSet()
                                                              : nullptr);
   }

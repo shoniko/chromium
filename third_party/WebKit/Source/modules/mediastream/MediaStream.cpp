@@ -28,13 +28,13 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/Deprecation.h"
 #include "modules/mediastream/MediaStreamRegistry.h"
 #include "modules/mediastream/MediaStreamTrackEvent.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/mediastream/MediaStreamCenter.h"
 #include "platform/mediastream/MediaStreamSource.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -110,7 +110,7 @@ MediaStream::MediaStream(ExecutionContext* context,
     : ContextClient(context),
       descriptor_(stream_descriptor),
       scheduled_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kMediaElementEvent, context),
+          context->GetTaskRunner(TaskType::kMediaElementEvent),
           this,
           &MediaStream::ScheduledEventTimerFired) {
   descriptor_->SetClient(this);
@@ -145,7 +145,7 @@ MediaStream::MediaStream(ExecutionContext* context,
     : ContextClient(context),
       descriptor_(stream_descriptor),
       scheduled_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kMediaElementEvent, context),
+          context->GetTaskRunner(TaskType::kMediaElementEvent),
           this,
           &MediaStream::ScheduledEventTimerFired) {
   descriptor_->SetClient(this);
@@ -176,7 +176,7 @@ MediaStream::MediaStream(ExecutionContext* context,
                          const MediaStreamTrackVector& video_tracks)
     : ContextClient(context),
       scheduled_event_timer_(
-          TaskRunnerHelper::Get(TaskType::kMediaElementEvent, context),
+          context->GetTaskRunner(TaskType::kMediaElementEvent),
           this,
           &MediaStream::ScheduledEventTimerFired) {
   MediaStreamComponentVector audio_components;
@@ -203,7 +203,7 @@ MediaStream::MediaStream(ExecutionContext* context,
   }
 }
 
-MediaStream::~MediaStream() {}
+MediaStream::~MediaStream() = default;
 
 bool MediaStream::EmptyOrOnlyEndedTracks() {
   if (!audio_tracks_.size() && !video_tracks_.size()) {
@@ -468,7 +468,7 @@ void MediaStream::ScheduleDispatchEvent(Event* event) {
   scheduled_events_.push_back(event);
 
   if (!scheduled_event_timer_.IsActive())
-    scheduled_event_timer_.StartOneShot(0, BLINK_FROM_HERE);
+    scheduled_event_timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void MediaStream::ScheduledEventTimerFired(TimerBase*) {

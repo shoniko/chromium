@@ -57,6 +57,7 @@
 #include "cc/trees/swap_promise.h"
 #include "cc/trees/swap_promise_manager.h"
 #include "cc/trees/transform_node.h"
+#include "components/ukm/test_ukm_recorder.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
@@ -83,6 +84,10 @@ using testing::Mock;
 
 namespace cc {
 namespace {
+const char kUserInteraction[] = "Compositor.UserInteraction";
+const char kCheckerboardArea[] = "CheckerboardedContentArea";
+const char kCheckerboardAreaRatio[] = "CheckerboardedContentAreaRatio";
+const char kMissingTiles[] = "NumMissingTiles";
 
 class LayerTreeHostTest : public LayerTreeTest {};
 
@@ -112,7 +117,8 @@ class LayerTreeHostTestSetNeedsCommitInsideLayout : public LayerTreeHostTest {
  protected:
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
 
-  void UpdateLayerTreeHost() override {
+  void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) override {
     // This shouldn't cause a second commit to happen.
     layer_tree_host()->SetNeedsCommit();
   }
@@ -158,7 +164,8 @@ class LayerTreeHostTestFrameOrdering : public LayerTreeHostTest {
 
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
 
-  void UpdateLayerTreeHost() override {
+  void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) override {
     EXPECT_TRUE(CheckStep(MAIN_LAYOUT, &main_));
   }
 
@@ -206,7 +213,8 @@ class LayerTreeHostTestSetNeedsUpdateInsideLayout : public LayerTreeHostTest {
  protected:
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
 
-  void UpdateLayerTreeHost() override {
+  void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) override {
     // This shouldn't cause a second commit to happen.
     layer_tree_host()->SetNeedsUpdateLayers();
   }
@@ -447,7 +455,8 @@ class LayerTreeHostContextCacheTest : public LayerTreeHostTest {
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
-      scoped_refptr<viz::ContextProvider> worker_context_provider) override {
+      scoped_refptr<viz::RasterContextProvider> worker_context_provider)
+      override {
     // Create the main viz::ContextProvider with a MockContextSupport.
     auto main_support = std::make_unique<MockContextSupport>();
     mock_main_context_support_ = main_support.get();
@@ -457,9 +466,8 @@ class LayerTreeHostContextCacheTest : public LayerTreeHostTest {
     // Create the main viz::ContextProvider with a MockContextSupport.
     auto worker_support = std::make_unique<MockContextSupport>();
     mock_worker_context_support_ = worker_support.get();
-    auto test_worker_context_provider = TestContextProvider::Create(
+    auto test_worker_context_provider = TestContextProvider::CreateWorker(
         TestWebGraphicsContext3D::Create(), std::move(worker_support));
-    test_worker_context_provider->BindToCurrentThread();
 
     // At init, visibility is set to true, so SetAggressivelyFreeResources will
     // be disabled.
@@ -483,7 +491,7 @@ class LayerTreeHostContextCacheTest : public LayerTreeHostTest {
  protected:
   class MockContextSupport : public TestContextSupport {
    public:
-    MockContextSupport() {}
+    MockContextSupport() = default;
     MOCK_METHOD1(SetAggressivelyFreeResources,
                  void(bool aggressively_free_resources));
   };
@@ -2403,7 +2411,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestUndrawnLayersDamageLater);
 // its damage is preserved until the next time it is drawn.
 class LayerTreeHostTestDamageWithScale : public LayerTreeHostTest {
  public:
-  LayerTreeHostTestDamageWithScale() {}
+  LayerTreeHostTestDamageWithScale() = default;
 
   void SetupTree() override {
     client_.set_fill_with_nonsolid_color(true);
@@ -2508,7 +2516,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestDamageWithScale);
 // to the impl side.
 class LayerTreeHostTestCommit : public LayerTreeHostTest {
  public:
-  LayerTreeHostTestCommit() {}
+  LayerTreeHostTestCommit() = default;
 
   void BeginTest() override {
     layer_tree_host()->SetViewportSize(gfx::Size(20, 20));
@@ -2657,7 +2665,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestFrameTimeUpdatesAfterDraw);
 // from LayerTreeHost to LayerTreeHostImpl in the MT compositor.
 class LayerTreeHostTestStartPageScaleAnimation : public LayerTreeHostTest {
  public:
-  LayerTreeHostTestStartPageScaleAnimation() {}
+  LayerTreeHostTestStartPageScaleAnimation() = default;
 
   void SetupTree() override {
     LayerTreeHostTest::SetupTree();
@@ -2765,7 +2773,7 @@ class ViewportDeltasAppliedDuringPinch : public LayerTreeHostTest {
     if (!sent_gesture_) {
       host_impl->PinchGestureBegin();
       host_impl->PinchGestureUpdate(2, gfx::Point(100, 100));
-      host_impl->PinchGestureEnd();
+      host_impl->PinchGestureEnd(gfx::Point(100, 100), true);
       sent_gesture_ = true;
     }
   }
@@ -2824,7 +2832,7 @@ MULTI_THREAD_TEST_F(LayerTreeHostTestSetVisible);
 class LayerTreeHostTestDeviceScaleFactorScalesViewportAndLayers
     : public LayerTreeHostTest {
  public:
-  LayerTreeHostTestDeviceScaleFactorScalesViewportAndLayers() {}
+  LayerTreeHostTestDeviceScaleFactorScalesViewportAndLayers() = default;
 
   void BeginTest() override {
     client_.set_fill_with_nonsolid_color(true);
@@ -3062,7 +3070,7 @@ class LayerTreeHostInvalidLocalSurfaceIdDefersCommit
   bool IsCommitAllowed() const override { return local_surface_id_.is_valid(); }
 
  private:
-  viz::LocalSurfaceIdAllocator allocator_;
+  viz::ParentLocalSurfaceIdAllocator allocator_;
   viz::LocalSurfaceId local_surface_id_;
 };
 
@@ -3156,16 +3164,182 @@ class LayerTreeHostTestDeferCommitsInsideBeginMainFrameWithCommitAfter
   void AfterTest() override {
     EXPECT_EQ(1, commit_count_);
     EXPECT_EQ(2, begin_main_frame_count_);
+    // The commit should not have been aborted.
+    EXPECT_EQ(1, ready_to_commit_count_);
+  }
+
+  void ReadyToCommitOnThread(LayerTreeHostImpl* host_impl) override {
+    ++ready_to_commit_count_;
   }
 
  private:
   bool allow_commits_ = false;
   int commit_count_ = 0;
   int begin_main_frame_count_ = 0;
+  int ready_to_commit_count_ = 0;
 };
 
 SINGLE_AND_MULTI_THREAD_TEST_F(
     LayerTreeHostTestDeferCommitsInsideBeginMainFrameWithCommitAfter);
+
+// This verifies that animate_only BeginFrames only run animation/layout
+// updates, i.e. abort commits after the animate stage and only request layer
+// tree updates for layout.
+//
+// The tests sends four Begin(Main)Frames in sequence: three animate_only
+// Begin(Main)Frames followed by a normal Begin(Main)Frame. The first three
+// should result in aborted commits, whereas the last one should complete the
+// previously aborted commits.
+//
+// Between BeginMainFrames 2 and 3, the client also requests a new commit
+// (SetNeedsCommit), but not between BeginMainFrames 1 and 2. In multi-threaded
+// mode, ProxyMain will run the animate pipeline stage only for BeginMainFrames
+// 1 and 3, as no new commit was requested between 1 and 2.
+//
+// The test uses the full-pipeline mode to ensure that each BeginFrame also
+// incurs a BeginMainFrame.
+class LayerTreeHostTestAnimateOnlyBeginFrames
+    : public LayerTreeHostTest,
+      public viz::ExternalBeginFrameSourceClient {
+ public:
+  LayerTreeHostTestAnimateOnlyBeginFrames()
+      : external_begin_frame_source_(this) {
+    UseBeginFrameSource(&external_begin_frame_source_);
+  }
+
+  void IssueBeginFrame(bool animate_only) {
+    ++begin_frame_count_;
+
+    last_begin_frame_time_ += viz::BeginFrameArgs::DefaultInterval();
+    uint64_t sequence_number = next_begin_frame_sequence_number_++;
+
+    auto args = viz::BeginFrameArgs::Create(
+        BEGINFRAME_FROM_HERE, viz::BeginFrameArgs::kManualSourceId,
+        sequence_number, last_begin_frame_time_,
+        last_begin_frame_time_ + viz::BeginFrameArgs::DefaultInterval(),
+        viz::BeginFrameArgs::DefaultInterval(), viz::BeginFrameArgs::NORMAL);
+    args.animate_only = animate_only;
+
+    external_begin_frame_source_.OnBeginFrame(args);
+  }
+
+  void PostIssueBeginFrame(bool animate_only) {
+    // Post a new task so that BeginFrame is not issued within same callstack.
+    ImplThreadTaskRunner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            &LayerTreeHostTestAnimateOnlyBeginFrames::IssueBeginFrame,
+            base::Unretained(this), animate_only));
+  }
+
+  // viz::ExternalBeginFrameSourceClient implementation:
+  void OnNeedsBeginFrames(bool needs_begin_frames) override {
+    if (needs_begin_frames) {
+      EXPECT_EQ(0, begin_frame_count_);
+      // Send a first animation_only BeginFrame.
+      PostIssueBeginFrame(true);
+    }
+  }
+
+  // LayerTreeHostTest implementation:
+  void BeginTest() override {
+    PostSetNeedsCommitToMainThread();
+    // OnNeedsBeginFrames(true) will be called during tree initialization.
+  }
+
+  void WillBeginMainFrame() override { ++will_begin_main_frame_count_; }
+
+  void DidSendBeginMainFrameOnThread(LayerTreeHostImpl* host_impl) override {
+    ++sent_begin_main_frame_count_;
+    EXPECT_EQ(begin_frame_count_, sent_begin_main_frame_count_);
+  }
+
+  void DidFinishImplFrameOnThread(LayerTreeHostImpl* host_impl) override {
+    if (begin_frame_count_ < 3) {
+      if (begin_frame_count_ == 2) {
+        // Request another commit before sending the third BeginMainFrame.
+        PostSetNeedsCommitToMainThread();
+      }
+
+      // Send another animation_only BeginFrame.
+      PostIssueBeginFrame(true);
+    } else if (begin_frame_count_ == 3) {
+      PostIssueBeginFrame(false);
+    }
+  }
+
+  void UpdateLayerTreeHost(
+      LayerTreeHostClient::VisualStateUpdate requested_update) override {
+    ++update_layer_tree_host_count_;
+
+    if (begin_frame_count_ < 4) {
+      // First three BeginFrames are animate_only, so only kPrePaint updates are
+      // requested.
+      EXPECT_EQ(LayerTreeHostClient::VisualStateUpdate::kPrePaint,
+                requested_update);
+    } else {
+      EXPECT_EQ(4, begin_frame_count_);
+      // Last BeginFrame is normal, so all updates are requested.
+      EXPECT_EQ(LayerTreeHostClient::VisualStateUpdate::kAll, requested_update);
+    }
+  }
+
+  void DidCommit() override {
+    ++commit_count_;
+
+    // Fourth BeginMainFrame should lead to commit.
+    EXPECT_EQ(4, begin_frame_count_);
+    EXPECT_EQ(4, sent_begin_main_frame_count_);
+
+    EndTest();
+  }
+
+  void ReadyToCommitOnThread(LayerTreeHostImpl* host_impl) override {
+    ++ready_to_commit_count_;
+  }
+
+  void AfterTest() override {
+    EXPECT_EQ(1, commit_count_);
+    EXPECT_EQ(4, begin_frame_count_);
+    EXPECT_EQ(4, sent_begin_main_frame_count_);
+
+    if (HasImplThread()) {
+      // ProxyMain aborts the second BeginMainFrame before running the animate
+      // pipeline stage, since no further updates were made since the first one.
+      // Thus, we expect not to be called for the second BeginMainFrame.
+      EXPECT_EQ(3, will_begin_main_frame_count_);
+      EXPECT_EQ(3, update_layer_tree_host_count_);
+    } else {
+      EXPECT_EQ(4, will_begin_main_frame_count_);
+      EXPECT_EQ(4, update_layer_tree_host_count_);
+    }
+
+    // The final commit should not have been aborted.
+    EXPECT_EQ(1, ready_to_commit_count_);
+  }
+
+ protected:
+  void InitializeSettings(LayerTreeSettings* settings) override {
+    // Use full-pipeline mode to make BeginFrame handling deterministic.
+    EXPECT_FALSE(settings->wait_for_all_pipeline_stages_before_draw);
+    settings->wait_for_all_pipeline_stages_before_draw = true;
+  }
+
+ private:
+  viz::ExternalBeginFrameSource external_begin_frame_source_;
+
+  base::TimeTicks last_begin_frame_time_ = base::TimeTicks::Now();
+  uint64_t next_begin_frame_sequence_number_ =
+      viz::BeginFrameArgs::kStartingFrameNumber;
+  int commit_count_ = 0;
+  int begin_frame_count_ = 0;
+  int sent_begin_main_frame_count_ = 0;
+  int will_begin_main_frame_count_ = 0;
+  int update_layer_tree_host_count_ = 0;
+  int ready_to_commit_count_ = 0;
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestAnimateOnlyBeginFrames);
 
 class LayerTreeHostTestCompositeImmediatelyStateTransitions
     : public LayerTreeHostTest {
@@ -3398,7 +3572,7 @@ class OnDrawLayerTreeFrameSink : public viz::TestLayerTreeFrameSink {
  public:
   OnDrawLayerTreeFrameSink(
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
-      scoped_refptr<viz::ContextProvider> worker_context_provider,
+      scoped_refptr<viz::RasterContextProvider> worker_context_provider,
       viz::SharedBitmapManager* shared_bitmap_manager,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       const viz::RendererSettings& renderer_settings,
@@ -3442,7 +3616,8 @@ class LayerTreeHostTestAbortedCommitDoesntStallSynchronousCompositor
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
-      scoped_refptr<viz::ContextProvider> worker_context_provider) override {
+      scoped_refptr<viz::RasterContextProvider> worker_context_provider)
+      override {
     auto on_draw_callback = base::Bind(
         &LayerTreeHostTestAbortedCommitDoesntStallSynchronousCompositor::
             CallOnDraw,
@@ -3988,11 +4163,11 @@ class LayerTreeHostTestImplLayersPushProperties
         break;
     }
 
-    PushPropertiesCountingLayerImpl* root_impl_ = NULL;
-    PushPropertiesCountingLayerImpl* child_impl_ = NULL;
-    PushPropertiesCountingLayerImpl* child2_impl_ = NULL;
-    PushPropertiesCountingLayerImpl* grandchild_impl_ = NULL;
-    PushPropertiesCountingLayerImpl* leaf_always_pushing_layer_impl_ = NULL;
+    PushPropertiesCountingLayerImpl* root_impl_ = nullptr;
+    PushPropertiesCountingLayerImpl* child_impl_ = nullptr;
+    PushPropertiesCountingLayerImpl* child2_impl_ = nullptr;
+    PushPropertiesCountingLayerImpl* grandchild_impl_ = nullptr;
+    PushPropertiesCountingLayerImpl* leaf_always_pushing_layer_impl_ = nullptr;
 
     // Pull the layers that we need from the tree assuming the same structure
     // as LayerTreeHostTestLayersPushProperties
@@ -4914,7 +5089,8 @@ class TestSwapPromise : public SwapPromise {
     result_->did_activate_called = true;
   }
 
-  void WillSwap(viz::CompositorFrameMetadata* metadata) override {
+  void WillSwap(viz::CompositorFrameMetadata* compositor_frame_metadata,
+                RenderFrameMetadata* render_frame_metadata) override {
     base::AutoLock lock(result_->lock);
     EXPECT_FALSE(result_->did_swap_called);
     EXPECT_FALSE(result_->did_not_swap_called);
@@ -5085,7 +5261,7 @@ MULTI_THREAD_TEST_F(LayerTreeHostTestBreakSwapPromise);
 
 class LayerTreeHostTestKeepSwapPromise : public LayerTreeHostTest {
  public:
-  LayerTreeHostTestKeepSwapPromise() {}
+  LayerTreeHostTestKeepSwapPromise() = default;
 
   void BeginTest() override {
     layer_ = SolidColorLayer::Create();
@@ -5177,7 +5353,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestKeepSwapPromise);
 
 class LayerTreeHostTestKeepSwapPromiseMFBA : public LayerTreeHostTest {
  public:
-  LayerTreeHostTestKeepSwapPromiseMFBA() {}
+  LayerTreeHostTestKeepSwapPromiseMFBA() = default;
 
   void InitializeSettings(LayerTreeSettings* settings) override {
     settings->main_frame_before_activation_enabled = true;
@@ -5344,7 +5520,7 @@ class SimpleSwapPromiseMonitor : public SwapPromiseMonitor {
             layer_tree_host_impl),
         set_needs_commit_count_(set_needs_commit_count) {}
 
-  ~SimpleSwapPromiseMonitor() override {}
+  ~SimpleSwapPromiseMonitor() override = default;
 
   void OnSetNeedsCommitOnMain() override { (*set_needs_commit_count_)++; }
 
@@ -5362,7 +5538,7 @@ class SimpleSwapPromiseMonitor : public SwapPromiseMonitor {
 
 class LayerTreeHostTestSwapPromiseDuringCommit : public LayerTreeHostTest {
  protected:
-  LayerTreeHostTestSwapPromiseDuringCommit() {}
+  LayerTreeHostTestSwapPromiseDuringCommit() = default;
 
   void WillBeginMainFrame() override {
     if (TestEnded())
@@ -5375,7 +5551,7 @@ class LayerTreeHostTestSwapPromiseDuringCommit : public LayerTreeHostTest {
 
     {
       std::unique_ptr<SimpleSwapPromiseMonitor> swap_promise_monitor(
-          new SimpleSwapPromiseMonitor(layer_tree_host(), NULL,
+          new SimpleSwapPromiseMonitor(layer_tree_host(), nullptr,
                                        &set_needs_commit_count,
                                        &set_needs_redraw_count));
       layer_tree_host()->QueueSwapPromise(std::move(swap_promise));
@@ -5398,7 +5574,7 @@ class LayerTreeHostTestSwapPromiseDuringCommit : public LayerTreeHostTest {
 
     {
       std::unique_ptr<SimpleSwapPromiseMonitor> swap_promise_monitor(
-          new SimpleSwapPromiseMonitor(layer_tree_host(), NULL,
+          new SimpleSwapPromiseMonitor(layer_tree_host(), nullptr,
                                        &set_needs_commit_count,
                                        &set_needs_redraw_count));
       layer_tree_host()->QueueSwapPromise(std::move(swap_promise));
@@ -5430,7 +5606,7 @@ class LayerTreeHostTestSimpleSwapPromiseMonitor : public LayerTreeHostTest {
 
     {
       std::unique_ptr<SimpleSwapPromiseMonitor> swap_promise_monitor(
-          new SimpleSwapPromiseMonitor(layer_tree_host(), NULL,
+          new SimpleSwapPromiseMonitor(layer_tree_host(), nullptr,
                                        &set_needs_commit_count,
                                        &set_needs_redraw_count));
       layer_tree_host()->SetNeedsCommit();
@@ -5446,7 +5622,7 @@ class LayerTreeHostTestSimpleSwapPromiseMonitor : public LayerTreeHostTest {
 
     {
       std::unique_ptr<SimpleSwapPromiseMonitor> swap_promise_monitor(
-          new SimpleSwapPromiseMonitor(layer_tree_host(), NULL,
+          new SimpleSwapPromiseMonitor(layer_tree_host(), nullptr,
                                        &set_needs_commit_count,
                                        &set_needs_redraw_count));
       layer_tree_host()->SetNeedsUpdateLayers();
@@ -5456,7 +5632,7 @@ class LayerTreeHostTestSimpleSwapPromiseMonitor : public LayerTreeHostTest {
 
     {
       std::unique_ptr<SimpleSwapPromiseMonitor> swap_promise_monitor(
-          new SimpleSwapPromiseMonitor(layer_tree_host(), NULL,
+          new SimpleSwapPromiseMonitor(layer_tree_host(), nullptr,
                                        &set_needs_commit_count,
                                        &set_needs_redraw_count));
       layer_tree_host()->SetNeedsAnimate();
@@ -5630,7 +5806,7 @@ class LayerTreeHostWithGpuRasterizationTest : public LayerTreeHostTest {
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> ignored_compositor_context_provider,
-      scoped_refptr<viz::ContextProvider> ignored_worker_context_provider)
+      scoped_refptr<viz::RasterContextProvider> ignored_worker_context_provider)
       override {
     auto context_provider = TestContextProvider::Create();
     context_provider->UnboundTestContext3d()->SetMaxSamples(4);
@@ -6167,7 +6343,8 @@ class LayerTreeHostTestSynchronousCompositeSwapPromise
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
-      scoped_refptr<viz::ContextProvider> worker_context_provider) override {
+      scoped_refptr<viz::RasterContextProvider> worker_context_provider)
+      override {
     constexpr bool disable_display_vsync = false;
     bool synchronous_composite =
         !HasImplThread() &&
@@ -6440,7 +6617,7 @@ class LayerTreeHostTestCrispUpAfterPinchEnds : public LayerTreeHostTest {
         // Pinch zoom in.
         host_impl->PinchGestureBegin();
         host_impl->PinchGestureUpdate(1.5f, gfx::Point(100, 100));
-        host_impl->PinchGestureEnd();
+        host_impl->PinchGestureEnd(gfx::Point(100, 100), true);
         break;
       case 3:
         // Pinch zoom back to 1.f but don't end it.
@@ -6450,7 +6627,7 @@ class LayerTreeHostTestCrispUpAfterPinchEnds : public LayerTreeHostTest {
       case 4:
         // End the pinch, but delay tile production.
         playback_allowed_event_.Reset();
-        host_impl->PinchGestureEnd();
+        host_impl->PinchGestureEnd(gfx::Point(100, 100), true);
         break;
       case 5:
         // Let tiles complete.
@@ -6514,7 +6691,7 @@ MULTI_THREAD_TEST_F(LayerTreeHostTestCrispUpAfterPinchEndsWithOneCopy);
 
 class RasterizeWithGpuRasterizationCreatesResources : public LayerTreeHostTest {
  protected:
-  RasterizeWithGpuRasterizationCreatesResources() {}
+  RasterizeWithGpuRasterizationCreatesResources() = default;
 
   void InitializeSettings(LayerTreeSettings* settings) override {
     settings->gpu_rasterization_forced = true;
@@ -6586,7 +6763,7 @@ class GpuRasterizationRasterizesBorderTiles : public LayerTreeHostTest {
   DrawResult PrepareToDrawOnThread(LayerTreeHostImpl* host_impl,
                                    LayerTreeHostImpl::FrameData* frame_data,
                                    DrawResult draw_result) override {
-    EXPECT_EQ(10u, host_impl->resource_provider()->num_resources());
+    EXPECT_EQ(15u, host_impl->resource_provider()->num_resources());
     EndTest();
     return draw_result;
   }
@@ -6723,7 +6900,7 @@ class LayerTreeHostTestContinuousDrawWhenCreatingVisibleTiles
         // Pinch zoom in to cause new tiles to be required.
         host_impl->PinchGestureBegin();
         host_impl->PinchGestureUpdate(1.5f, gfx::Point(100, 100));
-        host_impl->PinchGestureEnd();
+        host_impl->PinchGestureEnd(gfx::Point(100, 100), true);
         ++step_;
         break;
       case 2:
@@ -7592,7 +7769,7 @@ class LayerTreeHostTestLocalSurfaceId : public LayerTreeHostTest {
   void AfterTest() override {}
 
   viz::LocalSurfaceId expected_local_surface_id_;
-  viz::LocalSurfaceIdAllocator allocator_;
+  viz::ParentLocalSurfaceIdAllocator allocator_;
 };
 
 SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestLocalSurfaceId);
@@ -8127,6 +8304,17 @@ class LayerTreeHostTestImageAnimation : public LayerTreeHostTest {
 
 MULTI_THREAD_TEST_F(LayerTreeHostTestImageAnimation);
 
+class LayerTreeHostTestImageAnimationSynchronousScheduling
+    : public LayerTreeHostTestImageAnimation {
+ public:
+  void InitializeSettings(LayerTreeSettings* settings) override {
+    LayerTreeHostTestImageAnimation::InitializeSettings(settings);
+    settings->using_synchronous_renderer_compositor = true;
+  }
+};
+
+MULTI_THREAD_TEST_F(LayerTreeHostTestImageAnimationSynchronousScheduling);
+
 class LayerTreeHostTestImageDecodingHints : public LayerTreeHostTest {
  public:
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
@@ -8184,5 +8372,186 @@ class LayerTreeHostTestImageDecodingHints : public LayerTreeHostTest {
 };
 
 MULTI_THREAD_TEST_F(LayerTreeHostTestImageDecodingHints);
+
+class LayerTreeHostTestCheckerboardUkm : public LayerTreeHostTest {
+ public:
+  LayerTreeHostTestCheckerboardUkm() : url_(GURL("https://example.com")) {}
+
+  void BeginTest() override {
+    PostSetNeedsCommitToMainThread();
+    layer_tree_host()->SetURLForUkm(url_);
+  }
+
+  void SetupTree() override {
+    gfx::Size layer_size(100, 100);
+    content_layer_client_.set_bounds(layer_size);
+    content_layer_client_.set_fill_with_nonsolid_color(true);
+    layer_tree_host()->SetRootLayer(
+        FakePictureLayer::Create(&content_layer_client_));
+    layer_tree_host()->root_layer()->SetBounds(layer_size);
+    LayerTreeTest::SetupTree();
+  }
+
+  void DidActivateTreeOnThread(LayerTreeHostImpl* impl) override {
+    if (impl->active_tree()->source_frame_number() != 0)
+      return;
+
+    // We have an active tree. Start a pinch gesture so we start recording
+    // stats.
+    impl->PinchGestureBegin();
+  }
+
+  void DrawLayersOnThread(LayerTreeHostImpl* impl) override {
+    if (!impl->pinch_gesture_active())
+      return;
+
+    // We just drew a frame, stats for it should have been recorded. End the
+    // gesture so they are flushed to the recorder.
+    impl->PinchGestureEnd(gfx::Point(50, 50), false);
+
+    // RenewTreePriority will run when the smoothness expiration timer fires.
+    // Synthetically do it here so the UkmManager is notified.
+    impl->RenewTreePriorityForTesting();
+
+    auto* recorder = static_cast<ukm::TestUkmRecorder*>(
+        impl->ukm_manager()->recorder_for_testing());
+
+    const auto& entries = recorder->GetEntriesByName(kUserInteraction);
+    EXPECT_EQ(1u, entries.size());
+    for (const auto* entry : entries) {
+      recorder->ExpectEntrySourceHasUrl(entry, url_);
+      recorder->ExpectEntryMetric(entry, kCheckerboardArea, 0);
+      recorder->ExpectEntryMetric(entry, kMissingTiles, 0);
+      recorder->ExpectEntryMetric(entry, kCheckerboardAreaRatio, 0);
+    }
+
+    EndTest();
+  }
+
+  void AfterTest() override {}
+
+ private:
+  const GURL url_;
+  FakeContentLayerClient content_layer_client_;
+};
+
+// Only multi-thread mode needs to record UKMs.
+MULTI_THREAD_TEST_F(LayerTreeHostTestCheckerboardUkm);
+
+class DontUpdateLayersWithEmptyBounds : public LayerTreeTest {
+ protected:
+  void SetupTree() override {
+    auto root = FakePictureLayer::Create(&root_client_);
+    child_ = FakePictureLayer::Create(&child_client_);
+    mask_ = FakePictureLayer::Create(&mask_client_);
+
+    // Add a lot of draw ops, to make sure the recording source
+    // hits the early out and avoids being detected as solid color even
+    // though it is empty. This ensures we hit later code paths that would
+    // early out if solid color in CanHaveTilings().
+    PaintFlags flags;
+    flags.setColor(SK_ColorRED);
+    for (int i = 0; i < 100; ++i) {
+      child_client_.add_draw_rect(gfx::Rect(3, 3), flags);
+      mask_client_.add_draw_rect(gfx::Rect(2, 2), flags);
+    }
+
+    root_client_.set_bounds(gfx::Size(10, 10));
+    root->SetBounds(gfx::Size(10, 10));
+
+    child_client_.set_bounds(gfx::Size(9, 9));
+    child_->SetBounds(gfx::Size(9, 9));
+    mask_client_.set_bounds(gfx::Size(9, 9));
+    mask_->SetBounds(gfx::Size(9, 9));
+
+    child_->SetMaskLayer(mask_.get());
+    root->AddChild(child_);
+    layer_tree_host()->SetRootLayer(std::move(root));
+    LayerTreeTest::SetupTree();
+  }
+
+  void BeginTest() override { PostSetNeedsCommitToMainThread(); }
+
+  void DidCommit() override {
+    switch (layer_tree_host()->SourceFrameNumber()) {
+      case 1:
+        // The child and mask are updated when they have non-empty bounds.
+        EXPECT_EQ(1, child_->update_count());
+        EXPECT_EQ(1, mask_->update_count());
+
+        // The child and mask become empty bounds.
+        child_client_.set_bounds(gfx::Size());
+        child_->SetBounds(gfx::Size());
+        mask_client_.set_bounds(gfx::Size());
+        mask_->SetBounds(gfx::Size());
+        break;
+      case 2: {
+        scoped_refptr<RasterSource> child_raster =
+            child_->GetRecordingSourceForTesting()->CreateRasterSource();
+        EXPECT_FALSE(child_raster->IsSolidColor());
+        scoped_refptr<RasterSource> mask_raster =
+            mask_->GetRecordingSourceForTesting()->CreateRasterSource();
+        EXPECT_FALSE(mask_raster->IsSolidColor());
+      }
+
+        // The child and mask are not updated when they have empty bounds.
+        EXPECT_EQ(1, child_->update_count());
+        EXPECT_EQ(1, mask_->update_count());
+        EndTest();
+        break;
+      default:
+        ADD_FAILURE() << layer_tree_host()->SourceFrameNumber();
+    }
+  }
+
+  void AfterTest() override {}
+
+  scoped_refptr<FakePictureLayer> child_;
+  scoped_refptr<FakePictureLayer> mask_;
+  FakeContentLayerClient root_client_;
+  FakeContentLayerClient child_client_;
+  FakeContentLayerClient mask_client_;
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(DontUpdateLayersWithEmptyBounds);
+
+// Verifies that if we have a new LocalSurfaceId we submit a CompositorFrame
+// even if there is no damage.
+class LayerTreeHostTestNewLocalSurfaceIdForcesDraw : public LayerTreeHostTest {
+ public:
+  LayerTreeHostTestNewLocalSurfaceIdForcesDraw() {}
+
+  void InitializeSettings(LayerTreeSettings* settings) override {
+    settings->enable_surface_synchronization = true;
+  }
+
+  void BeginTest() override {
+    layer_tree_host()->SetViewportSize(gfx::Size(10, 10));
+    layer_tree_host()->root_layer()->SetBounds(gfx::Size(10, 10));
+    local_surface_id_ = allocator_.GenerateId();
+    PostSetLocalSurfaceIdToMainThread(local_surface_id_);
+  }
+
+  void DidReceiveCompositorFrameAck() override {
+    switch (layer_tree_host()->SourceFrameNumber()) {
+      case 1:
+        local_surface_id_ = allocator_.GenerateId();
+        PostSetLocalSurfaceIdToMainThread(local_surface_id_);
+        break;
+      case 2:
+        EndTest();
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+
+  void AfterTest() override {}
+  viz::LocalSurfaceId local_surface_id_;
+  viz::ParentLocalSurfaceIdAllocator allocator_;
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestNewLocalSurfaceIdForcesDraw);
+
 }  // namespace
 }  // namespace cc

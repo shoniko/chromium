@@ -37,20 +37,9 @@
 #include "base/message_loop/message_pump_libevent.h"
 #endif
 
-#if defined(OS_ANDROID)
-namespace base {
-namespace android {
-
-class JavaMessageHandlerFactory;
-
-}  // namespace android
-}  // namespace base
-#endif  // defined(OS_ANDROID)
-
 namespace base {
 
 class ThreadTaskRunnerHandle;
-class WaitableEvent;
 
 // A MessageLoop is used to process events for a particular thread.  There is
 // at most one MessageLoop instance per thread.
@@ -233,7 +222,7 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate,
 
   // Enables nestable tasks on |loop| while in scope.
   // DEPRECATED: This should not be used when the nested loop is driven by
-  // RunLoop (use RunLoop::Type::KNestableTasksAllowed instead). It can however
+  // RunLoop (use RunLoop::Type::kNestableTasksAllowed instead). It can however
   // still be useful in a few scenarios where re-entrancy is caused by a native
   // message loop.
   // TODO(gab): Remove usage of this class alongside RunLoop and rename it to
@@ -250,8 +239,8 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate,
     }
 
    private:
-    MessageLoop* loop_;
-    bool old_state_;
+    MessageLoop* const loop_;
+    const bool old_state_;
   };
 
   // A TaskObserver is an object that receives task notifications from the
@@ -277,7 +266,11 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate,
   void AddTaskObserver(TaskObserver* task_observer);
   void RemoveTaskObserver(TaskObserver* task_observer);
 
-  // Returns true if the message loop is "idle". Provided for testing.
+  // Returns true if the message loop is idle (ignoring delayed tasks). This is
+  // the same condition which triggers DoWork() to return false: i.e.
+  // out of tasks which can be processed at the current run-level -- there might
+  // be deferred non-nestable tasks remaining if currently in a nested run
+  // level.
   bool IsIdleForTesting();
 
   // Runs the specified PendingTask.
@@ -333,7 +326,7 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate,
   void SetThreadTaskRunnerHandle();
 
   // RunLoop::Delegate:
-  void Run() override;
+  void Run(bool application_tasks_allowed) override;
   void Quit() override;
   void EnsureWorkScheduled() override;
 
@@ -362,7 +355,7 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate,
 #if defined(OS_WIN)
   // Tracks if we have requested high resolution timers. Its only use is to
   // turn off the high resolution timer upon loop destruction.
-  bool in_high_res_mode_;
+  bool in_high_res_mode_ = false;
 #endif
 
   // A recent snapshot of Time::Now(), used to check delayed_work_queue_.
@@ -370,11 +363,15 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate,
 
   ObserverList<DestructionObserver> destruction_observers_;
 
-  // A recursion block that prevents accidentally running additional tasks when
-  // insider a (accidentally induced?) nested message pump. Deprecated in favor
-  // of run_loop_client_->ProcessingTasksAllowed(), equivalent until then (both
-  // need to be checked in conditionals).
-  bool nestable_tasks_allowed_;
+  // A boolean which prevents unintentional reentrant task execution (e.g. from
+  // induced nested message loops). As such, nested message loops will only
+  // process system messages (not application tasks) by default. A nested loop
+  // layer must have been explicitly granted permission to be able to execute
+  // application tasks. This is granted either by
+  // RunLoop::Type::kNestableTasksAllowed when the loop is driven by the
+  // application or by a ScopedNestableTaskAllower preceding a system call that
+  // is known to generate a system-driven nested loop.
+  bool task_execution_allowed_ = true;
 
   // pump_factory_.Run() is called to create a message pump for this loop
   // if type_ is TYPE_CUSTOM and pump_ is null.
@@ -387,7 +384,7 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate,
   // meant only to store context for creating a backtrace breadcrumb. Do not
   // attach other semantics to it without thinking through the use caes
   // thoroughly.
-  const PendingTask* current_pending_task_;
+  const PendingTask* current_pending_task_ = nullptr;
 
   scoped_refptr<internal::IncomingTaskQueue> incoming_task_queue_;
 
@@ -400,13 +397,10 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate,
 
   // Id of the thread this message loop is bound to. Initialized once when the
   // MessageLoop is bound to its thread and constant forever after.
-  PlatformThreadId thread_id_;
+  PlatformThreadId thread_id_ = kInvalidThreadId;
 
   // Whether task observers are allowed.
   bool allow_task_observers_ = true;
-
-  // An interface back to RunLoop state accessible by this RunLoop::Delegate.
-  RunLoop::Delegate::Client* run_loop_client_ = nullptr;
 
   // Holds data stored through the SequenceLocalStorageSlot API.
   internal::SequenceLocalStorageMap sequence_local_storage_map_;
@@ -439,7 +433,12 @@ class BASE_EXPORT MessageLoopForUI : public MessageLoop {
   static MessageLoopForUI* current() {
     MessageLoop* loop = MessageLoop::current();
     DCHECK(loop);
+#if defined(OS_ANDROID)
+    DCHECK(loop->IsType(MessageLoop::TYPE_UI) ||
+           loop->IsType(MessageLoop::TYPE_JAVA));
+#else
     DCHECK(loop->IsType(MessageLoop::TYPE_UI));
+#endif
     return static_cast<MessageLoopForUI*>(loop);
   }
 
@@ -460,8 +459,7 @@ class BASE_EXPORT MessageLoopForUI : public MessageLoop {
   // never be called. Instead use Start(), which will forward all the native UI
   // events to the Java message loop.
   void Start();
-  void StartForTesting(base::android::JavaMessageHandlerFactory* factory,
-                       WaitableEvent* test_done_event);
+
   // In Android there are cases where we want to abort immediately without
   // calling Quit(), in these cases we call Abort().
   void Abort();

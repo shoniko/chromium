@@ -207,7 +207,7 @@ void ConnectTestingEventInterface::QuitNestedEventLoop() {
 // OnResolveProxy callback and records the information passed to it.
 class TestProxyDelegateWithProxyInfo : public ProxyDelegate {
  public:
-  TestProxyDelegateWithProxyInfo() {}
+  TestProxyDelegateWithProxyInfo() = default;
 
   struct ResolvedProxyInfo {
     GURL url;
@@ -221,29 +221,16 @@ class TestProxyDelegateWithProxyInfo : public ProxyDelegate {
  protected:
   void OnResolveProxy(const GURL& url,
                       const std::string& method,
-                      const ProxyService& proxy_service,
+                      const ProxyRetryInfoMap& proxy_retry_info,
                       ProxyInfo* result) override {
     resolved_proxy_info_.url = url;
     resolved_proxy_info_.proxy_info = *result;
   }
 
-  void OnTunnelConnectCompleted(const HostPortPair& endpoint,
-                                const HostPortPair& proxy_server,
-                                int net_error) override {}
   void OnFallback(const ProxyServer& bad_proxy, int net_error) override {}
-  void OnBeforeTunnelRequest(const HostPortPair& proxy_server,
-                             HttpRequestHeaders* extra_headers) override {}
-  void OnTunnelHeadersReceived(
-      const HostPortPair& origin,
-      const HostPortPair& proxy_server,
-      const HttpResponseHeaders& response_headers) override {}
   bool IsTrustedSpdyProxy(const net::ProxyServer& proxy_server) override {
     return true;
   }
-  void GetAlternativeProxy(
-      const GURL& url,
-      const ProxyServer& resolved_proxy_server,
-      ProxyServer* alternative_proxy_server) const override {}
   void OnAlternativeProxyBroken(
       const ProxyServer& alternative_proxy_server) override {}
 

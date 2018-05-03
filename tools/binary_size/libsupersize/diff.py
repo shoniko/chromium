@@ -79,7 +79,9 @@ def _MatchSymbols(before, after, key_func, padding_by_section_name):
   logging.debug('%s: Matched %d of %d symbols', key_func.__name__,
                 len(delta_symbols), len(after))
 
-  unmatched_before = sum(before_symbols_by_key.itervalues(), [])
+  unmatched_before = []
+  for syms in before_symbols_by_key.itervalues():
+    unmatched_before.extend(syms)
   return delta_symbols, unmatched_before, unmatched_after
 
 
@@ -125,5 +127,4 @@ def Diff(before, after):
       section_sizes[k] = v
 
   symbol_diff = _DiffSymbolGroups(before.raw_symbols, after.raw_symbols)
-  return models.DeltaSizeInfo(section_sizes, symbol_diff, before.metadata,
-                              after.metadata)
+  return models.DeltaSizeInfo(before, after, section_sizes, symbol_diff)

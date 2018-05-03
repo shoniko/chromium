@@ -48,7 +48,7 @@ class LayerFillBackgroundPainter : public views::Background {
   explicit LayerFillBackgroundPainter(std::unique_ptr<views::Painter> painter)
       : painter_(std::move(painter)) {}
 
-  ~LayerFillBackgroundPainter() override {}
+  ~LayerFillBackgroundPainter() override = default;
 
   void Paint(gfx::Canvas* canvas, views::View* view) const override {
     views::Painter::PaintPainterAt(canvas, painter_.get(),
@@ -100,7 +100,7 @@ class WindowPreviewView : public views::View, public aura::WindowObserver {
 
     SetFocusBehavior(FocusBehavior::ALWAYS);
   }
-  ~WindowPreviewView() override {}
+  ~WindowPreviewView() override = default;
 
   // views::View:
   gfx::Size CalculatePreferredSize() const override {
@@ -230,12 +230,12 @@ class WindowCycleView : public views::WidgetDelegateView {
 
     const int kInsideBorderPaddingDip = 64;
     const int kBetweenChildPaddingDip = 10;
-    views::BoxLayout* layout = new views::BoxLayout(
+    auto layout = std::make_unique<views::BoxLayout>(
         views::BoxLayout::kHorizontal, gfx::Insets(kInsideBorderPaddingDip),
         kBetweenChildPaddingDip);
     layout->set_cross_axis_alignment(
         views::BoxLayout::CROSS_AXIS_ALIGNMENT_START);
-    mirror_container_->SetLayoutManager(layout);
+    mirror_container_->SetLayoutManager(std::move(layout));
     mirror_container_->SetPaintToLayer();
     mirror_container_->layer()->SetFillsBoundsOpaquely(false);
 
@@ -263,7 +263,7 @@ class WindowCycleView : public views::WidgetDelegateView {
     AddChildView(mirror_container_);
   }
 
-  ~WindowCycleView() override {}
+  ~WindowCycleView() override = default;
 
   void SetTargetWindow(aura::Window* target) {
     target_window_ = target;

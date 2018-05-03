@@ -45,7 +45,7 @@ base::ThreadLocalPointer<MessageLoop>* GetTLSMessageLoop() {
   static auto* lazy_tls_ptr = new base::ThreadLocalPointer<MessageLoop>();
   return lazy_tls_ptr;
 }
-MessageLoop::MessagePumpFactory* message_pump_for_ui_factory_ = NULL;
+MessageLoop::MessagePumpFactory* message_pump_for_ui_factory_ = nullptr;
 
 #if defined(OS_IOS)
 using MessagePumpForIO = MessagePumpIOSForIO;
@@ -71,14 +71,11 @@ std::unique_ptr<MessagePump> ReturnPump(std::unique_ptr<MessagePump> pump) {
 
 //------------------------------------------------------------------------------
 
-MessageLoop::TaskObserver::TaskObserver() {
-}
+MessageLoop::TaskObserver::TaskObserver() = default;
 
-MessageLoop::TaskObserver::~TaskObserver() {
-}
+MessageLoop::TaskObserver::~TaskObserver() = default;
 
-MessageLoop::DestructionObserver::~DestructionObserver() {
-}
+MessageLoop::DestructionObserver::~DestructionObserver() = default;
 
 //------------------------------------------------------------------------------
 
@@ -136,9 +133,9 @@ MessageLoop::~MessageLoop() {
 
   // Tell the incoming queue that we are dying.
   incoming_task_queue_->WillDestroyCurrentMessageLoop();
-  incoming_task_queue_ = NULL;
-  unbound_task_runner_ = NULL;
-  task_runner_ = NULL;
+  incoming_task_queue_ = nullptr;
+  unbound_task_runner_ = nullptr;
+  task_runner_ = nullptr;
 
   // OK, now make it so that no one can find us.
   if (current() == this)
@@ -238,11 +235,11 @@ void MessageLoop::SetNestableTasksAllowed(bool allowed) {
     // loop that does not go through RunLoop::Run().
     pump_->ScheduleWork();
   }
-  nestable_tasks_allowed_ = allowed;
+  task_execution_allowed_ = allowed;
 }
 
 bool MessageLoop::NestableTasksAllowed() const {
-  return nestable_tasks_allowed_ || run_loop_client_->ProcessingTasksAllowed();
+  return task_execution_allowed_;
 }
 
 // TODO(gab): Migrate TaskObservers to RunLoop as part of separating concerns
@@ -261,9 +258,17 @@ void MessageLoop::RemoveTaskObserver(TaskObserver* task_observer) {
 }
 
 bool MessageLoop::IsIdleForTesting() {
-  // We only check the incoming queue, since we don't want to lock the work
-  // queue.
-  return incoming_task_queue_->IsIdleForTesting();
+  // Have unprocessed tasks? (this reloads the work queue if necessary)
+  if (incoming_task_queue_->triage_tasks().HasTasks())
+    return false;
+
+  // Have unprocessed deferred tasks which can be processed at this run-level?
+  if (incoming_task_queue_->deferred_tasks().HasTasks() &&
+      !RunLoop::IsNestedOnCurrentThread()) {
+    return false;
+  }
+
+  return true;
 }
 
 //------------------------------------------------------------------------------
@@ -277,17 +282,11 @@ std::unique_ptr<MessageLoop> MessageLoop::CreateUnbound(
 
 MessageLoop::MessageLoop(Type type, MessagePumpFactoryCallback pump_factory)
     : type_(type),
-#if defined(OS_WIN)
-      in_high_res_mode_(false),
-#endif
-      nestable_tasks_allowed_(true),
       pump_factory_(std::move(pump_factory)),
-      current_pending_task_(nullptr),
       incoming_task_queue_(new internal::IncomingTaskQueue(this)),
       unbound_task_runner_(
           new internal::MessageLoopTaskRunner(incoming_task_queue_)),
-      task_runner_(unbound_task_runner_),
-      thread_id_(kInvalidThreadId) {
+      task_runner_(unbound_task_runner_) {
   // If type is TYPE_CUSTOM non-null pump_factory must be given.
   DCHECK(type_ != TYPE_CUSTOM || !pump_factory_.is_null());
 }
@@ -312,7 +311,7 @@ void MessageLoop::BindToCurrentThread() {
       internal::ScopedSetSequenceLocalStorageMapForCurrentThread>(
       &sequence_local_storage_map_);
 
-  run_loop_client_ = RunLoop::RegisterDelegateForCurrentThread(this);
+  RunLoop::RegisterDelegateForCurrentThread(this);
 }
 
 std::string MessageLoop::GetThreadName() const {
@@ -339,9 +338,17 @@ void MessageLoop::ClearTaskRunnerForTesting() {
   thread_task_runner_handle_.reset();
 }
 
-void MessageLoop::Run() {
+void MessageLoop::Run(bool application_tasks_allowed) {
   DCHECK_EQ(this, current());
-  pump_->Run(this);
+  if (application_tasks_allowed && !task_execution_allowed_) {
+    // Allow nested task execution as explicitly requested.
+    DCHECK(RunLoop::IsNestedOnCurrentThread());
+    task_execution_allowed_ = true;
+    pump_->Run(this);
+    task_execution_allowed_ = false;
+  } else {
+    pump_->Run(this);
+  }
 }
 
 void MessageLoop::Quit() {
@@ -364,7 +371,7 @@ void MessageLoop::SetThreadTaskRunnerHandle() {
 }
 
 bool MessageLoop::ProcessNextDelayedNonNestableTask() {
-  if (run_loop_client_->IsNested())
+  if (RunLoop::IsNestedOnCurrentThread())
     return false;
 
   while (incoming_task_queue_->deferred_tasks().HasTasks()) {
@@ -379,11 +386,11 @@ bool MessageLoop::ProcessNextDelayedNonNestableTask() {
 }
 
 void MessageLoop::RunTask(PendingTask* pending_task) {
-  DCHECK(NestableTasksAllowed());
+  DCHECK(task_execution_allowed_);
   current_pending_task_ = pending_task;
 
   // Execute the task and assume the worst: It is probably not reentrant.
-  nestable_tasks_allowed_ = false;
+  task_execution_allowed_ = false;
 
   TRACE_TASK_EXECUTION("MessageLoop::RunTask", *pending_task);
 
@@ -393,14 +400,14 @@ void MessageLoop::RunTask(PendingTask* pending_task) {
   for (auto& observer : task_observers_)
     observer.DidProcessTask(*pending_task);
 
-  nestable_tasks_allowed_ = true;
+  task_execution_allowed_ = true;
 
   current_pending_task_ = nullptr;
 }
 
 bool MessageLoop::DeferOrRunPendingTask(PendingTask pending_task) {
   if (pending_task.nestable == Nestable::kNestable ||
-      !run_loop_client_->IsNested()) {
+      !RunLoop::IsNestedOnCurrentThread()) {
     RunTask(&pending_task);
     // Show that we ran a task (Note: a new one might arrive as a
     // consequence!).
@@ -427,10 +434,8 @@ void MessageLoop::ScheduleWork() {
 }
 
 bool MessageLoop::DoWork() {
-  if (!NestableTasksAllowed()) {
-    // Task can't be executed right now.
+  if (!task_execution_allowed_)
     return false;
-  }
 
   // Execute oldest task.
   while (incoming_task_queue_->triage_tasks().HasTasks()) {
@@ -457,7 +462,7 @@ bool MessageLoop::DoWork() {
 }
 
 bool MessageLoop::DoDelayedWork(TimeTicks* next_delayed_work_time) {
-  if (!NestableTasksAllowed() ||
+  if (!task_execution_allowed_ ||
       !incoming_task_queue_->delayed_tasks().HasTasks()) {
     recent_time_ = *next_delayed_work_time = TimeTicks();
     return false;
@@ -494,7 +499,7 @@ bool MessageLoop::DoIdleWork() {
   if (ProcessNextDelayedNonNestableTask())
     return true;
 
-  if (run_loop_client_->ShouldQuitWhenIdle())
+  if (ShouldQuitWhenIdle())
     pump_->Quit();
 
   // When we return we will do a kernel wait for more tasks.
@@ -523,14 +528,6 @@ MessageLoopForUI::MessageLoopForUI(std::unique_ptr<MessagePump> pump)
 void MessageLoopForUI::Start() {
   // No Histogram support for UI message loop as it is managed by Java side
   static_cast<MessagePumpForUI*>(pump_.get())->Start(this);
-}
-
-void MessageLoopForUI::StartForTesting(
-    base::android::JavaMessageHandlerFactory* factory,
-    WaitableEvent* test_done_event) {
-  // No Histogram support for UI message loop as it is managed by Java side
-  static_cast<MessagePumpForUI*>(pump_.get())
-      ->StartForUnitTest(this, factory, test_done_event);
 }
 
 void MessageLoopForUI::Abort() {

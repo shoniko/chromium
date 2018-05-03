@@ -28,7 +28,9 @@ extern const base::Feature kAllowAutoplayUnmutedInWebappManifestScope;
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_MACOSX)
-extern const base::Feature kAppleScriptExecuteJavaScript;
+extern const base::Feature kAppleScriptExecuteJavaScriptMenuItem;
+extern const base::Feature kShow10_9ObsoleteInfobar;
+extern const base::Feature kViewsProfileChooser;
 extern const base::Feature kViewsTaskManager;
 #endif  // defined(OS_MACOSX)
 
@@ -72,9 +74,17 @@ extern const base::Feature kCaptureThumbnailDependingOnTransitionType;
 
 extern const base::Feature kCaptureThumbnailOnNavigatingAway;
 
+extern const base::Feature kChangePictureVideoMode;
+
 extern const base::Feature kCheckInstallabilityForBannerOnLoad;
 
+#if defined(OS_ANDROID)
+extern const base::Feature kClearOldBrowsingData;
+#endif
+
 extern const base::Feature kClickToOpenPDFPlaceholder;
+
+extern const base::Feature kClipboardContentSetting;
 
 #if defined(OS_MACOSX)
 extern const base::Feature kContentFullscreen;
@@ -90,8 +100,6 @@ extern const base::Feature kDesktopIOSPromotion;
 
 extern const base::Feature kDesktopPWAWindowing;
 
-extern const base::Feature kDisplayPersistenceToggleInPermissionPrompts;
-
 #if !defined(OS_ANDROID)
 extern const base::Feature kDoodlesOnLocalNtp;
 #endif
@@ -100,14 +108,30 @@ extern const base::Feature kDoodlesOnLocalNtp;
 extern const base::Feature kDownloadsForeground;
 #endif
 
+#if defined(OS_ANDROID)
+extern const base::Feature kDownloadsLocationChange;
+#endif
+
 extern const base::Feature kExpectCTReporting;
 
 extern const base::Feature kExperimentalAppBanners;
 extern const base::Feature kExperimentalKeyboardLockUI;
 
-#if BUILDFLAG(ENABLE_VR)
-extern const base::Feature kExperimentalVRFeatures;
+// Android expects this string from Java code, so it is always needed.
+// TODO(crbug.com/731802): Use #if BUILDFLAG(ENABLE_VR_BROWSING) instead.
+#if BUILDFLAG(ENABLE_VR) || defined(OS_ANDROID)
+extern const base::Feature kVrBrowsing;
 #endif
+#if BUILDFLAG(ENABLE_VR)
+extern const base::Feature kVrBrowserKeyboard;
+extern const base::Feature kVrBrowsingExperimentalFeatures;
+extern const base::Feature kVrBrowsingExperimentalRendering;
+
+#if BUILDFLAG(ENABLE_OPENVR)
+extern const base::Feature kOpenVR;
+#endif  // ENABLE_OPENVR
+
+#endif  // ENABLE_VR
 
 #if defined(OS_MACOSX)
 extern const base::Feature kFullscreenToolbarReveal;
@@ -117,6 +141,12 @@ extern const base::Feature kFullscreenToolbarReveal;
 extern const base::Feature kGdiTextPrinting;
 #endif
 
+extern const base::Feature kGeoLanguage;
+
+#if defined(OS_ANDROID)
+extern const base::Feature kGrantNotificationsToDSE;
+#endif
+
 #if defined(OS_CHROMEOS)
 extern const base::Feature kHappinessTrackingSystem;
 #endif
@@ -124,6 +154,10 @@ extern const base::Feature kHappinessTrackingSystem;
 extern const base::Feature kImportantSitesInCbd;
 
 extern const base::Feature kImprovedRecoveryComponent;
+
+#if !defined(OS_ANDROID)
+extern const base::Feature kLocalScreenCasting;
+#endif
 
 extern const base::Feature kLsdPermissionPrompt;
 
@@ -148,7 +182,6 @@ extern const base::Feature kMaterialDesignIncognitoNTP;
 
 #if !defined(OS_ANDROID)
 extern const base::Feature kMediaRemoting;
-extern const base::Feature kMediaRouterUIRouteController;
 #endif
 
 extern const base::Feature kModalPermissionPrompts;
@@ -173,6 +206,10 @@ extern const base::Feature kNtlmV2Enabled;
 
 extern const base::Feature kOfflinePageDownloadSuggestionsFeature;
 
+#if defined(OS_ANDROID)
+extern const base::Feature kOomIntervention;
+#endif
+
 #if !defined(OS_ANDROID)
 extern const base::Feature kOneGoogleBarOnLocalNtp;
 #endif
@@ -180,8 +217,6 @@ extern const base::Feature kOneGoogleBarOnLocalNtp;
 extern const base::Feature kUseNewAcceptLanguageHeader;
 
 extern const base::Feature kPermissionsBlacklist;
-
-extern const base::Feature kPreconnectMore;
 
 #if defined(OS_WIN)
 extern const base::Feature kDisablePostScriptPrinting;
@@ -199,13 +234,19 @@ extern const base::Feature kPreferHtmlOverPlugins;
 extern const base::Feature kPreloadLockScreen;
 #endif
 
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+extern const base::Feature kNewPrintPreview;
+#endif
+
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OS_WIN) && !defined(OS_MACOSX)
 extern const base::Feature kPrintPdfAsImage;
 #endif
 
 extern const base::Feature kPushMessagingBackgroundMode;
 
-extern const base::Feature kPwaMinimalUi;
+#if !defined(OS_ANDROID)
+extern const base::Feature kRemoveUsageOfDeprecatedGaiaSigninEndpoint;
+#endif
 
 #if defined(OS_CHROMEOS)
 extern const base::Feature kRuntimeMemoryLeakDetector;
@@ -213,24 +254,23 @@ extern const base::Feature kRuntimeMemoryLeakDetector;
 
 extern const base::Feature kSafeSearchUrlReporting;
 
+extern const base::Feature kSecurityKeyAttestationPrompt;
+
 #if defined(OS_MACOSX)
 extern const base::Feature kShowAllDialogsWithViewsToolkit;
 #endif
 
 extern const base::Feature kSimplifiedFullscreenUI;
 
-extern const base::Feature kSiteDetails;
-
 #if defined(OS_ANDROID)
 extern const base::Feature kSiteNotificationChannels;
 #endif
 
-extern const base::Feature kSoundContentSetting;
-
-#if !defined(OS_ANDROID)
-extern const base::Feature kStaggeredBackgroundTabOpening;
-extern const base::Feature kStaggeredBackgroundTabOpeningExperiment;
+#if defined(OS_CHROMEOS)
+extern const base::Feature kNativeSmb;
 #endif
+
+extern const base::Feature kSoundContentSetting;
 
 extern const base::Feature kSupervisedUserCreation;
 
@@ -242,11 +282,19 @@ extern const base::Feature kSysInternals;
 extern const base::Feature kSyzyasanDeferredFree;
 #endif
 
+#if !defined(OS_ANDROID)
+extern const base::Feature kTabMetricsLogging;
+#endif
+
 extern const base::Feature kTabsInCbd;
 
 extern const base::Feature kTopSitesFromSiteEngagement;
 
 extern const base::Feature kUseGoogleLocalNtp;
+
+#if defined(OS_CHROMEOS)
+extern const base::Feature kUserActivityEventLogging;
+#endif
 
 #if !defined(OS_ANDROID)
 extern const base::Feature kVoiceSearchOnLocalNtp;

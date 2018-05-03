@@ -10,7 +10,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "content/common/android/sync_compositor_messages.h"
+#include "content/common/input/sync_compositor_messages.h"
 #include "content/common/input_messages.h"
 #include "content/renderer/android/synchronous_compositor_proxy.h"
 #include "ipc/ipc_message_macros.h"
@@ -187,7 +187,7 @@ void SynchronousCompositorFilter::CreateSynchronousCompositorProxy(
     ui::SynchronousInputHandlerProxy* synchronous_input_handler_proxy) {
   DCHECK(sync_compositor_map_.find(routing_id) == sync_compositor_map_.end());
   std::unique_ptr<SynchronousCompositorProxy> proxy =
-      base::MakeUnique<SynchronousCompositorProxy>(
+      std::make_unique<SynchronousCompositorProxy>(
           routing_id, this, synchronous_input_handler_proxy);
   sync_compositor_map_[routing_id] = std::move(proxy);
 }

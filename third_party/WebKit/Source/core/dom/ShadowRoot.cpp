@@ -61,12 +61,13 @@ ShadowRoot::ShadowRoot(Document& document, ShadowRootType type)
       TreeScope(*this, document),
       style_sheet_list_(nullptr),
       child_shadow_root_count_(0),
-      type_(static_cast<unsigned>(type)),
+      type_(static_cast<unsigned short>(type)),
       registered_with_parent_shadow_root_(false),
       descendant_insertion_points_is_valid_(false),
-      delegates_focus_(false) {}
+      delegates_focus_(false),
+      unused_(0) {}
 
-ShadowRoot::~ShadowRoot() {}
+ShadowRoot::~ShadowRoot() = default;
 
 ShadowRoot* ShadowRoot::YoungerShadowRoot() const {
   if (GetType() == ShadowRootType::V0 && shadow_root_rare_data_v0_)
@@ -78,14 +79,6 @@ ShadowRoot* ShadowRoot::OlderShadowRoot() const {
   if (GetType() == ShadowRootType::V0 && shadow_root_rare_data_v0_)
     return shadow_root_rare_data_v0_->OlderShadowRoot();
   return nullptr;
-}
-
-ShadowRoot* ShadowRoot::olderShadowRootForBindings() const {
-  ShadowRoot* older = OlderShadowRoot();
-  while (older && !older->IsOpenOrV0())
-    older = older->OlderShadowRoot();
-  DCHECK(!older || older->IsOpenOrV0());
-  return older;
 }
 
 void ShadowRoot::SetYoungerShadowRoot(ShadowRoot& root) {
@@ -159,12 +152,6 @@ void ShadowRoot::setInnerHTML(const StringOrTrustedHTML& stringOrHtml,
                     ? stringOrHtml.GetAsString()
                     : stringOrHtml.GetAsTrustedHTML()->toString();
 
-  // TODO(mkwst): This is an ugly hack that will be resolved once `TreatNullAs`
-  // is treated as an extended attribute on the `DOMString` type rather than
-  // as an extended attribute on the attribute. https://crbug.com/714866
-  if (html == "null")
-    html = "";
-
   SetInnerHTMLFromString(html, exception_state);
 }
 
@@ -181,8 +168,15 @@ void ShadowRoot::RecalcStyle(StyleRecalcChange change) {
   // There's no style to update so just calling recalcStyle means we're updated.
   ClearNeedsStyleRecalc();
 
-  RecalcDescendantStyles(change);
+  if (change >= kUpdatePseudoElements || ChildNeedsStyleRecalc())
+    RecalcDescendantStyles(change);
   ClearChildNeedsStyleRecalc();
+}
+
+void ShadowRoot::RecalcStylesForReattach() {
+  // ShadowRoot doesn't support custom callbacks.
+  DCHECK(!HasCustomStyleCallbacks());
+  RecalcDescendantStylesForReattach();
 }
 
 void ShadowRoot::RebuildLayoutTree(WhitespaceAttacher& whitespace_attacher) {
@@ -244,6 +238,14 @@ void ShadowRoot::RemovedFrom(ContainerNode* insertion_point) {
   }
 
   DocumentFragment::RemovedFrom(insertion_point);
+}
+
+void ShadowRoot::SetNeedsAssignmentRecalc() {
+  DCHECK(RuntimeEnabledFeatures::IncrementalShadowDOMEnabled());
+  DCHECK(IsV1());
+  if (!slot_assignment_)
+    return;
+  return slot_assignment_->SetNeedsAssignmentRecalc();
 }
 
 void ShadowRoot::ChildrenChanged(const ChildrenChange& change) {
@@ -366,17 +368,17 @@ void ShadowRoot::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
 
 std::ostream& operator<<(std::ostream& ostream, const ShadowRootType& type) {
   switch (type) {
-    case ShadowRootType::kUserAgent:
-      ostream << "ShadowRootType::UserAgent";
+    case ShadowRootType::kUserAgentV1:
+      ostream << "UserAgent";
       break;
     case ShadowRootType::V0:
-      ostream << "ShadowRootType::V0";
+      ostream << "V0";
       break;
     case ShadowRootType::kOpen:
-      ostream << "ShadowRootType::Open";
+      ostream << "Open";
       break;
     case ShadowRootType::kClosed:
-      ostream << "ShadowRootType::Closed";
+      ostream << "Closed";
       break;
   }
   return ostream;

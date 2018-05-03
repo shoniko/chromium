@@ -13,7 +13,6 @@ var automationInternal =
 var exceptionHandler = require('uncaught_exception_handler');
 var logging = requireNative('logging');
 var nativeAutomationInternal = requireNative('automationInternal');
-var GetRoutingID = nativeAutomationInternal.GetRoutingID;
 var DestroyAccessibilityTree =
     nativeAutomationInternal.DestroyAccessibilityTree;
 var GetIntAttribute = nativeAutomationInternal.GetIntAttribute;
@@ -108,7 +107,6 @@ automation.registerCustomHook(function(bindingsAPI) {
 
   // TODO(aboxhall, dtseng): Make this return the speced AutomationRootNode obj.
   apiFunctions.setHandleRequest('getTree', function getTree(tabID, callback) {
-    var routingID = GetRoutingID();
     StartCachingAccessibilityTrees();
 
     // enableTab() ensures the renderer for the active or specified tab has
@@ -118,7 +116,7 @@ automation.registerCustomHook(function(bindingsAPI) {
     // the tree is available (either due to having been cached earlier, or after
     // an accessibility event occurs which causes the tree to be populated), the
     // callback can be called.
-    var params = { routingID: routingID, tabID: tabID };
+    var params = { tabID: tabID };
     automationInternal.enableTab(params,
         function onEnable(id) {
           if (hasLastError()) {
@@ -139,11 +137,9 @@ automation.registerCustomHook(function(bindingsAPI) {
       else
         idToCallback[DESKTOP_TREE_ID] = [callback];
 
-      var routingID = GetRoutingID();
-
       // TODO(dtseng): Disable desktop tree once desktop object goes out of
       // scope.
-      automationInternal.enableDesktop(routingID, function() {
+      automationInternal.enableDesktop(function() {
         if (hasLastError()) {
           AutomationRootNode.destroy(DESKTOP_TREE_ID);
           callback();
@@ -285,11 +281,7 @@ automationInternal.onNodesRemoved.addListener(function(treeID, nodeIDs) {
 automationInternal.onAccessibilityEvent.addListener(function(eventParams) {
   var id = eventParams.treeID;
   var targetTree = AutomationRootNode.getOrCreate(id);
-
-  var isFocusEvent = false;
-  if (eventParams.eventType == 'focus') {
-    isFocusEvent = true;
-  } else if (eventParams.eventType == 'blur') {
+  if (eventParams.eventType == 'blur') {
     // Work around an issue where Chrome sends us 'blur' events on the
     // root node when nothing has focus, we need to treat those as focus
     // events but otherwise not handle blur events specially.
@@ -300,27 +292,31 @@ automationInternal.onAccessibilityEvent.addListener(function(eventParams) {
       eventParams.eventType == 'mediaStoppedPlaying') {
     // These events are global to the tree.
     eventParams.targetID = privates(targetTree).impl.id;
-  }
-
-  // When we get a focus event, ignore the actual event target, and instead
-  // check what node has focus globally. If that represents a focus change,
-  // fire a focus event on the correct target.
-  if (isFocusEvent) {
+  } else {
     var previousFocusedNode = automationUtil.focusedNode;
     automationUtil.updateFocusedNode();
-    if (automationUtil.focusedNode &&
-        automationUtil.focusedNode == previousFocusedNode) {
-      return;
-    }
 
-    if (automationUtil.focusedNode) {
-      targetTree = automationUtil.focusedNode.root;
-      eventParams.treeID = privates(targetTree).impl.treeID;
-      eventParams.targetID = privates(automationUtil.focusedNode).impl.id;
+    // Fire focus events if necessary.
+    if (automationUtil.focusedNode &&
+        automationUtil.focusedNode != previousFocusedNode) {
+      var eventParamsCopy = {};
+      for (var key in eventParams)
+        eventParamsCopy[key] = eventParams[key];
+      eventParamsCopy['eventType'] = 'focus';
+      eventParamsCopy['treeID'] =
+          privates(automationUtil.focusedNode.root).impl.treeID;
+      eventParamsCopy['targetID'] =
+          privates(automationUtil.focusedNode).impl.id;
+      privates(automationUtil.focusedNode.root)
+          .impl.onAccessibilityEvent(eventParamsCopy);
     }
   }
 
-  if (!privates(targetTree).impl.onAccessibilityEvent(eventParams))
+  // Note that focus type events have already been handled above if there was a
+  // focused node. All other events, even non-focus events that triggered a
+  // focus dispatch, still need to have their original event fired.
+  if ((!automationUtil.focusedNode || eventParams.eventType != 'focus') &&
+      !privates(targetTree).impl.onAccessibilityEvent(eventParams))
     return;
 
   // If we're not waiting on a callback to getTree(), we can early out here.

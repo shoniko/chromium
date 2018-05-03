@@ -60,14 +60,18 @@ bool GbmSurface::SupportsPostSubBuffer() {
   return false;
 }
 
-void GbmSurface::SwapBuffersAsync(const SwapCompletionCallback& callback) {
+void GbmSurface::SwapBuffersAsync(
+    const SwapCompletionCallback& completion_callback,
+    const PresentationCallback& presentation_callback) {
   if (!images_[current_surface_]->ScheduleOverlayPlane(
           widget(), 0, gfx::OverlayTransform::OVERLAY_TRANSFORM_NONE,
           gfx::Rect(GetSize()), gfx::RectF(1, 1))) {
-    callback.Run(gfx::SwapResult::SWAP_FAILED);
+    completion_callback.Run(gfx::SwapResult::SWAP_FAILED);
+    // Notify the caller, the buffer is never presented on a screen.
+    presentation_callback.Run(gfx::PresentationFeedback());
     return;
   }
-  GbmSurfaceless::SwapBuffersAsync(callback);
+  GbmSurfaceless::SwapBuffersAsync(completion_callback, presentation_callback);
   current_surface_ ^= 1;
   BindFramebuffer();
 }

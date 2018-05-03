@@ -17,6 +17,7 @@
 #include "content/renderer/mus/mus_embedded_frame.h"
 #include "content/renderer/mus/mus_embedded_frame_delegate.h"
 #include "content/renderer/render_frame_proxy.h"
+#include "ui/base/ui_base_switches_util.h"
 
 namespace content {
 
@@ -30,7 +31,7 @@ base::LazyInstance<ConnectionMap>::Leaky g_connections =
 
 // static
 void RendererWindowTreeClient::CreateIfNecessary(int routing_id) {
-  if (!IsRunningInMash() || Get(routing_id))
+  if (!IsRunningWithMus() || Get(routing_id))
     return;
   RendererWindowTreeClient* connection =
       new RendererWindowTreeClient(routing_id);
@@ -54,6 +55,10 @@ void RendererWindowTreeClient::Bind(
     ui::mojom::WindowTreeClientRequest request,
     mojom::RenderWidgetWindowTreeClientRequest
         render_widget_window_tree_client_request) {
+  // Bind() may be called multiple times.
+  binding_.Close();
+  render_widget_window_tree_client_binding_.Close();
+
   binding_.Bind(std::move(request));
   render_widget_window_tree_client_binding_.Bind(
       std::move(render_widget_window_tree_client_request));
@@ -133,9 +138,9 @@ void RendererWindowTreeClient::RequestLayerTreeFrameSinkInternal(
   params.pipes.compositor_frame_sink_info = std::move(sink_info);
   params.pipes.client_request = std::move(client_request);
   params.local_surface_id_provider =
-      base::MakeUnique<viz::DefaultLocalSurfaceIdProvider>();
+      std::make_unique<viz::DefaultLocalSurfaceIdProvider>();
   params.enable_surface_synchronization = true;
-  auto frame_sink = base::MakeUnique<viz::ClientLayerTreeFrameSink>(
+  auto frame_sink = std::make_unique<viz::ClientLayerTreeFrameSink>(
       std::move(context_provider), nullptr /* worker_context_provider */,
       &params);
   tree_->AttachCompositorFrameSink(root_window_id_, std::move(sink_request),
@@ -171,12 +176,20 @@ void RendererWindowTreeClient::OnEmbed(
     ui::Id focused_window_id,
     bool drawn,
     const base::Optional<viz::LocalSurfaceId>& local_surface_id) {
+  const bool is_reembed = tree_.is_bound();
+  if (is_reembed) {
+    for (MusEmbeddedFrame* frame : embedded_frames_)
+      frame->OnTreeWillChange();
+  }
   root_window_id_ = root->window_id;
+
   tree_ = std::move(tree);
   tree_->SetWindowVisibility(GetAndAdvanceNextChangeId(), root_window_id_,
                              visible_);
-  for (MusEmbeddedFrame* frame : embedded_frames_)
-    frame->OnTreeAvailable();
+  if (!is_reembed) {
+    for (MusEmbeddedFrame* frame : embedded_frames_)
+      frame->OnTreeAvailable();
+  }
 
   if (!pending_layer_tree_frame_sink_callback_.is_null()) {
     RequestLayerTreeFrameSinkInternal(std::move(pending_context_provider_),
@@ -203,6 +216,11 @@ void RendererWindowTreeClient::OnCaptureChanged(ui::Id new_capture_window_id,
 void RendererWindowTreeClient::OnFrameSinkIdAllocated(
     ui::Id window_id,
     const viz::FrameSinkId& frame_sink_id) {
+  // When mus is not hosting viz FrameSinkIds come from the browser, so we
+  // ignore them here.
+  if (!switches::IsMusHostingViz())
+    return;
+
   for (MusEmbeddedFrame* embedded_frame : embedded_frames_) {
     if (embedded_frame->window_id_ == window_id) {
       embedded_frame->delegate_->OnMusEmbeddedFrameSinkIdAllocated(
@@ -279,6 +297,7 @@ void RendererWindowTreeClient::OnWindowInputEvent(
     uint32_t event_id,
     ui::Id window_id,
     int64_t display_id,
+    ui::Id display_root_window_id,
     const gfx::PointF& event_location_in_screen_pixel_layout,
     std::unique_ptr<ui::Event> event,
     bool matches_pointer_watcher) {
@@ -300,6 +319,7 @@ void RendererWindowTreeClient::OnWindowCursorChanged(ui::Id window_id,
 void RendererWindowTreeClient::OnWindowSurfaceChanged(
     ui::Id window_id,
     const viz::SurfaceInfo& surface_info) {
+  DCHECK(switches::IsMusHostingViz());
   for (MusEmbeddedFrame* embedded_frame : embedded_frames_) {
     if (embedded_frame->window_id_ == window_id) {
       embedded_frame->delegate_->OnMusEmbeddedFrameSurfaceChanged(surface_info);

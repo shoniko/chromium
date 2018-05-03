@@ -29,6 +29,7 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/loader/ThreadableLoadingContext.h"
@@ -40,12 +41,12 @@
 #include "platform/WaitableEvent.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/scheduler/child/worker_global_scope_scheduler.h"
+#include "platform/scheduler/util/thread_type.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/Optional.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebThread.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/network/public/interfaces/fetch_api.mojom-shared.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -88,8 +89,8 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
 
   // Starts the underlying thread and creates the global scope. Called on the
   // main thread.
-  // Startup data for WorkerBackingThread must be WTF::nullopt if |this| doesn't
-  // own the underlying WorkerBackingThread.
+  // Startup data for WorkerBackingThread is WTF::nullopt if |this| doesn't own
+  // the underlying WorkerBackingThread.
   // TODO(nhiroki): We could separate WorkerBackingThread initialization from
   // GlobalScope initialization sequence, that is, InitializeOnWorkerThread().
   // After that, we could remove this startup data for WorkerBackingThread.
@@ -99,9 +100,29 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
              WorkerInspectorProxy::PauseOnWorkerStart,
              ParentFrameTaskRunners*);
 
-  // Closes the global scope and terminates the underlying thread. Called on the
-  // main thread.
+  // Posts a task to evaluate a top-level classic script on the worker thread.
+  // Called on the main thread after Start().
+  void EvaluateClassicScript(const KURL& script_url,
+                             const String& source_code,
+                             std::unique_ptr<Vector<char>> cached_meta_data,
+                             const v8_inspector::V8StackTraceId& stack_id);
+
+  // Posts a task to import a top-level module script on the worker thread.
+  // Called on the main thread after start().
+  void ImportModuleScript(const KURL& script_url,
+                          network::mojom::FetchCredentialsMode);
+
+  // Posts a task to the worker thread to close the global scope and terminate
+  // the underlying thread. This task may be blocked by JavaScript execution on
+  // the worker thread, so this function also forcibly terminates JavaScript
+  // execution after a certain grace period.
   void Terminate();
+
+  // Terminates the worker thread. Subclasses of WorkerThread can override this
+  // to do cleanup. The default behavior is to call Terminate() and
+  // synchronously call EnsureScriptExecutionTerminates() to ensure the thread
+  // is quickly terminated. Called on the main thread.
+  virtual void TerminateForTesting();
 
   // Called on the main thread for the leak detector. Forcibly terminates the
   // script execution and waits by *blocking* the calling thread until the
@@ -167,19 +188,20 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
     return parent_frame_task_runners_.Get();
   }
 
-  scheduler::WorkerGlobalScopeScheduler* GetGlobalScopeScheduler() const {
-    return global_scope_scheduler_.get();
-  }
-
-  service_manager::InterfaceProvider& GetInterfaceProvider();
-
   // For ServiceWorkerScriptStreaming. Returns nullptr otherwise.
   virtual InstalledScriptsManager* GetInstalledScriptsManager() {
     return nullptr;
   }
 
+  // Can be called on both the main thread and the worker thread.
+  scoped_refptr<WebTaskRunner> GetTaskRunner(TaskType type) {
+    return global_scope_scheduler_->GetTaskRunner(type);
+  }
+
  protected:
   WorkerThread(ThreadableLoadingContext*, WorkerReportingProxy&);
+
+  virtual scheduler::ThreadType GetThreadType() const = 0;
 
   // Official moment of creation of worker: when the worker thread is created.
   // (https://w3c.github.io/hr-time/#time-origin)
@@ -240,6 +262,14 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
       const WTF::Optional<WorkerBackingThreadStartupData>&,
       WorkerInspectorProxy::PauseOnWorkerStart);
 
+  void EvaluateClassicScriptOnWorkerThread(
+      const KURL& script_url,
+      String source_code,
+      std::unique_ptr<Vector<char>> cached_meta_data,
+      const v8_inspector::V8StackTraceId& stack_id);
+  void ImportModuleScriptOnWorkerThread(const KURL& script_url,
+                                        network::mojom::FetchCredentialsMode);
+
   // These are called in this order during worker thread termination.
   void PrepareForShutdownOnWorkerThread();
   void PerformShutdownOnWorkerThread();
@@ -283,10 +313,6 @@ class CORE_EXPORT WorkerThread : public WebThread::TaskObserver {
   WorkerReportingProxy& worker_reporting_proxy_;
 
   CrossThreadPersistent<ParentFrameTaskRunners> parent_frame_task_runners_;
-
-  // Mojo interface provider serving interface requests scoped to this worker
-  // context.
-  service_manager::InterfaceProvider interface_provider_;
 
   // Tasks managed by this scheduler are canceled when the global scope is
   // closed.

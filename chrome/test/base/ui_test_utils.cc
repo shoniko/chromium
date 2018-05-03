@@ -57,13 +57,12 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/resource_request_body.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "device/geolocation/geolocation_provider.h"
-#include "device/geolocation/geoposition.h"
+#include "device/geolocation/public/interfaces/geoposition.mojom.h"
 #include "net/base/filename_util.h"
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_monster.h"
@@ -71,6 +70,7 @@
 #include "net/test/python_utils.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "ui/gfx/geometry/rect.h"
 
 #if defined(OS_WIN)
@@ -171,17 +171,16 @@ bool GetCurrentTabTitle(const Browser* browser, base::string16* title) {
   return true;
 }
 
-void NavigateToURL(chrome::NavigateParams* params) {
-  chrome::Navigate(params);
+void NavigateToURL(NavigateParams* params) {
+  Navigate(params);
   content::WaitForLoadStop(params->target_contents);
 }
 
 void NavigateToURLWithPost(Browser* browser, const GURL& url) {
-  chrome::NavigateParams params(browser, url,
-                                ui::PAGE_TRANSITION_FORM_SUBMIT);
+  NavigateParams params(browser, url, ui::PAGE_TRANSITION_FORM_SUBMIT);
 
   std::string post_data("test=body");
-  params.post_data = content::ResourceRequestBody::CreateFromBytes(
+  params.post_data = network::ResourceRequestBody::CreateFromBytes(
       post_data.data(), post_data.size());
   params.uses_post = true;
 
@@ -498,7 +497,7 @@ Browser* BrowserAddedObserver::WaitForSingleNewBrowser() {
 }
 
 void OverrideGeolocation(double latitude, double longitude) {
-  device::Geoposition position;
+  device::mojom::Geoposition position;
   position.latitude = latitude;
   position.longitude = longitude;
   position.altitude = 0.;

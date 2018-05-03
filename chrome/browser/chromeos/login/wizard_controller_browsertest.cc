@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 
-#include "ash/accessibility_types.h"
+#include "ash/public/cpp/accessibility_types.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
@@ -437,7 +437,7 @@ class WizardControllerFlowTest : public WizardControllerTest {
     device_disabled_screen_view_.reset(new MockDeviceDisabledScreenView);
     wizard_controller->screen_manager()
         ->screens_[OobeScreen::SCREEN_DEVICE_DISABLED] =
-        base::MakeUnique<DeviceDisabledScreen>(
+        std::make_unique<DeviceDisabledScreen>(
             wizard_controller, device_disabled_screen_view_.get());
     EXPECT_CALL(*device_disabled_screen_view_, Show()).Times(0);
 
@@ -1341,7 +1341,9 @@ IN_PROC_BROWSER_TEST_F(WizardControllerCellularFirstTest, CellularFirstFlow) {
 // http://crbug.com/706017
 
 // TODO(updowndota): Add tests for Voice Interaction OptIn flow.
-static_assert(static_cast<int>(ScreenExitCode::EXIT_CODES_COUNT) == 32,
+
+// TODO(alemate): Add tests for Sync Consent UI.
+static_assert(static_cast<int>(ScreenExitCode::EXIT_CODES_COUNT) == 33,
               "tests for new control flow are missing");
 
 }  // namespace chromeos

@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -69,8 +68,15 @@ em::DeviceRegisterRequest::Flavor EnrollmentModeToRegistrationFlavor(
       return em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_RECOVERY;
     case EnrollmentConfig::MODE_ATTESTATION:
       return em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_ATTESTATION;
-    case EnrollmentConfig::MODE_ATTESTATION_FORCED:
-      return em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_ATTESTATION_FORCED;
+    case EnrollmentConfig::MODE_ATTESTATION_LOCAL_FORCED:
+      return em::DeviceRegisterRequest::
+          FLAVOR_ENROLLMENT_ATTESTATION_LOCAL_FORCED;
+    case EnrollmentConfig::MODE_ATTESTATION_SERVER_FORCED:
+      return em::DeviceRegisterRequest::
+          FLAVOR_ENROLLMENT_ATTESTATION_SERVER_FORCED;
+    case EnrollmentConfig::MODE_ATTESTATION_MANUAL_FALLBACK:
+      return em::DeviceRegisterRequest::
+          FLAVOR_ENROLLMENT_ATTESTATION_MANUAL_FALLBACK;
   }
 
   NOTREACHED() << "Bad enrollment mode: " << mode;
@@ -137,7 +143,10 @@ EnrollmentHandlerChromeOS::EnrollmentHandlerChromeOS(
   CHECK_EQ(DM_STATUS_SUCCESS, client_->status());
   CHECK((enrollment_config_.mode == EnrollmentConfig::MODE_ATTESTATION ||
          enrollment_config_.mode ==
-             EnrollmentConfig::MODE_ATTESTATION_FORCED) == auth_token_.empty());
+             EnrollmentConfig::MODE_ATTESTATION_LOCAL_FORCED ||
+         enrollment_config.mode ==
+             EnrollmentConfig::MODE_ATTESTATION_SERVER_FORCED) ==
+        auth_token_.empty());
   CHECK(enrollment_config_.auth_mechanism !=
             EnrollmentConfig::AUTH_MECHANISM_ATTESTATION ||
         attestation_flow_);
@@ -240,7 +249,7 @@ void EnrollmentHandlerChromeOS::OnPolicyFetched(CloudPolicyClient* client) {
 
   std::unique_ptr<DeviceCloudPolicyValidator> validator(
       DeviceCloudPolicyValidator::Create(
-          base::MakeUnique<em::PolicyFetchResponse>(*policy),
+          std::make_unique<em::PolicyFetchResponse>(*policy),
           background_task_runner_));
 
   validator->ValidateTimestamp(base::Time(),
@@ -384,9 +393,9 @@ void EnrollmentHandlerChromeOS::StartAttestationBasedEnrollmentFlow() {
 }
 
 void EnrollmentHandlerChromeOS::HandleRegistrationCertificateResult(
-    bool success,
+    chromeos::attestation::AttestationStatus status,
     const std::string& pem_certificate_chain) {
-  if (success)
+  if (status == chromeos::attestation::ATTESTATION_SUCCESS)
     client_->RegisterWithCertificate(
         em::DeviceRegisterRequest::DEVICE,
         EnrollmentModeToRegistrationFlavor(enrollment_config_.mode),
@@ -609,7 +618,7 @@ void EnrollmentHandlerChromeOS::HandleLockDeviceResult(
 void EnrollmentHandlerChromeOS::StartStoreDMToken() {
   DCHECK(device_mode_ == DEVICE_MODE_ENTERPRISE_AD);
   SetStep(STEP_STORE_TOKEN);
-  dm_token_storage_ = base::MakeUnique<policy::DMTokenStorage>(
+  dm_token_storage_ = std::make_unique<policy::DMTokenStorage>(
       g_browser_process->local_state());
   dm_token_storage_->StoreDMToken(
       client_->dm_token(),
@@ -660,10 +669,10 @@ void EnrollmentHandlerChromeOS::HandleStoreRobotAuthTokenResult(bool result) {
 }
 
 void EnrollmentHandlerChromeOS::HandleActiveDirectoryPolicyRefreshed(
-    bool success) {
+    authpolicy::ErrorType error) {
   DCHECK_EQ(STEP_STORE_POLICY, enrollment_step_);
 
-  if (!success) {
+  if (error != authpolicy::ERROR_NONE) {
     LOG(ERROR) << "Failed to load Active Directory policy.";
     ReportResult(EnrollmentStatus::ForStatus(
         EnrollmentStatus::ACTIVE_DIRECTORY_POLICY_FETCH_FAILED));

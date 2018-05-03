@@ -20,8 +20,8 @@ namespace {
 // A class used to wait for animations.
 class TestAPIAnimationObserver : public views::BoundsAnimatorObserver {
  public:
-  TestAPIAnimationObserver() {}
-  ~TestAPIAnimationObserver() override {}
+  TestAPIAnimationObserver() = default;
+  ~TestAPIAnimationObserver() override = default;
 
   // views::BoundsAnimatorObserver overrides:
   void OnBoundsAnimatorProgressed(views::BoundsAnimator* animator) override {}
@@ -40,15 +40,16 @@ namespace ash {
 ShelfViewTestAPI::ShelfViewTestAPI(ShelfView* shelf_view)
     : shelf_view_(shelf_view) {}
 
-ShelfViewTestAPI::~ShelfViewTestAPI() {}
+ShelfViewTestAPI::~ShelfViewTestAPI() = default;
 
 int ShelfViewTestAPI::GetButtonCount() {
   return shelf_view_->view_model_->view_size();
 }
 
 ShelfButton* ShelfViewTestAPI::GetButton(int index) {
-  // App list button is not a ShelfButton.
-  if (shelf_view_->model_->items()[index].type == ash::TYPE_APP_LIST)
+  // App list and back button are not ShelfButtons.
+  if (shelf_view_->model_->items()[index].type == ash::TYPE_APP_LIST ||
+      shelf_view_->model_->items()[index].type == ash::TYPE_BACK_BUTTON)
     return nullptr;
 
   return static_cast<ShelfButton*>(GetViewAt(index));

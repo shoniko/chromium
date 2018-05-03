@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/webui/md_downloads/md_downloads_ui.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_piece.h"
@@ -42,7 +43,7 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
       content::WebUIDataSource::Create(chrome::kChromeUIDownloadsHost);
 
   source->AddLocalizedString("title", IDS_DOWNLOAD_TITLE);
-  source->AddLocalizedString("searchResultsFor", IDS_DOWNLOAD_SEARCHRESULTSFOR);
+  source->AddLocalizedString("searchResultsFor", IDS_SEARCH_RESULTS);
   source->AddLocalizedString("downloads", IDS_DOWNLOAD_TITLE);
 
   source->AddLocalizedString("clearAll", IDS_DOWNLOAD_LINK_CLEAR_ALL);
@@ -55,8 +56,7 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
 
   // No results message that shows instead of the downloads list.
   source->AddLocalizedString("noDownloads", IDS_MD_DOWNLOAD_NO_DOWNLOADS);
-  source->AddLocalizedString("noSearchResults",
-                             IDS_DOWNLOAD_NO_SEARCH_RESULTS);
+  source->AddLocalizedString("noSearchResults", IDS_SEARCH_NO_RESULTS);
 
   // Status.
   source->AddLocalizedString("statusCancelled", IDS_DOWNLOAD_TAB_CANCELLED);
@@ -150,8 +150,8 @@ MdDownloadsUI::MdDownloadsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   DownloadManager* dlm = BrowserContext::GetDownloadManager(profile);
 
   web_ui->AddMessageHandler(
-      base::MakeUnique<MdDownloadsDOMHandler>(dlm, web_ui));
-  web_ui->AddMessageHandler(base::MakeUnique<MetricsHandler>());
+      std::make_unique<MdDownloadsDOMHandler>(dlm, web_ui));
+  web_ui->AddMessageHandler(std::make_unique<MetricsHandler>());
 
   // Set up the chrome://downloads/ source.
   content::WebUIDataSource* source = CreateDownloadsUIHTMLSource(profile);

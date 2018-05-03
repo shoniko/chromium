@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
+#include "base/command_line.h"
 #include "chrome/browser/ui/views/chrome_constrained_window_views_client.h"
 #include "chrome/browser/ui/views/chrome_views_delegate.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
@@ -17,8 +17,8 @@
 #include "base/run_loop.h"
 #include "components/ui_devtools/devtools_server.h"
 #include "components/ui_devtools/views/css_agent.h"
-#include "components/ui_devtools/views/ui_devtools_dom_agent.h"
-#include "components/ui_devtools/views/ui_devtools_overlay_agent.h"
+#include "components/ui_devtools/views/dom_agent.h"
+#include "components/ui_devtools/views/overlay_agent.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/service_manager_connection.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -39,7 +39,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "base/command_line.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -49,6 +48,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/ash_config.h"
+#include "content/public/common/content_switches.h"
 #include "mash/common/config.h"                                   // nogncheck
 #include "mash/quick_launch/public/interfaces/constants.mojom.h"  // nogncheck
 #endif
@@ -78,7 +78,7 @@ void ChromeBrowserMainExtraPartsViews::ToolkitInitialized() {
   // The delegate needs to be set before any UI is created so that windows
   // display the correct icon.
   if (!views::ViewsDelegate::GetInstance())
-    views_delegate_ = base::MakeUnique<ChromeViewsDelegate>();
+    views_delegate_ = std::make_unique<ChromeViewsDelegate>();
 
   SetConstrainedWindowViewsClient(CreateChromeConstrainedWindowViewsClient());
 
@@ -113,13 +113,12 @@ void ChromeBrowserMainExtraPartsViews::PreProfileInit() {
   // Start devtools server
   devtools_server_ = ui_devtools::UiDevToolsServer::Create(nullptr);
   if (devtools_server_) {
-    auto dom_backend = base::MakeUnique<ui_devtools::UIDevToolsDOMAgent>();
+    auto dom_backend = std::make_unique<ui_devtools::DOMAgent>();
     auto overlay_backend =
-        base::MakeUnique<ui_devtools::UIDevToolsOverlayAgent>(
-            dom_backend.get());
+        std::make_unique<ui_devtools::OverlayAgent>(dom_backend.get());
     auto css_backend =
-        base::MakeUnique<ui_devtools::CSSAgent>(dom_backend.get());
-    auto devtools_client = base::MakeUnique<ui_devtools::UiDevToolsClient>(
+        std::make_unique<ui_devtools::CSSAgent>(dom_backend.get());
+    auto devtools_client = std::make_unique<ui_devtools::UiDevToolsClient>(
         "UiDevToolsClient", devtools_server_.get());
     devtools_client->AddAgent(std::move(dom_backend));
     devtools_client->AddAgent(std::move(css_backend));
@@ -175,12 +174,17 @@ void ChromeBrowserMainExtraPartsViews::ServiceManagerConnectionStarted(
         service_manager::Identity(ui::mojom::kServiceName));
     connection->GetConnector()->StartService(
         service_manager::Identity(mash::common::GetWindowManagerServiceName()));
-    connection->GetConnector()->StartService(
-        service_manager::Identity(mash::quick_launch::mojom::kServiceName));
+    // Don't start QuickLaunch in tests because it changes the startup shelf
+    // state vs. classic ash.
+    if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kTestType)) {
+      connection->GetConnector()->StartService(
+          service_manager::Identity(mash::quick_launch::mojom::kServiceName));
+    }
   }
 #endif
 
-  input_device_client_ = base::MakeUnique<ui::InputDeviceClient>();
+  input_device_client_ = std::make_unique<ui::InputDeviceClient>();
   ui::mojom::InputDeviceServerPtr server;
   connection->GetConnector()->BindInterface(ui::mojom::kServiceName, &server);
   input_device_client_->Connect(std::move(server));
@@ -192,7 +196,7 @@ void ChromeBrowserMainExtraPartsViews::ServiceManagerConnectionStarted(
 
   // WMState is owned as a member, so don't have MusClient create it.
   const bool create_wm_state = false;
-  mus_client_ = base::MakeUnique<views::MusClient>(
+  mus_client_ = std::make_unique<views::MusClient>(
       connection->GetConnector(), service_manager::Identity(),
       content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::IO),

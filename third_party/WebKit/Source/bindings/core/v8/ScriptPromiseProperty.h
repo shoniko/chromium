@@ -5,12 +5,12 @@
 #ifndef ScriptPromiseProperty_h
 #define ScriptPromiseProperty_h
 
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromisePropertyBase.h"
 #include "bindings/core/v8/ToV8ForCore.h"
 #include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -56,7 +56,7 @@ class ScriptPromiseProperty : public ScriptPromisePropertyBase {
   template <typename PassHolderType>
   ScriptPromiseProperty(ExecutionContext*, PassHolderType, Name);
 
-  ~ScriptPromiseProperty() override {}
+  ~ScriptPromiseProperty() override = default;
 
   template <typename PassResolvedType>
   void Resolve(PassResolvedType);

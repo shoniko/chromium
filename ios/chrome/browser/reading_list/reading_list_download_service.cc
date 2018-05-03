@@ -4,13 +4,13 @@
 
 #include "ios/chrome/browser/reading_list/reading_list_download_service.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/task_scheduler/post_task.h"
@@ -75,18 +75,18 @@ ReadingListDownloadService::ReadingListDownloadService(
       weak_ptr_factory_(this) {
   DCHECK(reading_list_model);
 
-  url_downloader_ = base::MakeUnique<URLDownloader>(
+  url_downloader_ = std::make_unique<URLDownloader>(
       distiller_factory_.get(), distiller_page_factory_.get(), prefs,
       chrome_profile_path, url_request_context_getter,
       base::Bind(&ReadingListDownloadService::OnDownloadEnd,
                  base::Unretained(this)),
       base::Bind(&ReadingListDownloadService::OnDeleteEnd,
                  base::Unretained(this)));
-  net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
 }
 
 ReadingListDownloadService::~ReadingListDownloadService() {
-  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 }
 
 void ReadingListDownloadService::Initialize() {
@@ -295,7 +295,7 @@ void ReadingListDownloadService::OnDeleteEnd(const GURL& url, bool success) {
   // Nothing to update as this is only called when deleting reading list entries
 }
 
-void ReadingListDownloadService::OnConnectionTypeChanged(
+void ReadingListDownloadService::OnNetworkChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
   if (type == net::NetworkChangeNotifier::CONNECTION_NONE) {
     had_connection_ = false;

@@ -12,9 +12,9 @@
 namespace blink {
 namespace scheduler {
 
-FakeRendererScheduler::FakeRendererScheduler() {}
+FakeRendererScheduler::FakeRendererScheduler() = default;
 
-FakeRendererScheduler::~FakeRendererScheduler() {}
+FakeRendererScheduler::~FakeRendererScheduler() = default;
 
 std::unique_ptr<blink::WebThread> FakeRendererScheduler::CreateMainThread() {
   return nullptr;
@@ -37,6 +37,11 @@ FakeRendererScheduler::LoadingTaskRunner() {
 
 scoped_refptr<SingleThreadIdleTaskRunner>
 FakeRendererScheduler::IdleTaskRunner() {
+  return nullptr;
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+FakeRendererScheduler::IPCTaskRunner() {
   return nullptr;
 }
 
@@ -76,6 +81,8 @@ void FakeRendererScheduler::SetRendererHidden(bool hidden) {}
 
 void FakeRendererScheduler::SetRendererBackgrounded(bool backgrounded) {}
 
+void FakeRendererScheduler::SetSchedulerKeepActive(bool keep_active) {}
+
 std::unique_ptr<FakeRendererScheduler::RendererPauseHandle>
 FakeRendererScheduler::PauseRenderer() {
   return nullptr;
@@ -107,10 +114,6 @@ void FakeRendererScheduler::RemoveTaskObserver(
 
 void FakeRendererScheduler::Shutdown() {}
 
-void FakeRendererScheduler::VirtualTimePaused() {}
-
-void FakeRendererScheduler::VirtualTimeResumed() {}
-
 void FakeRendererScheduler::SetStoppingWhenBackgroundedEnabled(bool enabled) {}
 
 void FakeRendererScheduler::SetTopLevelBlameContext(
@@ -124,6 +127,11 @@ bool FakeRendererScheduler::MainThreadSeemsUnresponsive(
 }
 
 void FakeRendererScheduler::SetRendererProcessType(RendererProcessType type) {}
+
+WebScopedVirtualTimePauser
+FakeRendererScheduler::CreateWebScopedVirtualTimePauser() {
+  return WebScopedVirtualTimePauser(nullptr);
+}
 
 }  // namespace scheduler
 }  // namespace blink

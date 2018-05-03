@@ -15,7 +15,6 @@
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
@@ -250,7 +249,7 @@ void DownloadItemView::OnExtractIconComplete(gfx::Image* icon_bitmap) {
 void DownloadItemView::MaybeSubmitDownloadToFeedbackService(
     DownloadCommands::Command download_command) {
   PrefService* prefs = shelf_->browser()->profile()->GetPrefs();
-  if (model_.MightBeMalicious() && model_.ShouldAllowDownloadFeedback() &&
+  if (model_.ShouldAllowDownloadFeedback() &&
       !shelf_->browser()->profile()->IsOffTheRecord()) {
     if (safe_browsing::ExtendedReportingPrefExists(*prefs)) {
       SubmitDownloadWhenFeedbackServiceEnabled(
@@ -440,6 +439,7 @@ bool DownloadItemView::OnMouseDragged(const ui::MouseEvent& event) {
       views::Widget* widget = GetWidget();
       DragDownloadItem(download(), icon,
                        widget ? widget->GetNativeView() : nullptr);
+      RecordDownloadShelfDragEvent(DownloadShelfDragEvent::STARTED);
     }
   } else if (ExceededDragThreshold(event.location() - drag_start_point_)) {
     dragging_ = true;
@@ -529,7 +529,7 @@ std::unique_ptr<views::InkDrop> DownloadItemView::CreateInkDrop() {
 
 std::unique_ptr<views::InkDropRipple> DownloadItemView::CreateInkDropRipple()
     const {
-  return base::MakeUnique<views::FloodFillInkDropRipple>(
+  return std::make_unique<views::FloodFillInkDropRipple>(
       size(), GetInkDropCenterBasedOnLastEvent(),
       color_utils::DeriveDefaultIconColor(GetTextColor()),
       ink_drop_visible_opacity());
@@ -538,7 +538,7 @@ std::unique_ptr<views::InkDropRipple> DownloadItemView::CreateInkDropRipple()
 std::unique_ptr<views::InkDropHighlight>
 DownloadItemView::CreateInkDropHighlight() const {
   gfx::Size size = GetPreferredSize();
-  return base::MakeUnique<views::InkDropHighlight>(
+  return std::make_unique<views::InkDropHighlight>(
       size, kInkDropSmallCornerRadius,
       gfx::RectF(gfx::SizeF(size)).CenterPoint(),
       color_utils::DeriveDefaultIconColor(GetTextColor()));
@@ -601,8 +601,9 @@ void DownloadItemView::ButtonPressed(views::Button* sender,
           ExperienceSamplingEvent::kProceed);
       sampling_event_.reset();
     }
-    // This will change the state and notify us.
-    download()->ValidateDangerousDownload();
+    // This will call ValidateDangerousDownload(), change download state and
+    // notify us.
+    MaybeSubmitDownloadToFeedbackService(DownloadCommands::KEEP);
     return;
   }
 
@@ -822,7 +823,7 @@ void DownloadItemView::UpdateColorsFromTheme() {
   if (!GetThemeProvider())
     return;
 
-  SetBorder(base::MakeUnique<SeparatorBorder>(GetThemeProvider()->GetColor(
+  SetBorder(std::make_unique<SeparatorBorder>(GetThemeProvider()->GetColor(
       ThemeProperties::COLOR_TOOLBAR_VERTICAL_SEPARATOR)));
 
   if (dangerous_download_label_)

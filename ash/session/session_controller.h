@@ -106,6 +106,9 @@ class ASH_EXPORT SessionController : public mojom::SessionController {
   // account or kid account.
   bool IsUserSupervised() const;
 
+  // Returns true if the current user is legacy supervised.
+  bool IsUserLegacySupervised() const;
+
   // Returns true if the current user is a child account.
   bool IsUserChild() const;
 
@@ -220,7 +223,7 @@ class ASH_EXPORT SessionController : public mojom::SessionController {
       const AccountId& account_id,
       std::unique_ptr<PrefService> pref_service);
 
-  // Bindings for mojom::SessionController interface.
+  // Bindings for users of the mojom::SessionController interface.
   mojo::BindingSet<mojom::SessionController> bindings_;
 
   // Client interface to session manager code (chrome).

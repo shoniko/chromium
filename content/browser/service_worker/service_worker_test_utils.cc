@@ -92,9 +92,9 @@ ServiceWorkerRemoteProviderEndpoint::~ServiceWorkerRemoteProviderEndpoint() {}
 void ServiceWorkerRemoteProviderEndpoint::BindWithProviderHostInfo(
     content::ServiceWorkerProviderHostInfo* info) {
   mojom::ServiceWorkerContainerAssociatedPtr client_ptr;
-  client_request_ = mojo::MakeIsolatedRequest(&client_ptr);
+  client_request_ = mojo::MakeRequestAssociatedWithDedicatedPipe(&client_ptr);
   info->client_ptr_info = client_ptr.PassInterface();
-  info->host_request = mojo::MakeIsolatedRequest(&host_ptr_);
+  info->host_request = mojo::MakeRequestAssociatedWithDedicatedPipe(&host_ptr_);
 }
 
 void ServiceWorkerRemoteProviderEndpoint::BindWithProviderInfo(
@@ -102,6 +102,10 @@ void ServiceWorkerRemoteProviderEndpoint::BindWithProviderInfo(
   client_request_ = std::move(info->client_request);
   host_ptr_.Bind(std::move(info->host_ptr_info));
   registration_object_info_ = std::move(info->registration);
+  // To enable the caller end point to make calls safely with no need to pass
+  // |registration_object_info_->request| through a message pipe endpoint.
+  mojo::AssociateWithDisconnectedPipe(
+      registration_object_info_->request.PassHandle());
 }
 
 std::unique_ptr<ServiceWorkerProviderHost> CreateProviderHostForWindow(
@@ -110,9 +114,10 @@ std::unique_ptr<ServiceWorkerProviderHost> CreateProviderHostForWindow(
     bool is_parent_frame_secure,
     base::WeakPtr<ServiceWorkerContextCore> context,
     ServiceWorkerRemoteProviderEndpoint* output_endpoint) {
-  ServiceWorkerProviderHostInfo info(provider_id, 1 /* route_id */,
-                                     SERVICE_WORKER_PROVIDER_FOR_WINDOW,
-                                     is_parent_frame_secure);
+  ServiceWorkerProviderHostInfo info(
+      provider_id, 1 /* route_id */,
+      blink::mojom::ServiceWorkerProviderType::kForWindow,
+      is_parent_frame_secure);
   output_endpoint->BindWithProviderHostInfo(&info);
   return ServiceWorkerProviderHost::Create(process_id, std::move(info),
                                            std::move(context), nullptr);
@@ -127,7 +132,8 @@ CreateProviderHostForServiceWorkerContext(
     ServiceWorkerRemoteProviderEndpoint* output_endpoint) {
   ServiceWorkerProviderHostInfo info(
       kInvalidServiceWorkerProviderId, MSG_ROUTING_NONE,
-      SERVICE_WORKER_PROVIDER_FOR_CONTROLLER, is_parent_frame_secure);
+      blink::mojom::ServiceWorkerProviderType::kForServiceWorker,
+      is_parent_frame_secure);
   std::unique_ptr<ServiceWorkerProviderHost> host =
       ServiceWorkerProviderHost::PreCreateForController(std::move(context));
   mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info =
@@ -143,8 +149,9 @@ std::unique_ptr<ServiceWorkerProviderHost> CreateProviderHostWithDispatcherHost(
     int route_id,
     ServiceWorkerDispatcherHost* dispatcher_host,
     ServiceWorkerRemoteProviderEndpoint* output_endpoint) {
-  ServiceWorkerProviderHostInfo info(provider_id, route_id,
-                                     SERVICE_WORKER_PROVIDER_FOR_WINDOW, true);
+  ServiceWorkerProviderHostInfo info(
+      provider_id, route_id,
+      blink::mojom::ServiceWorkerProviderType::kForWindow, true);
   output_endpoint->BindWithProviderHostInfo(&info);
   return ServiceWorkerProviderHost::Create(process_id, std::move(info),
                                            std::move(context),

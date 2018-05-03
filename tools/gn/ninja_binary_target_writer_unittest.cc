@@ -4,10 +4,12 @@
 
 #include "tools/gn/ninja_binary_target_writer.h"
 
+#include <memory>
 #include <sstream>
 #include <utility>
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "tools/gn/config.h"
 #include "tools/gn/scheduler.h"
 #include "tools/gn/target.h"
 #include "tools/gn/test_with_scope.h"
@@ -582,7 +584,7 @@ TEST(NinjaBinaryTargetWriter, WinPrecompiledHeaders) {
   pch_settings.set_default_toolchain_label(setup.toolchain()->label());
 
   // Declare a C++ compiler that supports PCH.
-  std::unique_ptr<Tool> cxx_tool(new Tool);
+  std::unique_ptr<Tool> cxx_tool = std::make_unique<Tool>();
   TestWithScope::SetCommandForTool(
       "c++ {{source}} {{cflags}} {{cflags_cc}} {{defines}} {{include_dirs}} "
       "-o {{output}}",
@@ -593,7 +595,7 @@ TEST(NinjaBinaryTargetWriter, WinPrecompiledHeaders) {
   pch_toolchain.SetTool(Toolchain::TYPE_CXX, std::move(cxx_tool));
 
   // Add a C compiler as well.
-  std::unique_ptr<Tool> cc_tool(new Tool);
+  std::unique_ptr<Tool> cc_tool = std::make_unique<Tool>();
   TestWithScope::SetCommandForTool(
       "cc {{source}} {{cflags}} {{cflags_c}} {{defines}} {{include_dirs}} "
       "-o {{output}}",
@@ -709,7 +711,7 @@ TEST(NinjaBinaryTargetWriter, GCCPrecompiledHeaders) {
   pch_settings.set_default_toolchain_label(setup.toolchain()->label());
 
   // Declare a C++ compiler that supports PCH.
-  std::unique_ptr<Tool> cxx_tool(new Tool);
+  std::unique_ptr<Tool> cxx_tool = std::make_unique<Tool>();
   TestWithScope::SetCommandForTool(
       "c++ {{source}} {{cflags}} {{cflags_cc}} {{defines}} {{include_dirs}} "
       "-o {{output}}",
@@ -721,7 +723,7 @@ TEST(NinjaBinaryTargetWriter, GCCPrecompiledHeaders) {
   pch_toolchain.ToolchainSetupComplete();
 
   // Add a C compiler as well.
-  std::unique_ptr<Tool> cc_tool(new Tool);
+  std::unique_ptr<Tool> cc_tool = std::make_unique<Tool>();
   TestWithScope::SetCommandForTool(
       "cc {{source}} {{cflags}} {{cflags_c}} {{defines}} {{include_dirs}} "
       "-o {{output}}",
@@ -851,7 +853,7 @@ TEST(NinjaBinaryTargetWriter, InputFiles) {
     target.visibility().SetPublic();
     target.sources().push_back(SourceFile("//foo/input1.cc"));
     target.sources().push_back(SourceFile("//foo/input2.cc"));
-    target.inputs().push_back(SourceFile("//foo/input.data"));
+    target.config_values().inputs().push_back(SourceFile("//foo/input.data"));
     target.SetToolchain(setup.toolchain());
     ASSERT_TRUE(target.OnResolved(&err));
 
@@ -886,8 +888,8 @@ TEST(NinjaBinaryTargetWriter, InputFiles) {
     target.visibility().SetPublic();
     target.sources().push_back(SourceFile("//foo/input1.cc"));
     target.sources().push_back(SourceFile("//foo/input2.cc"));
-    target.inputs().push_back(SourceFile("//foo/input1.data"));
-    target.inputs().push_back(SourceFile("//foo/input2.data"));
+    target.config_values().inputs().push_back(SourceFile("//foo/input1.data"));
+    target.config_values().inputs().push_back(SourceFile("//foo/input2.data"));
     target.SetToolchain(setup.toolchain());
     ASSERT_TRUE(target.OnResolved(&err));
 
@@ -906,6 +908,54 @@ TEST(NinjaBinaryTargetWriter, InputFiles) {
         "\n"
         "build obj/foo/bar.inputs.stamp: stamp"
           " ../../foo/input1.data ../../foo/input2.data\n"
+        "build obj/foo/bar.input1.o: cxx ../../foo/input1.cc"
+          " | obj/foo/bar.inputs.stamp\n"
+        "build obj/foo/bar.input2.o: cxx ../../foo/input2.cc"
+          " | obj/foo/bar.inputs.stamp\n"
+        "\n"
+        "build obj/foo/bar.stamp: stamp obj/foo/bar.input1.o "
+            "obj/foo/bar.input2.o\n";
+
+    EXPECT_EQ(expected, out.str());
+  }
+
+  // This target has one input itself, one from an immediate config, and one
+  // from a config tacked on to said config.
+  {
+    Config far_config(setup.settings(), Label(SourceDir("//foo/"), "qux"));
+    far_config.own_values().inputs().push_back(SourceFile("//foo/input3.data"));
+    ASSERT_TRUE(far_config.OnResolved(&err));
+
+    Config config(setup.settings(), Label(SourceDir("//foo/"), "baz"));
+    config.own_values().inputs().push_back(SourceFile("//foo/input2.data"));
+    config.configs().push_back(LabelConfigPair(&far_config));
+    ASSERT_TRUE(config.OnResolved(&err));
+
+    Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
+    target.set_output_type(Target::SOURCE_SET);
+    target.visibility().SetPublic();
+    target.sources().push_back(SourceFile("//foo/input1.cc"));
+    target.sources().push_back(SourceFile("//foo/input2.cc"));
+    target.config_values().inputs().push_back(SourceFile("//foo/input1.data"));
+    target.configs().push_back(LabelConfigPair(&config));
+    target.SetToolchain(setup.toolchain());
+    ASSERT_TRUE(target.OnResolved(&err));
+
+    std::ostringstream out;
+    NinjaBinaryTargetWriter writer(&target, out);
+    writer.Run();
+
+    const char expected[] =
+        "defines =\n"
+        "include_dirs =\n"
+        "cflags =\n"
+        "cflags_cc =\n"
+        "root_out_dir = .\n"
+        "target_out_dir = obj/foo\n"
+        "target_output_name = bar\n"
+        "\n"
+        "build obj/foo/bar.inputs.stamp: stamp"
+          " ../../foo/input1.data ../../foo/input2.data ../../foo/input3.data\n"
         "build obj/foo/bar.input1.o: cxx ../../foo/input1.cc"
           " | obj/foo/bar.inputs.stamp\n"
         "build obj/foo/bar.input2.o: cxx ../../foo/input2.cc"

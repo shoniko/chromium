@@ -25,10 +25,10 @@
 
 #include "core/dom/events/MediaElementEventQueue.h"
 
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/events/Event.h"
 #include "core/probe/CoreProbes.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -41,12 +41,12 @@ MediaElementEventQueue* MediaElementEventQueue::Create(
 MediaElementEventQueue::MediaElementEventQueue(EventTarget* owner,
                                                ExecutionContext* context)
     : owner_(owner),
-      timer_(TaskRunnerHelper::Get(TaskType::kMediaElementEvent, context),
+      timer_(context->GetTaskRunner(TaskType::kMediaElementEvent),
              this,
              &MediaElementEventQueue::TimerFired),
       is_closed_(false) {}
 
-MediaElementEventQueue::~MediaElementEventQueue() {}
+MediaElementEventQueue::~MediaElementEventQueue() = default;
 
 void MediaElementEventQueue::Trace(blink::Visitor* visitor) {
   visitor->Trace(owner_);
@@ -54,7 +54,7 @@ void MediaElementEventQueue::Trace(blink::Visitor* visitor) {
   EventQueue::Trace(visitor);
 }
 
-bool MediaElementEventQueue::EnqueueEvent(const WebTraceLocation& from_here,
+bool MediaElementEventQueue::EnqueueEvent(const base::Location& from_here,
                                           Event* event) {
   if (is_closed_)
     return false;
@@ -70,7 +70,7 @@ bool MediaElementEventQueue::EnqueueEvent(const WebTraceLocation& from_here,
   pending_events_.push_back(event);
 
   if (!timer_.IsActive())
-    timer_.StartOneShot(0, from_here);
+    timer_.StartOneShot(TimeDelta(), from_here);
 
   return true;
 }

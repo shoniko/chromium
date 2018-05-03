@@ -203,8 +203,7 @@ PostCleanupSettingsResetter::~PostCleanupSettingsResetter() = default;
 // static
 bool PostCleanupSettingsResetter::IsEnabled() {
 #if defined(OS_WIN)
-  return base::FeatureList::IsEnabled(
-      safe_browsing::kInBrowserCleanerUIFeature);
+  return true;
 #else
   return false;
 #endif
@@ -212,7 +211,7 @@ bool PostCleanupSettingsResetter::IsEnabled() {
 
 std::unique_ptr<ProfileResetter>
 PostCleanupSettingsResetter::Delegate::GetProfileResetter(Profile* profile) {
-  return base::MakeUnique<ProfileResetter>(profile);
+  return std::make_unique<ProfileResetter>(profile);
 }
 
 void PostCleanupSettingsResetter::TagForResetting(Profile* profile) {

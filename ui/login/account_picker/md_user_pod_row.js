@@ -428,7 +428,7 @@ cr.define('login', function() {
         parentPod.passwordEntryContainerElement.classList.toggle(
             'custom-icon-shown', validIcon);
       }
-      this.hidden = validIcon ? false : true;
+      this.hidden = !validIcon;
     },
 
     /**
@@ -2291,6 +2291,12 @@ cr.define('login', function() {
     lastPosition: {left: 'unset', top: 'unset'},
 
     /**
+     * The Learn more dialog.
+     * @type {HTMLDivElement}
+     */
+    learnMoreDialog_: undefined,
+
+    /**
      * "Enter" button in expanded side pane.
      * @type {!HTMLButtonElement}
      */
@@ -2393,7 +2399,7 @@ cr.define('login', function() {
       var monitoringLearnMore = this.querySelector('.monitoring-learn-more');
       monitoringLearnMore.tabIndex = UserPodTabOrder.POD_INPUT;
       monitoringLearnMore.addEventListener(
-          'click', this.onMonitoringLearnMoreClicked_.bind(this));
+          'click', this.onLearnMoreClicked_.bind(this));
 
       this.enterButtonElement.tabIndex = UserPodTabOrder.POD_INPUT;
       this.enterButtonElement.addEventListener('click', (function(e) {
@@ -2526,19 +2532,24 @@ cr.define('login', function() {
     },
 
     /**
-     * Show a dialog when user clicks on learn more (monitoring) button.
+     * Show a dialog when user clicks on Learn more button.
      */
-    onMonitoringLearnMoreClicked_: function() {
-      if (!this.dialogContainer_) {
-        this.dialogContainer_ = document.createElement('div');
-        this.dialogContainer_.classList.add('monitoring-dialog-container');
-        var topContainer = document.querySelector('#scroll-container');
-        topContainer.appendChild(this.dialogContainer_);
+    onLearnMoreClicked_: function() {
+      // Ignore if the Learn more dialog is already open.
+      if (this.learnMoreDialog_)
+        return;
+
+      var topContainer = document.querySelector('#scroll-container');
+      var dialogContainer =
+          topContainer.querySelector('.monitoring-dialog-container');
+      if (!dialogContainer) {
+        // Add a dummy parent element to enable different CSS settings.
+        dialogContainer = document.createElement('div');
+        dialogContainer.classList.add('monitoring-dialog-container');
+        topContainer.appendChild(dialogContainer);
       }
-      // Public Session POD in advanced view has a different size so add a dummy
-      // parent element to enable different CSS settings.
-      this.dialogContainer_.classList.toggle(
-          'advanced', this.classList.contains('advanced'))
+      dialogContainer.classList.toggle(
+          'advanced', this.classList.contains('advanced'));
       var html = '';
       var infoItems = ['publicAccountMonitoringInfoItem1',
                        'publicAccountMonitoringInfoItem2',
@@ -2550,18 +2561,18 @@ cr.define('login', function() {
         html += '</p>';
       }
       var title = loadTimeData.getString('publicAccountMonitoringInfo');
-      this.dialog_ = new cr.ui.dialogs.BaseDialog(this.dialogContainer_);
-      this.dialog_.showHtml(title, html, undefined,
-                            this.onMonitoringDialogClosed_.bind(this));
+      this.learnMoreDialog_ = new cr.ui.dialogs.BaseDialog(dialogContainer);
+      this.learnMoreDialog_.showHtml(
+          title, html, undefined, this.onLearnMoreDialogClosed_.bind(this));
       this.parentNode.disabled = true;
     },
 
     /**
-     * Cleanup after the monitoring warning dialog is closed.
+     * Clean up after the Learn more dialog is closed.
      */
-    onMonitoringDialogClosed_: function() {
+    onLearnMoreDialogClosed_: function() {
       this.parentNode.disabled = false;
-      this.dialog_ = undefined;
+      this.learnMoreDialog_ = undefined;
     },
 
     /**
@@ -2611,9 +2622,8 @@ cr.define('login', function() {
      * @param {boolean} multipleRecommendedLocales Whether |locales| contains
      *     two or more recommended locales
      */
-    populateLanguageSelect: function(locales,
-                                     defaultLocale,
-                                     multipleRecommendedLocales) {
+    populateLanguageSelect: function(
+        locales, defaultLocale, multipleRecommendedLocales) {
       var languageSelect = this.querySelector('.language-select');
       // If the user manually selected a locale, do not change the selection.
       // Otherwise, select the new |defaultLocale|.
@@ -2912,6 +2922,9 @@ cr.define('login', function() {
     // The color used by the scroll list when the user count exceeds
     // LANDSCAPE_MODE_LIMIT or PORTRAIT_MODE_LIMIT.
     overlayColors_: {maskColor: undefined, scrollColor: undefined},
+
+    // Whether we should add background behind user pods.
+    showPodBackground_: false,
 
     /** @override */
     decorate: function() {
@@ -4041,6 +4054,7 @@ cr.define('login', function() {
         }
       }
       this.updateSigninBannerPosition_();
+      this.togglePodBackground(this.showPodBackground_);
     },
 
     /**
@@ -4233,6 +4247,41 @@ cr.define('login', function() {
      */
     getMaskGradient_: function(maskColor) {
       return 'linear-gradient(' + maskColor + ', transparent)';
+    },
+
+    /**
+     * Toggles the background behind user pods.
+     * @param {boolean} showPodBackground Whether to add background behind user
+     *     pods.
+     */
+    togglePodBackground: function(showPodBackground) {
+      this.showPodBackground_ = showPodBackground;
+      var pods = this.pods;
+      for (var pod of pods)
+        pod.classList.toggle('show-pod-background', showPodBackground);
+      $('login-header-bar')
+          .classList.toggle('translucent-background', showPodBackground);
+
+      var isShowingScrollList =
+          this.smallPodsContainer.classList.contains('scroll');
+      if (isShowingScrollList) {
+        if (showPodBackground) {
+          // The scroll list should use a fixed color to make sure the pods are
+          // legible.
+          this.smallPodsContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        } else if (this.overlayColors_.scrollColor) {
+          // Change the background back to the color extracted from wallpaper.
+          this.smallPodsContainer.style.backgroundColor =
+              this.overlayColors_.scrollColor;
+        }
+      }
+      // Edge case: when we add pod background, we also need to add extra
+      // padding to the pods if they are not placed on top of the scroll list.
+      // The padding may result in overflow, so we allow showing overflow here.
+      // An alternative is to adjust the size of the small pods container, but
+      // we want to avoid changing the pod placement for this edge case.
+      this.smallPodsContainer.classList.toggle(
+          'show-overflow', showPodBackground && !isShowingScrollList);
     },
 
     /**

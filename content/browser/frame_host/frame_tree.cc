@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <queue>
+#include <set>
 #include <utility>
 
 #include "base/bind.h"
@@ -26,9 +27,8 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/frame_owner_properties.h"
-#include "content/common/frame_policy.h"
 #include "content/common/input_messages.h"
-#include "content/common/site_isolation_policy.h"
+#include "third_party/WebKit/common/frame_policy.h"
 
 namespace content {
 
@@ -109,6 +109,7 @@ FrameTree::FrameTree(Navigator* navigator,
                               blink::WebTreeScopeType::kDocument,
                               std::string(),
                               std::string(),
+                              false,
                               base::UnguessableToken::Create(),
                               FrameOwnerProperties())),
       focused_frame_tree_node_id_(FrameTreeNode::kFrameTreeNodeInvalidId),
@@ -171,15 +172,18 @@ FrameTree::NodeRange FrameTree::NodesExceptSubtree(FrameTreeNode* node) {
   return NodeRange(root_, node);
 }
 
-bool FrameTree::AddFrame(FrameTreeNode* parent,
-                         int process_id,
-                         int new_routing_id,
-                         blink::WebTreeScopeType scope,
-                         const std::string& frame_name,
-                         const std::string& frame_unique_name,
-                         const base::UnguessableToken& devtools_frame_token,
-                         const FramePolicy& frame_policy,
-                         const FrameOwnerProperties& frame_owner_properties) {
+bool FrameTree::AddFrame(
+    FrameTreeNode* parent,
+    int process_id,
+    int new_routing_id,
+    service_manager::mojom::InterfaceProviderRequest interface_provider_request,
+    blink::WebTreeScopeType scope,
+    const std::string& frame_name,
+    const std::string& frame_unique_name,
+    bool is_created_by_script,
+    const base::UnguessableToken& devtools_frame_token,
+    const blink::FramePolicy& frame_policy,
+    const FrameOwnerProperties& frame_owner_properties) {
   CHECK_NE(new_routing_id, MSG_ROUTING_NONE);
 
   // A child frame always starts with an initial empty document, which means
@@ -192,7 +196,8 @@ bool FrameTree::AddFrame(FrameTreeNode* parent,
   std::unique_ptr<FrameTreeNode> new_node = base::WrapUnique(new FrameTreeNode(
       this, parent->navigator(), render_frame_delegate_,
       render_widget_delegate_, manager_delegate_, parent, scope, frame_name,
-      frame_unique_name, devtools_frame_token, frame_owner_properties));
+      frame_unique_name, is_created_by_script, devtools_frame_token,
+      frame_owner_properties));
 
   // Set sandbox flags and container policy and make them effective immediately,
   // since initial sandbox flags and feature policy should apply to the initial
@@ -206,14 +211,20 @@ bool FrameTree::AddFrame(FrameTreeNode* parent,
   FrameTreeNode* added_node =
       parent->AddChild(std::move(new_node), process_id, new_routing_id);
 
+  DCHECK(interface_provider_request.is_pending());
+  added_node->current_frame_host()->BindInterfaceProviderRequest(
+      std::move(interface_provider_request));
+
   // The last committed NavigationEntry may have a FrameNavigationEntry with the
   // same |frame_unique_name|, since we don't remove FrameNavigationEntries if
   // their frames are deleted.  If there is a stale one, remove it to avoid
   // conflicts on future updates.
   NavigationEntryImpl* last_committed_entry = static_cast<NavigationEntryImpl*>(
       parent->navigator()->GetController()->GetLastCommittedEntry());
-  if (last_committed_entry)
-    last_committed_entry->ClearStaleFrameEntriesForNewFrame(added_node);
+  if (last_committed_entry) {
+    last_committed_entry->RemoveEntryForFrame(
+        added_node, /* only_if_different_position = */ true);
+  }
 
   // Now that the new node is part of the FrameTree and has a RenderFrameHost,
   // we can announce the creation of the initial RenderFrame which already

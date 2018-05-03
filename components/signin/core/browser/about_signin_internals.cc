@@ -15,7 +15,6 @@
 #include "base/hash.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
@@ -23,12 +22,12 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_internals_util.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "components/signin/core/common/signin_switches.h"
+#include "components/signin/core/browser/signin_switches.h"
 #include "google_apis/gaia/oauth2_token_service_delegate.h"
 #include "net/base/backoff_entry.h"
 
@@ -43,11 +42,11 @@ std::string GetTimeStr(base::Time time) {
 
 base::ListValue* AddSection(base::ListValue* parent_list,
                             const std::string& title) {
-  auto section = base::MakeUnique<base::DictionaryValue>();
+  auto section = std::make_unique<base::DictionaryValue>();
 
   section->SetString("title", title);
   base::ListValue* section_contents =
-      section->SetList("data", base::MakeUnique<base::ListValue>());
+      section->SetList("data", std::make_unique<base::ListValue>());
   parent_list->Append(std::move(section));
   return section_contents;
 }
@@ -106,6 +105,10 @@ std::string TokenServiceLoadCredentialsStateToLabel(
     case OAuth2TokenServiceDelegate::
         LOAD_CREDENTIALS_FINISHED_WITH_DECRYPT_ERRORS:
       return "Load credentials failed with decrypt errors";
+    case OAuth2TokenServiceDelegate::
+        LOAD_CREDENTIALS_FINISHED_WITH_NO_TOKEN_FOR_PRIMARY_ACCOUNT:
+      return "Load credentials failed with no refresh token for signed in "
+             "account";
     case OAuth2TokenServiceDelegate::
         LOAD_CREDENTIALS_FINISHED_WITH_UNKNOWN_ERRORS:
       return "Load credentials failed with unknown errors";
@@ -169,6 +172,11 @@ std::string GetAccountConsistencyDescription() {
       return "Mirror";
     case signin::AccountConsistencyMethod::kDiceFixAuthErrors:
       return "DICE fixing auth errors";
+    case signin::AccountConsistencyMethod::kDicePrepareMigration:
+      return "DICE preparing migration";
+    case signin::AccountConsistencyMethod::
+        kDicePrepareMigrationChromeSyncEndpoint:
+      return "DICE preparing migration with Chrome sync Gaia endpoint";
     case signin::AccountConsistencyMethod::kDiceMigration:
       return "DICE migration";
     case signin::AccountConsistencyMethod::kDice:
@@ -304,21 +312,19 @@ void AboutSigninInternals::NotifyObservers() {
   if (!signin_observers_.might_have_observers())
     return;
 
-  const std::string product_version = client_->GetProductVersion();
-
   std::unique_ptr<base::DictionaryValue> signin_status_value =
       signin_status_.ToValue(account_tracker_, signin_manager_,
                              signin_error_controller_, token_service_,
-                             cookie_manager_service_, product_version);
+                             cookie_manager_service_, client_);
 
   for (auto& observer : signin_observers_)
     observer.OnSigninStateChanged(signin_status_value.get());
 }
 
 std::unique_ptr<base::DictionaryValue> AboutSigninInternals::GetSigninStatus() {
-  return signin_status_.ToValue(
-      account_tracker_, signin_manager_, signin_error_controller_,
-      token_service_, cookie_manager_service_, client_->GetProductVersion());
+  return signin_status_.ToValue(account_tracker_, signin_manager_,
+                                signin_error_controller_, token_service_,
+                                cookie_manager_service_, client_);
 }
 
 void AboutSigninInternals::OnAccessTokenRequested(
@@ -330,7 +336,7 @@ void AboutSigninInternals::OnAccessTokenRequested(
     *token = TokenInfo(consumer_id, scopes);
   } else {
     signin_status_.token_info_map[account_id].push_back(
-        base::MakeUnique<TokenInfo>(consumer_id, scopes));
+        std::make_unique<TokenInfo>(consumer_id, scopes));
   }
 
   NotifyObservers();
@@ -409,7 +415,7 @@ void AboutSigninInternals::OnGaiaAccountsInCookieUpdated(
   if (error.state() != GoogleServiceAuthError::NONE)
     return;
 
-  auto cookie_info = base::MakeUnique<base::ListValue>();
+  auto cookie_info = std::make_unique<base::ListValue>();
 
   for (size_t i = 0; i < gaia_accounts.size(); ++i) {
     AddCookieEntry(cookie_info.get(), gaia_accounts[i].raw_email,
@@ -518,21 +524,22 @@ AboutSigninInternals::SigninStatus::ToValue(
     SigninErrorController* signin_error_controller,
     ProfileOAuth2TokenService* token_service,
     GaiaCookieManagerService* cookie_manager_service,
-    const std::string& product_version) {
-  auto signin_status = base::MakeUnique<base::DictionaryValue>();
-  auto signin_info = base::MakeUnique<base::ListValue>();
+    SigninClient* signin_client) {
+  auto signin_status = std::make_unique<base::DictionaryValue>();
+  auto signin_info = std::make_unique<base::ListValue>();
 
   // A summary of signin related info first.
   base::ListValue* basic_info =
       AddSection(signin_info.get(), "Basic Information");
-  AddSectionEntry(basic_info, "Chrome Version", product_version);
+  AddSectionEntry(basic_info, "Chrome Version",
+                  signin_client->GetProductVersion());
   AddSectionEntry(basic_info, "Account Consistency",
                   GetAccountConsistencyDescription());
   AddSectionEntry(basic_info, "Signin Status",
       signin_manager->IsAuthenticated() ? "Signed In" : "Not Signed In");
   OAuth2TokenServiceDelegate::LoadCredentialsState load_tokens_state =
       token_service->GetDelegate()->GetLoadCredentialsState();
-  AddSectionEntry(basic_info, "TokenService Status",
+  AddSectionEntry(basic_info, "TokenService Load Status",
                   TokenServiceLoadCredentialsStateToLabel(load_tokens_state));
 
   if (signin_manager->IsAuthenticated()) {
@@ -616,7 +623,7 @@ AboutSigninInternals::SigninStatus::ToValue(
 #endif  // !defined(OS_CHROMEOS)
 
   // Token information for all services.
-  auto token_info = base::MakeUnique<base::ListValue>();
+  auto token_info = std::make_unique<base::ListValue>();
   for (auto it = token_info_map.begin(); it != token_info_map.end(); ++it) {
     base::ListValue* token_details = AddSection(token_info.get(), it->first);
     std::sort(it->second.begin(), it->second.end(), TokenInfo::LessThan);
@@ -625,27 +632,31 @@ AboutSigninInternals::SigninStatus::ToValue(
   }
   signin_status->Set("token_info", std::move(token_info));
 
-  auto account_info = base::MakeUnique<base::ListValue>();
+  auto account_info = std::make_unique<base::ListValue>();
   const std::vector<std::string>& accounts_in_token_service =
       token_service->GetAccounts();
 
   if (accounts_in_token_service.size() == 0) {
-    auto no_token_entry = base::MakeUnique<base::DictionaryValue>();
+    auto no_token_entry = std::make_unique<base::DictionaryValue>();
     no_token_entry->SetString("accountId", "No token in Token Service.");
     account_info->Append(std::move(no_token_entry));
   }
 
   for (const std::string& account_id : accounts_in_token_service) {
-    auto entry = base::MakeUnique<base::DictionaryValue>();
+    auto entry = std::make_unique<base::DictionaryValue>();
     entry->SetString("accountId", account_id);
+    entry->SetBoolean("hasRefreshToken",
+                      token_service->RefreshTokenIsAvailable(account_id));
+    entry->SetBoolean("hasAuthError",
+                      token_service->RefreshTokenHasError(account_id));
     account_info->Append(std::move(entry));
   }
 
   signin_status->Set("accountInfo", std::move(account_info));
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  if (signin::IsDiceMigrationEnabled()) {
-    auto dice_info = base::MakeUnique<base::DictionaryValue>();
+  if (signin::IsDiceEnabledForProfile(signin_client->GetPrefs())) {
+    auto dice_info = std::make_unique<base::DictionaryValue>();
     dice_info->SetBoolean("isSignedIn", signin_manager->IsAuthenticated());
     signin_status->Set("dice", std::move(dice_info));
   }

@@ -11,7 +11,7 @@
 
 #include "ash/ash_export.h"
 #include "ash/public/cpp/shelf_types.h"
-#include "ash/shell_observer.h"
+#include "ash/sidebar/sidebar.h"
 #include "ash/wm/workspace/workspace_types.h"
 #include "base/macros.h"
 #include "ui/aura/window.h"
@@ -31,12 +31,11 @@ class KeyboardController;
 
 namespace ui {
 class EventHandler;
-class MenuModel;
+class SimpleMenuModel;
 class WindowTreeHost;
 }
 
 namespace views {
-class MenuModelAdapter;
 class MenuRunner;
 class Widget;
 }
@@ -55,6 +54,7 @@ enum class LoginStatus;
 class PanelLayoutManager;
 class Shelf;
 class ShelfLayoutManager;
+class Sidebar;
 class StackingController;
 class StatusAreaWidget;
 class SystemModalContainerLayoutManager;
@@ -63,11 +63,8 @@ class SystemWallpaperController;
 class TouchHudDebug;
 class TouchHudProjection;
 class WallpaperWidgetController;
-class WorkspaceController;
-
-namespace mus {
 class WindowManager;
-}
+class WorkspaceController;
 
 namespace wm {
 class RootWindowLayoutManager;
@@ -80,14 +77,14 @@ class RootWindowLayoutManager;
 // The RootWindowController for particular root window is stored in
 // its property (RootWindowSettings) and can be obtained using
 // |RootWindowController::ForWindow(aura::Window*)| function.
-class ASH_EXPORT RootWindowController : public ShellObserver {
+class ASH_EXPORT RootWindowController {
  public:
   // Enumerates the type of display. If there is only a single display then
   // it is primary. In a multi-display environment one monitor is deemed the
   // PRIMARY and all others SECONDARY.
   enum class RootWindowType { PRIMARY, SECONDARY };
 
-  ~RootWindowController() override;
+  ~RootWindowController();
 
   // Creates and Initialize the RootWindowController for primary display.
   static void CreateForPrimaryDisplay(AshWindowTreeHost* host);
@@ -124,8 +121,8 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
 
   Shelf* shelf() const { return shelf_.get(); }
 
-  // Initializes the shelf for this root window and notifies observers.
-  void InitializeShelf();
+  // Returns the instance of the sidebar.
+  Sidebar* sidebar() { return sidebar_.get(); }
 
   // Get touch HUDs associated with this root window controller.
   TouchHudDebug* touch_hud_debug() const { return touch_hud_debug_; }
@@ -241,9 +238,6 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // Deactivate virtual keyboard on current root window controller.
   void DeactivateKeyboard(keyboard::KeyboardController* keyboard_controller);
 
-  // Tests if a window is associated with the virtual keyboard.
-  bool IsVirtualKeyboardWindow(aura::Window* window);
-
   // If touch exploration is enabled, update the touch exploration
   // controller so that synthesized touch events are anchored at this point.
   void SetTouchAccessibilityAnchorPoint(const gfx::Point& anchor_point);
@@ -258,7 +252,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
  private:
   // TODO(sky): remove this. Temporary during ash-mus unification.
   // http://crbug.com/671246.
-  friend class mus::WindowManager;
+  friend class WindowManager;
 
   // Creates a new RootWindowController with the specified host. Only one of
   // |ash_host| or |window_tree_host| should be specified. This takes ownership
@@ -272,6 +266,9 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
 
   void InitLayoutManagers();
 
+  // Initializes the shelf for this root window and notifies observers.
+  void InitializeShelf();
+
   // Creates the containers (aura::Windows) used by the shell.
   void CreateContainers();
 
@@ -280,22 +277,13 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // not this is the first boot.
   void CreateSystemWallpaper(RootWindowType root_window_type);
 
-  // Enables projection touch HUD.
-  void EnableTouchHudProjection();
-
-  // Disables projection touch HUD.
-  void DisableTouchHudProjection();
-
   // Resets Shell::GetRootWindowForNewWindows() if appropriate. This is called
   // during shutdown to make sure GetRootWindowForNewWindows() isn't referencing
   // this.
   void ResetRootForNewWindowsIfNecessary();
 
-  // Callback for MenuModelAdapter.
-  void OnMenuClosed();
-
-  // Overridden from ShellObserver.
-  void OnTouchHudProjectionToggled(bool enabled) override;
+  // Callback for MenuRunner.
+  void OnMenuClosed(const base::TimeTicks desktop_context_menu_show_time);
 
   std::unique_ptr<AshWindowTreeHost> ash_host_;
   std::unique_ptr<aura::WindowTreeHost> mus_window_tree_host_;
@@ -314,8 +302,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   std::unique_ptr<AlwaysOnTopController> always_on_top_controller_;
 
   // Manages the context menu.
-  std::unique_ptr<ui::MenuModel> menu_model_;
-  std::unique_ptr<views::MenuModelAdapter> menu_model_adapter_;
+  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
   std::unique_ptr<views::MenuRunner> menu_runner_;
 
   std::unique_ptr<StackingController> stacking_controller_;
@@ -324,6 +311,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // of the RootWindowController so that it is safe for observers to be added
   // to it during construction of the shelf widget and status tray.
   std::unique_ptr<Shelf> shelf_;
+  std::unique_ptr<Sidebar> sidebar_;
 
   // TODO(jamescook): Eliminate this. It is left over from legacy shelf code and
   // doesn't mean anything in particular.

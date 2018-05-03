@@ -44,8 +44,6 @@ struct FaviconURL;
 struct LoadCommittedDetails;
 struct PrunedDetails;
 struct Referrer;
-struct ResourceRedirectDetails;
-struct ResourceRequestDetails;
 
 // An observer API implemented by classes which are interested in various page
 // load events from WebContents.  They also get a chance to filter IPC messages.
@@ -83,7 +81,7 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
   //
   // This method, in combination with |FrameDeleted|, is appropriate for
   // observers wishing to track the set of current RenderFrameHosts -- i.e.,
-  // those hosts that would be visited by calling WebContents::ForEachFrame.
+  // those hosts that would be visited by calling WebContents::ForEachFrame().
   virtual void RenderFrameHostChanged(RenderFrameHost* old_host,
                                       RenderFrameHost* new_host) {}
 
@@ -253,15 +251,13 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
       const std::string& mime_type,
       ResourceType resource_type) {}
 
-  // This method is invoked when a response has been received for a resource
+  // This method is invoked when a response has been received for a subresource
   // request.
-  virtual void DidGetResourceResponseStart(
-      const ResourceRequestDetails& details) {}
-
-  // This method is invoked when a redirect has been received for a resource
-  // request.
-  virtual void DidGetRedirectForResourceRequest(
-      const ResourceRedirectDetails& details) {}
+  virtual void SubresourceResponseStarted(const GURL& url,
+                                          const GURL& referrer,
+                                          const std::string& method,
+                                          ResourceType resource_type,
+                                          const std::string& ip) {}
 
   // This method is invoked when a new non-pending navigation entry is created.
   // This corresponds to one NavigationController entry being created
@@ -337,7 +333,9 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
   virtual void FrameNameChanged(RenderFrameHost* render_frame_host,
                                 const std::string& name) {}
 
-  // This methods is invoked when the title of the WebContents is set.
+  // This method is invoked when the title of the WebContents is set. Note that
+  // |entry| may be null if the web page whose title changed has not yet had a
+  // NavigationEntry assigned to it.
   virtual void TitleWasSet(NavigationEntry* entry) {}
 
   virtual void AppCacheAccessed(const GURL& manifest_url,
@@ -435,8 +433,17 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
   using MediaPlayerId = std::pair<RenderFrameHost*, int>;
   virtual void MediaStartedPlaying(const MediaPlayerInfo& video_type,
                                    const MediaPlayerId& id) {}
-  virtual void MediaStoppedPlaying(const MediaPlayerInfo& video_type,
-                                   const MediaPlayerId& id) {}
+  enum class MediaStoppedReason {
+    // The media was stopped for an unspecified reason.
+    kUnspecified,
+
+    // The media was stopped because it reached the end of the stream.
+    kReachedEndOfStream,
+  };
+  virtual void MediaStoppedPlaying(
+      const MediaPlayerInfo& video_type,
+      const MediaPlayerId& id,
+      WebContentsObserver::MediaStoppedReason reason) {}
   virtual void MediaResized(const gfx::Size& size, const MediaPlayerId& id) {}
   // Invoked when media enters or exits fullscreen. We must use a heuristic
   // to determine this as it is not trivial for media with custom controls.

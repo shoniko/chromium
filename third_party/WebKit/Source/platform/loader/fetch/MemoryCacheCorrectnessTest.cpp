@@ -38,7 +38,7 @@
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/loader/testing/MockFetchContext.h"
 #include "platform/loader/testing/MockResource.h"
-#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -71,10 +71,10 @@ class MemoryCacheCorrectnessTest : public ::testing::Test {
   MockResource* ResourceFromResourceRequest(ResourceRequest request) {
     if (request.Url().IsNull())
       request.SetURL(KURL(kResourceURL));
-    request.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeOmit);
+    request.SetFetchCredentialsMode(
+        network::mojom::FetchCredentialsMode::kOmit);
     MockResource* resource = MockResource::Create(request);
-    resource->SetResponse(
-        ResourceResponse(KURL(kResourceURL), "text/html", 0, g_null_atom));
+    resource->SetResponse(ResourceResponse(KURL(kResourceURL), "text/html"));
     resource->FinishForTest();
     GetMemoryCache()->Add(resource);
 
@@ -86,12 +86,12 @@ class MemoryCacheCorrectnessTest : public ::testing::Test {
     ResourceRequest resource_request{KURL(kResourceURL)};
     resource_request.SetRequestContext(WebURLRequest::kRequestContextInternal);
     FetchParameters fetch_params(resource_request);
-    return RawResource::Fetch(fetch_params, Fetcher());
+    return RawResource::Fetch(fetch_params, Fetcher(), nullptr);
   }
   MockResource* FetchMockResource() {
     ResourceRequest resource_request{KURL(kResourceURL)};
     FetchParameters fetch_params(resource_request);
-    return MockResource::Fetch(fetch_params, Fetcher());
+    return MockResource::Fetch(fetch_params, Fetcher(), nullptr);
   }
   ResourceFetcher* Fetcher() const { return fetcher_.Get(); }
   void AdvanceClock(double seconds) { platform_->AdvanceClockSeconds(seconds); }
@@ -354,8 +354,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshWithFreshRedirect) {
   ResourceRequest request(redirect_url);
   MockResource* first_resource = MockResource::Create(request);
 
-  ResourceResponse fresh301_response;
-  fresh301_response.SetURL(redirect_url);
+  ResourceResponse fresh301_response(redirect_url);
   fresh301_response.SetHTTPStatusCode(301);
   fresh301_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -368,8 +367,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshWithFreshRedirect) {
   first_resource->WillFollowRedirect(redirect_request, fresh301_response);
 
   // Add the final response to our request.
-  ResourceResponse fresh200_response;
-  fresh200_response.SetURL(redirect_target_url);
+  ResourceResponse fresh200_response(redirect_target_url);
   fresh200_response.SetHTTPStatusCode(200);
   fresh200_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -392,11 +390,10 @@ TEST_F(MemoryCacheCorrectnessTest, FreshWithStaleRedirect) {
   KURL redirect_target_url(kRedirectTargetUrlString);
 
   ResourceRequest request(redirect_url);
-  request.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeOmit);
+  request.SetFetchCredentialsMode(network::mojom::FetchCredentialsMode::kOmit);
   MockResource* first_resource = MockResource::Create(request);
 
-  ResourceResponse stale301_response;
-  stale301_response.SetURL(redirect_url);
+  ResourceResponse stale301_response(redirect_url);
   stale301_response.SetHTTPStatusCode(301);
   stale301_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -408,8 +405,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshWithStaleRedirect) {
   first_resource->WillFollowRedirect(redirect_request, stale301_response);
 
   // Add the final response to our request.
-  ResourceResponse fresh200_response;
-  fresh200_response.SetURL(redirect_target_url);
+  ResourceResponse fresh200_response(redirect_target_url);
   fresh200_response.SetHTTPStatusCode(200);
   fresh200_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -450,8 +446,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectNotImplicitlyFresh) {
   RawResource* first_resource =
       RawResource::CreateForTest(redirect_url, Resource::kRaw);
 
-  ResourceResponse fresh302_response;
-  fresh302_response.SetURL(redirect_url);
+  ResourceResponse fresh302_response(redirect_url);
   fresh302_response.SetHTTPStatusCode(302);
   fresh302_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -465,8 +460,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectNotImplicitlyFresh) {
   first_resource->WillFollowRedirect(redirect_request, fresh302_response);
 
   // Add the final response to our request.
-  ResourceResponse fresh200_response;
-  fresh200_response.SetURL(redirect_target_url);
+  ResourceResponse fresh200_response(redirect_target_url);
   fresh200_response.SetHTTPStatusCode(200);
   fresh200_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -491,8 +485,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectExplicitlyFreshMaxAge) {
   ResourceRequest request(redirect_url);
   MockResource* first_resource = MockResource::Create(request);
 
-  ResourceResponse fresh302_response;
-  fresh302_response.SetURL(redirect_url);
+  ResourceResponse fresh302_response(redirect_url);
   fresh302_response.SetHTTPStatusCode(302);
   fresh302_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -505,8 +498,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectExplicitlyFreshMaxAge) {
   first_resource->WillFollowRedirect(redirect_request, fresh302_response);
 
   // Add the final response to our request.
-  ResourceResponse fresh200_response;
-  fresh200_response.SetURL(redirect_target_url);
+  ResourceResponse fresh200_response(redirect_target_url);
   fresh200_response.SetHTTPStatusCode(200);
   fresh200_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -531,8 +523,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectExplicitlyFreshExpires) {
   ResourceRequest request(redirect_url);
   MockResource* first_resource = MockResource::Create(request);
 
-  ResourceResponse fresh302_response;
-  fresh302_response.SetURL(redirect_url);
+  ResourceResponse fresh302_response(redirect_url);
   fresh302_response.SetHTTPStatusCode(302);
   fresh302_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);
@@ -546,8 +537,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectExplicitlyFreshExpires) {
   first_resource->WillFollowRedirect(redirect_request, fresh302_response);
 
   // Add the final response to our request.
-  ResourceResponse fresh200_response;
-  fresh200_response.SetURL(redirect_target_url);
+  ResourceResponse fresh200_response(redirect_target_url);
   fresh200_response.SetHTTPStatusCode(200);
   fresh200_response.SetHTTPHeaderField(HTTPNames::Date,
                                        kOriginalRequestDateAsString);

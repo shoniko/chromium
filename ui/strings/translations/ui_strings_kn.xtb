@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">ಅವಧಿ</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 ತಿಂಗಳು}one{# ತಿಂಗಳುಗಳು}other{# ತಿಂಗಳುಗಳು}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>
+<translation id="1812519734428420144">ಸ್ಟಾರ್ ರೇಟಿಂಗ್ <ph name="RATING_SCORE" /></translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{1 ಗಂಟೆ ಮತ್ತು }one{# ಗಂಟೆಗಳು ಮತ್ತು }other{# ಗಂಟೆಗಳು ಮತ್ತು }}</translation>
 <translation id="1842960171412779397">ಆಯ್ಕೆ ಮಾಡಿ</translation>
 <translation id="1860796786778352021">ಅಧಿಸೂಚನೆ ಮುಚ್ಚು</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">ಫೋಲ್ಡರ್ ತೆರೆಯಿರಿ</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{1 ವರ್ಷದ ಹಿಂದೆ}one{# ವರ್ಷಗಳ ಹಿಂದೆ}other{# ವರ್ಷಗಳ ಹಿಂದೆ}}</translation>
 <translation id="2931838996092594335">ಕ್ಲಿಕ್‌ ಮಾಡಿ</translation>
-<translation id="2983818520079887040">ಸೆಟ್ಟಿಂಗ್‌ಗಳು...</translation>
 <translation id="3036649622769666520">ಫೈಲ್‌ಗಳನ್ನು ತೆರೆಯಿರಿ</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3087734570205094154">ಕೆಳಗೆ</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">ಎಲ್ಲಾ ಅಪ್ಲಿಕೇಶನ್‌ಗಳು</translation>
 <translation id="4320177379694898372">ಇಂಟರ್ನೆಟ್ ಸಂಪರ್ಕವಿಲ್ಲ</translation>
 <translation id="4588090240171750605">ಬಲಕ್ಕೆ ಸ್ಕ್ರೋಲ್ ಮಾಡಿ</translation>
+<translation id="4724120544754982507">ಅಧಿಸೂಚನೆ ಕೇಂದ್ರ, <ph name="UNREAD_NOTIFICATION_COUNT" /> ಓದದಿರುವ ಅಧಿಸೂಚನೆಗಳು</translation>
 <translation id="4730374152663651037">ಪದೇ ಪದೇ ಬಳಸಿರುವುದು</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{1 ತಿಂಗಳು ಉಳಿದಿದೆ}one{# ತಿಂಗಳುಗಳು ಉಳಿದಿವೆ}other{# ತಿಂಗಳುಗಳು ಉಳಿದಿವೆ}}</translation>
 <translation id="4820616160060340806">ಕಮಾಂಡ್+<ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">ಕುಗ್ಗಿಸು</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 ಗಂಟೆ}one{# ಗಂಟೆಗಳು}other{# ಗಂಟೆಗಳು}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">ಎಲ್ಲಾ ಅಪ್ಲಿಕೇಶನ್‌ಗಳು</translation>
 <translation id="6012623610530968780">ಪುಟ <ph name="SELECTED_PAGE" /> ರಲ್ಲಿ <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">ಹುಡುಕಾಟ ಬಾಕ್ಸ್ ಪಠ್ಯವನ್ನು ತೆರವುಗೊಳಿಸಿ</translation>
 <translation id="6040143037577758943">ಮುಚ್ಚಿರಿ</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">ಅರ್ಧವಿರಾಮ</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{1 ಸೆಕೆಂ ಹಿಂದೆ}one{# ಸೆಕೆಂಡುಗಳ ಹಿಂದೆ}other{# ಸೆಕೆಂಡುಗಳ ಹಿಂದೆ}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{1 ಸೆಕೆಂಡ್ ಹಿಂದೆ}one{# ಸೆಕೆಂಡುಗಳ ಹಿಂದೆ}other{# ಸೆಕೆಂಡುಗಳ ಹಿಂದೆ}}</translation>
+<translation id="654149438358937226">ಎಲ್ಲಾ ಅಧಿಸೂಚನೆಗಳನ್ನು ನಿರ್ಬಂಧಿಸಿ</translation>
 <translation id="6567071839949112727">ಪೂರ್ವಜರನ್ನು ಕ್ಲಿಕ್ ಮಾಡಿ</translation>
 <translation id="6612467943526193239">ಮಾಪನಾಂಕದಿಂದ ನಿರ್ಗಮಿಸಲು Esc ಒತ್ತಿರಿ.</translation>
 <translation id="6620110761915583480">ಫೈಲ್ ಉಳಿಸು</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">ರದ್ದುಮಾಡಿ</translation>
 <translation id="7781829728241885113">ನಿನ್ನೆ</translation>
 <translation id="7814458197256864873">&amp;ನಕಲಿಸಿ</translation>
+<translation id="7879499977785298635">ನಿರ್ಬಂಧಿಸಬೇಡಿ</translation>
 <translation id="7907591526440419938">ಫೈಲ್ ತೆರೆಯಿರಿ</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{1 ಗಂಟೆ ಹಿಂದೆ}one{# ಗಂಟೆಗಳ ಹಿಂದೆ}other{# ಗಂಟೆಗಳ ಹಿಂದೆ}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{1 ಸೆಕೆಂಡ್ ಬಾಕಿ ಉಳಿದಿದೆ}one{# ಸೆಕೆಂಡುಗಳು ಬಾಕಿ ಉಳಿದಿವೆ}other{# ಸೆಕೆಂಡುಗಳು ಬಾಕಿ ಉಳಿದಿವೆ}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{1 ವರ್ಷ}one{# ವರ್ಷಗಳು}other{# ವರ್ಷಗಳು}}</translation>
 <translation id="8371695176452482769">ಈಗ ಮಾತನಾಡಿ</translation>
 <translation id="838869780401515933">ಪರಿಶೀಲಿಸಿ</translation>
+<translation id="8393700583063109961">ಸಂದೇಶ ಕಳುಹಿಸು</translation>
 <translation id="8394908167088220973">ಮೀಡಿಯಾ ಪ್ಲೇ/ವಿರಾಮ</translation>
 <translation id="8400147561352026160">Shift+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1ವ}one{#ವ}other{#ವ}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> ಫೈಲ್ (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s </translation>
 <translation id="8725488761726303204">+ <ph name="NUMBER" /> ಇನ್ನಷ್ಟು</translation>
+<translation id="8730621377337864115">ಮುಗಿದಿದೆ</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{1ಗಂ}one{#ಗಂ}other{#ಗಂ}}</translation>
 <translation id="8806053966018712535">ಫೋಲ್ಡರ್ <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">ಚಿತ್ರವನ್ನು ಟಿಪ್ಪಣಿ ಮಾಡಿ</translation>

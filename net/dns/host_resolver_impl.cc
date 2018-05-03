@@ -36,8 +36,8 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -734,7 +734,7 @@ class HostResolverImpl::ProcTask
 
  private:
   friend class base::RefCountedThreadSafe<ProcTask>;
-  ~ProcTask() {}
+  ~ProcTask() = default;
 
   void StartLookupAttempt() {
     DCHECK(network_task_runner_->BelongsToCurrentThread());
@@ -766,8 +766,6 @@ class HostResolverImpl::ProcTask
   // mutate.
   void DoLookup(const base::TimeTicks& start_time,
                 const uint32_t attempt_number) {
-    TRACE_HEAP_PROFILER_API_SCOPED_TASK_EXECUTION scoped_heap_context(
-        "net/dns/proctask");
     AddressList results;
     int os_error = 0;
     int error = params_.resolver_proc->Resolve(key_.hostname,
@@ -983,8 +981,8 @@ class HostResolverImpl::DnsTask : public base::SupportsWeakPtr<DnsTask> {
     virtual void OnFirstDnsTransactionComplete() = 0;
 
    protected:
-    Delegate() {}
-    virtual ~Delegate() {}
+    Delegate() = default;
+    virtual ~Delegate() = default;
   };
 
   DnsTask(DnsClient* client,
@@ -1374,7 +1372,9 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
                                   requests_.front()->info(),
                                   &addr_list)) {
       // This will destroy the Job.
-      CompleteRequests(MakeCacheEntry(OK, addr_list), base::TimeDelta());
+      CompleteRequests(
+          MakeCacheEntry(OK, addr_list, HostCache::Entry::SOURCE_HOSTS),
+          base::TimeDelta());
       return true;
     }
     return false;
@@ -1418,19 +1418,22 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
   // HostCache::Entry(). The address list is omited from the cache entry
   // for errors.
   HostCache::Entry MakeCacheEntry(int net_error,
-                                  const AddressList& addr_list) const {
+                                  const AddressList& addr_list,
+                                  HostCache::Entry::Source source) const {
     return HostCache::Entry(
         net_error,
-        net_error == OK ? MakeAddressListForRequest(addr_list) : AddressList());
+        net_error == OK ? MakeAddressListForRequest(addr_list) : AddressList(),
+        source);
   }
 
   HostCache::Entry MakeCacheEntryWithTTL(int net_error,
                                          const AddressList& addr_list,
+                                         HostCache::Entry::Source source,
                                          base::TimeDelta ttl) const {
     return HostCache::Entry(
         net_error,
         net_error == OK ? MakeAddressListForRequest(addr_list) : AddressList(),
-        ttl);
+        source, ttl);
   }
 
   AddressList MakeAddressListForRequest(const AddressList& list) const {
@@ -1519,8 +1522,8 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
         } else {
           UmaAsyncDnsResolveStatus(RESOLVE_STATUS_PROC_SUCCESS);
         }
-        UMA_HISTOGRAM_SPARSE_SLOWLY("Net.DNS.DnsTask.Errors",
-                                    std::abs(dns_task_error_));
+        base::UmaHistogramSparse("Net.DNS.DnsTask.Errors",
+                                 std::abs(dns_task_error_));
         resolver_->OnDnsTaskResolve(dns_task_error_);
       } else {
         UMA_HISTOGRAM_LONG_TIMES_100("AsyncDNS.FallbackFail", duration);
@@ -1536,8 +1539,12 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
     if (net_error == OK)
       ttl = base::TimeDelta::FromSeconds(kCacheEntryTTLSeconds);
 
+    // Source unknown because the system resolver could have gotten it from a
+    // hosts file, its own cache, a DNS lookup or somewhere else.
     // Don't store the |ttl| in cache since it's not obtained from the server.
-    CompleteRequests(MakeCacheEntry(net_error, addr_list), ttl);
+    CompleteRequests(
+        MakeCacheEntry(net_error, addr_list, HostCache::Entry::SOURCE_UNKNOWN),
+        ttl);
   }
 
   void StartDnsTask() {
@@ -1611,7 +1618,8 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
     if (ContainsIcannNameCollisionIp(addr_list)) {
       CompleteRequestsWithError(ERR_ICANN_NAME_COLLISION);
     } else {
-      CompleteRequests(MakeCacheEntryWithTTL(net_error, addr_list, ttl),
+      CompleteRequests(MakeCacheEntryWithTTL(net_error, addr_list,
+                                             HostCache::Entry::SOURCE_DNS, ttl),
                        bounded_ttl);
     }
   }
@@ -1630,11 +1638,15 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
   }
 
   void RecordJobHistograms(int error) {
-    enum Category {  // Used in UMA_HISTOGRAM_ENUMERATION.
-      RESOLVE_SUCCESS,
-      RESOLVE_FAIL,
-      RESOLVE_SPECULATIVE_SUCCESS,
-      RESOLVE_SPECULATIVE_FAIL,
+    // Used in UMA_HISTOGRAM_ENUMERATION. Do not renumber entries or reuse
+    // deprecated values.
+    enum Category {
+      RESOLVE_SUCCESS = 0,
+      RESOLVE_FAIL = 1,
+      RESOLVE_SPECULATIVE_SUCCESS = 2,
+      RESOLVE_SPECULATIVE_FAIL = 3,
+      RESOLVE_ABORT = 4,
+      RESOLVE_SPECULATIVE_ABORT = 5,
       RESOLVE_MAX,  // Bounding value.
     };
     Category category = RESOLVE_MAX;  // Illegal value for later DCHECK only.
@@ -1663,21 +1675,25 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
         UMA_HISTOGRAM_LONG_TIMES_100("Net.DNS.ResolveSuccessTime.Speculative",
                                      duration);
       }
+    } else if (error == ERR_NETWORK_CHANGED ||
+               error == ERR_HOST_RESOLVER_QUEUE_TOO_LARGE) {
+      category = had_non_speculative_request_ ? RESOLVE_ABORT
+                                              : RESOLVE_SPECULATIVE_ABORT;
     } else {
       if (had_non_speculative_request_) {
         category = RESOLVE_FAIL;
         UMA_HISTOGRAM_LONG_TIMES_100("Net.DNS.ResolveFailureTime", duration);
         switch (key_.address_family) {
           case ADDRESS_FAMILY_IPV4:
-            UMA_HISTOGRAM_LONG_TIMES_100("Net.DNS.ResolveSuccessTime.IPV4",
+            UMA_HISTOGRAM_LONG_TIMES_100("Net.DNS.ResolveFailureTime.IPV4",
                                          duration);
             break;
           case ADDRESS_FAMILY_IPV6:
-            UMA_HISTOGRAM_LONG_TIMES_100("Net.DNS.ResolveSuccessTime.IPV6",
+            UMA_HISTOGRAM_LONG_TIMES_100("Net.DNS.ResolveFailureTime.IPV6",
                                          duration);
             break;
           case ADDRESS_FAMILY_UNSPECIFIED:
-            UMA_HISTOGRAM_LONG_TIMES_100("Net.DNS.ResolveSuccessTime.UNSPEC",
+            UMA_HISTOGRAM_LONG_TIMES_100("Net.DNS.ResolveFailureTime.UNSPEC",
                                          duration);
             break;
         }
@@ -1690,6 +1706,13 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
     DCHECK_LT(static_cast<int>(category),
               static_cast<int>(RESOLVE_MAX));  // Be sure it was set.
     UMA_HISTOGRAM_ENUMERATION("Net.DNS.ResolveCategory", category, RESOLVE_MAX);
+
+    if (category == RESOLVE_FAIL || category == RESOLVE_ABORT) {
+      if (duration < base::TimeDelta::FromMilliseconds(10))
+        base::UmaHistogramSparse("Net.DNS.ResolveError.Fast", std::abs(error));
+      else
+        base::UmaHistogramSparse("Net.DNS.ResolveError.Slow", std::abs(error));
+    }
   }
 
   // Performs Job's last rites. Completes all Requests. Deletes this.
@@ -1743,10 +1766,10 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
 
     bool did_complete = (entry.error() != ERR_NETWORK_CHANGED) &&
                         (entry.error() != ERR_HOST_RESOLVER_QUEUE_TOO_LARGE);
-    if (did_complete) {
+    if (did_complete)
       resolver_->CacheResult(key_, entry, ttl);
-      RecordJobHistograms(entry.error());
-    }
+
+    RecordJobHistograms(entry.error());
 
     // Complete all of the requests that were attached to the job and
     // detach them.
@@ -1772,7 +1795,8 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
 
   // Convenience wrapper for CompleteRequests in case of failure.
   void CompleteRequestsWithError(int net_error) {
-    CompleteRequests(HostCache::Entry(net_error, AddressList()),
+    CompleteRequests(HostCache::Entry(net_error, AddressList(),
+                                      HostCache::Entry::SOURCE_UNKNOWN),
                      base::TimeDelta());
   }
 
@@ -1848,7 +1872,7 @@ HostResolverImpl::ProcTaskParams::ProcTaskParams(
 HostResolverImpl::ProcTaskParams::ProcTaskParams(const ProcTaskParams& other) =
     default;
 
-HostResolverImpl::ProcTaskParams::~ProcTaskParams() {}
+HostResolverImpl::ProcTaskParams::~ProcTaskParams() = default;
 
 HostResolverImpl::~HostResolverImpl() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -2083,6 +2107,15 @@ void HostResolverImpl::SetDnsClientEnabled(bool enabled) {
 
 HostCache* HostResolverImpl::GetHostCache() {
   return cache_.get();
+}
+
+bool HostResolverImpl::HasCached(base::StringPiece hostname,
+                                 HostCache::Entry::Source* source_out,
+                                 HostCache::EntryStaleness* stale_out) const {
+  if (!cache_)
+    return false;
+
+  return cache_->HasEntry(hostname, source_out, stale_out);
 }
 
 std::unique_ptr<base::Value> HostResolverImpl::GetDnsConfigAsValue() const {
@@ -2490,8 +2523,9 @@ void HostResolverImpl::UpdateDNSConfig(bool config_changed) {
   // the newly started jobs use the new config.
   if (dns_client_.get()) {
     // Make sure that if the update is an initial read, not a change, there
-    // wasn't already a DnsConfig.
-    DCHECK(config_changed || !dns_client_->GetConfig());
+    // wasn't already a DnsConfig or it's the same one.
+    DCHECK(config_changed || !dns_client_->GetConfig() ||
+           dns_client_->GetConfig()->Equals(dns_config));
     dns_client_->SetConfig(dns_config);
     if (dns_client_->GetConfig())
       UMA_HISTOGRAM_BOOLEAN("AsyncDNS.DnsClientEnabled", true);
@@ -2545,8 +2579,8 @@ void HostResolverImpl::OnDnsTaskResolve(int net_error) {
   AbortDnsTasks();
 
   UMA_HISTOGRAM_BOOLEAN("AsyncDNS.DnsClientEnabled", false);
-  UMA_HISTOGRAM_SPARSE_SLOWLY("AsyncDNS.DnsClientDisabledReason",
-                              std::abs(net_error));
+  base::UmaHistogramSparse("AsyncDNS.DnsClientDisabledReason",
+                           std::abs(net_error));
 }
 
 void HostResolverImpl::SetDnsClient(std::unique_ptr<DnsClient> dns_client) {

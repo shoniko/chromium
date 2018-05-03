@@ -35,7 +35,7 @@ class CORE_EXPORT NodeList : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  virtual ~NodeList() {}
+  virtual ~NodeList() = default;
 
   // DOM methods & attributes for NodeList
   virtual unsigned length() const = 0;
@@ -45,10 +45,10 @@ class CORE_EXPORT NodeList : public ScriptWrappable {
   virtual bool IsEmptyNodeList() const { return false; }
   virtual bool IsChildNodeList() const { return false; }
 
-  virtual Node* VirtualOwnerNode() const { return 0; }
+  virtual Node* VirtualOwnerNode() const { return nullptr; }
 
  protected:
-  NodeList() {}
+  NodeList() = default;
 };
 
 }  // namespace blink

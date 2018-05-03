@@ -10,6 +10,7 @@
 #import <UIKit/UIKit.h>
 
 #import "base/ios/block_types.h"
+#import "ios/chrome/browser/ui/settings/sync_utils/sync_presenter.h"
 #import "ios/chrome/browser/ui/side_swipe/side_swipe_controller.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
 #import "ios/chrome/browser/ui/toolbar/web_toolbar_delegate.h"
@@ -22,23 +23,20 @@
 @class BrowserViewControllerDependencyFactory;
 class GURL;
 @protocol OmniboxFocuser;
+@protocol FakeboxFocuser;
 @protocol SnackbarCommands;
 @class Tab;
 @class TabModel;
 @protocol TabStripFoldAnimation;
+@protocol ToolbarCommands;
 
 namespace ios {
 class ChromeBrowserState;
 }
 
-// Notification sent when the location bar becomes first responder.
-extern NSString* const kLocationBarBecomesFirstResponderNotification;
-// Notification sent when the location bar resigns first responder.
-extern NSString* const kLocationBarResignsFirstResponderNotification;
-
 // The top-level view controller for the browser UI. Manages other controllers
 // which implement the interface.
-@interface BrowserViewController : UIViewController<SideSwipeControllerDelegate,
+@interface BrowserViewController : UIViewController<SyncPresenter,
                                                     ToolbarOwner,
                                                     UrlLoader,
                                                     VoiceSearchPresenter,
@@ -63,7 +61,9 @@ applicationCommandEndpoint:(id<ApplicationCommands>)applicationCommandEndpoint
 @property(nonatomic, readonly) id<ApplicationCommands,
                                   BrowserCommands,
                                   OmniboxFocuser,
+                                  FakeboxFocuser,
                                   SnackbarCommands,
+                                  ToolbarCommands,
                                   UrlLoader,
                                   WebToolbarDelegate>
     dispatcher;
@@ -139,9 +139,6 @@ applicationCommandEndpoint:(id<ApplicationCommands>)applicationCommandEndpoint
 // Shows the voice search UI. |originView|'s center is used for the presentation
 // and dismissal animations of the Voice Search UI. |originView| can be nil.
 - (void)startVoiceSearchWithOriginView:(UIView*)originView;
-
-// Focuses the omnibox.
-- (void)focusOmnibox;
 
 // Dismisses all presented views, excluding the omnibox if |dismissOmnibox| is
 // NO, then calls |completion|.

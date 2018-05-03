@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/android/jni_string.h"
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "components/infobars/core/infobar_delegate.h"
@@ -17,16 +16,22 @@
 #include "ui/android/window_android.h"
 
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
+using base::android::ScopedJavaGlobalRef;
 
 class SurveyInfoBarDelegate : public infobars::InfoBarDelegate {
  public:
-  SurveyInfoBarDelegate(const std::string& siteId,
+  SurveyInfoBarDelegate(JNIEnv* env,
+                        const std::string& siteId,
                         bool showAsBottomSheet,
-                        int displayLogoResourceId)
+                        int displayLogoResourceId,
+                        jobject surveyInfoBarDelegate)
       : site_id_(siteId),
         show_as_bottom_sheet_(showAsBottomSheet),
-        display_logo_resource_id_(displayLogoResourceId) {}
+        display_logo_resource_id_(displayLogoResourceId),
+        survey_info_bar_delegate_(
+            ScopedJavaGlobalRef<jobject>(env, surveyInfoBarDelegate)) {}
 
   ~SurveyInfoBarDelegate() override {}
 
@@ -48,10 +53,15 @@ class SurveyInfoBarDelegate : public infobars::InfoBarDelegate {
 
   int GetDisplayLogoResourceId() { return display_logo_resource_id_; }
 
+  const ScopedJavaGlobalRef<jobject>& GetSurveyInfoBarDelegate() {
+    return survey_info_bar_delegate_;
+  }
+
  private:
   std::string site_id_;
   bool show_as_bottom_sheet_;
   int display_logo_resource_id_;
+  ScopedJavaGlobalRef<jobject> survey_info_bar_delegate_;
 };
 
 SurveyInfoBar::SurveyInfoBar(std::unique_ptr<SurveyInfoBarDelegate> delegate)
@@ -83,20 +93,24 @@ ScopedJavaLocalRef<jobject> SurveyInfoBar::CreateRenderInfoBar(JNIEnv* env) {
       env,
       base::android::ConvertUTF8ToJavaString(env, survey_delegate->GetSiteId()),
       survey_delegate->GetShowAsBottomSheet(),
-      survey_delegate->GetDisplayLogoResourceId());
+      survey_delegate->GetDisplayLogoResourceId(),
+      survey_delegate->GetSurveyInfoBarDelegate());
 }
 
-void Create(JNIEnv* env,
-            const JavaParamRef<jclass>& j_caller,
-            const JavaParamRef<jobject>& j_web_contents,
-            const JavaParamRef<jstring>& j_site_id,
-            jboolean j_show_as_bottom_sheet,
-            jint j_display_logo_resource_id) {
+void JNI_SurveyInfoBar_Create(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& j_caller,
+    const JavaParamRef<jobject>& j_web_contents,
+    const JavaParamRef<jstring>& j_site_id,
+    jboolean j_show_as_bottom_sheet,
+    jint j_display_logo_resource_id,
+    const JavaParamRef<jobject>& j_survey_info_bar_delegate) {
   InfoBarService* service = InfoBarService::FromWebContents(
       content::WebContents::FromJavaWebContents(j_web_contents));
 
   service->AddInfoBar(
-      base::MakeUnique<SurveyInfoBar>(base::MakeUnique<SurveyInfoBarDelegate>(
-          base::android::ConvertJavaStringToUTF8(env, j_site_id),
-          j_show_as_bottom_sheet, j_display_logo_resource_id)));
+      std::make_unique<SurveyInfoBar>(std::make_unique<SurveyInfoBarDelegate>(
+          env, base::android::ConvertJavaStringToUTF8(env, j_site_id),
+          j_show_as_bottom_sheet, j_display_logo_resource_id,
+          j_survey_info_bar_delegate.obj())));
 }

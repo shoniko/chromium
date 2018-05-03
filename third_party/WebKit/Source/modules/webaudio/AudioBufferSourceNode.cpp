@@ -34,7 +34,6 @@
 #include "modules/webaudio/BaseAudioContext.h"
 #include "platform/audio/AudioUtilities.h"
 #include "platform/wtf/MathExtras.h"
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -86,7 +85,7 @@ scoped_refptr<AudioBufferSourceHandler> AudioBufferSourceHandler::Create(
     float sample_rate,
     AudioParamHandler& playback_rate,
     AudioParamHandler& detune) {
-  return WTF::AdoptRef(
+  return base::AdoptRef(
       new AudioBufferSourceHandler(node, sample_rate, playback_rate, detune));
 }
 
@@ -425,8 +424,8 @@ void AudioBufferSourceHandler::SetBuffer(AudioBuffer* buffer,
 
     Output(0).SetNumberOfChannels(number_of_channels);
 
-    source_channels_ = WrapArrayUnique(new const float*[number_of_channels]);
-    destination_channels_ = WrapArrayUnique(new float*[number_of_channels]);
+    source_channels_ = std::make_unique<const float* []>(number_of_channels);
+    destination_channels_ = std::make_unique<float* []>(number_of_channels);
 
     for (unsigned i = 0; i < number_of_channels; ++i)
       source_channels_[i] = buffer->getChannelData(i).View()->Data();

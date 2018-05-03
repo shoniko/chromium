@@ -25,7 +25,7 @@ namespace {
 
 class MessageLoopForIoPosixTest : public testing::Test {
  public:
-  MessageLoopForIoPosixTest() {}
+  MessageLoopForIoPosixTest() = default;
 
   // testing::Test interface.
   void SetUp() override {
@@ -145,7 +145,6 @@ TEST_F(MessageLoopForIoPosixTest, FileDescriptorWatcherOutlivesMessageLoop) {
 
 TEST_F(MessageLoopForIoPosixTest, FileDescriptorWatcherDoubleStop) {
   // Verify that it's ok to call StopWatchingFileDescriptor().
-  // (Errors only showed up in valgrind.)
 
   // Arrange for message loop to live longer than watcher.
   MessageLoopForIO message_loop;

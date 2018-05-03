@@ -23,8 +23,6 @@ const char kTabStripLayoutType[] = "tab_strip_layout_type";
 
 }  // namespace
 
-namespace chrome {
-
 void RegisterBrowserViewLocalPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(kTabStripLayoutType, 0);
   registry->RegisterBooleanPref(prefs::kTabStripStackedLayout, false);
@@ -36,10 +34,6 @@ void RegisterBrowserViewProfilePrefs(
   registry->RegisterBooleanPref(prefs::kUseCustomChromeFrame,
                                 ui::GetCustomFramePrefDefault());
 #endif
-
-  registry->RegisterIntegerPref(
-      prefs::kBackShortcutBubbleShownCount, 0,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 void MigrateBrowserTabStripPrefs(PrefService* prefs) {
@@ -49,5 +43,3 @@ void MigrateBrowserTabStripPrefs(PrefService* prefs) {
     prefs->ClearPref(kTabStripLayoutType);
   }
 }
-
-}  // namespace chrome

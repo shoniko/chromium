@@ -8,6 +8,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
 import android.text.TextUtils;
@@ -18,17 +19,19 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.BuildInfo;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.input.ChromiumBaseInputConnection;
 import org.chromium.content.browser.input.ImeTestUtils;
+import org.chromium.content.browser.selection.SelectionPopupControllerImpl;
 import org.chromium.content.browser.test.ContentJUnit4ClassRunner;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.SelectionClient;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 
@@ -43,21 +46,21 @@ public class ContentViewCoreSelectionTest {
     public ContentShellActivityTestRule mActivityTestRule = new ContentShellActivityTestRule();
     private static final String DATA_URL = UrlUtils.encodeHtmlDataUri(
             "<html><head><meta name=\"viewport\""
-            + "content=\"width=device-width, initial-scale=1.1, maximum-scale=1.5\" /></head>"
+            + "content=\"width=device-width\" /></head>"
             + "<body><form action=\"about:blank\">"
             + "<input id=\"empty_input_text\" type=\"text\" />"
-            + "<br/><input id=\"whitespace_input_text\" type=\"text\" value=\" \" />"
-            + "<br/><input id=\"input_text\" type=\"text\" value=\"SampleInputText\" />"
-            + "<br/><textarea id=\"textarea\" rows=\"2\" cols=\"20\">SampleTextArea</textarea>"
-            + "<br/><input id=\"password\" type=\"password\" value=\"SamplePassword\" size=\"10\"/>"
-            + "<br/><p><span id=\"smart_selection\">1600 Amphitheatre Parkway</span></p>"
-            + "<br/><p><span id=\"plain_text_1\">SamplePlainTextOne</span></p>"
-            + "<br/><p><span id=\"plain_text_2\">SamplePlainTextTwo</span></p>"
-            + "<br/><input id=\"disabled_text\" type=\"text\" disabled value=\"Sample Text\" />"
-            + "<br/><div id=\"rich_div\" contentEditable=\"true\" >Rich Editor</div>"
+            + "<input id=\"whitespace_input_text\" type=\"text\" value=\" \" />"
+            + "<input id=\"input_text\" type=\"text\" value=\"SampleInputText\" />"
+            + "<textarea id=\"textarea\" rows=\"2\" cols=\"20\">SampleTextArea</textarea>"
+            + "<input id=\"password\" type=\"password\" value=\"SamplePassword\" size=\"10\"/>"
+            + "<p><span id=\"smart_selection\">1600 Amphitheatre Parkway</span></p>"
+            + "<p><span id=\"plain_text_1\">SamplePlainTextOne</span></p>"
+            + "<p><span id=\"plain_text_2\">SamplePlainTextTwo</span></p>"
+            + "<input id=\"disabled_text\" type=\"text\" disabled value=\"Sample Text\" />"
+            + "<div id=\"rich_div\" contentEditable=\"true\" >Rich Editor</div>"
             + "</form></body></html>");
     private ContentViewCore mContentViewCore;
-    private SelectionPopupController mSelectionPopupController;
+    private SelectionPopupControllerImpl mSelectionPopupController;
 
     private static class TestSelectionClient implements SelectionClient {
         private SelectionClient.Result mResult;
@@ -106,7 +109,8 @@ public class ContentViewCoreSelectionTest {
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
 
         mContentViewCore = mActivityTestRule.getContentViewCore();
-        mSelectionPopupController = mContentViewCore.getSelectionPopupControllerForTesting();
+        mSelectionPopupController =
+                SelectionPopupControllerImpl.fromWebContents(mContentViewCore.getWebContents());
         waitForSelectActionBarVisible(false);
         waitForPastePopupStatus(false);
     }
@@ -284,8 +288,8 @@ public class ContentViewCoreSelectionTest {
     @Test
     @SmallTest
     @Feature({"TextInput"})
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.O)
     public void testPastePopupPasteAsPlainTextPlainTextRichEditor() throws Throwable {
-        if (!BuildInfo.isAtLeastO()) return;
         copyStringToClipboard("SampleTextToCopy");
         DOMUtils.longPressNode(mContentViewCore, "rich_div");
         waitForPastePopupStatus(true);
@@ -296,8 +300,8 @@ public class ContentViewCoreSelectionTest {
     @Test
     @SmallTest
     @Feature({"TextInput"})
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.O)
     public void testPastePopupPasteAsPlainTextPlainTextNormalEditor() throws Throwable {
-        if (!BuildInfo.isAtLeastO()) return;
         copyStringToClipboard("SampleTextToCopy");
         DOMUtils.longPressNode(mContentViewCore, "empty_input_text");
         waitForPastePopupStatus(true);
@@ -308,8 +312,8 @@ public class ContentViewCoreSelectionTest {
     @Test
     @SmallTest
     @Feature({"TextInput"})
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.O)
     public void testPastePopupPasteAsPlainTextHtmlTextRichEditor() throws Throwable {
-        if (!BuildInfo.isAtLeastO()) return;
         copyHtmlToClipboard("SampleTextToCopy", "<span style=\"color: red;\">HTML</span>");
         DOMUtils.longPressNode(mContentViewCore, "rich_div");
         waitForPastePopupStatus(true);
@@ -320,8 +324,8 @@ public class ContentViewCoreSelectionTest {
     @Test
     @SmallTest
     @Feature({"TextInput"})
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.O)
     public void testPastePopupPasteAsPlainTextHtmlTextNormalEditor() throws Throwable {
-        if (!BuildInfo.isAtLeastO()) return;
         copyHtmlToClipboard("SampleTextToCopy", "<span style=\"color: red;\">HTML</span>");
         DOMUtils.longPressNode(mContentViewCore, "empty_input_text");
         waitForPastePopupStatus(true);
@@ -414,7 +418,7 @@ public class ContentViewCoreSelectionTest {
         waitForSelectActionBarVisible(true);
         Assert.assertTrue(mSelectionPopupController.hasSelection());
         Assert.assertTrue(mSelectionPopupController.isActionModeValid());
-        Assert.assertTrue(mSelectionPopupController.isSelectionEditable());
+        Assert.assertTrue(mSelectionPopupController.isFocusedNodeEditable());
         Assert.assertFalse(mSelectionPopupController.isSelectionPassword());
     }
 
@@ -426,7 +430,7 @@ public class ContentViewCoreSelectionTest {
         waitForSelectActionBarVisible(true);
         Assert.assertTrue(mSelectionPopupController.hasSelection());
         Assert.assertTrue(mSelectionPopupController.isActionModeValid());
-        Assert.assertTrue(mSelectionPopupController.isSelectionEditable());
+        Assert.assertTrue(mSelectionPopupController.isFocusedNodeEditable());
         Assert.assertTrue(mSelectionPopupController.isSelectionPassword());
     }
 
@@ -438,7 +442,7 @@ public class ContentViewCoreSelectionTest {
         waitForSelectActionBarVisible(true);
         Assert.assertTrue(mSelectionPopupController.hasSelection());
         Assert.assertTrue(mSelectionPopupController.isActionModeValid());
-        Assert.assertFalse(mSelectionPopupController.isSelectionEditable());
+        Assert.assertFalse(mSelectionPopupController.isFocusedNodeEditable());
         Assert.assertFalse(mSelectionPopupController.isSelectionPassword());
     }
 
@@ -450,7 +454,7 @@ public class ContentViewCoreSelectionTest {
         waitForSelectActionBarVisible(true);
         Assert.assertTrue(mSelectionPopupController.hasSelection());
         Assert.assertTrue(mSelectionPopupController.isActionModeValid());
-        Assert.assertTrue(mSelectionPopupController.isSelectionEditable());
+        Assert.assertTrue(mSelectionPopupController.isFocusedNodeEditable());
         Assert.assertFalse(mSelectionPopupController.isSelectionPassword());
     }
 
@@ -633,7 +637,9 @@ public class ContentViewCoreSelectionTest {
 
     private CharSequence getTextBeforeCursor(final int length, final int flags) {
         final ChromiumBaseInputConnection connection =
-                mContentViewCore.getImeAdapterForTest().getInputConnectionForTest();
+                (ChromiumBaseInputConnection) ImeAdapter
+                        .fromWebContents(mContentViewCore.getWebContents())
+                        .getInputConnectionForTest();
         return ImeTestUtils.runBlockingOnHandlerNoException(
                 connection.getHandler(), new Callable<CharSequence>() {
                     @Override
@@ -829,7 +835,7 @@ public class ContentViewCoreSelectionTest {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mContentViewCore.destroySelectActionMode();
+                mSelectionPopupController.destroySelectActionMode();
             }
         });
     }
@@ -851,7 +857,7 @@ public class ContentViewCoreSelectionTest {
         CriteriaHelper.pollUiThread(Criteria.equals(visible, new Callable<Boolean>() {
             @Override
             public Boolean call() {
-                return mContentViewCore.isSelectActionBarShowing();
+                return mSelectionPopupController.isSelectActionBarShowing();
             }
         }));
     }

@@ -7,6 +7,7 @@
 
 import argparse
 import codecs
+import collections
 import glob
 import logging
 import os
@@ -42,10 +43,6 @@ _GRADLE_BUILD_FILE = 'build.gradle'
 _MODULE_ALL = '_all'
 
 _DEFAULT_TARGETS = [
-    # TODO(agrieve): .build_config seem not quite right for this target
-    # because it has resources as deps of android_apk() rather than using an
-    #  android_library() intermediate target.
-    # '//android_webview:system_webview_apk',
     '//android_webview/test/embedded_test_server:aw_net_test_support_apk',
     '//android_webview/test:webview_instrumentation_apk',
     '//android_webview/test:webview_instrumentation_test_apk',
@@ -57,6 +54,8 @@ _DEFAULT_TARGETS = [
     '//chrome/android:chrome_sync_shell_test_apk',
     '//content/public/android:content_junit_tests',
     '//content/shell/android:content_shell_apk',
+    # Needed even with --all since it's a library.
+    '//tools/android/errorprone_plugin:errorprone_plugin_java',
 ]
 
 _EXCLUDED_PREBUILT_JARS = [
@@ -153,7 +152,7 @@ class _ProjectEntry(object):
     self._build_config = None
     self._java_files = None
     self._all_entries = None
-    self.android_test_entry = None
+    self.android_test_entries = None
 
   @classmethod
   def FromGnTarget(cls, gn_target):
@@ -193,11 +192,15 @@ class _ProjectEntry(object):
 
   def GradleSubdir(self):
     """Returns the output subdirectory."""
-    return self.NinjaTarget().replace(':', os.path.sep)
+    ninja_target = self.NinjaTarget()
+    # Support targets at the root level. e.g. //:foo
+    if ninja_target[0] == ':':
+      ninja_target = ninja_target[1:]
+    return ninja_target.replace(':', os.path.sep)
 
   def ProjectName(self):
     """Returns the Gradle project name."""
-    return self.GradleSubdir().replace(os.path.sep, '>')
+    return self.GradleSubdir().replace(os.path.sep, '.')
 
   def BuildConfig(self):
     """Reads and returns the project's .build_config JSON."""
@@ -220,7 +223,8 @@ class _ProjectEntry(object):
     return self.DepsInfo()['type']
 
   def IsValid(self):
-    return self.GetType() in ('android_apk', 'java_library', 'java_binary')
+    return self.GetType() in (
+        'android_apk', 'java_library', 'java_binary', 'junit_binary')
 
   def ResZips(self):
     return self.DepsInfo().get('owned_resources_zips', [])
@@ -546,13 +550,12 @@ def _GenerateGradleFile(entry, generator, build_vars, source_properties,
     else:
       target_type = 'java_library'
   elif deps_info['type'] == 'java_binary':
-    if gradle['main_class'] == 'org.chromium.testing.local.JunitTestMain':
-      target_type = 'android_junit'
-      variables['sourceSetName'] = 'test'
-      variables['depCompileName'] = 'testCompile'
-    else:
-      target_type = 'java_binary'
-      variables['main_class'] = gradle['main_class']
+    target_type = 'java_binary'
+    variables['main_class'] = deps_info.get('main_class')
+  elif deps_info['type'] == 'junit_binary':
+    target_type = 'android_junit'
+    variables['sourceSetName'] = 'test'
+    variables['depCompileName'] = 'testCompile'
   else:
     return None
 
@@ -563,13 +566,14 @@ def _GenerateGradleFile(entry, generator, build_vars, source_properties,
   if bootclasspath:
     # Must use absolute path here.
     variables['bootclasspath'] = _RebasePath(bootclasspath)
-  if entry.android_test_entry:
-    variables['android_test'] = generator.Generate(
-        entry.android_test_entry)
-    for key, value in variables['android_test'].iteritems():
-      if isinstance(value, list):
-        variables['android_test'][key] = sorted(
-            set(value) - set(variables['main'][key]))
+  if entry.android_test_entries:
+    variables['android_test'] = []
+    for e in entry.android_test_entries:
+      test_entry = generator.Generate(e)
+      variables['android_test'].append(test_entry)
+      for key, value in test_entry.iteritems():
+        if isinstance(value, list):
+          test_entry[key] = sorted(set(value) - set(variables['main'][key]))
 
   return jinja_processor.Render(
       _TemplatePath(target_type.split('_')[0]), variables)
@@ -605,10 +609,10 @@ def _GenerateModuleAll(gradle_output_dir, generator, build_vars,
       'java_excludes': ['**/*.java'],
       'res_dirs': Relativize(res_dirs),
   }
-  variables['android_test'] = {
+  variables['android_test'] = [{
       'java_dirs': Relativize(test_java_dirs),
       'java_excludes': ['**/*.java'],
-  }
+  }]
   data = jinja_processor.Render(
       _TemplatePath(target_type.split('_')[0]), variables)
   _WriteFile(
@@ -683,22 +687,22 @@ def _CombineTestEntries(entries):
     - e.g. base_junit_tests > base_junit_test_support > base_java
   """
   combined_entries = []
-  android_test_entries = {}
+  android_test_entries = collections.defaultdict(list)
   for entry in entries:
     target_name = entry.GnTarget()
     if (target_name.endswith('_test_apk__apk') and
         'apk_under_test' in entry.Gradle()):
       apk_name = entry.Gradle()['apk_under_test']
-      android_test_entries[apk_name] = entry
+      android_test_entries[apk_name].append(entry)
     else:
       combined_entries.append(entry)
   for entry in combined_entries:
     target_name = entry.DepsInfo()['name']
     if target_name in android_test_entries:
-      entry.android_test_entry = android_test_entries[target_name]
+      entry.android_test_entries = android_test_entries[target_name]
       del android_test_entries[target_name]
   # Add unmatched test entries as individual targets.
-  combined_entries.extend(android_test_entries.values())
+  combined_entries.extend(e for l in android_test_entries.values() for e in l)
   return combined_entries
 
 
@@ -727,7 +731,10 @@ def main():
                       default=os.path.join('$CHROMIUM_OUTPUT_DIR', 'gradle'))
   parser.add_argument('--all',
                       action='store_true',
-                      help='Generate all java targets (slows down IDE)')
+                      help='Include all .java files reachable from any '
+                           'apk/test/binary target. On by default unless '
+                           '--split-projects is used (--split-projects can '
+                           'slow down Studio given too many targets).')
   parser.add_argument('--use-gradle-process-resources',
                       action='store_true',
                       help='Have gradle generate R.java rather than ninja')
@@ -738,7 +745,24 @@ def main():
   parser.add_argument('--canary',
                       action='store_true',
                       help='Generate a project that is compatible with '
-                           'Android Studio 3.0 Canary.')
+                           'Android Studio 3.1 Canary.')
+  sdk_group = parser.add_mutually_exclusive_group()
+  sdk_group.add_argument('--sdk',
+                         choices=['AndroidStudioCurrent',
+                                  'AndroidStudioDefault',
+                                  'ChromiumSdkRoot'],
+                         default='ChromiumSdkRoot',
+                         help="Set the project's SDK root. This can be set to "
+                              "Android Studio's current SDK root, the default "
+                              "Android Studio SDK root, or Chromium's SDK "
+                              "root. The default is Chromium's SDK root, but "
+                              "using this means that updates and additions to "
+                              "the SDK (e.g. installing emulators), will "
+                              "modify this root, hence possibly causing "
+                              "conflicts on the next repository sync.")
+  sdk_group.add_argument('--sdk-path',
+                         help='An explict path for the SDK root, setting this '
+                              'is an alternative to setting the --sdk option')
   args = parser.parse_args()
   if args.output_directory:
     constants.SetOutputDirectory(args.output_directory)
@@ -763,36 +787,42 @@ def main():
       args.canary)
   logging.warning('Creating project at: %s', generator.project_dir)
 
+  # Generate for "all targets" by default when not using --split-projects (too
+  # slow), and when no --target has been explicitly set. "all targets" means all
+  # java targets that are depended on by an apk or java_binary (leaf
+  # java_library targets will not be included).
+  args.all = args.all or (not args.split_projects and not args.targets)
+
+  targets_from_args = set(args.targets or _DEFAULT_TARGETS)
+  if args.extra_targets:
+    targets_from_args.update(args.extra_targets)
+
   if args.all:
     # Run GN gen if necessary (faster than running "gn gen" in the no-op case).
     _RunNinja(constants.GetOutDirectory(), ['build.ninja'])
     # Query ninja for all __build_config targets.
     targets = _QueryForAllGnTargets(output_dir)
   else:
-    targets = args.targets or _DEFAULT_TARGETS
-    if args.extra_targets:
-      targets.extend(args.extra_targets)
-    targets = [re.sub(r'_test_apk$', '_test_apk__apk', t) for t in targets]
-    # TODO(wnwen): Utilize Gradle's test constructs for our junit tests?
-    targets = [re.sub(r'_junit_tests$', '_junit_tests__java_binary', t)
-               for t in targets]
+    targets = [re.sub(r'_test_apk$', '_test_apk__apk', t)
+               for t in targets_from_args]
 
   main_entries = [_ProjectEntry.FromGnTarget(t) for t in targets]
 
   logging.warning('Building .build_config files...')
   _RunNinja(output_dir, [e.NinjaBuildConfigTarget() for e in main_entries])
 
-  # There are many unused libraries, so restrict to those that are actually used
-  # when using --all.
   if args.all:
+    # There are many unused libraries, so restrict to those that are actually
+    # used by apks/binaries/tests or that are explicitly mentioned in --targets.
     main_entries = [e for e in main_entries if (
-        e.GetType() == 'android_apk' or
-        e.GnTarget().endswith('_test_apk__apk') or
-        e.GnTarget().endswith('_junit_tests__java_binary'))]
+        e.GetType() in ('android_apk', 'java_binary', 'junit_binary') or
+        e.GnTarget() in targets_from_args or
+        e.GnTarget().endswith('_test_apk__apk'))]
 
   if args.split_projects:
     main_entries = _FindAllProjectEntries(main_entries)
-    logging.info('Found %d dependent build_config targets.', len(main_entries))
+
+  logging.info('Generating for %d targets.', len(main_entries))
 
   entries = [e for e in _CombineTestEntries(main_entries) if e.IsValid()]
   logging.info('Creating %d projects for targets.', len(entries))
@@ -833,9 +863,15 @@ def main():
   _WriteFile(os.path.join(generator.project_dir, 'settings.gradle'),
              _GenerateSettingsGradle(project_entries, add_all_module))
 
-  sdk_path = _RebasePath(build_vars['android_sdk_root'])
-  _WriteFile(os.path.join(generator.project_dir, 'local.properties'),
-             _GenerateLocalProperties(sdk_path))
+  if args.sdk != "AndroidStudioCurrent":
+    if args.sdk_path:
+      sdk_path = _RebasePath(args.sdk_path)
+    elif args.sdk == "AndroidStudioDefault":
+      sdk_path = os.path.expanduser('~/Android/Sdk')
+    else:
+      sdk_path = _RebasePath(build_vars['android_sdk_root'])
+    _WriteFile(os.path.join(generator.project_dir, 'local.properties'),
+               _GenerateLocalProperties(sdk_path))
 
   if generated_inputs:
     logging.warning('Building generated source files...')
@@ -846,9 +882,8 @@ def main():
     _ExtractZips(generator.project_dir, zip_tuples)
 
   logging.warning('Project created!')
-  logging.warning('Generated projects work with %s',
-                  'Android Studio 3.0 Beta 2' if args.canary
-                      else 'Android Studio 2.3')
+  logging.warning('Generated projects work with Android Studio %s',
+                  '3.1' if args.canary else '3.0')
   logging.warning('For more tips: https://chromium.googlesource.com/chromium'
                   '/src.git/+/master/docs/android_studio.md')
 

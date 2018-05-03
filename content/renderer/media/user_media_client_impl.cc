@@ -16,7 +16,7 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/renderer/media/apply_constraints_processor.h"
-#include "content/renderer/media/media_stream_dispatcher.h"
+#include "content/renderer/media/media_stream_device_observer.h"
 #include "content/renderer/media/media_stream_video_track.h"
 #include "content/renderer/media/peer_connection_tracker.h"
 #include "content/renderer/media/webrtc_logging.h"
@@ -24,7 +24,6 @@
 #include "content/renderer/render_thread_impl.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
-#include "third_party/WebKit/public/platform/WebMediaDeviceInfo.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -34,21 +33,6 @@
 namespace content {
 namespace {
 
-blink::WebMediaDeviceInfo::MediaDeviceKind ToMediaDeviceKind(
-    MediaDeviceType type) {
-  switch (type) {
-    case MEDIA_DEVICE_TYPE_AUDIO_INPUT:
-      return blink::WebMediaDeviceInfo::kMediaDeviceKindAudioInput;
-    case MEDIA_DEVICE_TYPE_VIDEO_INPUT:
-      return blink::WebMediaDeviceInfo::kMediaDeviceKindVideoInput;
-    case MEDIA_DEVICE_TYPE_AUDIO_OUTPUT:
-      return blink::WebMediaDeviceInfo::kMediaDeviceKindAudioOutput;
-    default:
-      NOTREACHED();
-      return blink::WebMediaDeviceInfo::kMediaDeviceKindAudioInput;
-  }
-}
-
 static int g_next_request_id = 0;
 
 }  // namespace
@@ -57,6 +41,7 @@ UserMediaClientImpl::Request::Request(std::unique_ptr<UserMediaRequest> request)
     : user_media_request_(std::move(request)) {
   DCHECK(user_media_request_);
   DCHECK(apply_constraints_request_.IsNull());
+  DCHECK(web_track_to_stop_.IsNull());
 }
 
 UserMediaClientImpl::Request::Request(
@@ -64,12 +49,32 @@ UserMediaClientImpl::Request::Request(
     : apply_constraints_request_(request) {
   DCHECK(!apply_constraints_request_.IsNull());
   DCHECK(!user_media_request_);
+  DCHECK(web_track_to_stop_.IsNull());
+}
+
+UserMediaClientImpl::Request::Request(
+    const blink::WebMediaStreamTrack& web_track_to_stop)
+    : web_track_to_stop_(web_track_to_stop) {
+  DCHECK(!web_track_to_stop_.IsNull());
+  DCHECK(!user_media_request_);
+  DCHECK(apply_constraints_request_.IsNull());
 }
 
 UserMediaClientImpl::Request::Request(Request&& other)
     : user_media_request_(std::move(other.user_media_request_)),
-      apply_constraints_request_(other.apply_constraints_request_) {
-  DCHECK(!IsApplyConstraints() || !IsUserMedia());
+      apply_constraints_request_(other.apply_constraints_request_),
+      web_track_to_stop_(other.web_track_to_stop_) {
+#if DCHECK_IS_ON()
+  int num_types = 0;
+  if (IsUserMedia())
+    num_types++;
+  if (IsApplyConstraints())
+    num_types++;
+  if (IsStopTrack())
+    num_types++;
+
+  DCHECK_EQ(num_types, 1);
+#endif
 }
 
 UserMediaClientImpl::Request& UserMediaClientImpl::Request::operator=(
@@ -96,18 +101,16 @@ UserMediaClientImpl::UserMediaClientImpl(
 UserMediaClientImpl::UserMediaClientImpl(
     RenderFrame* render_frame,
     PeerConnectionDependencyFactory* dependency_factory,
-    std::unique_ptr<MediaStreamDispatcher> media_stream_dispatcher,
-    const scoped_refptr<base::TaskRunner>& worker_task_runner)
+    std::unique_ptr<MediaStreamDeviceObserver> media_stream_device_observer)
     : UserMediaClientImpl(
           render_frame,
-          base::MakeUnique<UserMediaProcessor>(
+          std::make_unique<UserMediaProcessor>(
               render_frame,
               dependency_factory,
-              std::move(media_stream_dispatcher),
+              std::move(media_stream_device_observer),
               base::BindRepeating(
                   &UserMediaClientImpl::GetMediaDevicesDispatcher,
-                  base::Unretained(this)),
-              worker_task_runner)) {}
+                  base::Unretained(this)))) {}
 
 UserMediaClientImpl::~UserMediaClientImpl() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -148,17 +151,15 @@ void UserMediaClientImpl::RequestUserMedia(
   // The value returned by isProcessingUserGesture() is used by the browser to
   // make decisions about the permissions UI. Its value can be lost while
   // switching threads, so saving its value here.
+  bool user_gesture = blink::WebUserGestureIndicator::IsProcessingUserGesture(
+      web_request.OwnerDocument().IsNull()
+          ? nullptr
+          : web_request.OwnerDocument().GetFrame());
   std::unique_ptr<UserMediaRequest> request_info =
-      base::MakeUnique<UserMediaRequest>(
-          request_id, web_request,
-          blink::WebUserGestureIndicator::IsProcessingUserGesture());
+      std::make_unique<UserMediaRequest>(request_id, web_request, user_gesture);
   pending_request_infos_.push_back(Request(std::move(request_info)));
-  if (!is_processing_request_) {
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::BindOnce(&UserMediaClientImpl::MaybeProcessNextRequestInfo,
-                       weak_factory_.GetWeakPtr()));
-  }
+  if (!is_processing_request_)
+    MaybeProcessNextRequestInfo();
 }
 
 void UserMediaClientImpl::ApplyConstraints(
@@ -166,12 +167,15 @@ void UserMediaClientImpl::ApplyConstraints(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // TODO(guidou): Implement applyConstraints(). http://crbug.com/338503
   pending_request_infos_.push_back(Request(web_request));
-  if (!is_processing_request_) {
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::BindOnce(&UserMediaClientImpl::MaybeProcessNextRequestInfo,
-                       weak_factory_.GetWeakPtr()));
-  }
+  if (!is_processing_request_)
+    MaybeProcessNextRequestInfo();
+}
+
+void UserMediaClientImpl::StopTrack(
+    const blink::WebMediaStreamTrack& web_track) {
+  pending_request_infos_.push_back(Request(web_track));
+  if (!is_processing_request_)
+    MaybeProcessNextRequestInfo();
 }
 
 void UserMediaClientImpl::MaybeProcessNextRequestInfo() {
@@ -190,12 +194,22 @@ void UserMediaClientImpl::MaybeProcessNextRequestInfo() {
         current_request.MoveUserMediaRequest(),
         base::BindOnce(&UserMediaClientImpl::CurrentRequestCompleted,
                        base::Unretained(this)));
-  } else {
-    DCHECK(current_request.IsApplyConstraints());
+  } else if (current_request.IsApplyConstraints()) {
     apply_constraints_processor_->ProcessRequest(
         current_request.apply_constraints_request(),
         base::BindOnce(&UserMediaClientImpl::CurrentRequestCompleted,
                        base::Unretained(this)));
+  } else {
+    DCHECK(current_request.IsStopTrack());
+    MediaStreamTrack* track =
+        MediaStreamTrack::GetTrack(current_request.web_track_to_stop());
+    if (track) {
+      track->StopAndNotify(
+          base::BindOnce(&UserMediaClientImpl::CurrentRequestCompleted,
+                         weak_factory_.GetWeakPtr()));
+    } else {
+      CurrentRequestCompleted();
+    }
   }
 }
 
@@ -245,16 +259,6 @@ void UserMediaClientImpl::CancelUserMediaRequest(
   }
 }
 
-void UserMediaClientImpl::RequestMediaDevices(
-    const blink::WebMediaDevicesRequest& media_devices_request) {
-  UpdateWebRTCMethodCount(WEBKIT_GET_MEDIA_DEVICES);
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  GetMediaDevicesDispatcher()->EnumerateDevices(
-      true /* audio input */, true /* video input */, true /* audio output */,
-      base::BindOnce(&UserMediaClientImpl::FinalizeEnumerateDevices,
-                     weak_factory_.GetWeakPtr(), media_devices_request));
-}
-
 void UserMediaClientImpl::SetMediaDeviceChangeObserver(
     const blink::WebMediaDeviceChangeObserver& observer) {
   media_device_change_observer_ = observer;
@@ -279,41 +283,11 @@ void UserMediaClientImpl::SetMediaDeviceChangeObserver(
   }
 }
 
-void UserMediaClientImpl::FinalizeEnumerateDevices(
-    blink::WebMediaDevicesRequest request,
-    const EnumerationResult& result) {
-  DCHECK_EQ(static_cast<size_t>(NUM_MEDIA_DEVICE_TYPES), result.size());
-
-  blink::WebVector<blink::WebMediaDeviceInfo> devices(
-      result[MEDIA_DEVICE_TYPE_AUDIO_INPUT].size() +
-      result[MEDIA_DEVICE_TYPE_VIDEO_INPUT].size() +
-      result[MEDIA_DEVICE_TYPE_AUDIO_OUTPUT].size());
-  size_t index = 0;
-  for (size_t i = 0; i < NUM_MEDIA_DEVICE_TYPES; ++i) {
-    blink::WebMediaDeviceInfo::MediaDeviceKind device_kind =
-        ToMediaDeviceKind(static_cast<MediaDeviceType>(i));
-    for (const auto& device_info : result[i]) {
-      devices[index++].Initialize(
-          blink::WebString::FromUTF8(device_info.device_id), device_kind,
-          blink::WebString::FromUTF8(device_info.label),
-          blink::WebString::FromUTF8(device_info.group_id));
-    }
-  }
-
-  EnumerateDevicesSucceded(&request, devices);
-}
-
 void UserMediaClientImpl::DevicesChanged(
     MediaDeviceType type,
     const MediaDeviceInfoArray& device_infos) {
   if (!media_device_change_observer_.IsNull())
     media_device_change_observer_.DidChangeMediaDevices();
-}
-
-void UserMediaClientImpl::EnumerateDevicesSucceded(
-    blink::WebMediaDevicesRequest* request,
-    blink::WebVector<blink::WebMediaDeviceInfo>& devices) {
-  request->RequestSucceeded(devices);
 }
 
 void UserMediaClientImpl::DeleteAllUserMediaRequests() {
@@ -330,11 +304,11 @@ void UserMediaClientImpl::WillCommitProvisionalLoad() {
 }
 
 void UserMediaClientImpl::SetMediaDevicesDispatcherForTesting(
-    ::mojom::MediaDevicesDispatcherHostPtr media_devices_dispatcher) {
+    blink::mojom::MediaDevicesDispatcherHostPtr media_devices_dispatcher) {
   media_devices_dispatcher_ = std::move(media_devices_dispatcher);
 }
 
-const ::mojom::MediaDevicesDispatcherHostPtr&
+const blink::mojom::MediaDevicesDispatcherHostPtr&
 UserMediaClientImpl::GetMediaDevicesDispatcher() {
   if (!media_devices_dispatcher_) {
     render_frame()->GetRemoteInterfaces()->GetInterface(

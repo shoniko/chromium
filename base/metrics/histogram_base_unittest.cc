@@ -21,8 +21,7 @@ class HistogramBaseTest : public testing::Test {
     ResetStatisticsRecorder();
   }
 
-  ~HistogramBaseTest() override {
-  }
+  ~HistogramBaseTest() override = default;
 
   void ResetStatisticsRecorder() {
     // It is necessary to fully destruct any existing StatisticsRecorder
@@ -56,7 +55,7 @@ TEST_F(HistogramBaseTest, DeserializeHistogram) {
   deserialized = DeserializeHistogramInfo(&iter2);
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
-  EXPECT_EQ("TestHistogram", deserialized->histogram_name());
+  EXPECT_EQ("TestHistogram", StringPiece(deserialized->histogram_name()));
   EXPECT_TRUE(deserialized->HasConstructionArguments(1, 1000, 10));
 
   // kIPCSerializationSourceFlag will be cleared.
@@ -81,7 +80,7 @@ TEST_F(HistogramBaseTest, DeserializeLinearHistogram) {
   deserialized = DeserializeHistogramInfo(&iter2);
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
-  EXPECT_EQ("TestHistogram", deserialized->histogram_name());
+  EXPECT_EQ("TestHistogram", StringPiece(deserialized->histogram_name()));
   EXPECT_TRUE(deserialized->HasConstructionArguments(1, 1000, 10));
   EXPECT_EQ(0, deserialized->flags());
 }
@@ -103,7 +102,7 @@ TEST_F(HistogramBaseTest, DeserializeBooleanHistogram) {
   deserialized = DeserializeHistogramInfo(&iter2);
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
-  EXPECT_EQ("TestHistogram", deserialized->histogram_name());
+  EXPECT_EQ("TestHistogram", StringPiece(deserialized->histogram_name()));
   EXPECT_TRUE(deserialized->HasConstructionArguments(1, 2, 3));
   EXPECT_EQ(0, deserialized->flags());
 }
@@ -130,7 +129,7 @@ TEST_F(HistogramBaseTest, DeserializeCustomHistogram) {
   deserialized = DeserializeHistogramInfo(&iter2);
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
-  EXPECT_EQ("TestHistogram", deserialized->histogram_name());
+  EXPECT_EQ("TestHistogram", StringPiece(deserialized->histogram_name()));
   EXPECT_TRUE(deserialized->HasConstructionArguments(5, 13, 4));
   EXPECT_EQ(0, deserialized->flags());
 }
@@ -152,7 +151,7 @@ TEST_F(HistogramBaseTest, DeserializeSparseHistogram) {
   deserialized = DeserializeHistogramInfo(&iter2);
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
-  EXPECT_EQ("TestHistogram", deserialized->histogram_name());
+  EXPECT_EQ("TestHistogram", StringPiece(deserialized->histogram_name()));
   EXPECT_EQ(0, deserialized->flags());
 }
 

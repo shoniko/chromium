@@ -5,6 +5,7 @@
 #ifndef InspectorSession_h
 #define InspectorSession_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/inspector/protocol/Forward.h"
 #include "platform/heap/Handle.h"
@@ -23,8 +24,6 @@ class CORE_EXPORT InspectorSession
     : public GarbageCollectedFinalized<InspectorSession>,
       public protocol::FrontendChannel,
       public v8_inspector::V8Inspector::Channel {
-  WTF_MAKE_NONCOPYABLE(InspectorSession);
-
  public:
   class Client {
    public:
@@ -32,7 +31,7 @@ class CORE_EXPORT InspectorSession
                                      int call_id,
                                      const String& response,
                                      const String& state) = 0;
-    virtual ~Client() {}
+    virtual ~Client() = default;
   };
 
   InspectorSession(Client*,
@@ -42,6 +41,8 @@ class CORE_EXPORT InspectorSession
                    int context_group_id,
                    const String* saved_state);
   ~InspectorSession() override;
+  // TODO(dgozman): remove session id once WokrerInspectorController
+  // does not use it anymore.
   int SessionId() { return session_id_; }
   v8_inspector::V8InspectorSession* V8Session() { return v8_session_.get(); }
 
@@ -69,10 +70,6 @@ class CORE_EXPORT InspectorSession
       std::unique_ptr<v8_inspector::StringBuffer> message) override;
   void sendNotification(
       std::unique_ptr<v8_inspector::StringBuffer> message) override;
-  // TODO(kozyatinskiy): remove it.
-  void SendProtocolResponse(int call_id,
-                            const v8_inspector::StringView& message) {}
-  void SendProtocolNotification(const v8_inspector::StringView& message) {}
 
   void SendProtocolResponse(int call_id, const String& message);
 
@@ -87,6 +84,8 @@ class CORE_EXPORT InspectorSession
   class Notification;
   Vector<std::unique_ptr<Notification>> notification_queue_;
   String last_sent_state_;
+
+  DISALLOW_COPY_AND_ASSIGN(InspectorSession);
 };
 
 }  // namespace blink

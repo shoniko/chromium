@@ -4,10 +4,11 @@
 
 #include "components/omnibox/browser/physical_web_provider.h"
 
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -41,7 +42,7 @@ class FakeAutocompleteProviderClient
  public:
   FakeAutocompleteProviderClient()
       : physical_web_data_source_(
-            base::MakeUnique<FakePhysicalWebDataSource>()),
+            std::make_unique<FakePhysicalWebDataSource>()),
         is_off_the_record_(false) {}
 
   const AutocompleteSchemeClassifier& GetSchemeClassifier() const override {
@@ -94,7 +95,7 @@ class PhysicalWebProviderTest : public testing::Test {
     // DCHECK.
     field_trial_list_.reset();
     field_trial_list_.reset(new base::FieldTrialList(
-        base::MakeUnique<metrics::SHA1EntropyProvider>("foo")));
+        std::make_unique<metrics::SHA1EntropyProvider>("foo")));
     variations::testing::ClearAllVariationParams();
   }
 
@@ -112,9 +113,9 @@ class PhysicalWebProviderTest : public testing::Test {
   // populated with a unique scanned URL and page metadata.
   static std::unique_ptr<physical_web::MetadataList> CreateMetadata(
       size_t metadata_count) {
-    auto metadata_list = base::MakeUnique<physical_web::MetadataList>();
+    auto metadata_list = std::make_unique<physical_web::MetadataList>();
     for (size_t i = 0; i < metadata_count; ++i) {
-      std::string item_id = base::SizeTToString(i);
+      std::string item_id = base::NumberToString(i);
       std::string url = "https://example.com/" + item_id;
       metadata_list->emplace_back();
       auto& metadata_item = metadata_list->back();

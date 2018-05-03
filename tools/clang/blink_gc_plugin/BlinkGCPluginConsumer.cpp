@@ -7,11 +7,13 @@
 #include <algorithm>
 #include <set>
 
+#include "BadPatternFinder.h"
 #include "CheckDispatchVisitor.h"
 #include "CheckFieldsVisitor.h"
 #include "CheckFinalizerVisitor.h"
 #include "CheckGCRootsVisitor.h"
 #include "CheckTraceVisitor.h"
+#include "CheckTraceWrappersVisitor.h"
 #include "CollectVisitor.h"
 #include "JsonWriter.h"
 #include "RecordInfo.h"
@@ -117,11 +119,18 @@ void BlinkGCPluginConsumer::HandleTranslationUnit(ASTContext& context) {
   for (const auto& method : visitor.trace_decls())
     CheckTracingMethod(method);
 
+  if (options_.warn_trace_wrappers_missing_base_dispatch) {
+    for (const auto& method : visitor.trace_wrapper_decls())
+      CheckWrapperTracingMethod(method);
+  }
+
   if (json_) {
     json_->CloseList();
     delete json_;
     json_ = 0;
   }
+
+  FindBadPatterns(context, reporter_);
 }
 
 void BlinkGCPluginConsumer::ParseFunctionTemplates(TranslationUnitDecl* decl) {
@@ -522,6 +531,16 @@ void BlinkGCPluginConsumer::CheckTracingMethod(CXXMethodDecl* method) {
   CheckTraceOrDispatchMethod(parent, method);
 }
 
+void BlinkGCPluginConsumer::CheckWrapperTracingMethod(CXXMethodDecl* method) {
+  RecordInfo* parent = cache_.Lookup(method->getParent());
+  if (IsIgnored(parent))
+    return;
+
+  Config::TraceWrappersMethodType trace_wrappers_type =
+      Config::GetTraceWrappersMethodType(method);
+  CheckTraceWrappersMethod(parent, method, trace_wrappers_type);
+}
+
 void BlinkGCPluginConsumer::CheckTraceOrDispatchMethod(
     RecordInfo* parent,
     CXXMethodDecl* method) {
@@ -559,6 +578,18 @@ void BlinkGCPluginConsumer::CheckTraceMethod(
       break;
     }
   }
+}
+
+void BlinkGCPluginConsumer::CheckTraceWrappersMethod(
+    RecordInfo* parent,
+    clang::CXXMethodDecl* trace_wrappers,
+    Config::TraceWrappersMethodType trace_wrappers_type) {
+  CheckTraceWrappersVisitor visitor(trace_wrappers, parent, &cache_);
+  visitor.TraverseCXXMethodDecl(trace_wrappers);
+
+  for (auto& base : parent->GetBases())
+    if (!base.second.IsProperlyWrapperTraced())
+      reporter_.BaseRequiresWrapperTracing(parent, trace_wrappers, base.first);
 }
 
 void BlinkGCPluginConsumer::DumpClass(RecordInfo* info) {

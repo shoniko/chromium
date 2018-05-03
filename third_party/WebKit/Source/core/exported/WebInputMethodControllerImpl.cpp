@@ -29,7 +29,7 @@ WebInputMethodControllerImpl::WebInputMethodControllerImpl(
     WebLocalFrameImpl& web_frame)
     : web_frame_(&web_frame) {}
 
-WebInputMethodControllerImpl::~WebInputMethodControllerImpl() {}
+WebInputMethodControllerImpl::~WebInputMethodControllerImpl() = default;
 
 void WebInputMethodControllerImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(web_frame_);
@@ -145,6 +145,21 @@ int WebInputMethodControllerImpl::ComputeWebTextInputNextPreviousFlags() {
 
 WebTextInputType WebInputMethodControllerImpl::TextInputType() {
   return GetFrame()->GetInputMethodController().TextInputType();
+}
+
+WebRange WebInputMethodControllerImpl::CompositionRange() {
+  EphemeralRange range =
+      GetFrame()->GetInputMethodController().CompositionEphemeralRange();
+
+  if (range.IsNull())
+    return WebRange();
+
+  Element* editable =
+      GetFrame()->Selection().RootEditableElementOrDocumentElement();
+
+  editable->GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  return PlainTextRange::Create(*editable, range);
 }
 
 WebRange WebInputMethodControllerImpl::GetSelectionOffsets() const {

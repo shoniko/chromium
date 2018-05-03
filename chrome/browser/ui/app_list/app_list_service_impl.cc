@@ -27,7 +27,6 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_switches.h"
 
 namespace {
@@ -388,10 +387,8 @@ void AppListServiceImpl::ShowForAppInstall(Profile* profile,
   // The only way an install can happen is with the profile already loaded. So,
   // ShowForProfile() can never be asynchronous, and the model is guaranteed to
   // exist after a show.
-  DCHECK(view_delegate_->GetModel());
-  view_delegate_->GetModel()
-      ->top_level_item_list()
-      ->HighlightItemInstalledFromUI(extension_id);
+  DCHECK(view_delegate_->GetModelUpdater());
+  view_delegate_->GetModelUpdater()->HighlightItemInstalledFromUI(extension_id);
 }
 
 void AppListServiceImpl::EnableAppList(Profile* initial_profile,

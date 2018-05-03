@@ -44,8 +44,7 @@ using net::IOBuffer;
 using net::WrappedIOBuffer;
 
 namespace content {
-
-namespace {
+namespace appcache_url_request_job_unittest {
 
 const char kHttpBasicHeaders[] = "HTTP/1.0 200 OK\0Content-Length: 5\0\0";
 const char kHttpBasicBody[] = "Hello";
@@ -119,8 +118,6 @@ class MockURLRequestJobFactory : public net::URLRequestJobFactory {
   // This is mutable because MaybeCreateJobWithProtocolHandler is const.
   mutable std::unique_ptr<net::URLRequestJob> job_;
 };
-
-}  // namespace
 
 class AppCacheURLRequestJobTest : public testing::Test {
  public:
@@ -284,11 +281,11 @@ class AppCacheURLRequestJobTest : public testing::Test {
       task_stack_.pop();
 
     reader_.reset();
-    read_buffer_ = NULL;
-    read_info_buffer_ = NULL;
+    read_buffer_ = nullptr;
+    read_info_buffer_ = nullptr;
     writer_.reset();
-    write_buffer_ = NULL;
-    write_info_buffer_ = NULL;
+    write_buffer_ = nullptr;
+    write_info_buffer_ = nullptr;
     storage_delegate_.reset();
     service_.reset();
 
@@ -636,8 +633,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
     // Setup to create an AppCacheURLRequestJob with orders to deliver
     // a network response.
     std::unique_ptr<AppCacheURLRequestJob> job(
-        new AppCacheURLRequestJob(request_.get(), NULL, storage, NULL, false,
-                                  base::BindOnce(&ExpectNotRestarted)));
+        new AppCacheURLRequestJob(request_.get(), nullptr, storage, nullptr,
+                                  false, base::BindOnce(&ExpectNotRestarted)));
 
     if (start_after_delivery_orders) {
       job->DeliverAppCachedResponse(
@@ -756,8 +753,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
 
     // Create job with orders to deliver an appcached entry.
     std::unique_ptr<AppCacheURLRequestJob> job(
-        new AppCacheURLRequestJob(request_.get(), NULL, storage, NULL, false,
-                                  base::BindOnce(&ExpectNotRestarted)));
+        new AppCacheURLRequestJob(request_.get(), nullptr, storage, nullptr,
+                                  false, base::BindOnce(&ExpectNotRestarted)));
     job->DeliverAppCachedResponse(
         GURL(), 111,
         AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_), false);
@@ -915,4 +912,5 @@ TEST_F(AppCacheURLRequestJobTest, CancelRequestWithIOPending) {
   RunTestOnIOThread(&AppCacheURLRequestJobTest::CancelRequestWithIOPending);
 }
 
+}  // namespace appcache_url_request_job_unittest
 }  // namespace content

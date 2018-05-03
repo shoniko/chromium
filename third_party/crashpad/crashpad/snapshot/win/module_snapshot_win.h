@@ -85,6 +85,7 @@ class ModuleSnapshotWin final : public ModuleSnapshot {
   std::string DebugFileName() const override;
   std::vector<std::string> AnnotationsVector() const override;
   std::map<std::string, std::string> AnnotationsSimpleMap() const override;
+  std::vector<AnnotationSnapshot> AnnotationObjects() const override;
   std::set<CheckedRange<uint64_t>> ExtraMemoryRanges() const override;
   std::vector<const UserMinidumpStream*> CustomMinidumpStreams() const override;
 
@@ -117,7 +118,7 @@ class ModuleSnapshotWin final : public ModuleSnapshot {
   InitializationStateDcheck initialized_;
 
   // VSFixedFileInfo() is logically const, but updates these members on the
-  // the call. See https://crashpad.chromium.org/bug/9.
+  // call. See https://crashpad.chromium.org/bug/9.
   mutable VS_FIXEDFILEINFO vs_fixed_file_info_;
   mutable InitializationState initialized_vs_fixed_file_info_;
 

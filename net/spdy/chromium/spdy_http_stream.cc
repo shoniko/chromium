@@ -33,11 +33,13 @@ namespace net {
 const size_t SpdyHttpStream::kRequestBodyBufferSize = 1 << 14;  // 16KB
 
 SpdyHttpStream::SpdyHttpStream(const base::WeakPtr<SpdySession>& spdy_session,
+                               SpdyStreamId pushed_stream_id,
                                bool direct,
                                NetLogSource source_dependency)
     : MultiplexedHttpStream(
           std::make_unique<MultiplexedSessionHandle>(spdy_session)),
       spdy_session_(spdy_session),
+      pushed_stream_id_(pushed_stream_id),
       is_reused_(spdy_session_->IsReused()),
       source_dependency_(source_dependency),
       stream_(nullptr),
@@ -49,6 +51,7 @@ SpdyHttpStream::SpdyHttpStream(const base::WeakPtr<SpdySession>& spdy_session,
       request_info_(NULL),
       response_info_(NULL),
       response_headers_complete_(false),
+      upload_stream_in_progress_(false),
       user_buffer_len_(0),
       request_body_buf_size_(0),
       buffered_read_callback_pending_(false),
@@ -67,6 +70,7 @@ SpdyHttpStream::~SpdyHttpStream() {
 }
 
 int SpdyHttpStream::InitializeStream(const HttpRequestInfo* request_info,
+                                     bool can_send_early,
                                      RequestPriority priority,
                                      const NetLogWithSource& stream_net_log,
                                      const CompletionCallback& callback) {
@@ -75,11 +79,10 @@ int SpdyHttpStream::InitializeStream(const HttpRequestInfo* request_info,
     return ERR_CONNECTION_CLOSED;
 
   request_info_ = request_info;
-  // TODO(bnc): Remove this condition once pushed headers are properly
-  // validated.  https://crbug.com/554220.
-  if (request_info_->method == "GET") {
-    int error = spdy_session_->GetPushStream(request_info_->url, priority,
-                                             &stream_, stream_net_log);
+  if (pushed_stream_id_ != kNoPushedStreamFound) {
+    int error =
+        spdy_session_->GetPushedStream(request_info_->url, pushed_stream_id_,
+                                       priority, &stream_, stream_net_log);
     if (error != OK)
       return error;
 
@@ -126,14 +129,6 @@ int SpdyHttpStream::ReadResponseHeaders(const CompletionCallback& callback) {
 
 int SpdyHttpStream::ReadResponseBody(
     IOBuffer* buf, int buf_len, const CompletionCallback& callback) {
-  // Invalidate HttpRequestInfo pointer. This is to allow the stream to be
-  // shared across multiple transactions which might require this
-  // stream to outlive the request_'s owner.
-  // Only allowed when Reading of response body starts. It is safe to reset it
-  // at this point since request_->upload_data_stream is also not needed
-  // anymore.
-  request_info_ = nullptr;
-
   if (stream_)
     CHECK(!stream_->IsIdle());
 
@@ -336,6 +331,12 @@ void SpdyHttpStream::OnHeadersReceived(
   response_info_->vary_data
       .Init(*request_info_, *response_info_->headers.get());
 
+  // Invalidate HttpRequestInfo pointer. This is to allow |this| to be
+  // shared across multiple consumers at the cache layer which might require
+  // this stream to outlive the request_info_'s owner.
+  if (!upload_stream_in_progress_)
+    request_info_ = nullptr;
+
   if (!response_callback_.is_null()) {
     DoResponseCallback(OK);
   }
@@ -429,9 +430,18 @@ void SpdyHttpStream::OnStreamCreated(
 
 void SpdyHttpStream::ReadAndSendRequestBodyData() {
   CHECK(HasUploadData());
+  upload_stream_in_progress_ = true;
+
   CHECK_EQ(request_body_buf_size_, 0);
   if (request_info_->upload_data_stream->IsEOF()) {
     MaybePostRequestCallback(OK);
+
+    // Invalidate HttpRequestInfo pointer. This is to allow |this| to be
+    // shared across multiple consumers at the cache layer which might require
+    // this stream to outlive the request_info_'s owner.
+    upload_stream_in_progress_ = false;
+    if (response_headers_complete_)
+      request_info_ = nullptr;
     return;
   }
 

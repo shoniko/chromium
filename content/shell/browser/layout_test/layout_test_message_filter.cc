@@ -57,6 +57,7 @@ base::TaskRunner* LayoutTestMessageFilter::OverrideTaskRunnerForMessage(
     case LayoutTestHostMsg_ResetPermissions::ID:
     case LayoutTestHostMsg_LayoutTestRuntimeFlagsChanged::ID:
     case LayoutTestHostMsg_TestFinishedInSecondaryRenderer::ID:
+    case LayoutTestHostMsg_InspectSecondaryWindow::ID:
       return BrowserThread::GetTaskRunnerForThread(BrowserThread::UI).get();
   }
   return nullptr;
@@ -84,6 +85,8 @@ bool LayoutTestMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnLayoutTestRuntimeFlagsChanged)
     IPC_MESSAGE_HANDLER(LayoutTestHostMsg_TestFinishedInSecondaryRenderer,
                         OnTestFinishedInSecondaryRenderer)
+    IPC_MESSAGE_HANDLER(LayoutTestHostMsg_InspectSecondaryWindow,
+                        OnInspectSecondaryWindow)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -103,7 +106,7 @@ void LayoutTestMessageFilter::OnRegisterIsolatedFileSystem(
   ChildProcessSecurityPolicy* policy =
       ChildProcessSecurityPolicy::GetInstance();
   for (size_t i = 0; i < absolute_filenames.size(); ++i) {
-    files.AddPath(absolute_filenames[i], NULL);
+    files.AddPath(absolute_filenames[i], nullptr);
     if (!policy->CanReadFile(render_process_id_, absolute_filenames[i]))
       policy->GrantReadFile(render_process_id_, absolute_filenames[i]);
   }
@@ -156,8 +159,10 @@ void LayoutTestMessageFilter::OnBlockThirdPartyCookies(bool block) {
 }
 
 void LayoutTestMessageFilter::OnDeleteAllCookies() {
-  request_context_getter_->GetURLRequestContext()->cookie_store()
-      ->DeleteAllAsync(net::CookieStore::DeleteCallback());
+  net::URLRequestContext* context =
+      request_context_getter_->GetURLRequestContext();
+  if (context)
+    context->cookie_store()->DeleteAllAsync(net::CookieStore::DeleteCallback());
 }
 
 void LayoutTestMessageFilter::OnSetPermission(
@@ -172,9 +177,7 @@ void LayoutTestMessageFilter::OnSetPermission(
     type = PermissionType::MIDI;
   } else if (name == "midi-sysex") {
     type = PermissionType::MIDI_SYSEX;
-  } else if (name == "push-messaging") {
-    type = PermissionType::PUSH_MESSAGING;
-  } else if (name == "notifications") {
+  } else if (name == "push-messaging" || name == "notifications") {
     type = PermissionType::NOTIFICATIONS;
   } else if (name == "geolocation") {
     type = PermissionType::GEOLOCATION;
@@ -184,6 +187,10 @@ void LayoutTestMessageFilter::OnSetPermission(
     type = PermissionType::BACKGROUND_SYNC;
   } else if (name == "accessibility-events") {
     type = PermissionType::ACCESSIBILITY_EVENTS;
+  } else if (name == "clipboard-read") {
+    type = PermissionType::CLIPBOARD_READ;
+  } else if (name == "clipboard-write") {
+    type = PermissionType::CLIPBOARD_WRITE;
   } else {
     NOTREACHED();
     type = PermissionType::NOTIFICATIONS;
@@ -207,13 +214,22 @@ void LayoutTestMessageFilter::OnResetPermissions() {
 void LayoutTestMessageFilter::OnLayoutTestRuntimeFlagsChanged(
     const base::DictionaryValue& changed_layout_test_runtime_flags) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  BlinkTestController::Get()->OnLayoutTestRuntimeFlagsChanged(
-      render_process_id_, changed_layout_test_runtime_flags);
+  if (BlinkTestController::Get()) {
+    BlinkTestController::Get()->OnLayoutTestRuntimeFlagsChanged(
+        render_process_id_, changed_layout_test_runtime_flags);
+  }
 }
 
 void LayoutTestMessageFilter::OnTestFinishedInSecondaryRenderer() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  BlinkTestController::Get()->OnTestFinishedInSecondaryRenderer();
+  if (BlinkTestController::Get())
+    BlinkTestController::Get()->OnTestFinishedInSecondaryRenderer();
+}
+
+void LayoutTestMessageFilter::OnInspectSecondaryWindow() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (BlinkTestController::Get())
+    BlinkTestController::Get()->OnInspectSecondaryWindow();
 }
 
 }  // namespace content

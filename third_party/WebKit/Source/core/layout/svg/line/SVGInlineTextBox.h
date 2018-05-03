@@ -46,9 +46,10 @@ class SVGInlineTextBox final : public InlineTextBox {
              const LayoutPoint&,
              LayoutUnit line_top,
              LayoutUnit line_bottom) const override;
-  LayoutRect LocalSelectionRect(int start_position,
-                                int end_position,
-                                bool = true) const override;
+  LayoutRect LocalSelectionRect(
+      int start_position,
+      int end_position,
+      bool consider_current_selection = true) const override;
 
   bool MapStartEndPositionsIntoFragmentCoordinates(const SVGTextFragment&,
                                                    int& start_position,
@@ -70,9 +71,7 @@ class SVGInlineTextBox final : public InlineTextBox {
     starts_new_text_chunk_ = new_text_chunk;
   }
 
-  int OffsetForPositionInFragment(const SVGTextFragment&,
-                                  LayoutUnit position,
-                                  bool include_partial_glyphs) const;
+  int OffsetForPositionInFragment(const SVGTextFragment&, float position) const;
   FloatRect SelectionRectForTextFragment(const SVGTextFragment&,
                                          int fragment_start_position,
                                          int fragment_end_position,

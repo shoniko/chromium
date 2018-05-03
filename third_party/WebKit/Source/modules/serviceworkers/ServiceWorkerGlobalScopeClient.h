@@ -32,7 +32,7 @@
 #define ServiceWorkerGlobalScopeClient_h
 
 #include <memory>
-#include "core/dom/MessagePort.h"
+#include "core/messaging/MessagePort.h"
 #include "core/workers/WorkerClients.h"
 #include "modules/ModulesExport.h"
 #include "platform/wtf/Forward.h"
@@ -41,7 +41,7 @@
 #include "public/platform/modules/serviceworker/WebServiceWorkerClientsInfo.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerSkipWaitingCallbacks.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerStreamHandle.h"
-#include "public/platform/modules/serviceworker/service_worker_event_status.mojom-blink.h"
+#include "third_party/WebKit/common/service_worker/service_worker_event_status.mojom-blink.h"
 
 namespace blink {
 
@@ -76,8 +76,6 @@ class MODULES_EXPORT ServiceWorkerGlobalScopeClient
       std::unique_ptr<WebServiceWorkerClientCallbacks>);
   void SetCachedMetadata(const WebURL&, const char*, size_t);
   void ClearCachedMetadata(const WebURL&);
-
-  WebURL Scope() const;
 
   void DidHandleActivateEvent(int event_id,
                               mojom::ServiceWorkerEventStatus,
@@ -152,9 +150,6 @@ class MODULES_EXPORT ServiceWorkerGlobalScopeClient
   void Navigate(const WebString& client_uuid,
                 const WebURL&,
                 std::unique_ptr<WebServiceWorkerClientCallbacks>);
-  void RegisterForeignFetchScopes(int install_event_id,
-                                  const WebVector<WebURL>& sub_scopes,
-                                  const WebVector<WebSecurityOrigin>&);
 
   static const char* SupplementName();
   static ServiceWorkerGlobalScopeClient* From(ExecutionContext*);

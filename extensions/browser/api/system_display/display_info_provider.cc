@@ -79,7 +79,8 @@ api::system_display::DisplayUnitInfo DisplayInfoProvider::CreateDisplayUnitInfo(
   return unit;
 }
 
-bool DisplayInfoProvider::SetDisplayLayout(const DisplayLayoutList& layout) {
+bool DisplayInfoProvider::SetDisplayLayout(const DisplayLayoutList& layout,
+                                           std::string* error) {
   NOTREACHED();  // Implemented on Chrome OS only in override.
   return false;
 }
@@ -153,6 +154,13 @@ bool DisplayInfoProvider::ClearTouchCalibration(const std::string& id,
 }
 
 bool DisplayInfoProvider::IsNativeTouchCalibrationActive(std::string* error) {
+  NOTREACHED();  // Implemented on Chrome OS only in override.
+  return true;
+}
+
+bool DisplayInfoProvider::SetMirrorMode(
+    const api::system_display::MirrorModeInfo& info,
+    std::string* out_error) {
   NOTREACHED();  // Implemented on Chrome OS only in override.
   return true;
 }

@@ -3,17 +3,18 @@
 # found in the LICENSE file.
 
 import("//build/split_static_library.gni")
-import("//testing/libfuzzer/fuzzer_test.gni")
 import("//third_party/WebKit/Source/core/core.gni")
 
 blink_core_sources("html") {
-  split_count = 5
+  split_count = 4
 
   sources = [
     "CollectionItemsCache.h",
     "CollectionType.h",
     "CrossOriginAttribute.cpp",
     "CrossOriginAttribute.h",
+    "DocumentAllNameCollection.cpp",
+    "DocumentAllNameCollection.h",
     "DocumentNameCollection.cpp",
     "DocumentNameCollection.h",
     "HTMLAllCollection.cpp",
@@ -29,8 +30,6 @@ blink_core_sources("html") {
     "HTMLBaseElement.h",
     "HTMLBodyElement.cpp",
     "HTMLBodyElement.h",
-    "HTMLCanvasElement.cpp",
-    "HTMLCanvasElement.h",
     "HTMLCollection.cpp",
     "HTMLCollection.h",
     "HTMLContentElement.cpp",
@@ -165,8 +164,6 @@ blink_core_sources("html") {
     "HTMLTimeElement.h",
     "HTMLTitleElement.cpp",
     "HTMLTitleElement.h",
-    "HTMLTrackElement.cpp",
-    "HTMLTrackElement.h",
     "HTMLUListElement.cpp",
     "HTMLUListElement.h",
     "HTMLUnknownElement.cpp",
@@ -175,8 +172,6 @@ blink_core_sources("html") {
     "HTMLViewSourceDocument.h",
     "HTMLWBRElement.cpp",
     "HTMLWBRElement.h",
-    "ImageData.cpp",
-    "ImageData.h",
     "ImageDocument.cpp",
     "ImageDocument.h",
     "LinkManifest.cpp",
@@ -198,8 +193,6 @@ blink_core_sources("html") {
     "TableConstants.h",
     "TextDocument.cpp",
     "TextDocument.h",
-    "TextMetrics.cpp",
-    "TextMetrics.h",
     "TimeRanges.cpp",
     "TimeRanges.h",
     "URLRegistry.h",
@@ -218,8 +211,14 @@ blink_core_sources("html") {
     "canvas/CanvasRenderingContextFactory.h",
     "canvas/CanvasRenderingContextHost.cpp",
     "canvas/CanvasRenderingContextHost.h",
+    "canvas/HTMLCanvasElement.cpp",
+    "canvas/HTMLCanvasElement.h",
+    "canvas/ImageData.cpp",
+    "canvas/ImageData.h",
     "canvas/ImageElementBase.cpp",
     "canvas/ImageElementBase.h",
+    "canvas/TextMetrics.cpp",
+    "canvas/TextMetrics.h",
     "custom/CEReactionsScope.cpp",
     "custom/CEReactionsScope.h",
     "custom/CustomElement.cpp",
@@ -496,83 +495,8 @@ blink_core_sources("html") {
     "media/MediaError.h",
     "media/MediaFragmentURIParser.cpp",
     "media/MediaFragmentURIParser.h",
-    "media/MediaRemotingElements.cpp",
-    "media/MediaRemotingElements.h",
     "media/MediaRemotingInterstitial.cpp",
     "media/MediaRemotingInterstitial.h",
-    "parser/AtomicHTMLToken.cpp",
-    "parser/AtomicHTMLToken.h",
-    "parser/BackgroundHTMLInputStream.cpp",
-    "parser/BackgroundHTMLInputStream.h",
-    "parser/BackgroundHTMLParser.cpp",
-    "parser/BackgroundHTMLParser.h",
-    "parser/CSSPreloadScanner.cpp",
-    "parser/CSSPreloadScanner.h",
-    "parser/CompactHTMLToken.cpp",
-    "parser/CompactHTMLToken.h",
-    "parser/HTMLConstructionSite.cpp",
-    "parser/HTMLConstructionSite.h",
-    "parser/HTMLDocumentParser.cpp",
-    "parser/HTMLDocumentParser.h",
-    "parser/HTMLElementStack.cpp",
-    "parser/HTMLElementStack.h",
-    "parser/HTMLEntityParser.cpp",
-    "parser/HTMLEntityParser.h",
-    "parser/HTMLEntitySearch.cpp",
-    "parser/HTMLEntitySearch.h",
-    "parser/HTMLEntityTable.h",
-    "parser/HTMLFormattingElementList.cpp",
-    "parser/HTMLFormattingElementList.h",
-    "parser/HTMLInputStream.h",
-    "parser/HTMLMetaCharsetParser.cpp",
-    "parser/HTMLMetaCharsetParser.h",
-    "parser/HTMLParserIdioms.cpp",
-    "parser/HTMLParserIdioms.h",
-    "parser/HTMLParserOptions.cpp",
-    "parser/HTMLParserOptions.h",
-    "parser/HTMLParserReentryPermit.cpp",
-    "parser/HTMLParserReentryPermit.h",
-    "parser/HTMLParserScheduler.cpp",
-    "parser/HTMLParserScheduler.h",
-    "parser/HTMLParserScriptRunner.cpp",
-    "parser/HTMLParserScriptRunner.h",
-    "parser/HTMLParserScriptRunnerHost.h",
-    "parser/HTMLPreloadScanner.cpp",
-    "parser/HTMLPreloadScanner.h",
-    "parser/HTMLResourcePreloader.cpp",
-    "parser/HTMLResourcePreloader.h",
-    "parser/HTMLSourceTracker.cpp",
-    "parser/HTMLSourceTracker.h",
-    "parser/HTMLSrcsetParser.cpp",
-    "parser/HTMLSrcsetParser.h",
-    "parser/HTMLStackItem.h",
-    "parser/HTMLToken.h",
-    "parser/HTMLTokenizer.cpp",
-    "parser/HTMLTokenizer.h",
-    "parser/HTMLTreeBuilder.cpp",
-    "parser/HTMLTreeBuilder.h",
-    "parser/HTMLTreeBuilderSimulator.cpp",
-    "parser/HTMLTreeBuilderSimulator.h",
-    "parser/HTMLViewSourceParser.cpp",
-    "parser/HTMLViewSourceParser.h",
-    "parser/InputStreamPreprocessor.h",
-    "parser/MarkupTokenizerInlines.h",
-    "parser/NestingLevelIncrementer.h",
-    "parser/ParserSynchronizationPolicy.h",
-    "parser/PreloadRequest.cpp",
-    "parser/PreloadRequest.h",
-    "parser/ResourcePreloader.cpp",
-    "parser/ResourcePreloader.h",
-    "parser/TextDocumentParser.cpp",
-    "parser/TextDocumentParser.h",
-    "parser/TextResourceDecoder.cpp",
-    "parser/TextResourceDecoder.h",
-    "parser/TokenizedChunkQueue.cpp",
-    "parser/TokenizedChunkQueue.h",
-    "parser/XSSAuditor.cpp",
-    "parser/XSSAuditor.h",
-    "parser/XSSAuditorDelegate.cpp",
-    "parser/XSSAuditorDelegate.h",
     "shadow/DetailsMarkerControl.cpp",
     "shadow/DetailsMarkerControl.h",
     "shadow/ProgressShadowElement.cpp",
@@ -587,6 +511,8 @@ blink_core_sources("html") {
     "track/AutomaticTrackSelection.h",
     "track/CueTimeline.cpp",
     "track/CueTimeline.h",
+    "track/HTMLTrackElement.cpp",
+    "track/HTMLTrackElement.h",
     "track/InbandTextTrack.cpp",
     "track/InbandTextTrack.h",
     "track/LoadableTextTrack.cpp",
@@ -630,22 +556,8 @@ blink_core_sources("html") {
 
   jumbo_excluded_sources = [ "canvas/CanvasRenderingContext.cpp" ]  # https://crbug.com/716395
 
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
-  ]
-
   deps = [
     "//services/metrics/public/cpp:metrics_cpp",
-  ]
-}
-
-fuzzer_test("blink_html_tokenizer_fuzzer") {
-  sources = [
-    "parser/HTMLTokenizerFuzzer.cpp",
-  ]
-  deps = [
-    "../:core",
-    "../../platform:blink_fuzzer_test_support",
+    "//third_party/WebKit/Source/core/html/parser:parser",
   ]
 }

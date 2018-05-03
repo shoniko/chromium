@@ -26,6 +26,7 @@
 #include "platform/graphics/ImageFrameGenerator.h"
 
 #include <memory>
+#include "base/location.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/SharedBuffer.h"
 #include "platform/WebTaskRunner.h"
@@ -36,7 +37,6 @@
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
-#include "public/platform/WebTraceLocation.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -127,9 +127,9 @@ class ImageFrameGeneratorTest : public ::testing::Test,
     UseMockImageDecoderFactory();
   }
 
-  RefPtr<SharedBuffer> data_;
-  RefPtr<SegmentReader> segment_reader_;
-  RefPtr<ImageFrameGenerator> generator_;
+  scoped_refptr<SharedBuffer> data_;
+  scoped_refptr<SegmentReader> segment_reader_;
+  scoped_refptr<ImageFrameGenerator> generator_;
   int decoders_destroyed_;
   int decode_request_count_;
   int memory_allocator_set_count_;
@@ -258,8 +258,8 @@ TEST_F(ImageFrameGeneratorTest, incompleteDecodeBecomesCompleteMultiThreaded) {
   AddNewData();
   std::unique_ptr<WebThread> thread =
       Platform::Current()->CreateThread("DecodeThread");
-  thread->GetWebTaskRunner()->PostTask(
-      BLINK_FROM_HERE,
+  PostCrossThreadTask(
+      *thread->GetWebTaskRunner(), FROM_HERE,
       CrossThreadBind(&DecodeThreadMain, WTF::RetainedRef(generator_),
                       WTF::RetainedRef(segment_reader_)));
   thread.reset();

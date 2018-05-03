@@ -6,16 +6,16 @@
 
 #include <memory>
 
-#include "ash/login/lock_screen_controller.h"
+#include "ash/login/login_screen_controller.h"
 #include "ash/login/ui/layout_util.h"
 #include "ash/login/ui/lock_screen.h"
-#include "ash/login/ui/login_constants.h"
 #include "ash/login/ui/login_display_style.h"
 #include "ash/login/ui/login_password_view.h"
 #include "ash/login/ui/login_pin_view.h"
 #include "ash/login/ui/login_user_view.h"
 #include "ash/login/ui/non_accessible_view.h"
 #include "ash/login/ui/pin_keyboard_animation.h"
+#include "ash/public/cpp/login_constants.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/strings/utf_string_conversions.h"
@@ -102,7 +102,8 @@ LoginAuthUserView::LoginAuthUserView(
     const OnEasyUnlockIconTapped& on_easy_unlock_icon_tapped)
     : NonAccessibleView(kLoginAuthUserViewClassName),
       on_auth_(on_auth),
-      on_tap_(on_tap) {
+      on_tap_(on_tap),
+      weak_factory_(this) {
   // Build child views.
   user_view_ = new LoginUserView(
       LoginDisplayStyle::kLarge, true /*show_dropdown*/,
@@ -114,7 +115,7 @@ LoginAuthUserView::LoginAuthUserView(
   password_view_->UpdateForUser(user);
 
   pin_view_ =
-      new LoginPinView(base::BindRepeating(&LoginPasswordView::AppendNumber,
+      new LoginPinView(base::BindRepeating(&LoginPasswordView::InsertNumber,
                                            base::Unretained(password_view_)),
                        base::BindRepeating(&LoginPasswordView::Backspace,
                                            base::Unretained(password_view_)));
@@ -144,7 +145,8 @@ LoginAuthUserView::LoginAuthUserView(
 
   // Use views::GridLayout instead of views::BoxLayout because views::BoxLayout
   // lays out children according to the view->children order.
-  views::GridLayout* grid_layout = views::GridLayout::CreateAndInstall(this);
+  views::GridLayout* grid_layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
   views::ColumnSet* column_set = grid_layout->AddColumnSet(0);
   column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::LEADING,
                         0 /*resize_percent*/, views::GridLayout::USE_PREF,
@@ -173,7 +175,6 @@ LoginAuthUserView::LoginAuthUserView(
 LoginAuthUserView::~LoginAuthUserView() = default;
 
 void LoginAuthUserView::SetAuthMethods(uint32_t auth_methods) {
-  // TODO(jdufault): Implement additional auth methods.
   auth_methods_ = static_cast<AuthMethods>(auth_methods);
   bool has_password = HasAuthMethod(AUTH_PASSWORD);
   bool has_pin = HasAuthMethod(AUTH_PIN);
@@ -183,13 +184,8 @@ void LoginAuthUserView::SetAuthMethods(uint32_t auth_methods) {
   password_view_->SetFocusEnabledForChildViews(has_password);
   password_view_->layer()->SetOpacity(has_password ? 1 : 0);
 
-  // Make sure to clear any existing password on showing the view. We do this on
-  // show instead of on hide so that the password does not clear when animating
-  // out.
-  if (has_password) {
-    password_view_->Clear();
+  if (has_password)
     password_view_->RequestFocus();
-  }
 
   pin_view_->SetVisible(has_pin);
 
@@ -209,8 +205,7 @@ void LoginAuthUserView::SetAuthMethods(uint32_t auth_methods) {
   // case, then render the user view as if it was always focused, since clicking
   // on it will not do anything (such as swapping users).
   user_view_->SetForceOpaque(has_password);
-  user_view_->SetFocusBehavior(has_password ? FocusBehavior::NEVER
-                                            : FocusBehavior::ALWAYS);
+  user_view_->SetTapEnabled(!has_password);
 
   PreferredSizeChanged();
 }
@@ -320,6 +315,7 @@ void LoginAuthUserView::ApplyAnimationPostLayout() {
 void LoginAuthUserView::UpdateForUser(const mojom::LoginUserInfoPtr& user) {
   user_view_->UpdateForUser(user, true /*animate*/);
   password_view_->UpdateForUser(user);
+  password_view_->Clear();
 }
 
 const mojom::LoginUserInfoPtr& LoginAuthUserView::current_user() const {
@@ -340,14 +336,34 @@ void LoginAuthUserView::RequestFocus() {
 
 void LoginAuthUserView::OnAuthSubmit(const base::string16& password) {
   bool authenticated_by_pin = (auth_methods_ & AUTH_PIN) != 0;
-  Shell::Get()->lock_screen_controller()->AuthenticateUser(
+
+  password_view_->SetReadOnly(true);
+  Shell::Get()->login_screen_controller()->AuthenticateUser(
       current_user()->basic_user_info->account_id, base::UTF16ToUTF8(password),
-      authenticated_by_pin, on_auth_);
+      authenticated_by_pin,
+      base::BindOnce(&LoginAuthUserView::OnAuthComplete,
+                     weak_factory_.GetWeakPtr()));
+}
+
+void LoginAuthUserView::OnAuthComplete(base::Optional<bool> auth_success) {
+  if (!auth_success.has_value())
+    return;
+
+  // Clear the password only if auth fails. Make sure to keep the password view
+  // disabled even if auth succeededs, as if the user submits a password while
+  // animating the next lock screen will not work as expected. See
+  // https://crbug.com/808486.
+  if (!auth_success.value()) {
+    password_view_->Clear();
+    password_view_->SetReadOnly(false);
+  }
+
+  on_auth_.Run(auth_success.value());
 }
 
 void LoginAuthUserView::OnUserViewTap() {
   if (HasAuthMethod(AUTH_TAP)) {
-    Shell::Get()->lock_screen_controller()->AttemptUnlock(
+    Shell::Get()->login_screen_controller()->AttemptUnlock(
         current_user()->basic_user_info->account_id);
   } else {
     on_tap_.Run();

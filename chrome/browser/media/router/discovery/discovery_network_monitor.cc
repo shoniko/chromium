@@ -4,10 +4,12 @@
 
 #include "chrome/browser/media/router/discovery/discovery_network_monitor.h"
 
+#include <memory>
 #include <unordered_set>
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -58,9 +60,7 @@ DiscoveryNetworkMonitor* DiscoveryNetworkMonitor::GetInstance() {
 // static
 std::unique_ptr<DiscoveryNetworkMonitor>
 DiscoveryNetworkMonitor::CreateInstanceForTest(NetworkInfoFunction strategy) {
-  auto* discovery_network_monitor = new DiscoveryNetworkMonitor();
-  discovery_network_monitor->SetNetworkInfoFunctionForTest(std::move(strategy));
-  return std::unique_ptr<DiscoveryNetworkMonitor>(discovery_network_monitor);
+  return base::WrapUnique(new DiscoveryNetworkMonitor(strategy));
 }
 
 void DiscoveryNetworkMonitor::AddObserver(Observer* const observer) {
@@ -88,18 +88,25 @@ void DiscoveryNetworkMonitor::GetNetworkId(NetworkIdCallback callback) {
 }
 
 DiscoveryNetworkMonitor::DiscoveryNetworkMonitor()
+    : DiscoveryNetworkMonitor(&GetDiscoveryNetworkInfoList) {}
+
+DiscoveryNetworkMonitor::DiscoveryNetworkMonitor(NetworkInfoFunction strategy)
     : network_id_(kNetworkIdDisconnected),
       observers_(new base::ObserverListThreadSafe<Observer>(
-          base::ObserverListThreadSafe<
-              Observer>::NotificationType::NOTIFY_EXISTING_ONLY)),
+          base::ObserverListPolicy::EXISTING_ONLY)),
       task_runner_(base::CreateSequencedTaskRunnerWithTraits(base::MayBlock())),
-      network_info_function_(&GetDiscoveryNetworkInfoList),
-      metric_observer_(base::MakeUnique<DiscoveryNetworkMonitorMetricObserver>(
-          base::MakeUnique<base::DefaultTickClock>(),
-          base::MakeUnique<DiscoveryNetworkMonitorMetrics>())) {
+      network_info_function_(strategy),
+      metric_observer_(std::make_unique<DiscoveryNetworkMonitorMetricObserver>(
+          base::DefaultTickClock::GetInstance(),
+          std::make_unique<DiscoveryNetworkMonitorMetrics>())) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
   AddObserver(metric_observer_.get());
   net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          base::IgnoreResult(&DiscoveryNetworkMonitor::UpdateNetworkInfo),
+          base::Unretained(this)));
 }
 
 DiscoveryNetworkMonitor::~DiscoveryNetworkMonitor() {

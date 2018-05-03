@@ -13,7 +13,7 @@
 namespace blink {
 
 std::unique_ptr<Visitor> Visitor::Create(ThreadState* state, MarkingMode mode) {
-  return WTF::MakeUnique<Visitor>(state, mode);
+  return std::make_unique<Visitor>(state, mode);
 }
 
 Visitor::Visitor(ThreadState* state, MarkingMode marking_mode)
@@ -26,7 +26,7 @@ Visitor::Visitor(ThreadState* state, MarkingMode marking_mode)
 #endif
 }
 
-Visitor::~Visitor() {}
+Visitor::~Visitor() = default;
 
 void Visitor::MarkNoTracingCallback(Visitor* visitor, void* object) {
   visitor->MarkNoTracing(object);

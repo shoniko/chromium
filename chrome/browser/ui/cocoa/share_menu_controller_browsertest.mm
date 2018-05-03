@@ -7,6 +7,7 @@
 #import "base/mac/scoped_nsobject.h"
 #import "base/path_service.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -19,6 +20,7 @@
 #include "net/base/mac/url_conversions.h"
 #include "testing/gtest_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/events/test/cocoa_test_event_utils.h"
 
 // Mock sharing service for sensing shared items.
 @interface MockSharingService : NSSharingService
@@ -187,4 +189,58 @@ IN_PROC_BROWSER_TEST_F(ShareMenuControllerTest, SharingDelegate) {
              }]);
 
   PerformShare(service);
+}
+
+IN_PROC_BROWSER_TEST_F(ShareMenuControllerTest, Histograms) {
+  base::HistogramTester tester;
+  const std::string histogram_name = "OSX.NativeShare";
+
+  tester.ExpectTotalCount(histogram_name, 0);
+
+  base::scoped_nsobject<MockSharingService> service = MakeMockSharingService();
+
+  [controller_ sharingService:service didShareItems:@[]];
+  tester.ExpectBucketCount(histogram_name, true, 1);
+  tester.ExpectTotalCount(histogram_name, 1);
+
+  [controller_ sharingService:service didShareItems:@[]];
+  tester.ExpectBucketCount(histogram_name, true, 2);
+  tester.ExpectTotalCount(histogram_name, 2);
+
+  [controller_
+           sharingService:service
+      didFailToShareItems:@[]
+                    error:[NSError errorWithDomain:@"" code:0 userInfo:nil]];
+  tester.ExpectTotalCount(histogram_name, 3);
+  tester.ExpectBucketCount(histogram_name, false, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ShareMenuControllerTest, MenuHasKeyEquivalent) {
+  // If this method isn't implemented, |menuNeedsUpdate:| is called any time
+  // *any* hotkey is used
+  ASSERT_TRUE([controller_ respondsToSelector:@selector
+                           (menuHasKeyEquivalent:forEvent:target:action:)]);
+
+  // Ensure that calling |menuHasKeyEquivalent:...| the first time populates the
+  // menu.
+  base::scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@"Share"]);
+  EXPECT_EQ([menu numberOfItems], 0);
+  NSEvent* event = cocoa_test_event_utils::KeyEventWithKeyCode(
+      'i', 'i', NSKeyDown, NSCommandKeyMask | NSShiftKeyMask);
+  id ignored_target;
+  SEL ignored_action;
+  EXPECT_FALSE([controller_ menuHasKeyEquivalent:menu
+                                        forEvent:event
+                                          target:&ignored_target
+                                          action:&ignored_action]);
+  EXPECT_GT([menu numberOfItems], 0);
+
+  NSMenuItem* item = [menu itemAtIndex:0];
+  // |menuHasKeyEquivalent:....| shouldn't populate the menu after the first
+  // time.
+  [controller_ menuHasKeyEquivalent:menu
+                           forEvent:event
+                             target:&ignored_target
+                             action:&ignored_action];
+  EXPECT_EQ(item, [menu itemAtIndex:0]);  // Pointer equality intended.
 }

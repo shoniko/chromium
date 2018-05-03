@@ -8,12 +8,12 @@
 #include "core/CSSPropertyNames.h"
 #include "core/css/CSSSyntaxDescriptor.h"
 #include "core/css/cssom/CSSStyleValue.h"
+#include "modules/ModulesExport.h"
 #include "modules/csspaint/PaintRenderingContext2DSettings.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/bindings/TraceWrapperV8Reference.h"
 #include "platform/geometry/IntSize.h"
-#include "platform/geometry/LayoutSize.h"
 #include "platform/heap/Handle.h"
 #include "v8/include/v8.h"
 
@@ -26,7 +26,7 @@ class ImageResourceObserver;
 // Represents a javascript class registered on the PaintWorkletGlobalScope by
 // the author. It will store the properties for invalidation and input argument
 // types as well.
-class CSSPaintDefinition final
+class MODULES_EXPORT CSSPaintDefinition final
     : public GarbageCollectedFinalized<CSSPaintDefinition>,
       public TraceWrapperBase {
  public:
@@ -47,12 +47,10 @@ class CSSPaintDefinition final
   // This may return a nullptr (representing an invalid image) if javascript
   // throws an error.
   //
-  // The |container_size| is the container size with subpixel snapping, where
-  // the |logical_size| is without it. Both sizes include zoom.
+  // The |container_size| is the container size with subpixel snapping.
   scoped_refptr<Image> Paint(const ImageResourceObserver&,
                              const IntSize& container_size,
-                             const CSSStyleValueVector*,
-                             const LayoutSize* logical_size);
+                             const CSSStyleValueVector*);
   const Vector<CSSPropertyID>& NativeInvalidationProperties() const {
     return native_invalidation_properties_;
   }

@@ -26,7 +26,6 @@
 #include "content/browser/loader/mock_resource_loader.h"
 #include "content/browser/loader/temporary_file_stream.h"
 #include "content/browser/loader/test_resource_handler.h"
-#include "content/public/common/resource_response.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/completion_callback.h"
 #include "net/base/file_stream.h"
@@ -39,6 +38,7 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/resource_response.h"
 #include "storage/browser/blob/shareable_file_reference.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -214,7 +214,7 @@ class RedirectToFileResourceHandlerTest
                                                TRAFFIC_ANNOTATION_FOR_TESTS)) {
     base::CreateTemporaryFile(&temp_file_path_);
     std::unique_ptr<TestResourceHandler> test_handler =
-        base::MakeUnique<TestResourceHandler>();
+        std::make_unique<TestResourceHandler>();
     test_handler->set_expect_on_data_downloaded(true);
     if (GetParam() == CompletionMode::ASYNC) {
       // Don't defer OnResponseCompleted, by default, since that's really
@@ -224,16 +224,16 @@ class RedirectToFileResourceHandlerTest
     }
     test_handler_ = test_handler->GetWeakPtr();
 
-    redirect_to_file_handler_ = base::MakeUnique<RedirectToFileResourceHandler>(
+    redirect_to_file_handler_ = std::make_unique<RedirectToFileResourceHandler>(
         std::move(test_handler), url_request_.get());
     mock_loader_ =
-        base::MakeUnique<MockResourceLoader>(redirect_to_file_handler_.get());
+        std::make_unique<MockResourceLoader>(redirect_to_file_handler_.get());
     redirect_to_file_handler_->SetCreateTemporaryFileStreamFunctionForTesting(
         base::Bind(&RedirectToFileResourceHandlerTest::
                        SetCreateTemporaryFileStreamCallback,
                    base::Unretained(this)));
 
-    file_stream_ = base::MakeUnique<MockFileStream>();
+    file_stream_ = std::make_unique<MockFileStream>();
     file_stream_->set_open_result(
         MockFileStream::OperationResult(net::OK, GetParam()));
     file_stream_->set_all_write_results(MockFileStream::OperationResult(
@@ -332,7 +332,8 @@ class RedirectToFileResourceHandlerTest
   // and wait for it to resume the request if running an async test.
   MockResourceLoader::Status OnResponseStartedAndWaitForResult()
       WARN_UNUSED_RESULT {
-    mock_loader_->OnResponseStarted(base::MakeRefCounted<ResourceResponse>());
+    mock_loader_->OnResponseStarted(
+        base::MakeRefCounted<network::ResourceResponse>());
     if (GetParam() == CompletionMode::ASYNC) {
       EXPECT_EQ(MockResourceLoader::Status::CALLBACK_PENDING,
                 mock_loader_->status());
@@ -417,7 +418,8 @@ TEST_P(RedirectToFileResourceHandlerTest, SingleBodyReadDelayedFileOnResponse) {
     mock_loader_->WaitUntilIdleOrCanceled();
   }
   ASSERT_EQ(MockResourceLoader::Status::IDLE, mock_loader_->status());
-  mock_loader_->OnResponseStarted(base::MakeRefCounted<ResourceResponse>());
+  mock_loader_->OnResponseStarted(
+      base::MakeRefCounted<network::ResourceResponse>());
   ASSERT_EQ(MockResourceLoader::Status::CALLBACK_PENDING,
             mock_loader_->status());
 
@@ -451,7 +453,8 @@ TEST_P(RedirectToFileResourceHandlerTest, SingleBodyReadDelayedFileError) {
     mock_loader_->WaitUntilIdleOrCanceled();
   }
   ASSERT_EQ(MockResourceLoader::Status::IDLE, mock_loader_->status());
-  mock_loader_->OnResponseStarted(base::MakeRefCounted<ResourceResponse>());
+  mock_loader_->OnResponseStarted(
+      base::MakeRefCounted<network::ResourceResponse>());
   ASSERT_EQ(MockResourceLoader::Status::CALLBACK_PENDING,
             mock_loader_->status());
 

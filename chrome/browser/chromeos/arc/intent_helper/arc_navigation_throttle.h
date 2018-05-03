@@ -111,14 +111,6 @@ class ArcNavigationThrottle : public content::NavigationThrottle {
   static bool IsAppAvailable(
       const std::vector<mojom::IntentHandlerInfoPtr>& handlers);
 
-  // Swaps Chrome app with any app in row |kMaxAppResults-1| iff its index is
-  // bigger, thus ensuring the user can always see Chrome without scrolling.
-  // When swap is needed, fills |out_indices| and returns true. If |handlers|
-  // do not have Chrome, returns false.
-  static bool IsSwapElementsNeeded(
-      const std::vector<mojom::IntentHandlerInfoPtr>& handlers,
-      std::pair<size_t, size_t>* out_indices);
-
   static bool IsAppAvailableForTesting(
       const std::vector<mojom::IntentHandlerInfoPtr>& handlers);
   static size_t FindPreferredAppForTesting(
@@ -134,7 +126,15 @@ class ArcNavigationThrottle : public content::NavigationThrottle {
   NavigationThrottle::ThrottleCheckResult WillRedirectRequest() override;
 
   NavigationThrottle::ThrottleCheckResult HandleRequest();
+  // Resume/Cancel the current navigation which was put in DEFER. Close the
+  // current tab only if we continue the navigation on ARC and the current tab
+  // was explicitly generated for this navigation.
   void OnAppCandidatesReceived(
+      std::vector<mojom::IntentHandlerInfoPtr> handlers);
+  // Receives the array of app candidates to handle this URL and decides whether
+  // a preferred app should be triggered right away or ask the browser to
+  // display the intent picker.
+  bool FoundPreferredOrVerifiedArcApp(
       std::vector<mojom::IntentHandlerInfoPtr> handlers);
   void OnAppIconsReceived(
       std::vector<mojom::IntentHandlerInfoPtr> handlers,

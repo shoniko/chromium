@@ -10,6 +10,7 @@
 // clang-format off
 #include "V8TestVariadicConstructorArguments.h"
 
+#include "base/memory/scoped_refptr.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/IDLTypes.h"
 #include "bindings/core/v8/NativeValueTraitsImpl.h"
@@ -18,7 +19,6 @@
 #include "core/frame/LocalDOMWindow.h"
 #include "platform/bindings/V8ObjectConstructor.h"
 #include "platform/wtf/GetPtr.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -39,7 +39,6 @@ const WrapperTypeInfo V8TestVariadicConstructorArguments::wrapperTypeInfo = {
     WrapperTypeInfo::kWrapperTypeObjectPrototype,
     WrapperTypeInfo::kObjectClassId,
     WrapperTypeInfo::kNotInheritFromActiveScriptWrappable,
-    WrapperTypeInfo::kIndependent,
 };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
 #pragma clang diagnostic pop
@@ -71,7 +70,7 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
   ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kConstructionContext, "TestVariadicConstructorArguments");
 
   Vector<double> args;
-  args = ToImplArguments<Vector<double>>(info, 0, exceptionState);
+  args = ToImplArguments<IDLDouble>(info, 0, exceptionState);
   if (exceptionState.HadException())
     return;
 

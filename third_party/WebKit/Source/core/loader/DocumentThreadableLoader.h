@@ -39,11 +39,11 @@
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/RawResource.h"
 #include "platform/loader/fetch/ResourceError.h"
-#include "platform/loader/fetch/ResourceOwner.h"
 #include "platform/network/HTTPHeaderMap.h"
 #include "platform/weborigin/Referrer.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/text/WTFString.h"
+#include "services/network/public/interfaces/fetch_api.mojom-blink.h"
 
 namespace blink {
 
@@ -77,6 +77,7 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   void OverrideTimeout(unsigned long timeout) override;
 
   void Cancel() override;
+  void Detach() override;
   void SetDefersLoading(bool);
 
   void Trace(blink::Visitor*) override;
@@ -124,8 +125,8 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // The FetchCredentialsMode argument must be the request's credentials mode.
   // It's used for CORS check.
   void HandleResponse(unsigned long identifier,
-                      WebURLRequest::FetchRequestMode,
-                      WebURLRequest::FetchCredentialsMode,
+                      network::mojom::FetchRequestMode,
+                      network::mojom::FetchCredentialsMode,
                       const ResourceResponse&,
                       std::unique_ptr<WebDataConsumerHandle>);
   void HandleReceivedData(const char* data, size_t data_length);
@@ -150,12 +151,12 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
                                       const ResourceRequest&,
                                       const ResourceResponse&);
   void HandleResponseOutOfBlinkCORS(unsigned long identifier,
-                                    WebURLRequest::FetchRequestMode,
-                                    WebURLRequest::FetchCredentialsMode,
+                                    network::mojom::FetchRequestMode,
+                                    network::mojom::FetchCredentialsMode,
                                     const ResourceResponse&,
                                     std::unique_ptr<WebDataConsumerHandle>);
-  // TODO(hintzed): CORS handled in Blink. Methods below named *BlinkCORS are to
-  // be removed after https://crbug.com/736308 is fixed (i.e. when CORS is
+  // TODO(toyoshim): CORS handled in Blink. Methods below named *BlinkCORS are
+  // to be removed after https://crbug.com/736308 is fixed (i.e. when CORS is
   // handled out of Blink).
   void DispatchInitialRequestBlinkCORS(ResourceRequest&);
   void MakeCrossOriginAccessRequestBlinkCORS(const ResourceRequest&);
@@ -164,8 +165,8 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
                                  const ResourceRequest&,
                                  const ResourceResponse&);
   void HandleResponseBlinkCORS(unsigned long identifier,
-                               WebURLRequest::FetchRequestMode,
-                               WebURLRequest::FetchCredentialsMode,
+                               network::mojom::FetchRequestMode,
+                               network::mojom::FetchCredentialsMode,
                                const ResourceResponse&,
                                std::unique_ptr<WebDataConsumerHandle>);
 
@@ -199,35 +200,9 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // ResourceFetcher doesn't perform some part of the CORS logic since this
   // class performs it by itself.
   void LoadRequest(ResourceRequest&, ResourceLoaderOptions);
-  bool IsAllowedRedirect(WebURLRequest::FetchRequestMode, const KURL&) const;
+  bool IsAllowedRedirect(network::mojom::FetchRequestMode, const KURL&) const;
 
-  // TODO(hiroshige): After crbug.com/633696 is fixed,
-  // - Remove RawResourceClientStateChecker logic,
-  // - Make DocumentThreadableLoader to be a ResourceOwner and remove this
-  //   re-implementation of ResourceOwner, and
-  // - Consider re-applying RawResourceClientStateChecker in a more
-  //   general fashion (crbug.com/640291).
-  RawResource* GetResource() const { return resource_.Get(); }
-  void ClearResource() { SetResource(nullptr); }
-  void SetResource(RawResource* new_resource) {
-    if (new_resource == resource_)
-      return;
-
-    if (RawResource* old_resource = resource_.Release()) {
-      checker_.WillRemoveClient();
-      old_resource->RemoveClient(this);
-    }
-
-    if (new_resource) {
-      resource_ = new_resource;
-      checker_.WillAddClient();
-      resource_->AddClient(this);
-    }
-  }
-  Member<RawResource> resource_;
-  // End of ResourceOwner re-implementation, see above.
-
-  SecurityOrigin* GetSecurityOrigin() const;
+  const SecurityOrigin* GetSecurityOrigin() const;
 
   // Returns null if the loader is not associated with Document.
   // TODO(kinuko): Remove dependency to document.
@@ -250,7 +225,7 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // Corresponds to the CORS flag in the Fetch spec.
   bool cors_flag_;
   bool suborigin_force_credentials_;
-  scoped_refptr<SecurityOrigin> security_origin_;
+  scoped_refptr<const SecurityOrigin> security_origin_;
 
   // Set to true when the response data is given to a data consumer handle.
   bool is_using_data_consumer_handle_;
@@ -263,8 +238,8 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // Saved so that we can use the original value for the modes in
   // ResponseReceived() where |resource| might be a reused one (e.g. preloaded
   // resource) which can have different modes.
-  WebURLRequest::FetchRequestMode fetch_request_mode_;
-  WebURLRequest::FetchCredentialsMode fetch_credentials_mode_;
+  network::mojom::FetchRequestMode fetch_request_mode_;
+  network::mojom::FetchCredentialsMode fetch_credentials_mode_;
 
   // Holds the original request for fallback in case the Service Worker
   // does not respond.
@@ -288,7 +263,7 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // same-origin redirects are not counted here.
   int cors_redirect_limit_;
 
-  WebURLRequest::FetchRedirectMode redirect_mode_;
+  network::mojom::FetchRedirectMode redirect_mode_;
 
   // Holds the referrer after a redirect response was received. This referrer is
   // used to populate the HTTP Referer header when following the redirect.

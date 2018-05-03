@@ -25,6 +25,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/readback_types.h"
 #include "content/public/common/javascript_dialog_type.h"
+#include "third_party/WebKit/public/platform/modules/manifest/manifest_manager.mojom.h"
 #include "url/gurl.h"
 
 class SkBitmap;
@@ -40,6 +41,7 @@ struct WebDeviceEmulationParams;
 namespace content {
 
 class DevToolsAgentHostImpl;
+class NavigationRequest;
 class RenderFrameHostImpl;
 class WebContentsImpl;
 
@@ -77,16 +79,18 @@ class PageHandler : public DevToolsDomainHandler,
   void DidRunBeforeUnloadConfirm(const GURL& url,
                                  JavaScriptDialogCallback callback);
   void DidCloseJavaScriptDialog(bool success, const base::string16& user_input);
+  void NavigationReset(NavigationRequest* navigation_request);
 
   Response Enable() override;
   Response Disable() override;
 
+  Response Crash() override;
   Response Reload(Maybe<bool> bypassCache,
                   Maybe<std::string> script_to_evaluate_on_load) override;
-  Response Navigate(const std::string& url,
-                    Maybe<std::string> referrer,
-                    Maybe<std::string> transition_type,
-                    Page::FrameId* frame_id) override;
+  void Navigate(const std::string& url,
+                Maybe<std::string> referrer,
+                Maybe<std::string> transition_type,
+                std::unique_ptr<NavigateCallback> callback) override;
   Response StopLoading() override;
 
   using NavigationEntries = protocol::Array<Page::NavigationEntry>;
@@ -113,6 +117,8 @@ class PageHandler : public DevToolsDomainHandler,
                   Maybe<double> margin_right,
                   Maybe<String> page_ranges,
                   Maybe<bool> ignore_invalid_page_ranges,
+                  Maybe<String> header_template,
+                  Maybe<String> footer_template,
                   std::unique_ptr<PrintToPDFCallback> callback) override;
   Response StartScreencast(Maybe<std::string> format,
                            Maybe<int> quality,
@@ -131,6 +137,9 @@ class PageHandler : public DevToolsDomainHandler,
 
   Response SetDownloadBehavior(const std::string& behavior,
                                Maybe<std::string> download_path) override;
+
+  void GetAppManifest(
+      std::unique_ptr<GetAppManifestCallback> callback) override;
 
  private:
   enum EncodingFormat { PNG, JPEG };
@@ -153,6 +162,10 @@ class PageHandler : public DevToolsDomainHandler,
       const gfx::Size& requested_image_size,
       const blink::WebDeviceEmulationParams& original_params,
       const gfx::Image& image);
+
+  void GotManifest(std::unique_ptr<GetAppManifestCallback> callback,
+                   const GURL& manifest_url,
+                   blink::mojom::ManifestDebugInfoPtr debug_info);
 
   // NotificationObserver overrides.
   void Observe(int type,
@@ -181,6 +194,7 @@ class PageHandler : public DevToolsDomainHandler,
   NotificationRegistrar registrar_;
   JavaScriptDialogCallback pending_dialog_;
   scoped_refptr<DevToolsDownloadManagerDelegate> download_manager_delegate_;
+  std::unique_ptr<NavigateCallback> navigate_callback_;
   base::WeakPtrFactory<PageHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PageHandler);

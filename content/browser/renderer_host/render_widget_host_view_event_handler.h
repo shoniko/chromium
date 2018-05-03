@@ -147,6 +147,11 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   void OnTouchEvent(ui::TouchEvent* event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
 
+  // Used to set the mouse_wheel_phase_handler_ timer timeout for testing.
+  void set_mouse_wheel_wheel_phase_handler_timeout(base::TimeDelta timeout) {
+    mouse_wheel_phase_handler_.set_mouse_wheel_end_dispatch_timeout(timeout);
+  }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(InputMethodResultAuraTest,
                            FinishImeCompositionSession);
@@ -175,6 +180,9 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // |event| contains the WebMouseEvent being modified.
   void ModifyEventMovementAndCoords(const ui::MouseEvent& ui_mouse_event,
                                     blink::WebMouseEvent* event);
+
+  // This method moves cursor to window center for pointer lock.
+  void MoveCursorToCenter();
 
   // Helper function to set keyboard focus to the main window.
   void SetKeyboardFocus();

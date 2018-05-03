@@ -10,11 +10,9 @@
 
 #include "ash/display/extended_mouse_warp_controller.h"
 #include "ash/display/mouse_cursor_event_filter.h"
+#include "ash/display/screen_orientation_controller_test_api.h"
 #include "ash/display/unified_mouse_warp_controller.h"
 #include "ash/display/window_tree_host_manager.h"
-#include "ash/mus/top_level_window_factory.h"
-#include "ash/mus/window_manager.h"
-#include "ash/mus/window_manager_application.h"
 #include "ash/public/cpp/config.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/root_window_controller.h"
@@ -24,10 +22,16 @@
 #include "ash/shell/toplevel_window.h"
 #include "ash/test/ash_test_environment.h"
 #include "ash/test/ash_test_helper.h"
+#include "ash/test_screenshot_delegate.h"
 #include "ash/test_shell_delegate.h"
+#include "ash/utility/screenshot_controller.h"
+#include "ash/window_manager.h"
+#include "ash/window_manager_service.h"
+#include "ash/wm/top_level_window_factory.h"
 #include "ash/wm/window_positioner.h"
 #include "base/memory/ptr_util.h"
 #include "components/signin/core/account_id/account_id.h"
+#include "components/user_manager/user_names.h"
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
@@ -60,8 +64,8 @@ namespace {
 class AshEventGeneratorDelegate
     : public aura::test::EventGeneratorDelegateAura {
  public:
-  AshEventGeneratorDelegate() {}
-  ~AshEventGeneratorDelegate() override {}
+  AshEventGeneratorDelegate() = default;
+  ~AshEventGeneratorDelegate() override = default;
 
   // aura::test::EventGeneratorDelegateAura overrides:
   aura::WindowTreeHost* GetHostAt(
@@ -219,6 +223,10 @@ display::Display::Rotation AshTestBase::GetCurrentInternalDisplayRotation() {
 void AshTestBase::UpdateDisplay(const std::string& display_specs) {
   display::test::DisplayManagerTestApi(Shell::Get()->display_manager())
       .UpdateDisplay(display_specs);
+  ScreenOrientationControllerTestApi(
+      Shell::Get()->screen_orientation_controller())
+      .UpdateNaturalOrientation();
+  ash_test_helper_->NotifyClientAboutAcceleratedWidgets();
 }
 
 aura::Window* AshTestBase::CurrentContext() {
@@ -268,9 +276,9 @@ std::unique_ptr<aura::Window> AshTestBase::CreateTestWindow(
 
   const ui::mojom::WindowType mus_window_type =
       MusWindowTypeFromWindowType(type);
-  mus::WindowManager* window_manager =
-      ash_test_helper_->window_manager_app()->window_manager();
-  aura::Window* window = mus::CreateAndParentTopLevelWindow(
+  WindowManager* window_manager =
+      ash_test_helper_->window_manager_service()->window_manager();
+  aura::Window* window = CreateAndParentTopLevelWindow(
       window_manager, mus_window_type, &properties);
   window->set_id(shell_window_id);
   window->Show();
@@ -374,7 +382,8 @@ void AshTestBase::RunAllPendingInMessageLoop() {
 }
 
 TestScreenshotDelegate* AshTestBase::GetScreenshotDelegate() {
-  return ash_test_helper_->test_screenshot_delegate();
+  return static_cast<TestScreenshotDelegate*>(
+      Shell::Get()->screenshot_controller()->screenshot_delegate_.get());
 }
 
 TestSessionControllerClient* AshTestBase::GetSessionControllerClient() {
@@ -392,6 +401,26 @@ void AshTestBase::SimulateUserLogin(const std::string& user_email) {
   session_controller_client->SwitchActiveUser(
       AccountId::FromUserEmail(user_email));
   session_controller_client->SetSessionState(SessionState::ACTIVE);
+}
+
+void AshTestBase::SimulateGuestLogin() {
+  const std::string guest = user_manager::kGuestUserName;
+  TestSessionControllerClient* session = GetSessionControllerClient();
+  session->AddUserSession(guest, user_manager::USER_TYPE_GUEST);
+  session->SwitchActiveUser(AccountId::FromUserEmail(guest));
+  session->SetSessionState(SessionState::ACTIVE);
+}
+
+void AshTestBase::SimulateKioskMode(user_manager::UserType user_type) {
+  DCHECK(user_type == user_manager::USER_TYPE_ARC_KIOSK_APP ||
+         user_type == user_manager::USER_TYPE_KIOSK_APP);
+
+  const std::string user_email = "fake_kiosk@kioks-apps.device-local.localhost";
+  TestSessionControllerClient* session = GetSessionControllerClient();
+  session->SetIsRunningInAppMode(true);
+  session->AddUserSession(user_email, user_type);
+  session->SwitchActiveUser(AccountId::FromUserEmail(user_email));
+  session->SetSessionState(SessionState::ACTIVE);
 }
 
 void AshTestBase::ClearLogin() {

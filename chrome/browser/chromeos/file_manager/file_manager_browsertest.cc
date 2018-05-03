@@ -132,7 +132,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 
 // Flaky: crbug.com/715963
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    CreateNewFolder,
+    DISABLED_CreateNewFolder,
     FileManagerBrowserTest,
     ::testing::Values(
         TestParameter(NOT_IN_GUEST_MODE, "createNewFolderAfterSelectFile"),
@@ -627,10 +627,11 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
   // Adds a new user for testing to the current session.
   void AddUser(const TestAccountInfo& info, bool log_in) {
     base::ScopedAllowBlockingForTesting allow_blocking;
-    const AccountId account_id(AccountId::FromUserEmail(info.email));
+    const AccountId account_id(
+        AccountId::FromUserEmailGaiaId(info.email, info.gaia_id));
     if (log_in) {
       session_manager::SessionManager::Get()->CreateSession(account_id,
-                                                            info.hash);
+                                                            info.hash, false);
     }
     user_manager::UserManager::Get()->SaveUserDisplayName(
         account_id, base::UTF8ToUTF16(info.display_name));

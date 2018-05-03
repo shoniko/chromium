@@ -18,6 +18,7 @@
 <translation id="1801827354178857021">Tempoh</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 bulan}other{# bulan}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> MB/s</translation>
+<translation id="1812519734428420144">Penilaian <ph name="RATING_SCORE" /> bintang</translation>
 <translation id="1830179671306812954">{HOURS,plural, =1{1 jam dan }other{# jam dan }}</translation>
 <translation id="1842960171412779397">pilih</translation>
 <translation id="1860796786778352021">Tutup Pemberitahuan</translation>
@@ -42,7 +43,6 @@
 <translation id="2803313416453193357">Buka folder</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{1 tahun yang lalu}other{# tahun yang lalu}}</translation>
 <translation id="2931838996092594335">klik</translation>
-<translation id="2983818520079887040">Tetapan...</translation>
 <translation id="3036649622769666520">Buka Fail</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
 <translation id="3087734570205094154">Bawah</translation>
@@ -66,6 +66,7 @@
 <translation id="4316910396681052118">SEMUA APL</translation>
 <translation id="4320177379694898372">Tiada sambungan Internet</translation>
 <translation id="4588090240171750605">Tatal ke Kanan</translation>
+<translation id="4724120544754982507">Pusat Pemberitahuan, <ph name="UNREAD_NOTIFICATION_COUNT" /> pemberitahuan belum dibaca</translation>
 <translation id="4730374152663651037">KERAP DIGUNAKAN</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{Berbaki 1 bulan}other{Berbaki # bulan}}</translation>
 <translation id="4820616160060340806">Command+<ph name="KEY_COMBO_NAME" /></translation>
@@ -89,7 +90,6 @@
 <translation id="5941711191222866238">Minimumkan</translation>
 <translation id="5943826764092288734">{HOURS,plural, =1{1 jam}other{# jam}}</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME" /></translation>
-<translation id="598033046487663418">Semua Apl</translation>
 <translation id="6012623610530968780">Halaman <ph name="SELECTED_PAGE" /> daripada <ph name="TOTAL_PAGE_NUM" /></translation>
 <translation id="6022924867608035986">Kosongkan teks kotak carian</translation>
 <translation id="6040143037577758943">Tutup</translation>
@@ -104,6 +104,7 @@
 <translation id="6394627529324717982">Koma</translation>
 <translation id="6404817160109697034">{SECONDS,plural, =1{1 saat yang lalu}other{# saat yang lalu}}</translation>
 <translation id="6483402905448010557">{SECONDS,plural, =1{Sesaat yang lalu}other{# saat yang lalu}}</translation>
+<translation id="654149438358937226">Sekat semua pemberitahuan</translation>
 <translation id="6567071839949112727">klik pewaris</translation>
 <translation id="6612467943526193239">Untuk keluar daripada penentukuran, tekan Esc.</translation>
 <translation id="6620110761915583480">Simpan Fail</translation>
@@ -130,6 +131,7 @@
 <translation id="7658239707568436148">Batal</translation>
 <translation id="7781829728241885113">Semalam</translation>
 <translation id="7814458197256864873">&amp;Salin</translation>
+<translation id="7879499977785298635">Jangan sekat</translation>
 <translation id="7907591526440419938">Buka Fail</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{1 jam yang lalu}other{# jam yang lalu}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{1 saat lagi}other{# saat lagi}}</translation>
@@ -142,12 +144,14 @@
 <translation id="8352146631962686268">{YEARS,plural, =1{1 tahun}other{# tahun}}</translation>
 <translation id="8371695176452482769">Cakap sekarang</translation>
 <translation id="838869780401515933">periksa</translation>
+<translation id="8393700583063109961">Hantar mesej</translation>
 <translation id="8394908167088220973">Main/Jeda Media</translation>
 <translation id="8400147561352026160">Anjak+<ph name="KEY_COMBO_NAME" /></translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1t}other{#t}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> Fail (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8677655579646609597"><ph name="QUANTITY" /> KB/s</translation>
 <translation id="8725488761726303204">+<ph name="NUMBER" /> lagi</translation>
+<translation id="8730621377337864115">Selesai</translation>
 <translation id="8772073294905169192">{HOURS,plural, =1{1j}other{#j}}</translation>
 <translation id="8806053966018712535">Folder <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">Anotasikan imej</translation>

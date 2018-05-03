@@ -10,11 +10,11 @@ import android.app.PictureInPictureParams;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Rect;
+import android.os.Build;
 import android.os.SystemClock;
 import android.support.annotation.Nullable;
 import android.util.Rational;
 
-import org.chromium.base.BuildInfo;
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.library_loader.LibraryLoader;
@@ -28,6 +28,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
+import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 
@@ -70,6 +71,9 @@ public class PictureInPictureController {
     private static final int METRICS_END_REASON_WEB_CONTENTS_LEFT_FULLSCREEN = 7;
     private static final int METRICS_END_REASON_COUNT = 8;
 
+    private static final float MIN_ASPECT_RATIO = 1 / 2.39f;
+    private static final float MAX_ASPECT_RATIO = 2.39f;
+
     /** Callbacks to cleanup after leaving PiP. */
     private List<Callback<ChromeActivity>> mOnLeavePipCallbacks = new LinkedList<>();
 
@@ -105,7 +109,7 @@ public class PictureInPictureController {
             return false;
         }
 
-        if (!BuildInfo.isAtLeastO()) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             recordAttemptResult(METRICS_ATTEMPT_RESULT_NO_SYSTEM_SUPPORT);
             return false;
         }
@@ -171,13 +175,14 @@ public class PictureInPictureController {
         assert webContents != null;
 
         Rect bounds = getVideoBounds(webContents, activity);
+        PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
+        if (bounds != null) {
+            builder.setAspectRatio(new Rational(bounds.width(), bounds.height()));
+            builder.setSourceRectHint(bounds);
+        }
+
         try {
-            boolean entered = activity.enterPictureInPictureMode(
-                    new PictureInPictureParams.Builder()
-                            .setAspectRatio(new Rational(bounds.width(), bounds.height()))
-                            .setSourceRectHint(bounds)
-                            .build());
-            if (!entered) return;
+            if (!activity.enterPictureInPictureMode(builder.build())) return;
         } catch (IllegalStateException e) {
             Log.e(TAG, "Error entering PiP: " + e);
             return;
@@ -185,10 +190,14 @@ public class PictureInPictureController {
 
         webContents.setHasPersistentVideo(true);
 
+        // We don't want InfoBars displaying while in PiP, they cover too much content.
+        activity.getActivityTab().getInfoBarContainer().setHidden(true);
+
         mOnLeavePipCallbacks.add(new Callback<ChromeActivity>() {
             @Override
             public void onResult(ChromeActivity activity2) {
                 webContents.setHasPersistentVideo(false);
+                activity.getActivityTab().getInfoBarContainer().setHidden(false);
             }
         });
 
@@ -233,11 +242,14 @@ public class PictureInPictureController {
         // yet been detected. However we check |hasActiveEffectivelyFullscreenVideo| in
         // |shouldAttempt|, so |rect| should never be null.
         Rect rect = webContents.getFullscreenVideoSize();
-        float videoAspectRatio = ((float) rect.width()) / ((float) rect.height());
+        if (rect.width() == 0 || rect.height() == 0) return null;
+
+        float videoAspectRatio = MathUtils.clamp(rect.width() / (float) rect.height(),
+                MIN_ASPECT_RATIO, MAX_ASPECT_RATIO);
 
         int windowWidth = activity.getWindow().getDecorView().getWidth();
         int windowHeight = activity.getWindow().getDecorView().getHeight();
-        float phoneAspectRatio = ((float) windowWidth) / ((float) windowHeight);
+        float phoneAspectRatio = windowWidth / (float) windowHeight;
 
         // The currently playing video size is the video frame size, not the on-screen size.
         // We know the video will be touching either the sides or the top and bottom of the screen
@@ -295,7 +307,7 @@ public class PictureInPictureController {
     /**
      * A class to dismiss the Activity when the tab:
      * - Closes.
-     * - Reparents.
+     * - Reparents: Attaches to a different activity.
      * - Crashes.
      * - Leaves fullscreen.
      */
@@ -306,8 +318,10 @@ public class PictureInPictureController {
         }
 
         @Override
-        public void onReparentingFinished(Tab tab) {
-            dismissActivity(mActivity, METRICS_END_REASON_REPARENT);
+        public void onActivityAttachmentChanged(Tab tab, boolean isAttached) {
+            if (isAttached) {
+                dismissActivity(mActivity, METRICS_END_REASON_REPARENT);
+            }
         }
 
         @Override

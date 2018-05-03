@@ -14,15 +14,12 @@ import android.widget.Toast;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.MemoryPressureListener;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.DeviceUtils;
-import org.chromium.content.common.ContentSwitches;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_shell.Shell;
 import org.chromium.content_shell.ShellManager;
@@ -38,19 +35,21 @@ public class ContentShellActivity extends Activity {
     private static final String ACTIVE_SHELL_URL_KEY = "activeUrl";
     public static final String COMMAND_LINE_ARGS_KEY = "commandLineArgs";
 
+    // Native switch - shell_switches::kRunLayoutTest
+    private static final String RUN_LAYOUT_TEST_SWITCH = "run-layout-test";
+
     private ShellManager mShellManager;
     private ActivityWindowAndroid mWindowAndroid;
     private Intent mLastSentIntent;
     private String mStartupUrl;
 
     @Override
-    @SuppressFBWarnings("DM_EXIT")
     protected void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         // Initializing the command line must occur before loading the library.
         if (!CommandLine.isInitialized()) {
-            ContentApplication.initCommandLine(this);
+            ((ContentShellApplication) getApplication()).initCommandLine();
             String[] commandLineParams = getCommandLineParamsFromIntent(getIntent());
             if (commandLineParams != null) {
                 CommandLine.getInstance().appendSwitchesAndArguments(commandLineParams);
@@ -85,7 +84,7 @@ public class ContentShellActivity extends Activity {
             mShellManager.setStartupUrl(Shell.sanitizeUrl(mStartupUrl));
         }
 
-        if (CommandLine.getInstance().hasSwitch(ContentSwitches.RUN_LAYOUT_TEST)) {
+        if (CommandLine.getInstance().hasSwitch(RUN_LAYOUT_TEST_SWITCH)) {
             try {
                 BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
                         .startBrowserProcessesSync(false);

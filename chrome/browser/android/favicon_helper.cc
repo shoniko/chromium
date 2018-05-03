@@ -78,7 +78,8 @@ void OnEnsureIconIsAvailableFinished(
 
 }  // namespace
 
-static jlong Init(JNIEnv* env, const JavaParamRef<jclass>& clazz) {
+static jlong JNI_FaviconHelper_Init(JNIEnv* env,
+                                    const JavaParamRef<jclass>& clazz) {
   return reinterpret_cast<intptr_t>(new FaviconHelper());
 }
 
@@ -95,7 +96,6 @@ jboolean FaviconHelper::GetLocalFaviconImageForURL(
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& j_profile,
     const JavaParamRef<jstring>& j_page_url,
-    jint j_icon_types,
     jint j_desired_size_in_pixel,
     const JavaParamRef<jobject>& j_favicon_image_callback) {
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
@@ -114,12 +114,21 @@ jboolean FaviconHelper::GetLocalFaviconImageForURL(
       base::Bind(&OnLocalFaviconAvailable,
                  ScopedJavaGlobalRef<jobject>(j_favicon_image_callback));
 
+  // |j_page_url| is an origin, and it may not have had a favicon associated
+  // with it. A trickier case is when |j_page_url| only has domain-scoped
+  // cookies, but visitors are redirected to HTTPS on visiting. Then
+  // |j_page_url| defaults to a HTTP scheme, but the favicon will be associated
+  // with the HTTPS URL and hence won't be found if we include the scheme in the
+  // lookup. Set |fallback_to_host|=true so the favicon database will fall back
+  // to matching only the hostname to have the best chance of finding a favicon.
+  const bool fallback_to_host = true;
   favicon_service->GetRawFaviconForPageURL(
       GURL(ConvertJavaStringToUTF16(env, j_page_url)),
-      static_cast<int>(j_icon_types),
-      static_cast<int>(j_desired_size_in_pixel),
-      callback_runner,
-      cancelable_task_tracker_.get());
+      {favicon_base::IconType::kFavicon, favicon_base::IconType::kTouchIcon,
+       favicon_base::IconType::kTouchPrecomposedIcon,
+       favicon_base::IconType::kWebManifestIcon},
+      static_cast<int>(j_desired_size_in_pixel), fallback_to_host,
+      callback_runner, cancelable_task_tracker_.get());
 
   return true;
 }
@@ -173,8 +182,9 @@ void FaviconHelper::EnsureIconIsAvailable(
   DCHECK(web_contents);
   GURL page_url(ConvertJavaStringToUTF8(env, j_page_url));
   GURL icon_url(ConvertJavaStringToUTF8(env, j_icon_url));
-  favicon_base::IconType icon_type =
-      j_is_large_icon ? favicon_base::TOUCH_ICON : favicon_base::FAVICON;
+  favicon_base::IconType icon_type = j_is_large_icon
+                                         ? favicon_base::IconType::kTouchIcon
+                                         : favicon_base::IconType::kFavicon;
 
   // TODO(treib): Optimize this by creating a FaviconService::HasFavicon method
   // so that we don't have to actually get the image.

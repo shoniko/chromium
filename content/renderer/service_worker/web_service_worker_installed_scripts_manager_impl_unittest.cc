@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -14,17 +15,18 @@
 
 namespace content {
 
-class BrowserSideSender : mojom::ServiceWorkerInstalledScriptsManagerHost {
+class BrowserSideSender
+    : blink::mojom::ServiceWorkerInstalledScriptsManagerHost {
  public:
   BrowserSideSender() : binding_(this) {}
   ~BrowserSideSender() override = default;
 
-  mojom::ServiceWorkerInstalledScriptsInfoPtr CreateAndBind(
+  blink::mojom::ServiceWorkerInstalledScriptsInfoPtr CreateAndBind(
       const std::vector<GURL>& installed_urls) {
     EXPECT_FALSE(manager_.is_bound());
     EXPECT_FALSE(body_handle_.is_valid());
     EXPECT_FALSE(meta_data_handle_.is_valid());
-    auto scripts_info = mojom::ServiceWorkerInstalledScriptsInfo::New();
+    auto scripts_info = blink::mojom::ServiceWorkerInstalledScriptsInfo::New();
     scripts_info->installed_urls = installed_urls;
     scripts_info->manager_request = mojo::MakeRequest(&manager_);
     binding_.Bind(mojo::MakeRequest(&scripts_info->manager_host_ptr));
@@ -36,7 +38,7 @@ class BrowserSideSender : mojom::ServiceWorkerInstalledScriptsManagerHost {
                                int64_t meta_data_size) {
     EXPECT_FALSE(body_handle_.is_valid());
     EXPECT_FALSE(meta_data_handle_.is_valid());
-    auto script_info = mojom::ServiceWorkerScriptInfo::New();
+    auto script_info = blink::mojom::ServiceWorkerScriptInfo::New();
     script_info->script_url = script_url;
     EXPECT_EQ(MOJO_RESULT_OK,
               mojo::CreateDataPipe(nullptr, &body_handle_, &script_info->body));
@@ -89,8 +91,9 @@ class BrowserSideSender : mojom::ServiceWorkerInstalledScriptsManagerHost {
   base::OnceClosure requested_script_closure_;
   GURL waiting_requested_url_;
 
-  mojom::ServiceWorkerInstalledScriptsManagerPtr manager_;
-  mojo::Binding<mojom::ServiceWorkerInstalledScriptsManagerHost> binding_;
+  blink::mojom::ServiceWorkerInstalledScriptsManagerPtr manager_;
+  mojo::Binding<blink::mojom::ServiceWorkerInstalledScriptsManagerHost>
+      binding_;
 
   mojo::ScopedDataPipeProducerHandle body_handle_;
   mojo::ScopedDataPipeProducerHandle meta_data_handle_;
@@ -123,7 +126,8 @@ class WebServiceWorkerInstalledScriptsManagerImplTest : public testing::Test {
   }
 
   void CreateInstalledScriptsManager(
-      mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info) {
+      blink::mojom::ServiceWorkerInstalledScriptsInfoPtr
+          installed_scripts_info) {
     installed_scripts_manager_ =
         WebServiceWorkerInstalledScriptsManagerImpl::Create(
             std::move(installed_scripts_info), io_task_runner_);

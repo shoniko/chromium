@@ -56,6 +56,10 @@
 
 namespace shell_integration {
 
+// Allows LaunchXdgUtility to join a process.
+class LaunchXdgUtilityScopedAllowBaseSyncPrimitives
+    : public base::ScopedAllowBaseSyncPrimitives {};
+
 namespace {
 
 // Helper to launch xdg scripts. We don't want them to ask any questions on the
@@ -79,6 +83,7 @@ bool LaunchXdgUtility(const std::vector<std::string>& argv, int* exit_code) {
   close(devnull);
   if (!process.IsValid())
     return false;
+  LaunchXdgUtilityScopedAllowBaseSyncPrimitives allow_base_sync_primitives;
   return process.WaitForExit(exit_code);
 }
 
@@ -738,7 +743,7 @@ base::FilePath GetWebShortcutFilename(const GURL& url) {
   for (size_t i = 1; i < 100; ++i) {
     if (base::PathExists(base::FilePath(alternative_filepath))) {
       alternative_filepath = base::FilePath(
-          filepath.value() + "_" + base::SizeTToString(i) + ".desktop");
+          filepath.value() + "_" + base::NumberToString(i) + ".desktop");
     } else {
       return base::FilePath(alternative_filepath).BaseName();
     }

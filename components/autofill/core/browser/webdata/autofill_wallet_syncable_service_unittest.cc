@@ -4,9 +4,9 @@
 
 #include "components/autofill/core/browser/webdata/autofill_wallet_syncable_service.h"
 
+#include <memory>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/test_autofill_clock.h"
@@ -61,7 +61,7 @@ class TestAutofillTable : public AutofillTable {
   bool GetServerCreditCards(
       std::vector<std::unique_ptr<CreditCard>>* cards) const override {
     for (const auto& card_on_disk : cards_on_disk_)
-      cards->push_back(base::MakeUnique<CreditCard>(card_on_disk));
+      cards->push_back(std::make_unique<CreditCard>(card_on_disk));
     return true;
   }
 
@@ -220,6 +220,30 @@ TEST(AutofillWalletSyncableServiceTest, NewWalletCard) {
   // The use_count should be 1 and the use_date should be the current time.
   EXPECT_EQ(1U, wallet_cards.back().use_count());
   EXPECT_EQ(arbitrary_time, wallet_cards.back().use_date());
+}
+
+// Verify that name on card can be empty.
+TEST(AutofillWalletSyncableServiceTest, EmptyNameOnCard) {
+  std::vector<CreditCard> wallet_cards;
+  std::vector<AutofillProfile> wallet_addresses;
+  syncer::SyncDataList data_list;
+
+  // Create a Sync data for a card and its billing address.
+  data_list.push_back(CreateSyncDataForWalletCreditCard(
+      "card1" /* id */, "1" /* billing_address_id */));
+
+  AutofillWalletSyncableService::PopulateWalletCardsAndAddresses(
+      data_list, &wallet_cards, &wallet_addresses);
+
+  ASSERT_EQ(1U, wallet_cards.size());
+
+  // Make sure card holder name can be empty.
+  EXPECT_TRUE(
+      wallet_cards.back().GetRawInfo(autofill::CREDIT_CARD_NAME_FULL).empty());
+  EXPECT_TRUE(
+      wallet_cards.back().GetRawInfo(autofill::CREDIT_CARD_NAME_FIRST).empty());
+  EXPECT_TRUE(
+      wallet_cards.back().GetRawInfo(autofill::CREDIT_CARD_NAME_LAST).empty());
 }
 
 }  // namespace autofill

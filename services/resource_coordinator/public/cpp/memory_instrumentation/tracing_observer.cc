@@ -4,8 +4,8 @@
 
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/tracing_observer.h"
 
+#include "base/files/file_path.h"
 #include "base/format_macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event_argument.h"
@@ -31,10 +31,13 @@ bool IsMemoryInfraTracingEnabled() {
 void OsDumpAsValueInto(TracedValue* value, const mojom::OSMemDump& os_dump) {
   value->SetString(
       "resident_set_bytes",
-      base::StringPrintf("%" PRIx32, os_dump.resident_set_kb * 1024));
+      base::StringPrintf(
+          "%" PRIx64, static_cast<uint64_t>(os_dump.resident_set_kb) * 1024));
   value->SetString(
       "private_footprint_bytes",
-      base::StringPrintf("%" PRIx32, os_dump.private_footprint_kb * 1024));
+      base::StringPrintf(
+          "%" PRIx64,
+          static_cast<uint64_t>(os_dump.private_footprint_kb) * 1024));
 }
 
 };  // namespace
@@ -73,7 +76,7 @@ void TracingObserver::OnTraceLogEnabled() {
       trace_config.memory_dump_config();
 
   memory_dump_config_ =
-      base::MakeUnique<base::trace_event::TraceConfig::MemoryDumpConfig>(
+      std::make_unique<base::trace_event::TraceConfig::MemoryDumpConfig>(
           memory_dump_config);
 
   if (memory_dump_manager_)
@@ -129,7 +132,7 @@ bool TracingObserver::AddChromeDumpToTraceIfEnabled(
   if (!ShouldAddToTrace(args))
     return false;
 
-  std::unique_ptr<TracedValue> traced_value = base::MakeUnique<TracedValue>();
+  std::unique_ptr<TracedValue> traced_value = std::make_unique<TracedValue>();
   process_memory_dump->SerializeAllocatorDumpsInto(traced_value.get());
 
   AddToTrace(args, pid, std::move(traced_value));
@@ -145,7 +148,7 @@ bool TracingObserver::AddOsDumpToTraceIfEnabled(
   if (!ShouldAddToTrace(args))
     return false;
 
-  std::unique_ptr<TracedValue> traced_value = base::MakeUnique<TracedValue>();
+  std::unique_ptr<TracedValue> traced_value = std::make_unique<TracedValue>();
 
   traced_value->BeginDictionary("process_totals");
   OsDumpAsValueInto(traced_value.get(), *os_dump);
@@ -153,7 +156,7 @@ bool TracingObserver::AddOsDumpToTraceIfEnabled(
 
   if (memory_maps->size()) {
     traced_value->BeginDictionary("process_mmaps");
-    MemoryMapsAsValueInto(*memory_maps, traced_value.get());
+    MemoryMapsAsValueInto(*memory_maps, traced_value.get(), false);
     traced_value->EndDictionary();
   }
 
@@ -164,7 +167,8 @@ bool TracingObserver::AddOsDumpToTraceIfEnabled(
 // static
 void TracingObserver::MemoryMapsAsValueInto(
     const std::vector<mojom::VmRegionPtr>& memory_maps,
-    TracedValue* value) {
+    TracedValue* value,
+    bool is_argument_filtering_enabled) {
   static const char kHexFmt[] = "%" PRIx64;
 
   // Refer to the design doc goo.gl/sxfFY8 for the semantics of these fields.
@@ -178,7 +182,19 @@ void TracingObserver::MemoryMapsAsValueInto(
       value->SetString("ts",
                        base::StringPrintf(kHexFmt, region->module_timestamp));
     value->SetInteger("pf", region->protection_flags);
-    value->SetString("mf", region->mapped_file);
+
+    // The module path will be the basename when argument filtering is
+    // activated. The whitelisting implemented for filtering string values
+    // doesn't allow rewriting. Therefore, a different path is produced here
+    // when argument filtering is activated.
+    if (is_argument_filtering_enabled) {
+      base::FilePath::StringType module_path(region->mapped_file.begin(),
+                                             region->mapped_file.end());
+      value->SetString("mf",
+                       base::FilePath(module_path).BaseName().AsUTF8Unsafe());
+    } else {
+      value->SetString("mf", region->mapped_file);
+    }
 
     value->BeginDictionary("bs");  // byte stats
     value->SetString(

@@ -30,6 +30,7 @@
 #ifndef VTTScanner_h
 #define VTTScanner_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/text/ParsingUtilities.h"
@@ -50,7 +51,6 @@ namespace blink {
 // advance the input pointer past the matched sequence.
 class CORE_EXPORT VTTScanner {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(VTTScanner);
 
  public:
   explicit VTTScanner(const String& line);
@@ -136,10 +136,10 @@ class CORE_EXPORT VTTScanner {
   unsigned ScanDigits(int& number);
 
   // Scan a floating point value on one of the forms: \d+\.? \d+\.\d+ \.\d+
-  bool ScanFloat(float& number);
+  bool ScanDouble(double& number);
 
-  // Scan a floating point value (per scanFloat) followed by a '%'.
-  bool ScanPercentage(float& percentage);
+  // Scan a floating point value (per ScanDouble) followed by a '%'.
+  bool ScanPercentage(double& percentage);
 
  protected:
   Position GetPosition() const { return data_.characters8; }
@@ -162,6 +162,8 @@ class CORE_EXPORT VTTScanner {
     const UChar* characters16;
   } end_;
   bool is8_bit_;
+
+  DISALLOW_COPY_AND_ASSIGN(VTTScanner);
 };
 
 inline size_t VTTScanner::Run::length() const {

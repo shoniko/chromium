@@ -4,9 +4,10 @@
 
 #include "cc/paint/paint_image.h"
 
+#include <memory>
+
 #include "base/atomic_sequence_num.h"
 #include "base/hash.h"
-#include "base/memory/ptr_util.h"
 #include "cc/paint/paint_image_generator.h"
 #include "cc/paint/paint_record.h"
 #include "cc/paint/skia_paint_image_generator.h"
@@ -14,8 +15,8 @@
 
 namespace cc {
 namespace {
-base::AtomicSequenceNumber s_next_id_;
-base::AtomicSequenceNumber s_next_content_id_;
+base::AtomicSequenceNumber g_next_id_;
+base::AtomicSequenceNumber g_next_content_id_;
 }  // namespace
 
 const PaintImage::Id PaintImage::kNonLazyStableId = -1;
@@ -31,15 +32,29 @@ PaintImage& PaintImage::operator=(const PaintImage& other) = default;
 PaintImage& PaintImage::operator=(PaintImage&& other) = default;
 
 bool PaintImage::operator==(const PaintImage& other) const {
-  return sk_image_ == other.sk_image_ && paint_record_ == other.paint_record_ &&
-         paint_record_rect_ == other.paint_record_rect_ &&
-         paint_record_content_id_ == other.paint_record_content_id_ &&
-         paint_image_generator_ == other.paint_image_generator_ &&
-         id_ == other.id_ && animation_type_ == other.animation_type_ &&
-         completion_state_ == other.completion_state_ &&
-         subset_rect_ == other.subset_rect_ &&
-         frame_index_ == other.frame_index_ &&
-         is_multipart_ == other.is_multipart_;
+  if (sk_image_ != other.sk_image_)
+    return false;
+  if (paint_record_ != other.paint_record_)
+    return false;
+  if (paint_record_rect_ != other.paint_record_rect_)
+    return false;
+  if (paint_record_content_id_ != other.paint_record_content_id_)
+    return false;
+  if (paint_image_generator_ != other.paint_image_generator_)
+    return false;
+  if (id_ != other.id_)
+    return false;
+  if (animation_type_ != other.animation_type_)
+    return false;
+  if (completion_state_ != other.completion_state_)
+    return false;
+  if (subset_rect_ != other.subset_rect_)
+    return false;
+  if (frame_index_ != other.frame_index_)
+    return false;
+  if (is_multipart_ != other.is_multipart_)
+    return false;
+  return true;
 }
 
 // static
@@ -58,12 +73,12 @@ PaintImage::DecodingMode PaintImage::GetConservative(DecodingMode one,
 
 // static
 PaintImage::Id PaintImage::GetNextId() {
-  return s_next_id_.GetNext();
+  return g_next_id_.GetNext();
 }
 
 // static
 PaintImage::ContentId PaintImage::GetNextContentId() {
-  return s_next_content_id_.GetNext();
+  return g_next_content_id_.GetNext();
 }
 
 const sk_sp<SkImage>& PaintImage::GetSkImage() const {
@@ -106,7 +121,7 @@ void PaintImage::CreateSkImage() {
         nullptr, nullptr, SkImage::BitDepth::kU8, SkColorSpace::MakeSRGB());
   } else if (paint_image_generator_) {
     cached_sk_image_ =
-        SkImage::MakeFromGenerator(base::MakeUnique<SkiaPaintImageGenerator>(
+        SkImage::MakeFromGenerator(std::make_unique<SkiaPaintImageGenerator>(
             paint_image_generator_, frame_index_));
   }
 
@@ -134,6 +149,10 @@ bool PaintImage::Decode(void* memory,
                         size_t frame_index) const {
   // We only support decode to supported decode size.
   DCHECK(info->dimensions() == GetSupportedDecodeSize(info->dimensions()));
+
+  // We don't support SkImageInfo's with color spaces on them. Color spaces
+  // should always be passed via the |color_space| arg.
+  DCHECK(!info->colorSpace());
 
   // TODO(vmpstr): If we're using a subset_rect_ then the info specifies the
   // requested size relative to the subset. However, the generator isn't aware
@@ -253,7 +272,7 @@ sk_sp<SkImage> PaintImage::GetSkImageForFrame(size_t index) const {
     return GetSkImage();
 
   sk_sp<SkImage> image = SkImage::MakeFromGenerator(
-      base::MakeUnique<SkiaPaintImageGenerator>(paint_image_generator_, index));
+      std::make_unique<SkiaPaintImageGenerator>(paint_image_generator_, index));
   if (!subset_rect_.IsEmpty())
     image = image->makeSubset(gfx::RectToSkIRect(subset_rect_));
   return image;

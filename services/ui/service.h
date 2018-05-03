@@ -17,6 +17,7 @@
 #include "base/memory/weak_ptr.h"
 #include "components/discardable_memory/public/interfaces/discardable_shared_memory_manager.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_runner.h"
 #include "services/ui/ime/ime_driver_bridge.h"
@@ -30,16 +31,21 @@
 #include "services/ui/public/interfaces/remote_event_dispatcher.mojom.h"
 #include "services/ui/public/interfaces/user_access_manager.mojom.h"
 #include "services/ui/public/interfaces/user_activity_monitor.mojom.h"
+#include "services/ui/public/interfaces/video_detector.mojom.h"
 #include "services/ui/public/interfaces/window_manager_window_tree_factory.mojom.h"
 #include "services/ui/public/interfaces/window_server_test.mojom.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
-#include "services/ui/public/interfaces/window_tree_host.mojom.h"
+#include "services/ui/public/interfaces/window_tree_host_factory.mojom.h"
 #include "services/ui/ws/user_id.h"
 #include "services/ui/ws/window_server_delegate.h"
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/client_native_pixmap_factory_ozone.h"
 #endif
+
+#if defined(OS_CHROMEOS)
+#include "services/ui/public/interfaces/arc.mojom.h"
+#endif  // defined(OS_CHROMEOS)
 
 namespace discardable_memory {
 class DiscardableSharedMemoryManager;
@@ -68,11 +74,12 @@ class WindowServer;
 class Service : public service_manager::Service,
                 public ws::WindowServerDelegate {
  public:
-  // Contains the configuration necessary to run the UI Service inside the
-  // Window Manager's process.
-  struct InProcessConfig {
-    InProcessConfig();
-    ~InProcessConfig();
+  struct InitParams {
+    InitParams();
+    ~InitParams();
+
+    // UI service runs in its own process (i.e. not embedded in browser or ash).
+    bool running_standalone = false;
 
     // Can be used to load resources.
     scoped_refptr<base::SingleThreadTaskRunner> resource_runner = nullptr;
@@ -84,17 +91,16 @@ class Service : public service_manager::Service,
     discardable_memory::DiscardableSharedMemoryManager* memory_manager =
         nullptr;
 
+    // Whether mus should host viz, or whether an external client (e.g. the
+    // window manager) would be responsible for hosting viz.
+    bool should_host_viz = true;
+
    private:
-    DISALLOW_COPY_AND_ASSIGN(InProcessConfig);
+    DISALLOW_COPY_AND_ASSIGN(InitParams);
   };
 
-  // |config| should be null when UI Service runs in it's own separate process,
-  // as opposed to inside the Window Manager's process.
-  explicit Service(const InProcessConfig* config = nullptr);
+  explicit Service(const InitParams& params);
   ~Service() override;
-
-  // Call if the ui::Service is being run as a standalone process.
-  void set_running_standalone(bool value) { running_standalone_ = value; }
 
  private:
   // Holds InterfaceRequests received before the first WindowTreeHost Display
@@ -103,8 +109,6 @@ class Service : public service_manager::Service,
   struct UserState;
 
   using UserIdToUserState = std::map<ws::UserId, std::unique_ptr<UserState>>;
-
-  bool is_in_process() const { return is_in_process_; }
 
   // Attempts to initialize the resource bundle. Returns true if successful,
   // otherwise false if resources cannot be loaded.
@@ -177,6 +181,12 @@ class Service : public service_manager::Service,
   void BindRemoteEventDispatcherRequest(
       mojom::RemoteEventDispatcherRequest request);
 
+  void BindVideoDetectorRequest(mojom::VideoDetectorRequest request);
+
+#if defined(OS_CHROMEOS)
+  void BindArcRequest(mojom::ArcRequest request);
+#endif  // defined(OS_CHROMEOS)
+
   std::unique_ptr<ws::WindowServer> window_server_;
   std::unique_ptr<PlatformEventSource> event_source_;
   using PendingRequests = std::vector<std::unique_ptr<PendingRequest>>;
@@ -188,9 +198,9 @@ class Service : public service_manager::Service,
   // and must outlive |registry_|.
   InputDeviceServer input_device_server_;
 
-  // True if the UI Service runs inside WM's process, false if it runs inside
-  // its own process.
-  const bool is_in_process_;
+  // True if the UI Service runs runs inside its own process, false if it is
+  // embedded in another process.
+  const bool running_standalone_;
 
   std::unique_ptr<ws::ThreadedImageCursorsFactory>
       threaded_image_cursors_factory_;
@@ -220,6 +230,8 @@ class Service : public service_manager::Service,
   std::unique_ptr<discardable_memory::DiscardableSharedMemoryManager>
       owned_discardable_shared_memory_manager_;
 
+  const bool should_host_viz_;
+
   service_manager::BinderRegistryWithArgs<
       const service_manager::BindSourceInfo&>
       registry_with_source_info_;
@@ -229,8 +241,6 @@ class Service : public service_manager::Service,
   bool is_gpu_ready_ = false;
 
   bool in_destructor_ = false;
-
-  bool running_standalone_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(Service);
 };

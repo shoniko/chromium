@@ -207,8 +207,8 @@ NetworkTrafficAnnotationTag BranchedCompleteNetworkTrafficAnnotation(
 // }
 
 // Do not use this unless net-serialization is required.
-// TODO(crbug.com/690323): Add tools to check constructor of this structure is
-// used only in .mojom.cc files.
+// Mojo interfaces for this class and the next one are defined in
+// '/services/network/public/interfaces'.
 struct MutableNetworkTrafficAnnotationTag {
   MutableNetworkTrafficAnnotationTag()
       : unique_id_hash_code(TRAFFIC_ANNOTATION_UNINITIALIZED) {}
@@ -275,6 +275,12 @@ struct MutablePartialNetworkTrafficAnnotationTag {
 #define MISSING_TRAFFIC_ANNOTATION     \
   net::DefineNetworkTrafficAnnotation( \
       "missing", "Function called without traffic annotation.")
+
+// TODO(crbug.com/656607): Remove this temporary tag which is only used during
+// refactoring.
+#define NO_TRAFFIC_ANNOTATION_BUG_656607                  \
+  net::DefineNetworkTrafficAnnotation("undefined-656607", \
+                                      "Temporary tag for crbug.com/656607.")
 
 #undef COMPUTE_STRING_HASH
 

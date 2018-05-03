@@ -25,7 +25,7 @@ var TestRunner = class {
     this._log.call(null, item);
   }
 
-  _logObject(object, title, stabilizeNames = ['id', 'nodeId', 'objectId', 'scriptId', 'timestamp', 'backendNodeId', 'parentId', 'frameId', 'baseURL', 'documentURL']) {
+  _logObject(object, title, stabilizeNames = ['id', 'nodeId', 'objectId', 'scriptId', 'timestamp', 'backendNodeId', 'parentId', 'frameId', 'loaderId', 'baseURL', 'documentURL', 'styleSheetId']) {
     var lines = [];
 
     function dumpValue(value, prefix, prefixWithName) {
@@ -161,6 +161,36 @@ var TestRunner = class {
   startURL(url, description) {
     return this._start(description, null, url);
   }
+
+  async logStackTrace(debuggers, stackTrace, debuggerId) {
+    while (stackTrace) {
+      const {description, callFrames, parent, parentId} = stackTrace;
+      if (description)
+        this.log(`--${description}--`);
+      this.logCallFrames(callFrames);
+      if (parentId) {
+        if (parentId.debuggerId)
+          debuggerId = parentId.debuggerId;
+        let result = await debuggers.get(debuggerId).getStackTrace({
+          stackTraceId: parentId
+        });
+        stackTrace = result.stackTrace || result.result.stackTrace;
+      } else {
+        stackTrace = parent;
+      }
+    }
+  }
+
+  logCallFrames(callFrames) {
+    for (let frame of callFrames) {
+      let functionName = frame.functionName || '(anonymous)';
+      let url = frame.url;
+      let location = frame.location || frame;
+      this.log(`${functionName} at ${url}:${
+                                            location.lineNumber
+                                          }:${location.columnNumber}`);
+    }
+  }
 };
 
 TestRunner.Page = class {
@@ -171,7 +201,7 @@ TestRunner.Page = class {
 
   async createSession() {
     var sessionId = (await DevToolsAPI._sendCommandOrDie('Target.attachToTarget', {targetId: this._targetId})).sessionId;
-    var session = new TestRunner.Session(this, sessionId);
+    var session = new TestRunner.Session(this._testRunner, sessionId);
     DevToolsAPI._sessions.set(sessionId, session);
     return session;
   }
@@ -195,23 +225,47 @@ TestRunner.Page = class {
 };
 
 TestRunner.Session = class {
-  constructor(page, sessionId) {
-    this._testRunner = page._testRunner;
-    this._page = page;
+  constructor(testRunner, sessionId) {
+    this._testRunner = testRunner;
     this._sessionId = sessionId;
     this._requestId = 0;
     this._dispatchTable = new Map();
     this._eventHandlers = new Map();
     this.protocol = this._setupProtocol();
+    this._childSessions = null;
+    this._parentSession = null;
   }
 
   async disconnect() {
     await DevToolsAPI._sendCommandOrDie('Target.detachFromTarget', {sessionId: this._sessionId});
-    DevToolsAPI._sessions.delete(this._page._targetId);
+    if (this._parentSession)
+      this._parentSession._childSessions.delete(this._sessionId);
+    else
+      DevToolsAPI._sessions.delete(this._sessionId);
+  }
+
+  createChild(sessionId) {
+    if (!this._childSessions) {
+      this._childSessions = new Map();
+      this.protocol.Target.onReceivedMessageFromTarget(event => this._dispatchMessageFromTarget(event));
+    }
+    let session = new TestRunner.Session(this._testRunner, sessionId);
+    this._childSessions.set(sessionId, session);
+    session._parentSession = this;
+    return session;
+  }
+
+  _dispatchMessageFromTarget(event) {
+    var session = this._childSessions.get(event.params.sessionId);
+    if (session)
+      session._dispatchMessage(JSON.parse(event.params.message));
   }
 
   sendRawCommand(requestId, message) {
-    DevToolsAPI._sendCommandOrDie('Target.sendMessageToTarget', {sessionId: this._sessionId, message: message});
+    if (this._parentSession)
+      this._parentSession.sendCommand('Target.sendMessageToTarget', {sessionId: this._sessionId, message: message});
+    else
+      DevToolsAPI._sendCommandOrDie('Target.sendMessageToTarget', {sessionId: this._sessionId, message: message});
     return new Promise(f => this._dispatchTable.set(requestId, f));
   }
 
@@ -229,8 +283,8 @@ TestRunner.Session = class {
       code = `(${code.toString()})(${argsString})`;
     }
     var response = await this.protocol.Runtime.evaluate({expression: code, returnByValue: true});
-    if (response.error) {
-      this._testRunner.log(`Error while evaluating '${code}': ${JSON.stringify(response.error)}`);
+    if (response.error || response.result.exceptionDetails) {
+      this._testRunner.log(`Error while evaluating '${code}': ${JSON.stringify(response.error || response.result.exceptionDetails)}`);
       this._testRunner.completeTest();
     } else {
       return response.result.result.value;
@@ -256,19 +310,10 @@ TestRunner.Session = class {
   }
 
   async _navigate(url) {
-    this.protocol.Page.enable();
-    this.protocol.Page.navigate({url: url});
-
-    var callback;
-    var promise = new Promise(f => callback = f);
-    this.protocol.Page.onFrameNavigated(message => {
-      if (!message.params.frame.parentId)
-        callback();
-    });
-    await Promise.all([
-      promise,
-      this.protocol.Page.onceLoadEventFired()
-    ]);
+    await this.protocol.Page.enable();
+    await this.protocol.Page.setLifecycleEventsEnabled({enabled: true});
+    await this.protocol.Page.navigate({url: url});
+    await this.protocol.Page.onceLifecycleEvent(event => event.params.name === 'load');
   }
 
   _dispatchMessage(message) {
@@ -288,21 +333,27 @@ TestRunner.Session = class {
   }
 
   _setupProtocol() {
-    return new Proxy({}, { get: (target, agentName, receiver) => new Proxy({}, {
-      get: (target, methodName, receiver) => {
-        const eventPattern = /^(on(ce)?|off)([A-Z][A-Za-z0-9]+)/;
-        var match = eventPattern.exec(methodName);
-        if (!match)
-          return args => this.sendCommand(`${agentName}.${methodName}`, args || {});
-        var eventName = match[3];
-        eventName = eventName.charAt(0).toLowerCase() + eventName.slice(1);
-        if (match[1] === 'once')
-          return eventMatcher => this._waitForEvent(`${agentName}.${eventName}`, eventMatcher);
-        if (match[1] === 'off')
-          return listener => this._removeEventHandler(`${agentName}.${eventName}`, listener);
-        return listener => this._addEventHandler(`${agentName}.${eventName}`, listener);
-      }
-    })});
+    return new Proxy({}, {
+      get: (target, agentName, receiver) => new Proxy({}, {
+        get: (target, methodName, receiver) => {
+          const eventPattern = /^(on(ce)?|off)([A-Z][A-Za-z0-9]*)/;
+          var match = eventPattern.exec(methodName);
+          if (!match)
+            return args => this.sendCommand(
+                       `${agentName}.${methodName}`, args || {});
+          var eventName = match[3];
+          eventName = eventName.charAt(0).toLowerCase() + eventName.slice(1);
+          if (match[1] === 'once')
+            return eventMatcher => this._waitForEvent(
+                       `${agentName}.${eventName}`, eventMatcher);
+          if (match[1] === 'off')
+            return listener => this._removeEventHandler(
+                       `${agentName}.${eventName}`, listener);
+          return listener => this._addEventHandler(
+                     `${agentName}.${eventName}`, listener);
+        }
+      })
+    });
   }
 
   _addEventHandler(eventName, handler) {
@@ -330,6 +381,64 @@ TestRunner.Session = class {
       };
       this._addEventHandler(eventName, handler);
     });
+  }
+};
+
+class WorkerProtocol {
+  constructor(dp, sessionId) {
+    this._sessionId = sessionId;
+    this._callbacks = new Map();
+    this._dp = dp;
+    this._dp.Target.onReceivedMessageFromTarget(
+        (message) => this._onMessage(message));
+    this.dp = this._setupProtocol();
+  }
+
+  _setupProtocol() {
+    let lastId = 0;
+    return new Proxy({}, {
+      get: (target, agentName, receiver) => new Proxy({}, {
+        get: (target, methodName, receiver) => {
+          const eventPattern = /^(once)?([A-Z][A-Za-z0-9]*)/;
+          var match = eventPattern.exec(methodName);
+          if (!match || match[1] !== 'once') {
+            return args => new Promise(resolve => {
+                     let id = ++lastId;
+                     this._callbacks.set(id, resolve);
+                     this._dp.Target.sendMessageToTarget({
+                       sessionId: this._sessionId,
+                       message: JSON.stringify({
+                         method: `${agentName}.${methodName}`,
+                         params: args || {},
+                         id: id
+                       })
+                     });
+                   });
+          }
+          var eventName = match[2];
+          eventName = eventName.charAt(0).toLowerCase() + eventName.slice(1);
+          return () => new Promise(resolve => {
+                   this._callbacks.set(`${agentName}.${eventName}`, resolve);
+                 });
+        }
+      })
+    });
+  }
+
+  _onMessage(message) {
+    if (message.params.sessionId !== this._sessionId)
+      return;
+    const {id, result, method, params} = JSON.parse(message.params.message);
+    if (id && this._callbacks.has(id)) {
+      let callback = this._callbacks.get(id);
+      this._callbacks.delete(id);
+      callback(result);
+    }
+    if (method && this._callbacks.has(method)) {
+      let callback = this._callbacks.get(method);
+      this._callbacks.delete(method);
+      callback(params);
+    }
   }
 };
 
@@ -407,25 +516,6 @@ DevToolsAPI._sendCommandOrDie = function(method, params) {
   });
 };
 
-function debugTest(testFunction) {
-  var dispatch = DevToolsAPI.dispatchMessage;
-  var messages = [];
-  DevToolsAPI.dispatchMessage = message => {
-    if (!messages.length) {
-      setTimeout(() => {
-        for (var message of messages.splice(0))
-          dispatch(message);
-      }, 0);
-    }
-    messages.push(message);
-  };
-  return testRunner => {
-    testRunner.log = console.log;
-    testRunner.completeTest = () => console.log('Test completed');
-    window.test = () => testFunction(testRunner);
-  };
-};
-
 DevToolsAPI._fetch = function(url) {
   return new Promise(fulfill => {
     var xhr = new XMLHttpRequest();
@@ -447,11 +537,29 @@ window.testRunner.waitUntilDone();
 window.testRunner.setCanOpenWindows(true);
 
 window.addEventListener('load', () => {
-  var testScriptURL = window.location.search.substring(1);
+  var params = new URLSearchParams(window.location.search);
+  var testScriptURL = params.get('test');
   var baseURL = testScriptURL.substring(0, testScriptURL.lastIndexOf('/') + 1);
   DevToolsAPI._fetch(testScriptURL).then(testScript => {
     var testRunner = new TestRunner(baseURL, DevToolsAPI._log, DevToolsAPI._completeTest, DevToolsAPI._fetch);
     var testFunction = eval(`${testScript}\n//# sourceURL=${testScriptURL}`);
+    if (params.get('debug')) {
+      var dispatch = DevToolsAPI.dispatchMessage;
+      var messages = [];
+      DevToolsAPI.dispatchMessage = message => {
+        if (!messages.length) {
+          setTimeout(() => {
+            for (var message of messages.splice(0))
+              dispatch(message);
+          }, 0);
+        }
+        messages.push(message);
+      };
+      testRunner.log = console.log;
+      testRunner.completeTest = () => console.log('Test completed');
+      window.test = () => testFunction(testRunner);
+      return;
+    }
     return testFunction(testRunner);
   }).catch(reason => {
     DevToolsAPI._log(`Error while executing test script: ${reason}\n${reason.stack}`);

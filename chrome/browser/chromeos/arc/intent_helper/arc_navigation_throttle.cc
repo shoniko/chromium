@@ -214,24 +214,34 @@ GURL ArcNavigationThrottle::GetStartingGURL() const {
   return navigation_handle()->GetStartingSiteInstance()->GetSiteURL();
 }
 
-// We received the array of app candidates to handle this URL (even the Chrome
-// app is included).
 void ArcNavigationThrottle::OnAppCandidatesReceived(
+    std::vector<mojom::IntentHandlerInfoPtr> handlers) {
+  if (FoundPreferredOrVerifiedArcApp(std::move(handlers))) {
+    content::WebContents* tab = navigation_handle()->GetWebContents();
+    if (tab && tab->GetController().IsInitialNavigation())
+      tab->Close();
+    else
+      CancelDeferredNavigation(content::NavigationThrottle::CANCEL_AND_IGNORE);
+  } else {
+    Resume();
+  }
+}
+
+bool ArcNavigationThrottle::FoundPreferredOrVerifiedArcApp(
     std::vector<mojom::IntentHandlerInfoPtr> handlers) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::NavigationHandle* handle = navigation_handle();
   const GURL& url = handle->GetURL();
 
+  bool cancel_navigation = false;
   if (!IsAppAvailable(handlers)) {
-    // This scenario shouldn't be accessed as ArcNavigatinoThrottle is created
+    // This scenario shouldn't be accessed as ArcNavigationThrottle is created
     // iff there are ARC apps which can actually handle the given URL.
     DVLOG(1) << "There are no app candidates for this URL: " << url;
     ui_displayed_ = false;
-    Resume();
-    return;
+    RecordUma(CloseReason::ERROR, Platform::CHROME);
+    return cancel_navigation;
   }
-
-  Resume();
 
   // If one of the apps is marked as preferred, use it right away without
   // showing the UI.
@@ -251,17 +261,12 @@ void ArcNavigationThrottle::OnAppCandidatesReceived(
 
     if (!instance) {
       close_reason = CloseReason::ERROR;
+    } else if (ArcIntentHelperBridge::IsIntentHelperPackage(package_name)) {
+      chrome::SetIntentPickerViewVisibility(
+          chrome::FindBrowserWithWebContents(handle->GetWebContents()), true);
     } else {
-      if (!ArcIntentHelperBridge::IsIntentHelperPackage(package_name))
-        instance->HandleUrl(url.spec(), package_name);
-
-      // Make intent picker's icon visible if there are installed apps that can
-      // handle the current URL, this enables the user to still access ARC's
-      // apps even if they marked an app or Chrome as preferred before.
-      Browser* browser =
-          chrome::FindBrowserWithWebContents(handle->GetWebContents());
-      if (browser)
-        chrome::SetIntentPickerViewVisibility(browser, true);
+      instance->HandleUrl(url.spec(), package_name);
+      cancel_navigation = true;
     }
 
     Platform platform = GetDestinationPlatform(package_name, close_reason);
@@ -271,7 +276,8 @@ void ArcNavigationThrottle::OnAppCandidatesReceived(
         handle->GetWebContents()->GetBrowserContext());
     if (!intent_helper_bridge) {
       LOG(ERROR) << "Cannot get an instance of ArcIntentHelperBridge";
-      return;
+      RecordUma(CloseReason::ERROR, Platform::CHROME);
+      return cancel_navigation;
     }
     std::vector<ArcIntentHelperBridge::ActivityName> activities;
     for (const auto& handler : handlers)
@@ -279,10 +285,13 @@ void ArcNavigationThrottle::OnAppCandidatesReceived(
 
     intent_helper_bridge->GetActivityIcons(
         activities,
-        base::Bind(&ArcNavigationThrottle::AsyncOnAppIconsReceived,
-                   chrome::FindBrowserWithWebContents(handle->GetWebContents()),
-                   base::Passed(&handlers), url));
+        base::BindOnce(
+            &ArcNavigationThrottle::AsyncOnAppIconsReceived,
+            chrome::FindBrowserWithWebContents(handle->GetWebContents()),
+            std::move(handlers), url));
   }
+
+  return cancel_navigation;
 }
 
 // static
@@ -299,7 +308,7 @@ void ArcNavigationThrottle::AsyncOnAppIconsReceived(
         handler->package_name, handler->activity_name);
     const auto it = icons->find(activity);
 
-    app_info.emplace_back(it != icons->end() ? it->second.icon20 : gfx::Image(),
+    app_info.emplace_back(it != icons->end() ? it->second.icon16 : gfx::Image(),
                           handler->package_name, handler->name);
   }
 
@@ -431,26 +440,6 @@ size_t ArcNavigationThrottle::FindPreferredAppForTesting(
 }
 
 // static
-bool ArcNavigationThrottle::IsSwapElementsNeeded(
-    const std::vector<mojom::IntentHandlerInfoPtr>& handlers,
-    std::pair<size_t, size_t>* out_indices) {
-  size_t chrome_app_index = 0;
-  for (size_t i = 0; i < handlers.size(); ++i) {
-    if (ArcIntentHelperBridge::IsIntentHelperPackage(
-            handlers[i]->package_name)) {
-      chrome_app_index = i;
-      break;
-    }
-  }
-  if (chrome_app_index < ArcNavigationThrottle::kMaxAppResults)
-    return false;
-
-  *out_indices = std::make_pair(ArcNavigationThrottle::kMaxAppResults - 1,
-                                chrome_app_index);
-  return true;
-}
-
-// static
 void ArcNavigationThrottle::AsyncShowIntentPickerBubble(const Browser* browser,
                                                         const GURL& url) {
   arc::ArcServiceManager* arc_service_manager = arc::ArcServiceManager::Get();
@@ -495,8 +484,9 @@ void ArcNavigationThrottle::AsyncOnAppCandidatesReceived(
     activities.emplace_back(handler->package_name, handler->activity_name);
 
   intent_helper_bridge->GetActivityIcons(
-      activities, base::Bind(&ArcNavigationThrottle::AsyncOnAppIconsReceived,
-                             browser, base::Passed(&handlers), url));
+      activities,
+      base::BindOnce(&ArcNavigationThrottle::AsyncOnAppIconsReceived, browser,
+                     std::move(handlers), url));
 }
 
 }  // namespace arc

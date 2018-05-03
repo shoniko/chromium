@@ -56,7 +56,6 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
@@ -160,8 +159,6 @@ PrerenderManagerObserver::~PrerenderManagerObserver() {}
 
 // static
 PrerenderManager::PrerenderManagerMode PrerenderManager::mode_ =
-    PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT;
-PrerenderManager::PrerenderManagerMode PrerenderManager::instant_mode_ =
     PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT;
 PrerenderManager::PrerenderManagerMode PrerenderManager::omnibox_mode_ =
     PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT;
@@ -284,14 +281,6 @@ PrerenderManager::AddForcedPrerenderFromExternalRequest(
                       bounds, session_storage_namespace);
 }
 
-std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerenderForInstant(
-    const GURL& url,
-    content::SessionStorageNamespace* session_storage_namespace,
-    const gfx::Size& size) {
-  return AddPrerender(ORIGIN_INSTANT, url, content::Referrer(), gfx::Rect(size),
-                      session_storage_namespace);
-}
-
 void PrerenderManager::CancelAllPrerenders() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   while (!active_prerenders_.empty()) {
@@ -302,7 +291,7 @@ void PrerenderManager::CancelAllPrerenders() {
 }
 
 bool PrerenderManager::MaybeUsePrerenderedPage(const GURL& url,
-                                               chrome::NavigateParams* params) {
+                                               NavigateParams* params) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   WebContents* web_contents = params->target_contents;
@@ -398,7 +387,7 @@ std::unique_ptr<WebContents> PrerenderManager::SwapInternal(
   }
 
   // Do not swap in the prerender if the current WebContents is being captured.
-  if (web_contents->GetCapturerCount() > 0) {
+  if (web_contents->IsBeingCaptured()) {
     prerender_data->contents()->Destroy(FINAL_STATUS_PAGE_BEING_CAPTURED);
     return nullptr;
   }
@@ -411,16 +400,6 @@ std::unique_ptr<WebContents> PrerenderManager::SwapInternal(
     histograms_->RecordFinalStatus(prerender_data->contents()->origin(),
                                    FINAL_STATUS_DEVTOOLS_ATTACHED);
     prerender_data->contents()->Destroy(FINAL_STATUS_DEVTOOLS_ATTACHED);
-    return nullptr;
-  }
-
-  // If the prerendered page is in the middle of a cross-site navigation,
-  // don't swap it in because there isn't a good way to merge histories.
-  if (prerender_data->contents()->IsCrossSiteNavigationPending()) {
-    histograms_->RecordFinalStatus(prerender_data->contents()->origin(),
-                                   FINAL_STATUS_CROSS_SITE_NAVIGATION_PENDING);
-    prerender_data->contents()->Destroy(
-        FINAL_STATUS_CROSS_SITE_NAVIGATION_PENDING);
     return nullptr;
   }
 
@@ -498,21 +477,6 @@ void PrerenderManager::MoveEntryToPendingDelete(PrerenderContents* entry,
   PostCleanupTask();
 }
 
-void PrerenderManager::RecordPrefetchResponseReceived(Origin origin,
-                                                      bool is_main_resource,
-                                                      bool is_redirect,
-                                                      bool is_no_store) {
-  histograms_->RecordPrefetchResponseReceived(origin, is_main_resource,
-                                              is_redirect, is_no_store);
-}
-
-void PrerenderManager::RecordPrefetchRedirectCount(Origin origin,
-                                                   bool is_main_resource,
-                                                   int redirect_count) {
-  histograms_->RecordPrefetchRedirectCount(origin, is_main_resource,
-                                           redirect_count);
-}
-
 void PrerenderManager::RecordNoStateFirstContentfulPaint(const GURL& url,
                                                          bool is_no_store,
                                                          bool was_hidden,
@@ -568,8 +532,6 @@ void PrerenderManager::RecordPrerenderFirstContentfulPaint(
 PrerenderManager::PrerenderManagerMode PrerenderManager::GetMode(
     Origin origin) {
   switch (origin) {
-    case ORIGIN_INSTANT:
-      return instant_mode_;
     case ORIGIN_OMNIBOX:
       return omnibox_mode_;
     default:
@@ -583,11 +545,6 @@ void PrerenderManager::SetMode(PrerenderManagerMode mode) {
 }
 
 // static
-void PrerenderManager::SetInstantMode(PrerenderManagerMode mode) {
-  instant_mode_ = mode;
-}
-
-// static
 void PrerenderManager::SetOmniboxMode(PrerenderManagerMode mode) {
   omnibox_mode_ = mode;
 }
@@ -595,7 +552,6 @@ void PrerenderManager::SetOmniboxMode(PrerenderManagerMode mode) {
 // static
 bool PrerenderManager::IsAnyPrerenderingPossible() {
   return mode_ != PRERENDER_MODE_DISABLED ||
-         instant_mode_ != PRERENDER_MODE_DISABLED ||
          omnibox_mode_ != PRERENDER_MODE_DISABLED;
 }
 
@@ -723,18 +679,6 @@ bool PrerenderManager::HasRecentlyBeenNavigatedTo(Origin origin,
   }
 
   return false;
-}
-
-// static
-bool PrerenderManager::DoesURLHaveValidScheme(const GURL& url) {
-  return (url.SchemeIsHTTPOrHTTPS() ||
-          url.SchemeIs(extensions::kExtensionScheme) ||
-          url.SchemeIs("data"));
-}
-
-// static
-bool PrerenderManager::DoesSubresourceURLHaveValidScheme(const GURL& url) {
-  return DoesURLHaveValidScheme(url) || url == url::kAboutBlankURL;
 }
 
 std::unique_ptr<base::DictionaryValue> PrerenderManager::CopyAsValue() const {

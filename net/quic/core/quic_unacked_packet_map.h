@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_transmission_info.h"
-#include "net/quic/core/stream_notifier_interface.h"
+#include "net/quic/core/session_notifier_interface.h"
 #include "net/quic/platform/api/quic_export.h"
 
 namespace net {
@@ -42,18 +42,15 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   // Returns true if the packet |packet_number| is unacked.
   bool IsUnacked(QuicPacketNumber packet_number) const;
 
-  // Notifies stream_notifier that stream frames have been acked.
-  void NotifyStreamFramesAcked(const QuicTransmissionInfo& info,
-                               QuicTime::Delta ack_delay);
+  // Notifies session_notifier that frames have been acked.
+  void NotifyFramesAcked(const QuicTransmissionInfo& info,
+                         QuicTime::Delta ack_delay);
 
   // Marks |info| as no longer in flight.
   void RemoveFromInFlight(QuicTransmissionInfo* info);
 
   // Marks |packet_number| as no longer in flight.
   void RemoveFromInFlight(QuicPacketNumber packet_number);
-
-  // Marks |packet_number| as in flight.  Must not be unackable.
-  void RestoreToInFlight(QuicPacketNumber packet_number);
 
   // No longer retransmit data for |stream_id|.
   void CancelRetransmissionsForStream(QuicStreamId stream_id);
@@ -144,7 +141,7 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   // RTT measurement purposes.
   void RemoveObsoletePackets();
 
-  void SetStreamNotifier(StreamNotifierInterface* stream_notifier);
+  void SetSessionNotifier(SessionNotifierInterface* session_notifier);
 
  private:
   // Called when a packet is retransmitted with a new packet number.
@@ -194,9 +191,8 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
   // Number of retransmittable crypto handshake packets.
   size_t pending_crypto_packet_count_;
 
-  // Receives notifications of stream frames being retransmitted or
-  // acknowledged.
-  StreamNotifierInterface* stream_notifier_;
+  // Receives notifications of frames being retransmitted or acknowledged.
+  SessionNotifierInterface* session_notifier_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicUnackedPacketMap);
 };

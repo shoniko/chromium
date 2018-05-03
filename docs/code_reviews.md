@@ -95,8 +95,9 @@ owners rather than large directories with many owners. Owners must:
     discourage people from sending reviews, including writing "slow" or
     "emeritus" after your name.
 
-Seldom-updated directories may have exceptions. Directories in `third_party`
-should list those most familiar with the library.
+Seldom-updated directories may have exceptions to the "substantiality" and
+"recency" requirements. Directories in `third_party` should list those most
+familiar with the library, regardless of how often the code is updated.
 
 ## TBR ("To Be Reviewed")
 
@@ -109,7 +110,7 @@ review the change. If there are comments after landing, the author is obligated
 to address them in a followup patch.
 
 Do not use TBR just because a change is urgent or the reviewer is being slow.
-Contact the reviewer directly or find somebody.
+Contact the reviewer directly or find somebody else to review your change.
 
 To send a change TBR, annotate the description and send email like normal.
 Otherwise the reviewer won't know to review the patch.

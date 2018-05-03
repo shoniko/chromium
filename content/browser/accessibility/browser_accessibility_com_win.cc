@@ -38,8 +38,10 @@ const uint32_t kScreenReaderAndHTMLAccessibilityModes =
 
 namespace content {
 
-using AXPlatformPositionInstance = AXPlatformPosition::AXPositionInstance;
-using AXPlatformRange = ui::AXRange<AXPlatformPositionInstance::element_type>;
+using BrowserAccessibilityPositionInstance =
+    BrowserAccessibilityPosition::AXPositionInstance;
+using AXPlatformRange =
+    ui::AXRange<BrowserAccessibilityPositionInstance::element_type>;
 
 // These nonstandard GUIDs are taken directly from the Mozilla sources
 // (accessible/src/msaa/nsAccessNodeWrap.cpp); some documentation is here:
@@ -308,23 +310,17 @@ STDMETHODIMP BrowserAccessibilityComWin::get_text(LONG start_offset,
   HandleSpecialTextOffset(&end_offset);
 
   // The spec allows the arguments to be reversed.
-  if (start_offset > end_offset) {
-    LONG tmp = start_offset;
-    start_offset = end_offset;
-    end_offset = tmp;
-  }
+  if (start_offset > end_offset)
+    std::swap(start_offset, end_offset);
 
-  // The spec does not allow the start or end offsets to be out or range;
-  // we must return an error if so.
-  LONG len = text_str.length();
-  if (start_offset < 0)
+  LONG len = static_cast<LONG>(text_str.length());
+  if (start_offset < 0 || start_offset > len)
     return E_INVALIDARG;
-  if (end_offset > len)
+  if (end_offset < 0 || end_offset > len)
     return E_INVALIDARG;
 
   base::string16 substr =
       text_str.substr(start_offset, end_offset - start_offset);
-
   if (substr.empty())
     return S_FALSE;
 
@@ -1113,7 +1109,7 @@ STDMETHODIMP BrowserAccessibilityComWin::get_nodeInfo(
   *name_space_id = 0;
   *node_value = SysAllocString(value().c_str());
   *num_children = owner()->PlatformChildCount();
-  *unique_id = -AXPlatformNodeWin::unique_id();
+  *unique_id = -AXPlatformNodeWin::GetUniqueId();
 
   if (owner()->IsDocument()) {
     *node_type = NODETYPE_DOCUMENT;
@@ -1711,7 +1707,7 @@ void BrowserAccessibilityComWin::ComputeStylesIfNeeded() {
     return;
 
   std::map<int, std::vector<base::string16>> attributes_map;
-  if (owner()->PlatformIsLeaf() || owner()->IsSimpleTextControl()) {
+  if (owner()->PlatformIsLeaf() || owner()->IsPlainTextField()) {
     attributes_map[0] = ComputeTextAttributes();
     const std::map<int, std::vector<base::string16>> spelling_attributes =
         GetSpellingAttributes();
@@ -1760,9 +1756,9 @@ void BrowserAccessibilityComWin::ComputeStylesIfNeeded() {
 // tree positions.
 // TODO(nektar): Remove this function once selection fixes in Blink are
 // thoroughly tested and convert to tree positions.
-AXPlatformPosition::AXPositionInstance
+BrowserAccessibilityPosition::AXPositionInstance
 BrowserAccessibilityComWin::CreatePositionForSelectionAt(int offset) const {
-  AXPlatformPositionInstance position =
+  BrowserAccessibilityPositionInstance position =
       owner()->CreatePositionAt(offset)->AsLeafTextPosition();
   if (position->GetAnchor() &&
       position->GetAnchor()->GetRole() == ui::AX_ROLE_INLINE_TEXT_BOX) {
@@ -1805,8 +1801,6 @@ void BrowserAccessibilityComWin::UpdateStep1ComputeWinAttributes() {
       owner()->GetString16Attribute(ui::AX_ATTR_DESCRIPTION);
 
   win_attributes_->value = GetValue();
-
-  CalculateRelationships();
 }
 
 void BrowserAccessibilityComWin::UpdateStep2ComputeHypertext() {
@@ -1920,7 +1914,7 @@ void BrowserAccessibilityComWin::Destroy() {
 
 void BrowserAccessibilityComWin::Init(ui::AXPlatformNodeDelegate* delegate) {
   owner_ = static_cast<BrowserAccessibilityWin*>(delegate);
-  AXPlatformNodeBase::Init(delegate);
+  AXPlatformNodeWin::Init(delegate);
 }
 
 std::vector<base::string16> BrowserAccessibilityComWin::ComputeTextAttributes()
@@ -1980,8 +1974,7 @@ std::vector<base::string16> BrowserAccessibilityComWin::ComputeTextAttributes()
     // We assume that there are 96 pixels per inch on a standard display.
     // TODO(nektar): Figure out the current value of pixels per inch.
     float points = font_size * 72.0 / 96.0;
-    attributes.push_back(L"font-size:" +
-                         base::UTF8ToUTF16(base::DoubleToString(points)) +
+    attributes.push_back(L"font-size:" + base::NumberToString16(points) +
                          L"pt");
   }
 
@@ -2133,7 +2126,7 @@ BrowserAccessibilityComWin::GetSpellingAttributes() {
       spelling_attributes[end_offset] = end_attributes;
     }
   }
-  if (owner()->IsSimpleTextControl()) {
+  if (owner()->IsPlainTextField()) {
     int start_offset = 0;
     for (BrowserAccessibility* static_text =
              BrowserAccessibilityManager::NextTextOnlyObject(
@@ -2247,9 +2240,9 @@ void BrowserAccessibilityComWin::SetIA2HypertextSelection(LONG start_offset,
                                                           LONG end_offset) {
   HandleSpecialTextOffset(&start_offset);
   HandleSpecialTextOffset(&end_offset);
-  AXPlatformPositionInstance start_position =
+  BrowserAccessibilityPositionInstance start_position =
       CreatePositionForSelectionAt(static_cast<int>(start_offset));
-  AXPlatformPositionInstance end_position =
+  BrowserAccessibilityPositionInstance end_position =
       CreatePositionForSelectionAt(static_cast<int>(end_offset));
   Manager()->SetSelection(
       AXPlatformRange(std::move(start_position), std::move(end_position)));
@@ -2259,28 +2252,29 @@ LONG BrowserAccessibilityComWin::FindBoundary(
     IA2TextBoundaryType ia2_boundary,
     LONG start_offset,
     ui::TextBoundaryDirection direction) {
-  // If the boundary is relative to the caret, use the selection
-  // affinity, otherwise default to downstream affinity.
-  ui::AXTextAffinity affinity =
-      start_offset == IA2_TEXT_OFFSET_CARET
-          ? Manager()->GetTreeData().sel_focus_affinity
-          : ui::AX_TEXT_AFFINITY_DOWNSTREAM;
-
   HandleSpecialTextOffset(&start_offset);
+  // If the |start_offset| is equal to the location of the caret, then use the
+  // focus affinity, otherwise default to downstream affinity.
+  ui::AXTextAffinity affinity = ui::AX_TEXT_AFFINITY_DOWNSTREAM;
+  int selection_start, selection_end;
+  GetSelectionOffsets(&selection_start, &selection_end);
+  if (selection_end >= 0 && start_offset == selection_end)
+    affinity = Manager()->GetTreeData().sel_focus_affinity;
+
   if (ia2_boundary == IA2_TEXT_BOUNDARY_WORD) {
     switch (direction) {
       case ui::FORWARDS_DIRECTION: {
-        AXPlatformPositionInstance position =
+        BrowserAccessibilityPositionInstance position =
             owner()->CreatePositionAt(static_cast<int>(start_offset), affinity);
-        AXPlatformPositionInstance next_word =
+        BrowserAccessibilityPositionInstance next_word =
             position->CreateNextWordStartPosition(
                 ui::AXBoundaryBehavior::StopAtAnchorBoundary);
         return next_word->text_offset();
       }
       case ui::BACKWARDS_DIRECTION: {
-        AXPlatformPositionInstance position =
+        BrowserAccessibilityPositionInstance position =
             owner()->CreatePositionAt(static_cast<int>(start_offset), affinity);
-        AXPlatformPositionInstance previous_word =
+        BrowserAccessibilityPositionInstance previous_word =
             position->CreatePreviousWordStartPosition(
                 ui::AXBoundaryBehavior::StopIfAlreadyAtBoundary);
         return previous_word->text_offset();
@@ -2291,17 +2285,17 @@ LONG BrowserAccessibilityComWin::FindBoundary(
   if (ia2_boundary == IA2_TEXT_BOUNDARY_LINE) {
     switch (direction) {
       case ui::FORWARDS_DIRECTION: {
-        AXPlatformPositionInstance position =
+        BrowserAccessibilityPositionInstance position =
             owner()->CreatePositionAt(static_cast<int>(start_offset), affinity);
-        AXPlatformPositionInstance next_line =
+        BrowserAccessibilityPositionInstance next_line =
             position->CreateNextLineStartPosition(
                 ui::AXBoundaryBehavior::StopAtAnchorBoundary);
         return next_line->text_offset();
       }
       case ui::BACKWARDS_DIRECTION: {
-        AXPlatformPositionInstance position =
+        BrowserAccessibilityPositionInstance position =
             owner()->CreatePositionAt(static_cast<int>(start_offset), affinity);
-        AXPlatformPositionInstance previous_line =
+        BrowserAccessibilityPositionInstance previous_line =
             position->CreatePreviousLineStartPosition(
                 ui::AXBoundaryBehavior::StopIfAlreadyAtBoundary);
         return previous_line->text_offset();

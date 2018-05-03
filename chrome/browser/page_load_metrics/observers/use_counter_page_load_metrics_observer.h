@@ -15,6 +15,8 @@ namespace internal {
 
 const char kFeaturesHistogramName[] =
     "Blink.UseCounter.Features_TestBrowserProcessLogging";
+const char kUkmUseCounterEventName[] = "Blink.UseCounter";
+const char kUkmUseCounterFeature[] = "Feature";
 
 }  // namespace internal
 
@@ -28,7 +30,10 @@ class UseCounterPageLoadMetricsObserver
   ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
                          ukm::SourceId source_id) override;
   void OnFeaturesUsageObserved(
-      const page_load_metrics::mojom::PageLoadFeatures&) override;
+      const page_load_metrics::mojom::PageLoadFeatures&,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  ObservePolicy ShouldObserveMimeType(
+      const std::string& mime_type) const override;
 
  private:
   // To keep tracks of which features have been measured.

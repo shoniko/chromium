@@ -11,7 +11,7 @@
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutEmbeddedContent.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/RootScrollerUtil.h"
 #include "core/page/scrolling/TopDocumentRootScrollerController.h"
@@ -46,7 +46,7 @@ bool FillsViewport(const Element& element) {
   LayoutRect bounding_box(quads[0].BoundingBox());
 
   return bounding_box.Location() == LayoutPoint::Zero() &&
-         bounding_box.Size() == top_document.GetLayoutViewItem().Size();
+         bounding_box.Size() == top_document.GetLayoutView()->Size();
 }
 
 }  // namespace
@@ -85,7 +85,6 @@ Node& RootScrollerController::EffectiveRootScroller() const {
 }
 
 void RootScrollerController::DidUpdateLayout() {
-  DCHECK(document_->Lifecycle().GetState() == DocumentLifecycle::kLayoutClean);
   RecomputeEffectiveRootScroller();
 }
 
@@ -133,14 +132,6 @@ void RootScrollerController::RecomputeEffectiveRootScroller() {
 
   ApplyRootScrollerProperties(*old_effective_root_scroller);
   ApplyRootScrollerProperties(*effective_root_scroller_);
-
-  // Document (i.e. LayoutView) gets its background style from the rootScroller
-  // so we need to recalc its style. Ensure that we get back to a LayoutClean
-  // state after.
-  document_->SetNeedsStyleRecalc(kLocalStyleChange,
-                                 StyleChangeReasonForTracing::Create(
-                                     StyleChangeReason::kStyleInvalidator));
-  document_->UpdateStyleAndLayout();
 
   if (Page* page = document_->GetPage())
     page->GlobalRootScrollerController().DidChangeRootScroller();

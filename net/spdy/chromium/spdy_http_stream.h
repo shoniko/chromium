@@ -36,6 +36,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   static const size_t kRequestBodyBufferSize;
   // |spdy_session| must not be NULL.
   SpdyHttpStream(const base::WeakPtr<SpdySession>& spdy_session,
+                 SpdyStreamId pushed_stream_id,
                  bool direct,
                  NetLogSource source_dependency);
   ~SpdyHttpStream() override;
@@ -48,6 +49,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   // HttpStream implementation.
 
   int InitializeStream(const HttpRequestInfo* request_info,
+                       bool can_send_early,
                        RequestPriority priority,
                        const NetLogWithSource& net_log,
                        const CompletionCallback& callback) override;
@@ -133,6 +135,12 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   bool ShouldWaitForMoreBufferedData() const;
 
   const base::WeakPtr<SpdySession> spdy_session_;
+
+  // The ID of the pushed stream if one is claimed by this request.
+  // In this case, the request fails if it cannot use that pushed stream.
+  // Otherwise set to kNoPushedStreamFound.
+  const SpdyStreamId pushed_stream_id_;
+
   bool is_reused_;
   SpdyStreamRequest stream_request_;
   const NetLogSource source_dependency_;
@@ -160,9 +168,10 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   int64_t closed_stream_sent_bytes_;
 
   // The request to send.
-  // Set to null when response body is starting to be read. This is to allow
-  // the stream to be shared for reading and to possibly outlive request_info_'s
-  // owner.
+  // Set to null before response body is starting to be read. This is to allow
+  // |this| to be shared for reading and to possibly outlive request_info_'s
+  // owner. Setting to null happens after headers are completely read or upload
+  // data stream is uploaded, whichever is later.
   const HttpRequestInfo* request_info_;
 
   // |response_info_| is the HTTP response data object which is filled in
@@ -173,6 +182,8 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   std::unique_ptr<HttpResponseInfo> push_response_info_;
 
   bool response_headers_complete_;
+
+  bool upload_stream_in_progress_;
 
   // We buffer the response body as it arrives asynchronously from the stream.
   SpdyReadQueue response_body_queue_;

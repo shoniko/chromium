@@ -175,8 +175,9 @@ v8::Local<v8::Object> GenerateMostVisitedItemData(
       .Set("dataGenerationTime",
            mv_item.data_generation_time.is_null()
                ? v8::Local<v8::Value>(v8::Null(isolate))
-               : v8::Date::New(isolate,
-                               mv_item.data_generation_time.ToJsTime()));
+               : v8::Date::New(isolate->GetCurrentContext(),
+                               mv_item.data_generation_time.ToJsTime())
+                     .ToLocalChecked());
 
   // If the suggestion already has a favicon, we populate the element with it.
   if (!mv_item.favicon.spec().empty())
@@ -218,13 +219,13 @@ v8::Local<v8::Object> GenerateThemeBackgroundInfo(
   // backgroundColorRgba field.
   builder.Set(
       "colorRgba",
-      // Convert the alpha using DoubleToString because StringPrintf will
+      // Convert the alpha using NumberToString because StringPrintf will
       // use locale specific formatters (e.g., use , instead of . in
       // German).
       base::StringPrintf(
           kCSSBackgroundColorFormat, theme_info.background_color.r,
           theme_info.background_color.g, theme_info.background_color.b,
-          base::DoubleToString(theme_info.background_color.a / 255.0).c_str()));
+          base::NumberToString(theme_info.background_color.a / 255.0).c_str()));
 
   // Theme color for background as an array with the RGBA components in order.
   // Value is always valid.
@@ -549,6 +550,7 @@ class NewTabPageBindings : public gin::Wrappable<NewTabPageBindings> {
   // Handlers for JS properties.
   static bool IsInputInProgress();
   static v8::Local<v8::Value> GetMostVisited(v8::Isolate* isolate);
+  static bool GetMostVisitedAvailable(v8::Isolate* isolate);
   static v8::Local<v8::Value> GetThemeBackgroundInfo(v8::Isolate* isolate);
 
   // Handlers for JS functions visible to all NTPs.
@@ -592,6 +594,8 @@ gin::ObjectTemplateBuilder NewTabPageBindings::GetObjectTemplateBuilder(
   return gin::Wrappable<NewTabPageBindings>::GetObjectTemplateBuilder(isolate)
       .SetProperty("isInputInProgress", &NewTabPageBindings::IsInputInProgress)
       .SetProperty("mostVisited", &NewTabPageBindings::GetMostVisited)
+      .SetProperty("mostVisitedAvailable",
+                   &NewTabPageBindings::GetMostVisitedAvailable)
       .SetProperty("themeBackgroundInfo",
                    &NewTabPageBindings::GetThemeBackgroundInfo)
       .SetMethod("checkIsUserSignedIntoChromeAs",
@@ -656,6 +660,15 @@ v8::Local<v8::Value> NewTabPageBindings::GetMostVisited(v8::Isolate* isolate) {
                                                 render_view_id, rid));
   }
   return v8_mv_items;
+}
+
+// static
+bool NewTabPageBindings::GetMostVisitedAvailable(v8::Isolate* isolate) {
+  const SearchBox* search_box = GetSearchBoxForCurrentContext();
+  if (!search_box)
+    return false;
+
+  return search_box->AreMostVisitedItemsAvailable();
 }
 
 // static
@@ -766,6 +779,7 @@ void NewTabPageBindings::LogMostVisitedImpression(
         position, static_cast<ntp_tiles::TileSource>(tile_source),
         static_cast<ntp_tiles::TileTitleSource>(tile_title_source),
         static_cast<ntp_tiles::TileVisualType>(tile_type),
+        favicon_base::IconType::kInvalid,
         ConvertDateValueToTime(*data_generation_time),
         /*url_for_rappor=*/GURL());
     search_box->LogMostVisitedImpression(impression);
@@ -790,6 +804,7 @@ void NewTabPageBindings::LogMostVisitedNavigation(
         position, static_cast<ntp_tiles::TileSource>(tile_source),
         static_cast<ntp_tiles::TileTitleSource>(tile_title_source),
         static_cast<ntp_tiles::TileVisualType>(tile_type),
+        favicon_base::IconType::kInvalid,
         ConvertDateValueToTime(*data_generation_time),
         /*url_for_rappor=*/GURL());
     search_box->LogMostVisitedNavigation(impression);

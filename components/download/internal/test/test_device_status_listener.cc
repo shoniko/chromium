@@ -4,11 +4,27 @@
 
 #include "components/download/internal/test/test_device_status_listener.h"
 
+#include <memory>
+
 namespace download {
 namespace test {
 
+class FakeBatteryStatusListener : public BatteryStatusListener {
+ public:
+  FakeBatteryStatusListener() : BatteryStatusListener(base::TimeDelta()) {}
+  ~FakeBatteryStatusListener() override = default;
+
+  // BatteryStatusListener implementation.
+  int GetBatteryPercentageInternal() override { return 100; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FakeBatteryStatusListener);
+};
+
 TestDeviceStatusListener::TestDeviceStatusListener()
-    : DeviceStatusListener(base::TimeDelta(), base::TimeDelta()),
+    : DeviceStatusListener(base::TimeDelta(), /* startup_delay */
+                           base::TimeDelta(), /* online_delay */
+                           std::make_unique<FakeBatteryStatusListener>()),
       weak_ptr_factory_(this) {}
 
 TestDeviceStatusListener::~TestDeviceStatusListener() {
@@ -39,8 +55,8 @@ void TestDeviceStatusListener::Start(DeviceStatusListener::Observer* observer) {
 }
 
 void TestDeviceStatusListener::StartAfterDelay() {
-  if (status_ != DeviceStatus())
-    NotifyObserver(status_);
+  is_valid_state_ = true;
+  NotifyObserver(status_);
 }
 
 void TestDeviceStatusListener::Stop() {

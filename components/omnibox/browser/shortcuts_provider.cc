@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <utility>
 #include <vector>
 
 #include "base/i18n/break_iterator.h"
@@ -124,7 +125,7 @@ void ShortcutsProvider::Start(const AutocompleteInput& input,
   if (input.text().length() < 6) {
     base::TimeTicks end_time = base::TimeTicks::Now();
     std::string name = "ShortcutsProvider.QueryIndexTime." +
-                       base::SizeTToString(input.text().size());
+                       base::NumberToString(input.text().size());
     base::HistogramBase* counter = base::Histogram::FactoryGet(
         name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
     counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));

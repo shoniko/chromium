@@ -44,7 +44,7 @@ const gfx::Font::Weight kHoverWeight = gfx::Font::Weight::NORMAL;
 const gfx::Font::Weight kActiveWeight = gfx::Font::Weight::BOLD;
 const gfx::Font::Weight kInactiveWeight = gfx::Font::Weight::NORMAL;
 
-const int kHarmonyTabStripTabHeight = 40;
+const int kHarmonyTabStripTabHeight = 32;
 
 // The View containing the text for each tab in the tab strip.
 class TabLabel : public Label {
@@ -136,7 +136,7 @@ Tab::Tab(TabbedPane* tabbed_pane, const base::string16& title, View* contents)
 
   SetBorder(CreateEmptyBorder(
       gfx::Insets(kTabVerticalPadding, kTabHorizontalPadding)));
-  SetLayoutManager(new FillLayout);
+  SetLayoutManager(std::make_unique<FillLayout>());
 
   SetState(TAB_INACTIVE);
   AddChildView(title_);
@@ -281,9 +281,11 @@ MdTab::~MdTab() {}
 void MdTab::OnStateChanged() {
   ui::NativeTheme* theme = GetNativeTheme();
 
-  SkColor font_color = selected()
-      ? theme->GetSystemColor(ui::NativeTheme::kColorId_ProminentButtonColor)
-      : theme->GetSystemColor(ui::NativeTheme::kColorId_ButtonEnabledColor);
+  SkColor font_color =
+      selected()
+          ? theme->GetSystemColor(ui::NativeTheme::kColorId_TabTitleColorActive)
+          : theme->GetSystemColor(
+                ui::NativeTheme::kColorId_TabTitleColorInactive);
   title()->SetEnabledColor(font_color);
 
   gfx::Font::Weight font_weight = gfx::Font::Weight::MEDIUM;
@@ -321,12 +323,12 @@ const char TabStrip::kViewClassName[] = "TabStrip";
 
 TabStrip::TabStrip() {
   const int kTabStripLeadingEdgePadding = 9;
-  BoxLayout* layout = new BoxLayout(
+  auto layout = std::make_unique<BoxLayout>(
       BoxLayout::kHorizontal, gfx::Insets(0, kTabStripLeadingEdgePadding));
   layout->set_main_axis_alignment(BoxLayout::MAIN_AXIS_ALIGNMENT_START);
   layout->set_cross_axis_alignment(BoxLayout::CROSS_AXIS_ALIGNMENT_END);
   layout->SetDefaultFlex(0);
-  SetLayoutManager(layout);
+  SetLayoutManager(std::move(layout));
 }
 
 TabStrip::~TabStrip() {}
@@ -393,11 +395,11 @@ Tab* TabStrip::GetTabAtDeltaFromSelected(int delta) const {
 }
 
 MdTabStrip::MdTabStrip() {
-  BoxLayout* layout = new BoxLayout(BoxLayout::kHorizontal);
+  auto layout = std::make_unique<BoxLayout>(BoxLayout::kHorizontal);
   layout->set_main_axis_alignment(BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
   layout->set_cross_axis_alignment(BoxLayout::CROSS_AXIS_ALIGNMENT_STRETCH);
   layout->SetDefaultFlex(1);
-  SetLayoutManager(layout);
+  SetLayoutManager(std::move(layout));
 
   // These durations are taken from the Paper Tabs source:
   // https://github.com/PolymerElements/paper-tabs/blob/master/paper-tabs.html
@@ -434,7 +436,7 @@ void MdTabStrip::OnPaintBorder(gfx::Canvas* canvas) {
   canvas->FillRect(gfx::Rect(0, max_y - kUnselectedBorderThickness, width(),
                              kUnselectedBorderThickness),
                    GetNativeTheme()->GetSystemColor(
-                       ui::NativeTheme::kColorId_UnfocusedBorderColor));
+                       ui::NativeTheme::kColorId_TabBottomBorder));
 
   int min_x = 0;
   int max_x = 0;

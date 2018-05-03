@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/numerics/math_constants.h"
 #include "base/numerics/ranges.h"
 #include "third_party/WebKit/public/platform/WebGestureEvent.h"
@@ -28,10 +27,10 @@ constexpr float kDisplacementScaleFactor = 300.0f;
 // If the user does not move outside of the slop, no gesture is detected.
 // Gestures start to be detected when the user moves outside of the slop.
 // Vertical distance from the border to the center of slop.
-constexpr float kSlopVertical = 0.165f;
+constexpr float kSlopVertical = 0.185f;
 
 // Horizontal distance from the border to the center of slop.
-constexpr float kSlopHorizontal = 0.15f;
+constexpr float kSlopHorizontal = 0.17f;
 
 // Minimum distance needed in at least one direction to call two vectors
 // not equal. Also, minimum time distance needed to call two timestamps
@@ -61,13 +60,27 @@ float DeltaTimeSeconds(int64_t last_timestamp_nanos) {
          kNanoSecondsPerSecond;
 }
 
+gvr::ControllerButton PlatformToGvrButton(
+    vr::PlatformController::ButtonType type) {
+  switch (type) {
+    case vr::PlatformController::kButtonHome:
+      return gvr::kControllerButtonHome;
+    case vr::PlatformController::kButtonMenu:
+      return gvr::kControllerButtonApp;
+    case vr::PlatformController::kButtonSelect:
+      return gvr::kControllerButtonClick;
+    default:
+      return gvr::kControllerButtonNone;
+  }
+}
+
 }  // namespace
 
 VrController::VrController(gvr_context* gvr_context) {
   DVLOG(1) << __FUNCTION__ << "=" << this;
   CHECK(gvr_context != nullptr) << "invalid gvr_context";
-  controller_api_ = base::MakeUnique<gvr::ControllerApi>();
-  controller_state_ = base::MakeUnique<gvr::ControllerState>();
+  controller_api_ = std::make_unique<gvr::ControllerApi>();
+  controller_state_ = std::make_unique<gvr::ControllerState>();
   gvr_api_ = gvr::GvrApi::WrapNonOwned(gvr_context);
 
   int32_t options = gvr::ControllerApi::DefaultOptions();
@@ -145,6 +158,10 @@ float VrController::TouchPosY() {
   return controller_state_->GetTouchPos().y;
 }
 
+bool VrController::IsButtonDown(vr::PlatformController::ButtonType type) const {
+  return controller_state_->GetButtonState(PlatformToGvrButton(type));
+}
+
 base::TimeTicks VrController::GetLastOrientationTimestamp() const {
   // controller_state_->GetLast*Timestamp() returns timestamps in a
   // different timebase from base::TimeTicks::Now(), so we can't use the
@@ -194,16 +211,6 @@ gfx::Point3F VrController::GetPointerStart() const {
   rotation_mat.TransformVector(&pointer_direction);
   return Position() +
          gfx::ScaleVector3d(pointer_direction, kLaserStartDisplacement);
-}
-
-vr::VrControllerModel::State VrController::GetModelState() const {
-  if (ButtonState(gvr::ControllerButton::GVR_CONTROLLER_BUTTON_CLICK))
-    return vr::VrControllerModel::TOUCHPAD;
-  if (ButtonState(gvr::ControllerButton::GVR_CONTROLLER_BUTTON_APP))
-    return vr::VrControllerModel::APP;
-  if (ButtonState(gvr::ControllerButton::GVR_CONTROLLER_BUTTON_HOME))
-    return vr::VrControllerModel::SYSTEM;
-  return vr::VrControllerModel::IDLE;
 }
 
 bool VrController::TouchDownHappened() {
@@ -273,7 +280,7 @@ void VrController::UpdateTouchInfo() {
 }
 
 std::unique_ptr<GestureList> VrController::DetectGestures() {
-  std::unique_ptr<GestureList> gesture_list = base::MakeUnique<GestureList>();
+  std::unique_ptr<GestureList> gesture_list = std::make_unique<GestureList>();
   std::unique_ptr<blink::WebGestureEvent> gesture(new blink::WebGestureEvent());
 
   if (controller_state_->GetConnectionState() != gvr::kControllerConnected) {

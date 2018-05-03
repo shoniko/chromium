@@ -14,9 +14,6 @@
 #include "components/history/core/browser/web_history_service.h"
 #include "url/gurl.h"
 
-class OAuth2TokenService;
-class SigninManagerBase;
-
 namespace history {
 
 // A fake WebHistoryService for testing.
@@ -33,8 +30,6 @@ namespace history {
 class FakeWebHistoryService : public WebHistoryService {
  public:
   FakeWebHistoryService(
-      OAuth2TokenService* token_service,
-      SigninManagerBase* signin_manager,
       const scoped_refptr<net::URLRequestContextGetter>& request_context);
   ~FakeWebHistoryService() override;
 
@@ -57,20 +52,23 @@ class FakeWebHistoryService : public WebHistoryService {
   bool AreOtherFormsOfBrowsingHistoryPresent();
   void SetOtherFormsOfBrowsingHistoryPresent(bool present);
 
- private:
-  class FakeRequest;
+ protected:
   typedef std::pair<std::string, base::Time> Visit;
 
   // Returns up to |count| results from |visits_| between |begin| and |end.
   // Results are sorted from most recent to least recent, prioritizing more
   // recent results when some need to be omitted. |more_results_left| will be
   // set to true only if there are results from |visits_| that were not included
-  // because of |count| limitations, but were also within time range.
-  std::vector<FakeWebHistoryService::Visit> GetVisitsBetween(
+  // because of |count| limitations, but were also within time range. Virtual to
+  // allow subclasses to modify.
+  virtual std::vector<FakeWebHistoryService::Visit> GetVisitsBetween(
       base::Time begin,
       base::Time end,
       size_t count,
       bool* more_results_left);
+
+ private:
+  class FakeRequest;
 
   base::Time GetTimeForKeyInQuery(const GURL& url, const std::string& key);
 

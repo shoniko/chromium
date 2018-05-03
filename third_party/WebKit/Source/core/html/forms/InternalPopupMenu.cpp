@@ -9,7 +9,6 @@
 #include "core/css/StyleEngine.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeComputedStyle.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/events/ScopedEventQueue.h"
 #include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrame.h"
@@ -28,8 +27,8 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/text/PlatformLocale.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebMouseEvent.h"
-#include "public/web/WebColorChooser.h"
 
 namespace blink {
 
@@ -95,7 +94,7 @@ PopupMenuCSSFontSelector::PopupMenuCSSFontSelector(
   owner_font_selector_->RegisterForInvalidationCallbacks(this);
 }
 
-PopupMenuCSSFontSelector::~PopupMenuCSSFontSelector() {}
+PopupMenuCSSFontSelector::~PopupMenuCSSFontSelector() = default;
 
 scoped_refptr<FontData> PopupMenuCSSFontSelector::GetFontData(
     const FontDescription& description,
@@ -122,7 +121,7 @@ class InternalPopupMenu::ItemIterationContext {
   ItemIterationContext(const ComputedStyle& style, SharedBuffer* buffer)
       : base_style_(style),
         background_color_(
-            style.VisitedDependentColor(CSSPropertyBackgroundColor)),
+            style.VisitedDependentColor(GetCSSPropertyBackgroundColor())),
         list_index_(0),
         is_in_group_(false),
         buffer_(buffer) {
@@ -144,7 +143,7 @@ class InternalPopupMenu::ItemIterationContext {
     AddProperty("backgroundColor", background_color_.Serialized(), buffer_);
     AddProperty(
         "color",
-        BaseStyle().VisitedDependentColor(CSSPropertyColor).Serialized(),
+        BaseStyle().VisitedDependentColor(GetCSSPropertyColor()).Serialized(),
         buffer_);
     AddProperty("textTransform",
                 String(TextTransformToString(BaseStyle().TextTransform())),
@@ -169,9 +168,9 @@ class InternalPopupMenu::ItemIterationContext {
   }
 
   Color BackgroundColor() const {
-    return is_in_group_
-               ? group_style_->VisitedDependentColor(CSSPropertyBackgroundColor)
-               : background_color_;
+    return is_in_group_ ? group_style_->VisitedDependentColor(
+                              GetCSSPropertyBackgroundColor())
+                        : background_color_;
   }
   // Do not use baseStyle() for background-color, use backgroundColor()
   // instead.
@@ -320,11 +319,12 @@ void InternalPopupMenu::AddElementStyle(ItemIterationContext& context,
   }
   if (IsOverride(style->GetUnicodeBidi()))
     AddProperty("unicodeBidi", String("bidi-override"), data);
-  Color foreground_color = style->VisitedDependentColor(CSSPropertyColor);
-  if (base_style.VisitedDependentColor(CSSPropertyColor) != foreground_color)
+  Color foreground_color = style->VisitedDependentColor(GetCSSPropertyColor());
+  if (base_style.VisitedDependentColor(GetCSSPropertyColor()) !=
+      foreground_color)
     AddProperty("color", foreground_color.Serialized(), data);
   Color background_color =
-      style->VisitedDependentColor(CSSPropertyBackgroundColor);
+      style->VisitedDependentColor(GetCSSPropertyBackgroundColor());
   if (context.BackgroundColor() != background_color &&
       background_color != Color::kTransparent)
     AddProperty("backgroundColor", background_color.Serialized(), data);
@@ -498,9 +498,10 @@ void InternalPopupMenu::UpdateFromElement(UpdateReason) {
   if (needs_update_)
     return;
   needs_update_ = true;
-  TaskRunnerHelper::Get(TaskType::kUserInteraction,
-                        &OwnerElement().GetDocument())
-      ->PostTask(BLINK_FROM_HERE,
+  OwnerElement()
+      .GetDocument()
+      .GetTaskRunner(TaskType::kUserInteraction)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&InternalPopupMenu::Update, WrapPersistent(this)));
 }
 
@@ -548,7 +549,7 @@ void InternalPopupMenu::Update() {
       OwnerElement().GetDocument().View());
   AddProperty("anchorRectInScreen", anchor_rect_in_screen, data.get());
   PagePopupClient::AddString("}\n", data.get());
-  popup_->PostMessage(String::FromUTF8(data->Data(), data->size()));
+  popup_->PostMessageToPopup(String::FromUTF8(data->Data(), data->size()));
 }
 
 void InternalPopupMenu::DisconnectClient() {

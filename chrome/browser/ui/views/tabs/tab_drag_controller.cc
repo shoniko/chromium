@@ -11,12 +11,12 @@
 #include "base/callback.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/ash_util.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -195,7 +195,7 @@ TabDragController::TabDragController()
       attached_tabstrip_(NULL),
       can_release_capture_(true),
       offset_to_width_ratio_(0),
-      old_focused_view_tracker_(base::MakeUnique<views::ViewTracker>()),
+      old_focused_view_tracker_(std::make_unique<views::ViewTracker>()),
       last_move_screen_loc_(0),
       started_drag_(false),
       active_(true),
@@ -216,7 +216,7 @@ TabDragController::TabDragController()
       is_mutating_(false),
       attach_x_(-1),
       attach_index_(-1),
-      window_finder_(base::MakeUnique<WindowFinder>()),
+      window_finder_(std::make_unique<WindowFinder>()),
       weak_factory_(this) {
   instance_ = this;
 }
@@ -234,21 +234,20 @@ TabDragController::~TabDragController() {
     GetModel(source_tabstrip_)->RemoveObserver(this);
 
   if (event_source_ == EVENT_SOURCE_TOUCH) {
-    TabStrip* capture_tabstrip = attached_tabstrip_ ?
-        attached_tabstrip_ : source_tabstrip_;
+    TabStrip* capture_tabstrip =
+        attached_tabstrip_ ? attached_tabstrip_ : source_tabstrip_;
     capture_tabstrip->GetWidget()->ReleaseCapture();
   }
 }
 
-void TabDragController::Init(
-    TabStrip* source_tabstrip,
-    Tab* source_tab,
-    const std::vector<Tab*>& tabs,
-    const gfx::Point& mouse_offset,
-    int source_tab_offset,
-    const ui::ListSelectionModel& initial_selection_model,
-    MoveBehavior move_behavior,
-    EventSource event_source) {
+void TabDragController::Init(TabStrip* source_tabstrip,
+                             Tab* source_tab,
+                             const std::vector<Tab*>& tabs,
+                             const gfx::Point& mouse_offset,
+                             int source_tab_offset,
+                             ui::ListSelectionModel initial_selection_model,
+                             MoveBehavior move_behavior,
+                             EventSource event_source) {
   DCHECK(!tabs.empty());
   DCHECK(base::ContainsValue(tabs, source_tab));
   source_tabstrip_ = source_tabstrip;
@@ -293,7 +292,7 @@ void TabDragController::Init(
         static_cast<float>(source_tab->width());
   }
   InitWindowCreatePoint();
-  initial_selection_model_.Copy(initial_selection_model);
+  initial_selection_model_ = std::move(initial_selection_model);
 
   // Gestures don't automatically do a capture. We don't allow multiple drags at
   // the same time, so we explicitly capture.
@@ -560,9 +559,8 @@ TabDragController::Liveness TabDragController::ContinueDragging(
 }
 
 TabDragController::DragBrowserResultType
-TabDragController::DragBrowserToNewTabStrip(
-    TabStrip* target_tabstrip,
-    const gfx::Point& point_in_screen) {
+TabDragController::DragBrowserToNewTabStrip(TabStrip* target_tabstrip,
+                                            const gfx::Point& point_in_screen) {
   TRACE_EVENT1("views", "TabDragController::DragBrowserToNewTabStrip",
                "point_in_screen", point_in_screen.ToString());
 
@@ -885,7 +883,7 @@ void TabDragController::Attach(TabStrip* attached_tabstrip,
     // Transitioning from detached to attached to a new tabstrip. Add tabs to
     // the new model.
 
-    selection_model_before_attach_.Copy(attached_tabstrip->GetSelectionModel());
+    selection_model_before_attach_ = attached_tabstrip->GetSelectionModel();
 
     // Inserting counts as a move. We don't want the tabs to jitter when the
     // user moves the tab immediately after attaching it.
@@ -1353,8 +1351,8 @@ void TabDragController::EndDragImpl(EndDragType type) {
   // Clear out drag data so we don't attempt to do anything with it.
   drag_data_.clear();
 
-  TabStrip* owning_tabstrip = attached_tabstrip_ ?
-      attached_tabstrip_ : source_tabstrip_;
+  TabStrip* owning_tabstrip =
+      attached_tabstrip_ ? attached_tabstrip_ : source_tabstrip_;
   owning_tabstrip->DestroyDragController();
 }
 
@@ -1419,8 +1417,7 @@ void TabDragController::RestoreInitialSelection() {
   // initial_selection_model_. Before resetting though we have to remove all
   // the tabs from initial_selection_model_ as it was created with the tabs
   // still there.
-  ui::ListSelectionModel selection_model;
-  selection_model.Copy(initial_selection_model_);
+  ui::ListSelectionModel selection_model = initial_selection_model_;
   for (DragData::const_reverse_iterator i(drag_data_.rbegin());
        i != drag_data_.rend(); ++i) {
     selection_model.DecrementFrom(i->source_model_index);
@@ -1532,7 +1529,11 @@ void TabDragController::MaximizeAttachedWindow() {
   if (was_source_fullscreen_) {
     // In fullscreen mode it is only possible to get here if the source
     // was in "immersive fullscreen" mode, so toggle it back on.
-    GetAttachedBrowserWidget()->SetFullscreen(true);
+    BrowserView* browser_view = BrowserView::GetBrowserViewForNativeWindow(
+        GetAttachedBrowserWidget()->GetNativeWindow());
+    DCHECK(browser_view);
+    if (!browser_view->IsFullscreen())
+      chrome::ToggleFullscreenMode(browser_view->browser());
   }
 #endif
 }
@@ -1604,8 +1605,7 @@ void TabDragController::BringWindowUnderPointToFront(
   }
 }
 
-TabStripModel* TabDragController::GetModel(
-    TabStrip* tabstrip) const {
+TabStripModel* TabDragController::GetModel(TabStrip* tabstrip) const {
   return static_cast<BrowserTabStripController*>(tabstrip->controller())->
       model();
 }
@@ -1772,8 +1772,8 @@ gfx::Point TabDragController::GetCursorScreenPoint() {
 
 gfx::Vector2d TabDragController::GetWindowOffset(
     const gfx::Point& point_in_screen) {
-  TabStrip* owning_tabstrip = attached_tabstrip_ ?
-      attached_tabstrip_ : source_tabstrip_;
+  TabStrip* owning_tabstrip =
+      attached_tabstrip_ ? attached_tabstrip_ : source_tabstrip_;
   views::View* toplevel_view = owning_tabstrip->GetWidget()->GetContentsView();
 
   gfx::Point point = point_in_screen;

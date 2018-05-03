@@ -7,6 +7,7 @@
 #import <Foundation/Foundation.h>
 
 #include "ios/web/public/app/web_main_parts.h"
+#include "ios/web/public/features.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -73,7 +74,8 @@ base::RefCountedMemory* WebClient::GetDataResourceBytes(int resource_id) const {
   return nullptr;
 }
 
-NSString* WebClient::GetEarlyPageScript(BrowserState* browser_state) const {
+NSString* WebClient::GetDocumentStartScriptForMainFrame(
+    BrowserState* browser_state) const {
   return @"";
 }
 
@@ -93,7 +95,7 @@ void WebClient::AllowCertificateError(
 }
 
 bool WebClient::IsSlimNavigationManagerEnabled() const {
-  return false;
+  return base::FeatureList::IsEnabled(web::features::kSlimNavigationManager);
 }
 
 }  // namespace web

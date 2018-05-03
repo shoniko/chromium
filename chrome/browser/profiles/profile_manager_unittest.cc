@@ -40,7 +40,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -52,12 +52,14 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/ui/ash/test_wallpaper_controller.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_names.h"
 #include "extensions/common/features/feature_session_type.h"
@@ -142,6 +144,10 @@ class ProfileManagerTest : public testing::Test {
     base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
     cl->AppendSwitch(switches::kTestType);
     chromeos::WallpaperManager::Initialize();
+    wallpaper_controller_client_ =
+        std::make_unique<WallpaperControllerClient>();
+    wallpaper_controller_client_->InitForTesting(
+        test_wallpaper_controller_.CreateInterfacePtr());
 
     // Have to manually reset the session type in between test runs because
     // some tests log in users.
@@ -157,6 +163,7 @@ class ProfileManagerTest : public testing::Test {
     content::RunAllTasksUntilIdle();
 #if defined(OS_CHROMEOS)
     session_type_.reset();
+    wallpaper_controller_client_.reset();
     chromeos::WallpaperManager::Shutdown();
 #endif
   }
@@ -209,12 +216,14 @@ class ProfileManagerTest : public testing::Test {
 #if defined(OS_CHROMEOS)
   // Helper function to register an user with id |user_id| and create profile
   // with a correct path.
-  void RegisterUser(const std::string& user_id) {
+  void RegisterUser(const AccountId& account_id) {
     chromeos::ProfileHelper* profile_helper = chromeos::ProfileHelper::Get();
     const std::string user_id_hash =
-        profile_helper->GetUserIdHashByUserIdForTesting(user_id);
-    user_manager::UserManager::Get()->UserLoggedIn(
-        AccountId::FromUserEmail(user_id), user_id_hash, false);
+        profile_helper->GetUserIdHashByUserIdForTesting(
+            account_id.GetUserEmail());
+    user_manager::UserManager::Get()->UserLoggedIn(account_id, user_id_hash,
+                                                   false /* browser_restart */,
+                                                   false /* is_child */);
     g_browser_process->profile_manager()->GetProfile(
         profile_helper->GetProfilePathByUserIdHash(user_id_hash));
   }
@@ -232,6 +241,8 @@ class ProfileManagerTest : public testing::Test {
   chromeos::ScopedTestUserManager test_user_manager_;
   std::unique_ptr<base::AutoReset<extensions::FeatureSessionType>>
       session_type_;
+  std::unique_ptr<WallpaperControllerClient> wallpaper_controller_client_;
+  TestWallpaperController test_wallpaper_controller_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(ProfileManagerTest);
@@ -280,11 +291,13 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
   EXPECT_EQ(expected_default.value(),
             profile_manager->GetInitialProfileDir().value());
 
-  const char kTestUserName[] = "test-user@example.com";
-  const AccountId test_account_id(AccountId::FromUserEmail(kTestUserName));
+  constexpr char kTestUserName[] = "test-user@example.com";
+  constexpr char kTestUserGaiaId[] = "0123456789";
+  const AccountId test_account_id(
+      AccountId::FromUserEmailGaiaId(kTestUserName, kTestUserGaiaId));
   chromeos::FakeChromeUserManager* user_manager =
       new chromeos::FakeChromeUserManager();
-  chromeos::ScopedUserManagerEnabler enabler(user_manager);
+  user_manager::ScopedUserManager enabler(base::WrapUnique(user_manager));
 
   const user_manager::User* active_user =
       user_manager->AddUser(test_account_id);
@@ -322,10 +335,12 @@ TEST_F(ProfileManagerTest, UserProfileLoading) {
 
   // User signs in but user profile loading has not started.
   const std::string user_id = "test-user@example.com";
+  const std::string gaia_id = "0123456789";
   const std::string user_id_hash =
       ProfileHelper::Get()->GetUserIdHashByUserIdForTesting(user_id);
   user_manager::UserManager::Get()->UserLoggedIn(
-      AccountId::FromUserEmail(user_id), user_id_hash, false);
+      AccountId::FromUserEmailGaiaId(user_id, gaia_id), user_id_hash,
+      false /* browser_restart */, false /* is_child */);
 
   // Sign-in profile should be returned at this stage. Otherwise, login code
   // ends up in an invalid state. Strange things as in http://crbug.com/728683
@@ -356,7 +371,14 @@ TEST_F(ProfileManagerTest, UserProfileLoading) {
 
 #endif
 
-TEST_F(ProfileManagerTest, CreateAndUseTwoProfiles) {
+// Data race on Linux bots. http://crbug.com/789214
+#if defined(OS_LINUX)
+#define MAYBE_CreateAndUseTwoProfiles DISABLED_CreateAndUseTwoProfiles
+#else
+#define MAYBE_CreateAndUseTwoProfiles CreateAndUseTwoProfiles
+#endif
+
+TEST_F(ProfileManagerTest, MAYBE_CreateAndUseTwoProfiles) {
   base::FilePath dest_path1 = temp_dir_.GetPath();
   dest_path1 = dest_path1.Append(FILE_PATH_LITERAL("New Profile 1"));
 
@@ -594,6 +616,11 @@ class ProfileManagerGuestTest : public ProfileManagerTest  {
     cl->AppendSwitch(::switches::kIncognito);
 
     chromeos::WallpaperManager::Initialize();
+    wallpaper_controller_client_ =
+        std::make_unique<WallpaperControllerClient>();
+    wallpaper_controller_client_->InitForTesting(
+        test_wallpaper_controller_.CreateInterfacePtr());
+
     // Have to manually reset the session type in between test runs because
     // RegisterUser() changes it.
     ASSERT_EQ(extensions::FeatureSessionType::INITIAL,
@@ -601,9 +628,17 @@ class ProfileManagerGuestTest : public ProfileManagerTest  {
     session_type_ = extensions::ScopedCurrentFeatureSessionType(
         extensions::GetCurrentFeatureSessionType());
 
-    RegisterUser(user_manager::kGuestUserName);
+    RegisterUser(GetFakeUserManager()->GetGuestAccountId());
 #endif
   }
+
+ private:
+#if defined(OS_CHROMEOS)
+  chromeos::FakeChromeUserManager* GetFakeUserManager() const {
+    return static_cast<chromeos::FakeChromeUserManager*>(
+        user_manager::UserManager::Get());
+  }
+#endif
 };
 
 TEST_F(ProfileManagerGuestTest, GetLastUsedProfileAllowedByPolicy) {
@@ -751,7 +786,8 @@ TEST_F(ProfileManagerTest, GetLastUsedProfileAllowedByPolicy) {
   // On CrOS, profile returned by GetLastUsedProfile is a sign-in profile that
   // is forced to be incognito. That's why we need to create at least one user
   // to get a regular profile.
-  RegisterUser("test-user@example.com");
+  RegisterUser(
+      AccountId::FromUserEmailGaiaId("test-user@example.com", "1234567890"));
 #endif
 
   Profile* profile = profile_manager->GetLastUsedProfileAllowedByPolicy();
@@ -801,7 +837,7 @@ TEST_F(ProfileManagerTest, LastOpenedProfiles) {
   // Create a browser for profile1.
   Browser::CreateParams profile1_params(profile1, true);
   std::unique_ptr<Browser> browser1a(
-      chrome::CreateBrowserWithTestWindowForParams(&profile1_params));
+      CreateBrowserWithTestWindowForParams(&profile1_params));
 
   last_opened_profiles = profile_manager->GetLastOpenedProfiles();
   ASSERT_EQ(1U, last_opened_profiles.size());
@@ -810,7 +846,7 @@ TEST_F(ProfileManagerTest, LastOpenedProfiles) {
   // And for profile2.
   Browser::CreateParams profile2_params(profile2, true);
   std::unique_ptr<Browser> browser2(
-      chrome::CreateBrowserWithTestWindowForParams(&profile2_params));
+      CreateBrowserWithTestWindowForParams(&profile2_params));
 
   last_opened_profiles = profile_manager->GetLastOpenedProfiles();
   ASSERT_EQ(2U, last_opened_profiles.size());
@@ -819,7 +855,7 @@ TEST_F(ProfileManagerTest, LastOpenedProfiles) {
 
   // Adding more browsers doesn't change anything.
   std::unique_ptr<Browser> browser1b(
-      chrome::CreateBrowserWithTestWindowForParams(&profile1_params));
+      CreateBrowserWithTestWindowForParams(&profile1_params));
   last_opened_profiles = profile_manager->GetLastOpenedProfiles();
   ASSERT_EQ(2U, last_opened_profiles.size());
   EXPECT_EQ(profile1, last_opened_profiles[0]);
@@ -863,12 +899,12 @@ TEST_F(ProfileManagerTest, LastOpenedProfilesAtShutdown) {
   // Create a browser for profile1.
   Browser::CreateParams profile1_params(profile1, true);
   std::unique_ptr<Browser> browser1(
-      chrome::CreateBrowserWithTestWindowForParams(&profile1_params));
+      CreateBrowserWithTestWindowForParams(&profile1_params));
 
   // And for profile2.
   Browser::CreateParams profile2_params(profile2, true);
   std::unique_ptr<Browser> browser2(
-      chrome::CreateBrowserWithTestWindowForParams(&profile2_params));
+      CreateBrowserWithTestWindowForParams(&profile2_params));
 
   std::vector<Profile*> last_opened_profiles =
       profile_manager->GetLastOpenedProfiles();
@@ -913,7 +949,7 @@ TEST_F(ProfileManagerTest, LastOpenedProfilesDoesNotContainIncognito) {
   // Create a browser for profile1.
   Browser::CreateParams profile1_params(profile1, true);
   std::unique_ptr<Browser> browser1(
-      chrome::CreateBrowserWithTestWindowForParams(&profile1_params));
+      CreateBrowserWithTestWindowForParams(&profile1_params));
 
   last_opened_profiles = profile_manager->GetLastOpenedProfiles();
   ASSERT_EQ(1U, last_opened_profiles.size());
@@ -923,7 +959,7 @@ TEST_F(ProfileManagerTest, LastOpenedProfilesDoesNotContainIncognito) {
   Browser::CreateParams profile2_params(profile1->GetOffTheRecordProfile(),
                                         true);
   std::unique_ptr<Browser> browser2a(
-      chrome::CreateBrowserWithTestWindowForParams(&profile2_params));
+      CreateBrowserWithTestWindowForParams(&profile2_params));
 
   last_opened_profiles = profile_manager->GetLastOpenedProfiles();
   ASSERT_EQ(1U, last_opened_profiles.size());
@@ -931,7 +967,7 @@ TEST_F(ProfileManagerTest, LastOpenedProfilesDoesNotContainIncognito) {
 
   // Adding more browsers doesn't change anything.
   std::unique_ptr<Browser> browser2b(
-      chrome::CreateBrowserWithTestWindowForParams(&profile2_params));
+      CreateBrowserWithTestWindowForParams(&profile2_params));
   last_opened_profiles = profile_manager->GetLastOpenedProfiles();
   ASSERT_EQ(1U, last_opened_profiles.size());
   EXPECT_EQ(profile1, last_opened_profiles[0]);
@@ -973,7 +1009,7 @@ TEST_F(ProfileManagerTest, EphemeralProfilesDontEndUpAsLastProfile) {
   // Create a browser for the profile.
   Browser::CreateParams profile_params(profile, true);
   std::unique_ptr<Browser> browser(
-      chrome::CreateBrowserWithTestWindowForParams(&profile_params));
+      CreateBrowserWithTestWindowForParams(&profile_params));
   last_used_profile = profile_manager->GetLastUsedProfile();
   EXPECT_NE(profile, last_used_profile);
 
@@ -1014,16 +1050,16 @@ TEST_F(ProfileManagerTest, EphemeralProfilesDontEndUpAsLastOpenedAtShutdown) {
   // Create a browser for profile1.
   Browser::CreateParams profile1_params(normal_profile, true);
   std::unique_ptr<Browser> browser1(
-      chrome::CreateBrowserWithTestWindowForParams(&profile1_params));
+      CreateBrowserWithTestWindowForParams(&profile1_params));
 
   // Create browsers for the ephemeral profile.
   Browser::CreateParams profile2_params(ephemeral_profile1, true);
   std::unique_ptr<Browser> browser2(
-      chrome::CreateBrowserWithTestWindowForParams(&profile2_params));
+      CreateBrowserWithTestWindowForParams(&profile2_params));
 
   Browser::CreateParams profile3_params(ephemeral_profile2, true);
   std::unique_ptr<Browser> browser3(
-      chrome::CreateBrowserWithTestWindowForParams(&profile3_params));
+      CreateBrowserWithTestWindowForParams(&profile3_params));
 
   std::vector<Profile*> last_opened_profiles =
       profile_manager->GetLastOpenedProfiles();

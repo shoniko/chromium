@@ -10,6 +10,8 @@ namespace extensions {
 namespace manifest_keys {
 
 const char kAboutPage[] = "about_page";
+const char kAction[] = "action";
+const char kActionDefaultState[] = "default_state";
 const char kAllFrames[] = "all_frames";
 const char kAltKey[] = "altKey";
 const char kApp[] = "app";
@@ -80,8 +82,6 @@ const char kKioskSecondaryApps[] = "kiosk_secondary_apps";
 const char kLanguage[] = "language";
 const char kLaunch[] = "app.launch";
 const char kLaunchContainer[] = "app.launch.container";
-const char kLauncherPage[] = "launcher_page";
-const char kLauncherPagePage[] = "launcher_page.page";
 const char kLaunchHeight[] = "app.launch.height";
 const char kLaunchLocalPath[] = "app.launch.local_path";
 const char kLaunchWebURL[] = "app.launch.web_url";
@@ -128,9 +128,6 @@ const char kPlatformAppBackground[] = "app.background";
 const char kPlatformAppBackgroundPage[] = "app.background.page";
 const char kPlatformAppBackgroundScripts[] = "app.background.scripts";
 const char kPlatformAppContentSecurityPolicy[] = "app.content_security_policy";
-const char kPlugins[] = "plugins";
-const char kPluginsPath[] = "path";
-const char kPluginsPublic[] = "public";
 const char kPublicKey[] = "key";
 const char kRemoveButton[] = "remove_button";
 const char kRequirements[] = "requirements";
@@ -303,11 +300,16 @@ const char kDeclarativeNetRequestPermissionNeeded[] =
     "The extension requires '*' permission for the '*' manifest key.";
 const char kDeclarativeNetRequestListNotPassed[] =
     "Declarative Net Request: Ruleset must be a list.";
+const char kDefaultStateShouldNotBeSet[] =
+    "The default_state key cannot be set for browser_action or page_action "
+    "keys.";
 const char kExpectString[] = "Expect string value.";
 const char kFileNotFound[] = "File not found: *.";
 const char kInvalidAboutPage[] = "Invalid value for 'about_page'.";
 const char kInvalidAboutPageExpectRelativePath[] =
     "Invalid value for 'about_page'. Value must be a relative path.";
+const char kInvalidAction[] = "Invalid value for 'action'.";
+const char kInvalidActionDefaultState[] = "Invalid value for 'default_state'.";
 const char kInvalidAllFrames[] =
     "Invalid value for 'content_scripts[*].all_frames'.";
 const char kInvalidAppIconColor[] = "Invalid value for app.icon_color.";
@@ -503,9 +505,6 @@ const char kInvalidKioskSecondaryAppsBadAppEntry[] =
     "Invalid app id item for 'kiosk_secondary_apps'";
 const char kInvalidKioskSecondaryAppsBadAppId[] =
     "Invalid app id value for 'kiosk_secondary_apps'";
-const char kInvalidLauncherPage[] = "Invalid value for 'launcher_page'.";
-const char kInvalidLauncherPagePage[] =
-    "Invalid value for 'launcher_page.page'.";
 const char kInvalidLaunchContainer[] =
     "Invalid value for 'app.launch.container'.";
 const char kInvalidLaunchValue[] =
@@ -596,12 +595,6 @@ const char kInvalidPermissions[] =
     "Invalid value for 'permissions'.";
 const char kInvalidPermissionScheme[] =
     "Invalid scheme for 'permissions[*]'.";
-const char kInvalidPlugins[] =
-    "Invalid value for 'plugins'.";
-const char kInvalidPluginsPath[] =
-    "Invalid value for 'plugins[*].path'.";
-const char kInvalidPluginsPublic[] =
-    "Invalid value for 'plugins[*].public'.";
 const char kInvalidRequirement[] =
     "Invalid value for requirement \"*\"";
 const char kInvalidRequirements[] =
@@ -703,8 +696,6 @@ const char kInvalidZipHash[] =
     "Required key 'zip_hash' is missing or invalid.";
 const char kKeyIsDeprecatedWithReplacement[] =
     "Key \"*\" is deprecated.  Key \"*\" should be used instead.";
-const char kLauncherPagePageRequired[] =
-    "The 'launcher_page.page' key is required.";
 const char kLaunchPathAndExtentAreExclusive[] =
     "The 'app.launch.local_path' and 'app.urls' keys cannot both be set.";
 const char kLaunchPathAndURLAreExclusive[] =
@@ -732,6 +723,7 @@ const char kMultipleOverrides[] =
     "An extension cannot override more than one page.";
 const char kNoWildCardsInPaths[] =
   "Wildcards are not allowed in extent URL pattern paths.";
+const char kNPAPIPluginsNotSupported[] = "NPAPI plugins are not supported.";
 const char kOneUISurfaceOnly[] =
     "Only one of 'browser_action', 'page_action', and 'app' can be specified.";
 const char kPermissionMustBeOptional[] =
@@ -742,6 +734,8 @@ const char kPermissionNotAllowedInManifest[] =
     "Permission '*' cannot be specified in the manifest.";
 const char kPermissionUnknownOrMalformed[] =
     "Permission '*' is unknown or URL pattern is malformed.";
+const char kPluginsRequirementDeprecated[] =
+    "The \"plugins\" requirement is deprecated.";
 const char kReservedMessageFound[] =
     "Reserved key * found in message catalog.";
 const char kRulesFileIsInvalid[] =

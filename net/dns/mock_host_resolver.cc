@@ -149,6 +149,18 @@ int MockHostResolverBase::ResolveFromCache(const RequestInfo& info,
   return rv;
 }
 
+int MockHostResolverBase::ResolveStaleFromCache(
+    const RequestInfo& info,
+    AddressList* addresses,
+    HostCache::EntryStaleness* stale_info,
+    const NetLogWithSource& net_log) {
+  num_resolve_from_cache_++;
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  next_request_id_++;
+  int rv = ResolveFromIPLiteralOrCache(info, addresses);
+  return rv;
+}
+
 void MockHostResolverBase::DetachRequest(size_t id) {
   RequestMap::iterator it = requests_.find(id);
   CHECK(it != requests_.end());
@@ -157,6 +169,16 @@ void MockHostResolverBase::DetachRequest(size_t id) {
 
 HostCache* MockHostResolverBase::GetHostCache() {
   return cache_.get();
+}
+
+bool MockHostResolverBase::HasCached(
+    base::StringPiece hostname,
+    HostCache::Entry::Source* source_out,
+    HostCache::EntryStaleness* stale_out) const {
+  if (!cache_)
+    return false;
+
+  return cache_->HasEntry(hostname, source_out, stale_out);
 }
 
 void MockHostResolverBase::ResolveAllPending() {
@@ -184,8 +206,10 @@ MockHostResolverBase::MockHostResolverBase(bool use_caching)
   }
 }
 
-int MockHostResolverBase::ResolveFromIPLiteralOrCache(const RequestInfo& info,
-                                                      AddressList* addresses) {
+int MockHostResolverBase::ResolveFromIPLiteralOrCache(
+    const RequestInfo& info,
+    AddressList* addresses,
+    HostCache::EntryStaleness* stale_info) {
   IPAddress ip_address;
   if (ip_address.AssignFromIPLiteral(info.hostname())) {
     // This matches the behavior HostResolverImpl.
@@ -204,7 +228,11 @@ int MockHostResolverBase::ResolveFromIPLiteralOrCache(const RequestInfo& info,
     HostCache::Key key(info.hostname(),
                        info.address_family(),
                        info.host_resolver_flags());
-    const HostCache::Entry* entry = cache_->Lookup(key, base::TimeTicks::Now());
+    const HostCache::Entry* entry;
+    if (stale_info)
+      entry = cache_->LookupStale(key, base::TimeTicks::Now(), stale_info);
+    else
+      entry = cache_->Lookup(key, base::TimeTicks::Now());
     if (entry) {
       rv = entry->error();
       if (rv == OK)
@@ -227,7 +255,9 @@ int MockHostResolverBase::ResolveProc(const RequestInfo& info,
     base::TimeDelta ttl;
     if (rv == OK)
       ttl = base::TimeDelta::FromSeconds(kCacheEntryTTLSeconds);
-    cache_->Set(key, HostCache::Entry(rv, addr), base::TimeTicks::Now(), ttl);
+    cache_->Set(key,
+                HostCache::Entry(rv, addr, HostCache::Entry::SOURCE_UNKNOWN),
+                base::TimeTicks::Now(), ttl);
   }
   if (rv == OK)
     *addresses = AddressList::CopyWithPort(addr, info.port());
@@ -447,8 +477,7 @@ int RuleBasedHostResolverProc::Resolve(const std::string& host,
                               host_resolver_flags, addrlist, os_error);
 }
 
-RuleBasedHostResolverProc::~RuleBasedHostResolverProc() {
-}
+RuleBasedHostResolverProc::~RuleBasedHostResolverProc() = default;
 
 void RuleBasedHostResolverProc::AddRuleInternal(const Rule& rule) {
   Rule fixed_rule = rule;
@@ -500,9 +529,24 @@ int HangingHostResolver::ResolveFromCache(const RequestInfo& info,
   return ERR_DNS_CACHE_MISS;
 }
 
+int HangingHostResolver::ResolveStaleFromCache(
+    const RequestInfo& info,
+    AddressList* addresses,
+    HostCache::EntryStaleness* stale_info,
+    const NetLogWithSource& net_log) {
+  return ERR_DNS_CACHE_MISS;
+}
+
+bool HangingHostResolver::HasCached(
+    base::StringPiece hostname,
+    HostCache::Entry::Source* source_out,
+    HostCache::EntryStaleness* stale_out) const {
+  return false;
+}
+
 //-----------------------------------------------------------------------------
 
-ScopedDefaultHostResolverProc::ScopedDefaultHostResolverProc() {}
+ScopedDefaultHostResolverProc::ScopedDefaultHostResolverProc() = default;
 
 ScopedDefaultHostResolverProc::ScopedDefaultHostResolverProc(
     HostResolverProc* proc) {

@@ -38,11 +38,6 @@ class InternalTestInitializer {
 
 void SetContentClient(ContentClient* client) {
   g_client = client;
-
-  // TODO(jam): find out which static on Windows is causing this to have to be
-  // called on startup.
-  if (client)
-    client->GetUserAgent();
 }
 
 ContentClient* GetContentClient() {
@@ -65,10 +60,7 @@ ContentClient::Schemes::Schemes() = default;
 ContentClient::Schemes::~Schemes() = default;
 
 ContentClient::ContentClient()
-    : browser_(NULL),
-      gpu_(NULL),
-      renderer_(NULL),
-      utility_(NULL) {}
+    : browser_(nullptr), gpu_(nullptr), renderer_(nullptr), utility_(nullptr) {}
 
 ContentClient::~ContentClient() {
 }
@@ -108,10 +100,6 @@ gfx::Image& ContentClient::GetNativeImageNamed(int resource_id) const {
 std::string ContentClient::GetProcessTypeNameInEnglish(int type) {
   NOTIMPLEMENTED();
   return std::string();
-}
-
-bool ContentClient::IsSupplementarySiteIsolationModeEnabled() {
-  return false;
 }
 
 OriginTrialPolicy* ContentClient::GetOriginTrialPolicy() {

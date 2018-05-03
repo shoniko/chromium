@@ -28,6 +28,7 @@
 
 #include "modules/webdatabase/DatabaseBasicTypes.h"
 #include "modules/webdatabase/DatabaseError.h"
+#include "modules/webdatabase/SQLTransactionBackend.h"
 #include "modules/webdatabase/sqlite/SQLiteDatabase.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/bindings/TraceWrapperMember.h"
@@ -42,7 +43,6 @@ class DatabaseAuthorizer;
 class DatabaseContext;
 class ExecutionContext;
 class SQLTransaction;
-class SQLTransactionBackend;
 class SQLTransactionCallback;
 class SQLTransactionClient;
 class SQLTransactionCoordinator;
@@ -55,12 +55,12 @@ class Database final : public ScriptWrappable {
 
  public:
   virtual ~Database();
-  void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
   bool OpenAndVerifyVersion(bool set_version_in_new_database,
                             DatabaseError&,
-                            String& error_message);
+                            String& error_message,
+                            V8DatabaseCallback* creation_callback);
   void Close();
 
   SQLTransactionBackend* RunTransaction(SQLTransaction*,
@@ -89,7 +89,7 @@ class Database final : public ScriptWrappable {
   bool Opened();
   bool IsNew() const { return new_; }
 
-  SecurityOrigin* GetSecurityOrigin() const;
+  const SecurityOrigin* GetSecurityOrigin() const;
   String StringIdentifier() const;
   String DisplayName() const;
   unsigned EstimatedSize() const;
@@ -129,12 +129,11 @@ class Database final : public ScriptWrappable {
            const String& name,
            const String& expected_version,
            const String& display_name,
-           unsigned estimated_size,
-           V8DatabaseCallback* creation_callback);
+           unsigned estimated_size);
   bool PerformOpenAndVerify(bool set_version_in_new_database,
                             DatabaseError&,
                             String& error_message);
-  void RunCreationCallback();
+  void RunCreationCallback(V8DatabaseCallback* creation_callback);
 
   void ScheduleTransaction();
 
@@ -178,8 +177,8 @@ class Database final : public ScriptWrappable {
     return context_thread_security_origin_->ToString() + "::" + name_;
   }
 
-  scoped_refptr<SecurityOrigin> context_thread_security_origin_;
-  scoped_refptr<SecurityOrigin> database_thread_security_origin_;
+  scoped_refptr<const SecurityOrigin> context_thread_security_origin_;
+  scoped_refptr<const SecurityOrigin> database_thread_security_origin_;
   Member<DatabaseContext>
       database_context_;  // Associated with m_executionContext.
   // TaskRunnerHelper::get is not thread-safe, so we save WebTaskRunner for
@@ -200,7 +199,6 @@ class Database final : public ScriptWrappable {
   SQLiteDatabase sqlite_database_;
 
   Member<DatabaseAuthorizer> database_authorizer_;
-  TraceWrapperMember<V8DatabaseCallback> creation_callback_;
   Deque<CrossThreadPersistent<SQLTransactionBackend>> transaction_queue_;
   Mutex transaction_in_progress_mutex_;
   bool transaction_in_progress_;

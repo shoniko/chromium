@@ -13,6 +13,7 @@
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
+#include "services/network/public/interfaces/request_context_frame_type.mojom-shared.h"
 
 #if INSIDE_BLINK
 #include <utility>
@@ -59,6 +60,10 @@ class BLINK_PLATFORM_EXPORT WebServiceWorkerRequest {
 
   void VisitHTTPHeaderFields(WebHTTPHeaderVisitor*) const;
 
+  // There are two ways of representing body: WebHTTPBody or Blob.  Only one
+  // should be used.
+  void SetBody(const WebHTTPBody&);
+  WebHTTPBody Body() const;
   void SetBlob(const WebString& uuid,
                long long size,
                mojo::ScopedMessagePipeHandle);
@@ -67,14 +72,14 @@ class BLINK_PLATFORM_EXPORT WebServiceWorkerRequest {
   WebURL ReferrerUrl() const;
   WebReferrerPolicy GetReferrerPolicy() const;
 
-  void SetMode(WebURLRequest::FetchRequestMode);
-  WebURLRequest::FetchRequestMode Mode() const;
+  void SetMode(network::mojom::FetchRequestMode);
+  network::mojom::FetchRequestMode Mode() const;
 
   void SetIsMainResourceLoad(bool);
   bool IsMainResourceLoad() const;
 
-  void SetCredentialsMode(WebURLRequest::FetchCredentialsMode);
-  WebURLRequest::FetchCredentialsMode CredentialsMode() const;
+  void SetCredentialsMode(network::mojom::FetchCredentialsMode);
+  network::mojom::FetchCredentialsMode CredentialsMode() const;
 
   void SetIntegrity(const WebString&);
   const WebString& Integrity() const;
@@ -82,14 +87,17 @@ class BLINK_PLATFORM_EXPORT WebServiceWorkerRequest {
   void SetCacheMode(mojom::FetchCacheMode);
   mojom::FetchCacheMode CacheMode() const;
 
-  void SetRedirectMode(WebURLRequest::FetchRedirectMode);
-  WebURLRequest::FetchRedirectMode RedirectMode() const;
+  void SetKeepalive(bool);
+  bool Keepalive() const;
+
+  void SetRedirectMode(network::mojom::FetchRedirectMode);
+  network::mojom::FetchRedirectMode RedirectMode() const;
 
   void SetRequestContext(WebURLRequest::RequestContext);
   WebURLRequest::RequestContext GetRequestContext() const;
 
-  void SetFrameType(WebURLRequest::FrameType);
-  WebURLRequest::FrameType GetFrameType() const;
+  void SetFrameType(network::mojom::RequestContextFrameType);
+  network::mojom::RequestContextFrameType GetFrameType() const;
 
   void SetClientId(const WebString&);
   const WebString& ClientId() const;
@@ -99,7 +107,7 @@ class BLINK_PLATFORM_EXPORT WebServiceWorkerRequest {
 
 #if INSIDE_BLINK
   const HTTPHeaderMap& Headers() const;
-  RefPtr<BlobDataHandle> GetBlobDataHandle() const;
+  scoped_refptr<BlobDataHandle> GetBlobDataHandle() const;
   const Referrer& GetReferrer() const;
   void SetBlob(const WebString& uuid,
                long long size,

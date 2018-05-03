@@ -53,13 +53,19 @@ void FakeVRDevice::RequestPresent(
     VRDisplayImpl* display,
     mojom::VRSubmitFrameClientPtr submit_client,
     mojom::VRPresentationProviderRequest request,
+    mojom::VRRequestPresentOptionsPtr present_options,
     mojom::VRDisplayHost::RequestPresentCallback callback) {
   SetPresentingDisplay(display);
-  std::move(callback).Run(true);
+  std::move(callback).Run(true, mojom::VRDisplayFrameTransportOptions::New());
 }
 
 void FakeVRDevice::ExitPresent() {
   OnExitPresent();
+}
+
+void FakeVRDevice::OnMagicWindowPoseRequest(
+    mojom::VRMagicWindowProvider::GetPoseCallback callback) {
+  std::move(callback).Run(pose_.Clone());
 }
 
 }  // namespace device

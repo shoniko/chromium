@@ -11,10 +11,9 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/metrics/user_metrics.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/autofill_field.h"
@@ -80,8 +79,7 @@ std::string PreviousSaveCreditCardPromptUserDecisionToString(
 ukm::SourceId NewUkmSourceWithUrl(ukm::UkmRecorder* ukm_recorder,
                                   const GURL& url) {
   ukm::SourceId source_id = ukm::UkmRecorder::GetNewSourceID();
-  if (ukm_recorder)
-    ukm_recorder->UpdateSourceURL(source_id, url);
+  AutofillMetrics::UpdateSourceURL(ukm_recorder, source_id, url);
   return source_id;
 }
 
@@ -329,63 +327,105 @@ ServerFieldType GetActualFieldType(const ServerFieldTypeSet& possible_types,
   return actual_type;
 }
 
-// Logs field type prediction quality metrics.  The primary histogram name is
-// constructed based on |prediction_source| The field-specific histogram names
-// also incorporates the possible and predicted types for |field|. A suffix may
-// be appended to the metric name, depending on |metric_type|.
-void LogPredictionQualityMetrics(
-    AutofillMetrics::QualityMetricPredictionSource prediction_source,
+// Check if the value of |field| is same as one of the previously autofilled
+// values. This indicates a bad rationalization if |field| has
+// only_fill_when_focued set to true.
+bool DuplicatedFilling(const FormStructure& form, const AutofillField& field) {
+  for (const auto& form_field : form) {
+    if (field.value == form_field->value && form_field->is_autofilled)
+      return true;
+  }
+  return false;
+}
+
+void LogPredictionQualityMetricsForFieldsOnlyFilledWhenFocused(
+    const std::string& aggregate_histogram,
+    const std::string& type_specific_histogram,
+    const std::string& rationalization_quality_histogram,
     ServerFieldType predicted_type,
-    AutofillMetrics::FormInteractionsUkmLogger* form_interactions_ukm_logger,
+    ServerFieldType actual_type,
+    bool is_empty,
+    bool is_ambiguous,
+    bool log_rationalization_metrics,
     const FormStructure& form,
-    const AutofillField& field,
-    AutofillMetrics::QualityMetricType metric_type) {
-  // Generate histogram names.
-  const char* source = GetQualityMetricPredictionSource(prediction_source);
-  const char* suffix = GetQualityMetricTypeSuffix(metric_type);
-  std::string raw_data_histogram =
-      base::JoinString({"Autofill.FieldPrediction.", source, suffix}, "");
-  std::string aggregate_histogram = base::JoinString(
-      {"Autofill.FieldPredictionQuality.Aggregate.", source, suffix}, "");
-  std::string type_specific_histogram = base::JoinString(
-      {"Autofill.FieldPredictionQuality.ByFieldType.", source, suffix}, "");
+    const AutofillField& field) {
+  // If it is filled with values unknown, it is a true negative.
+  if (actual_type == UNKNOWN_TYPE) {
+    // Only log aggregate true negative; do not log type specific metrics
+    // for UNKNOWN/EMPTY.
+    DVLOG(2) << "TRUE NEGATIVE";
+    LogUMAHistogramEnumeration(
+        aggregate_histogram,
+        (is_empty ? AutofillMetrics::TRUE_NEGATIVE_EMPTY
+                  : (is_ambiguous ? AutofillMetrics::TRUE_NEGATIVE_AMBIGUOUS
+                                  : AutofillMetrics::TRUE_NEGATIVE_UNKNOWN)),
+        AutofillMetrics::NUM_FIELD_TYPE_QUALITY_METRICS);
+    if (log_rationalization_metrics) {
+      LogUMAHistogramEnumeration(
+          rationalization_quality_histogram,
+          (is_empty ? AutofillMetrics::RATIONALIZATION_GOOD
+                    : AutofillMetrics::RATIONALIZATION_OK),
+          AutofillMetrics::NUM_RATIONALIZATION_QUALITY_METRICS);
+    }
+    return;
+  }
 
-  const ServerFieldTypeSet& possible_types =
-      metric_type == AutofillMetrics::TYPE_AUTOCOMPLETE_BASED
-          ? ServerFieldTypeSet{AutofillType(field.html_type(),
-                                            field.html_mode())
-                                   .GetStorableType()}
-          : field.possible_types();
+  // If it is filled with same type as predicted, it is a true positive. We
+  // also log an RATIONALIZATION_BAD by checking if the filled value is filled
+  // already in previous fields, this means autofill could have filled it
+  // automatically if there has been no rationalization.
+  if (predicted_type == actual_type) {
+    DVLOG(2) << "TRUE POSITIVE";
+    LogUMAHistogramEnumeration(aggregate_histogram,
+                               AutofillMetrics::TRUE_POSITIVE,
+                               AutofillMetrics::NUM_FIELD_TYPE_QUALITY_METRICS);
+    LogUMAHistogramEnumeration(
+        type_specific_histogram,
+        GetFieldTypeGroupMetric(actual_type, AutofillMetrics::TRUE_POSITIVE),
+        KMaxFieldTypeGroupMetric);
+    if (log_rationalization_metrics) {
+      bool duplicated_filling = DuplicatedFilling(form, field);
+      LogUMAHistogramEnumeration(
+          rationalization_quality_histogram,
+          (duplicated_filling ? AutofillMetrics::RATIONALIZATION_BAD
+                              : AutofillMetrics::RATIONALIZATION_OK),
+          AutofillMetrics::NUM_RATIONALIZATION_QUALITY_METRICS);
+    }
+    return;
+  }
 
-  // Get the best type classification we can for the field.
-  ServerFieldType actual_type =
-      GetActualFieldType(possible_types, predicted_type);
+  DVLOG(2) << "MISMATCH";
+  // Here the prediction is wrong, but user has to provide some value still.
+  // This should be a false negative.
+  LogUMAHistogramEnumeration(aggregate_histogram,
+                             AutofillMetrics::FALSE_NEGATIVE_MISMATCH,
+                             AutofillMetrics::NUM_FIELD_TYPE_QUALITY_METRICS);
+  // Log FALSE_NEGATIVE_MISMATCH for predicted type if it did predicted
+  // something but actual type is different.
+  if (predicted_type != UNKNOWN_TYPE)
+    LogUMAHistogramEnumeration(
+        type_specific_histogram,
+        GetFieldTypeGroupMetric(predicted_type,
+                                AutofillMetrics::FALSE_NEGATIVE_MISMATCH),
+        KMaxFieldTypeGroupMetric);
+  if (log_rationalization_metrics) {
+    // Logging RATIONALIZATION_OK despite of type mismatch here because autofill
+    // would have got it wrong with or without rationalization. Rationalization
+    // here does not help, neither does it do any harm.
+    LogUMAHistogramEnumeration(
+        rationalization_quality_histogram, AutofillMetrics::RATIONALIZATION_OK,
+        AutofillMetrics::NUM_RATIONALIZATION_QUALITY_METRICS);
+  }
+  return;
+}
 
-  DVLOG(2) << "Predicted: " << AutofillType(predicted_type).ToString() << "; "
-           << "Actual: " << AutofillType(actual_type).ToString();
-
-  DCHECK_LE(predicted_type, UINT16_MAX);
-  DCHECK_LE(actual_type, UINT16_MAX);
-  UMA_HISTOGRAM_SPARSE_SLOWLY(raw_data_histogram,
-                              (predicted_type << 16) | actual_type);
-
-  form_interactions_ukm_logger->LogFieldType(
-      form.form_parsed_timestamp(), form.form_signature(),
-      field.GetFieldSignature(), prediction_source, metric_type, predicted_type,
-      actual_type);
-
-  // NO_SERVER_DATA is the equivalent of predicting UNKNOWN.
-  if (predicted_type == NO_SERVER_DATA)
-    predicted_type = UNKNOWN_TYPE;
-
-  // The actual type being EMPTY_TYPE is the same as UNKNOWN_TYPE for comparison
-  // purposes, but remember whether or not it was empty for more precise logging
-  // later.
-  bool is_empty = (actual_type == EMPTY_TYPE);
-  bool is_ambiguous = (actual_type == AMBIGUOUS_TYPE);
-  if (is_empty || is_ambiguous)
-    actual_type = UNKNOWN_TYPE;
-
+void LogPredictionQualityMetricsForCommonFields(
+    const std::string& aggregate_histogram,
+    const std::string& type_specific_histogram,
+    ServerFieldType predicted_type,
+    ServerFieldType actual_type,
+    bool is_empty,
+    bool is_ambiguous) {
   // If the predicted and actual types match then it's either a true positive
   // or a true negative (if they are both unknown). Do not log type specific
   // true negatives (instead log a true positive for the "Ambiguous" type).
@@ -472,7 +512,116 @@ void LogPredictionQualityMetrics(
       KMaxFieldTypeGroupMetric);
 }
 
+// Logs field type prediction quality metrics.  The primary histogram name is
+// constructed based on |prediction_source| The field-specific histogram names
+// also incorporates the possible and predicted types for |field|. A suffix may
+// be appended to the metric name, depending on |metric_type|.
+void LogPredictionQualityMetrics(
+    AutofillMetrics::QualityMetricPredictionSource prediction_source,
+    ServerFieldType predicted_type,
+    AutofillMetrics::FormInteractionsUkmLogger* form_interactions_ukm_logger,
+    const FormStructure& form,
+    const AutofillField& field,
+    AutofillMetrics::QualityMetricType metric_type,
+    bool log_rationalization_metrics) {
+  // Generate histogram names.
+  const char* source = GetQualityMetricPredictionSource(prediction_source);
+  const char* suffix = GetQualityMetricTypeSuffix(metric_type);
+  std::string raw_data_histogram =
+      base::JoinString({"Autofill.FieldPrediction.", source, suffix}, "");
+  std::string aggregate_histogram = base::JoinString(
+      {"Autofill.FieldPredictionQuality.Aggregate.", source, suffix}, "");
+  std::string type_specific_histogram = base::JoinString(
+      {"Autofill.FieldPredictionQuality.ByFieldType.", source, suffix}, "");
+  std::string rationalization_quality_histogram = base::JoinString(
+      {"Autofill.RationalizationQuality.PhoneNumber", suffix}, "");
+
+  const ServerFieldTypeSet& possible_types =
+      metric_type == AutofillMetrics::TYPE_AUTOCOMPLETE_BASED
+          ? ServerFieldTypeSet{AutofillType(field.html_type(),
+                                            field.html_mode())
+                                   .GetStorableType()}
+          : field.possible_types();
+
+  // Get the best type classification we can for the field.
+  ServerFieldType actual_type =
+      GetActualFieldType(possible_types, predicted_type);
+
+  DVLOG(2) << "Predicted: " << AutofillType(predicted_type).ToString() << "; "
+           << "Actual: " << AutofillType(actual_type).ToString();
+
+  DCHECK_LE(predicted_type, UINT16_MAX);
+  DCHECK_LE(actual_type, UINT16_MAX);
+  base::UmaHistogramSparse(raw_data_histogram,
+                           (predicted_type << 16) | actual_type);
+
+  form_interactions_ukm_logger->LogFieldType(
+      form.form_parsed_timestamp(), form.form_signature(),
+      field.GetFieldSignature(), prediction_source, metric_type, predicted_type,
+      actual_type);
+
+  // NO_SERVER_DATA is the equivalent of predicting UNKNOWN.
+  if (predicted_type == NO_SERVER_DATA)
+    predicted_type = UNKNOWN_TYPE;
+
+  // The actual type being EMPTY_TYPE is the same as UNKNOWN_TYPE for comparison
+  // purposes, but remember whether or not it was empty for more precise logging
+  // later.
+  bool is_empty = (actual_type == EMPTY_TYPE);
+  bool is_ambiguous = (actual_type == AMBIGUOUS_TYPE);
+  if (is_empty || is_ambiguous)
+    actual_type = UNKNOWN_TYPE;
+
+  // Log metrics for a field that is |only_fill_when_focused|==true. Basically
+  // autofill might have a field prediction but it also thinks it should not
+  // be filled automatically unless user focused on the field. This requires
+  // different metrics logging than normal fields.
+  if (field.only_fill_when_focused()) {
+    LogPredictionQualityMetricsForFieldsOnlyFilledWhenFocused(
+        aggregate_histogram, type_specific_histogram,
+        rationalization_quality_histogram, predicted_type, actual_type,
+        is_empty, is_ambiguous, log_rationalization_metrics, form, field);
+    return;
+  }
+
+  LogPredictionQualityMetricsForCommonFields(
+      aggregate_histogram, type_specific_histogram, predicted_type, actual_type,
+      is_empty, is_ambiguous);
+}
+
+AutofillMetrics::FormEvent GetCardNumberStatusFormEvent(
+    const AutofillMetrics::CardNumberStatus card_number_status) {
+  switch (card_number_status) {
+    case AutofillMetrics::EMPTY_CARD:
+      return AutofillMetrics::
+          FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_NO_CARD;
+    case AutofillMetrics::WRONG_SIZE_CARD:
+      return AutofillMetrics::
+          FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_WRONG_SIZE_CARD;
+    case AutofillMetrics::FAIL_LUHN_CHECK_CARD:
+      return AutofillMetrics::
+          FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_FAIL_LUHN_CHECK_CARD;
+    case AutofillMetrics::KNOWN_CARD:
+      return AutofillMetrics::
+          FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_KNOWN_CARD;
+    case AutofillMetrics::UNKNOWN_CARD:
+      return AutofillMetrics::
+          FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_UNKNOWN_CARD;
+  }
+  NOTREACHED();
+  return AutofillMetrics::
+      FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_NO_CARD;
+}
+
 }  // namespace
+
+// static
+void AutofillMetrics::UpdateSourceURL(ukm::UkmRecorder* ukm_recorder,
+                                      ukm::SourceId source_id,
+                                      const GURL& url) {
+  if (ukm_recorder)
+    ukm_recorder->UpdateSourceURL(source_id, url);
+}
 
 // static
 void AutofillMetrics::LogSubmittedServerCardExpirationStatusMetric(
@@ -685,7 +834,8 @@ void AutofillMetrics::LogHeuristicPredictionQualityMetrics(
   LogPredictionQualityMetrics(
       PREDICTION_SOURCE_HEURISTIC,
       AutofillType(field.heuristic_type()).GetStorableType(),
-      form_interactions_ukm_logger, form, field, metric_type);
+      form_interactions_ukm_logger, form, field, metric_type,
+      false /*log_rationalization_metrics*/);
 }
 
 void AutofillMetrics::LogServerPredictionQualityMetrics(
@@ -696,7 +846,8 @@ void AutofillMetrics::LogServerPredictionQualityMetrics(
   LogPredictionQualityMetrics(
       PREDICTION_SOURCE_SERVER,
       AutofillType(field.overall_server_type()).GetStorableType(),
-      form_interactions_ukm_logger, form, field, metric_type);
+      form_interactions_ukm_logger, form, field, metric_type,
+      false /*log_rationalization_metrics*/);
 }
 
 void AutofillMetrics::LogOverallPredictionQualityMetrics(
@@ -706,7 +857,8 @@ void AutofillMetrics::LogOverallPredictionQualityMetrics(
     QualityMetricType metric_type) {
   LogPredictionQualityMetrics(
       PREDICTION_SOURCE_OVERALL, field.Type().GetStorableType(),
-      form_interactions_ukm_logger, form, field, metric_type);
+      form_interactions_ukm_logger, form, field, metric_type,
+      true /*log_rationalization_metrics*/);
 }
 
 // static
@@ -986,8 +1138,8 @@ void AutofillMetrics::LogAddressSuggestionsCount(size_t num_suggestions) {
 // static
 void AutofillMetrics::LogAutofillSuggestionAcceptedIndex(int index) {
   // A maximum of 50 is enforced to minimize the number of buckets generated.
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Autofill.SuggestionAcceptedIndex",
-                              std::min(index, 50));
+  base::UmaHistogramSparse("Autofill.SuggestionAcceptedIndex",
+                           std::min(index, 50));
 
   base::RecordAction(base::UserMetricsAction("Autofill_SelectedSuggestion"));
 }
@@ -995,8 +1147,8 @@ void AutofillMetrics::LogAutofillSuggestionAcceptedIndex(int index) {
 // static
 void AutofillMetrics::LogAutocompleteSuggestionAcceptedIndex(int index) {
   // A maximum of 50 is enforced to minimize the number of buckets generated.
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Autofill.SuggestionAcceptedIndex.Autocomplete",
-                              std::min(index, 50));
+  base::UmaHistogramSparse("Autofill.SuggestionAcceptedIndex.Autocomplete",
+                           std::min(index, 50));
 }
 
 // static
@@ -1157,8 +1309,6 @@ AutofillMetrics::FormEventLogger::FormEventLogger(
       has_logged_will_submit_(false),
       has_logged_submitted_(false),
       has_logged_bank_name_available_(false),
-      has_logged_detected_card_in_submitted_form_(false),
-      has_logged_submitted_known_card(false),
       logged_suggestion_filled_was_server_data_(false),
       logged_suggestion_filled_was_masked_server_card_(false),
       form_interactions_ukm_logger_(form_interactions_ukm_logger) {}
@@ -1323,7 +1473,9 @@ void AutofillMetrics::FormEventLogger::OnWillSubmitForm() {
   base::RecordAction(base::UserMetricsAction("Autofill_OnWillSubmitForm"));
 }
 
-void AutofillMetrics::FormEventLogger::OnFormSubmitted(bool force_logging) {
+void AutofillMetrics::FormEventLogger::OnFormSubmitted(
+    bool force_logging,
+    CardNumberStatus card_number_status) {
   // Not logging this kind of form if we haven't logged a user interaction.
   if (!has_logged_interacted_)
     return;
@@ -1347,30 +1499,13 @@ void AutofillMetrics::FormEventLogger::OnFormSubmitted(bool force_logging) {
   if (has_logged_suggestions_shown_ || force_logging) {
     Log(AutofillMetrics::FORM_EVENT_SUGGESTION_SHOWN_SUBMITTED_ONCE);
     if (is_for_credit_card_ && !has_logged_suggestion_filled_) {
-      if (!has_logged_detected_card_in_submitted_form_) {
-        Log(AutofillMetrics::
-                FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_NO_CARD);
-      } else if (has_logged_submitted_known_card) {
-        Log(AutofillMetrics::
-                FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_KNOWN_CARD);
-      } else {
-        Log(AutofillMetrics::
-                FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_UNKNOWN_CARD);
-      }
+      Log(GetCardNumberStatusFormEvent(card_number_status));
     }
   }
 }
 
 void AutofillMetrics::FormEventLogger::SetBankNameAvailable() {
   has_logged_bank_name_available_ = true;
-}
-
-void AutofillMetrics::FormEventLogger::DetectedCardInSubmittedForm() {
-  has_logged_detected_card_in_submitted_form_ = true;
-}
-
-void AutofillMetrics::FormEventLogger::SubmittedKnownCard() {
-  has_logged_submitted_known_card = true;
 }
 
 void AutofillMetrics::FormEventLogger::Log(FormEvent event) const {
@@ -1586,7 +1721,7 @@ void AutofillMetrics::FormInteractionsUkmLogger::UpdateSourceURL(
     const GURL& url) {
   url_ = url;
   if (CanLog())
-    ukm_recorder_->UpdateSourceURL(source_id_, url_);
+    AutofillMetrics::UpdateSourceURL(ukm_recorder_, source_id_, url_);
 }
 
 bool AutofillMetrics::FormInteractionsUkmLogger::CanLog() const {
@@ -1604,7 +1739,7 @@ int64_t AutofillMetrics::FormInteractionsUkmLogger::MillisecondsSinceFormParsed(
 
 void AutofillMetrics::FormInteractionsUkmLogger::GetNewSourceID() {
   source_id_ = ukm_recorder_->GetNewSourceID();
-  ukm_recorder_->UpdateSourceURL(source_id_, url_);
+  AutofillMetrics::UpdateSourceURL(ukm_recorder_, source_id_, url_);
 }
 
 AutofillMetrics::UkmTimestampPin::UkmTimestampPin(

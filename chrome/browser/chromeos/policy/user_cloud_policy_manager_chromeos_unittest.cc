@@ -20,7 +20,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_simple_task_runner.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_token_forwarder.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/policy/cloud/cloud_policy_test_utils.h"
@@ -48,6 +47,7 @@
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_preferences/pref_service_syncable.h"
+#include "components/user_manager/scoped_user_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_constants.h"
@@ -90,7 +90,7 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
   // in the test.
   void MakeManagerWithPreloadedStore(int fetch_timeout_seconds) {
     std::unique_ptr<MockCloudPolicyStore> store =
-        base::MakeUnique<MockCloudPolicyStore>();
+        std::make_unique<MockCloudPolicyStore>();
     store->policy_.reset(new em::PolicyData(policy_data_));
     store->policy_map_.CopyFrom(policy_map_);
     store->NotifyStoreLoaded();
@@ -111,7 +111,7 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
         profile_(NULL),
         signin_profile_(NULL),
         user_manager_(new chromeos::FakeChromeUserManager()),
-        user_manager_enabler_(user_manager_) {}
+        user_manager_enabler_(base::WrapUnique(user_manager_)) {}
 
   void SetUp() override {
     // The initialization path that blocks on the initial policy fetch requires
@@ -133,13 +133,13 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
     signin_profile_ = TestingProfile::Builder().BuildIncognito(profile_);
     ASSERT_EQ(signin_profile_, chromeos::ProfileHelper::GetSigninProfile());
 
-    chrome::RegisterLocalState(prefs_.registry());
+    RegisterLocalState(prefs_.registry());
 
     // Set up a policy map for testing.
     GetExpectedDefaultPolicy(&policy_map_);
     policy_map_.Set(key::kHomepageLocation, POLICY_LEVEL_MANDATORY,
                     POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                    base::MakeUnique<base::Value>("http://chromium.org"),
+                    std::make_unique<base::Value>("http://chromium.org"),
                     nullptr);
     expected_bundle_.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .CopyFrom(policy_map_);
@@ -180,7 +180,7 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
 
   void MakeManagerWithEmptyStore(int fetch_timeout) {
     std::unique_ptr<MockCloudPolicyStore> store =
-        base::MakeUnique<MockCloudPolicyStore>();
+        std::make_unique<MockCloudPolicyStore>();
     EXPECT_CALL(*store, Load());
     CreateManager(std::move(store), fetch_timeout);
     EXPECT_FALSE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
@@ -224,7 +224,8 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
       net::TestURLFetcher* fetcher = NULL;
 
       // Issue the oauth_token cookie first.
-      fetcher = PrepareOAuthFetcher(gaia_urls->client_login_to_oauth2_url());
+      fetcher = PrepareOAuthFetcher(
+          gaia_urls->deprecated_client_login_to_oauth2_url());
       if (!fetcher)
         return NULL;
 
@@ -334,7 +335,7 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
   TestingProfile* signin_profile_;
 
   chromeos::FakeChromeUserManager* user_manager_;
-  chromeos::ScopedUserManagerEnabler user_manager_enabler_;
+  user_manager::ScopedUserManager user_manager_enabler_;
 
  private:
   void CreateManager(std::unique_ptr<MockCloudPolicyStore> store,
@@ -466,7 +467,7 @@ TEST_F(UserCloudPolicyManagerChromeOSTest, BlockingFetchOAuthError) {
   // The PolicyOAuth2TokenFetcher posts delayed retries on some errors. This
   // data will make it fail immediately.
   net::TestURLFetcher* fetcher = PrepareOAuthFetcher(
-      GaiaUrls::GetInstance()->client_login_to_oauth2_url());
+      GaiaUrls::GetInstance()->deprecated_client_login_to_oauth2_url());
   ASSERT_TRUE(fetcher);
   fetcher->set_response_code(400);
   fetcher->SetResponseString("Error=BadAuthentication");

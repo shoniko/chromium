@@ -50,7 +50,8 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
     SEQUENCES,
   };
 
-  explicit SurfaceManager(LifetimeType lifetime_type = LifetimeType::SEQUENCES);
+  SurfaceManager(LifetimeType lifetime_type,
+                 uint32_t number_of_frames_to_activation_deadline);
   ~SurfaceManager();
 
 #if DCHECK_IS_ON()
@@ -72,10 +73,6 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
 
   // Destroy the Surface once a set of sequence numbers has been satisfied.
   void DestroySurface(const SurfaceId& surface_id);
-
-  // Called when |surface_id| or one of its descendents is determined to be
-  // damaged at aggregation time.
-  void SurfaceSubtreeDamaged(const SurfaceId& surface_id);
 
   Surface* GetSurfaceForId(const SurfaceId& surface_id);
 
@@ -102,8 +99,8 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
   // has changed.
   void SurfaceDependenciesChanged(
       Surface* surface,
-      const base::flat_set<SurfaceId>& added_dependencies,
-      const base::flat_set<SurfaceId>& removed_dependencies);
+      const base::flat_set<FrameSinkId>& added_dependencies,
+      const base::flat_set<FrameSinkId>& removed_dependencies);
 
   // Called when |surface| is being destroyed.
   void SurfaceDiscarded(Surface* surface);
@@ -127,6 +124,11 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
   // Invalidate a frame_sink_id that might still have associated sequences,
   // possibly because a renderer process has crashed.
   void InvalidateFrameSinkId(const FrameSinkId& frame_sink_id);
+
+  const base::flat_map<FrameSinkId, std::string>& valid_frame_sink_labels()
+      const {
+    return valid_frame_sink_labels_;
+  }
 
   // Set |debug_label| of the |frame_sink_id|. |frame_sink_id| must exist in
   // |valid_frame_sink_labels_| already when UpdateFrameSinkDebugLabel is
@@ -171,6 +173,9 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
   // nothing.
   void DropTemporaryReference(const SurfaceId& surface_id);
 
+  // Garbage collects all destroyed surfaces that aren't live.
+  void GarbageCollectSurfaces();
+
   // Returns all surfaces referenced by parent |surface_id|. Will return an
   // empty set if |surface_id| is unknown or has no references.
   const base::flat_set<SurfaceId>& GetSurfacesReferencedByParent(
@@ -188,6 +193,20 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
   bool using_surface_references() const {
     return lifetime_type_ == LifetimeType::REFERENCES;
   }
+
+  // Returns the most recent surface associated with the |fallback_surface_id|'s
+  // FrameSinkId that was created prior to the current primary surface and
+  // verified by the viz host to be owned by the fallback surface's parent. If
+  // the FrameSinkId of the |primary_surface_id| does not match the
+  // |fallback_surface_id|'s then this method will always return the fallback
+  // surface because we cannot guarantee the latest in flight surface from the
+  // fallback frame sink is older than the primary surface.
+  Surface* GetLatestInFlightSurface(const SurfaceId& primary_surface_id,
+                                    const SurfaceId& fallback_surface_id);
+
+  // Called by SurfaceAggregator notifying us that it will use |surface| in the
+  // next display frame. We will notify SurfaceObservers accordingly.
+  void SurfaceWillBeDrawn(Surface* surface);
 
  private:
   friend class test::SurfaceSynchronizationTest;
@@ -218,9 +237,6 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
     // timer tick and will be true on second timer tick.
     bool marked_as_old = false;
   };
-
-  // Garbage collects all destroyed surfaces that aren't live.
-  void GarbageCollectSurfaces();
 
   // Returns set of live surfaces for |lifetime_manager_| is REFERENCES.
   SurfaceIdSet GetLiveSurfacesForReferences();
@@ -253,7 +269,7 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
   void RemoveTemporaryReference(const SurfaceId& surface_id, bool remove_range);
 
   // Marks old temporary references for logging and deletion.
-  void MarkOldTemporaryReference();
+  void MarkOldTemporaryReferences();
 
   // Removes the surface from the surface map and destroys it.
   void DestroySurfaceInternal(const SurfaceId& surface_id);
@@ -267,6 +283,12 @@ class VIZ_SERVICE_EXPORT SurfaceManager {
 
   // Returns true if |surface_id| is in the garbage collector's queue.
   bool IsMarkedForDestruction(const SurfaceId& surface_id);
+
+  // Determines if the provided |owner| FrameSinkId matches the FrameSinkId of
+  // a surface in the set of |fallback_parents|.
+  bool IsOwnerAmongFallbackParents(
+      const base::flat_set<SurfaceId>& fallback_parents,
+      const base::Optional<FrameSinkId>& owner) const;
 
   // Use reference or sequence based lifetime management.
   LifetimeType lifetime_type_;

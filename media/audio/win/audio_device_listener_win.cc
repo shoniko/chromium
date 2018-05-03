@@ -135,10 +135,14 @@ STDMETHODIMP AudioDeviceListenerWin::OnDefaultDeviceChanged(
     did_run_listener_cb = true;
   }
 
+  base::SystemMonitor* monitor = base::SystemMonitor::Get();
+  if (monitor)
+    monitor->ProcessDevicesChanged(base::SystemMonitor::DEVTYPE_AUDIO);
+
   DVLOG(1) << "OnDefaultDeviceChanged() "
            << "new_default_device: "
            << (new_default_device_id
-                   ? CoreAudioUtil::GetFriendlyName(new_device_id)
+                   ? CoreAudioUtil::GetFriendlyName(new_device_id, flow, role)
                    : "no device")
            << ", flow: " << FlowToString(flow)
            << ", role: " << RoleToString(role)

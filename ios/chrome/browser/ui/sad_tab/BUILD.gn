@@ -36,6 +36,8 @@ source_set("coordinator") {
   ]
   deps = [
     ":sad_tab",
+    "//ios/chrome/browser/ui/commands",
+    "//ios/chrome/browser/web",
     "//ios/chrome/browser/web:tab_helper_delegates",
     "//ios/web",
   ]
@@ -53,7 +55,7 @@ source_set("eg_tests") {
     "//base",
     "//components/strings",
     "//ios/chrome/app/strings",
-    "//ios/chrome/browser/ui/tools_menu",
+    "//ios/chrome/browser/ui/tools_menu/public",
     "//ios/chrome/test/app:test_support",
     "//ios/chrome/test/earl_grey:test_support",
     "//ios/testing/earl_grey:earl_grey_support",

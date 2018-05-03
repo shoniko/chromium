@@ -45,13 +45,13 @@ namespace {
 
 base::AtomicSequenceNumber g_next_shard_id;
 
-ClientSocketPoolManager* CreateSocketPoolManager(
+std::unique_ptr<ClientSocketPoolManager> CreateSocketPoolManager(
     HttpNetworkSession::SocketPoolType pool_type,
     const HttpNetworkSession::Context& context,
     const std::string& ssl_session_cache_shard) {
   // TODO(yutak): Differentiate WebSocket pool manager and allow more
   // simultaneous connections for WebSockets.
-  return new ClientSocketPoolManagerImpl(
+  return std::make_unique<ClientSocketPoolManagerImpl>(
       context.net_log,
       context.client_socket_factory ? context.client_socket_factory
                                     : ClientSocketFactory::GetDefaultFactory(),
@@ -113,24 +113,38 @@ HttpNetworkSession::Params::Params()
       mark_quic_broken_when_network_blackholes(false),
       retry_without_alt_svc_on_quic_errors(false),
       support_ietf_format_quic_altsvc(false),
+      quic_close_sessions_on_ip_change(false),
       quic_idle_connection_timeout_seconds(kIdleConnectionTimeoutSeconds),
       quic_reduced_ping_timeout_seconds(kPingTimeoutSecs),
+      quic_max_time_before_crypto_handshake_seconds(
+          kMaxTimeForCryptoHandshakeSecs),
+      quic_max_idle_time_before_crypto_handshake_seconds(
+          kInitialIdleTimeoutSecs),
       quic_connect_using_default_network(false),
       quic_migrate_sessions_on_network_change(false),
       quic_migrate_sessions_early(false),
+      quic_migrate_sessions_on_network_change_v2(false),
+      quic_migrate_sessions_early_v2(false),
+      quic_max_time_on_non_default_network(
+          base::TimeDelta::FromSeconds(kMaxTimeOnNonDefaultNetworkSecs)),
+      quic_max_migrations_to_non_default_network_on_path_degrading(
+          kMaxMigrationsToNonDefaultNetworkOnPathDegrading),
       quic_allow_server_migration(false),
+      quic_allow_remote_alt_svc(false),
       quic_disable_bidirectional_streams(false),
       quic_force_hol_blocking(false),
       quic_race_cert_verification(false),
       quic_estimate_initial_rtt(false),
+      quic_headers_include_h2_stream_dependency(false),
       enable_token_binding(false),
-      http_09_on_non_default_ports_enabled(false) {
+      http_09_on_non_default_ports_enabled(false),
+      disable_idle_sockets_close_on_memory_pressure(false) {
   quic_supported_versions.push_back(QUIC_VERSION_39);
 }
 
 HttpNetworkSession::Params::Params(const Params& other) = default;
 
-HttpNetworkSession::Params::~Params() {}
+HttpNetworkSession::Params::~Params() = default;
 
 HttpNetworkSession::Context::Context()
     : client_socket_factory(nullptr),
@@ -154,7 +168,7 @@ HttpNetworkSession::Context::Context()
 
 HttpNetworkSession::Context::Context(const Context& other) = default;
 
-HttpNetworkSession::Context::~Context() {}
+HttpNetworkSession::Context::~Context() = default;
 
 // TODO(mbelshe): Move the socket factories into HttpStreamFactory.
 HttpNetworkSession::HttpNetworkSession(const Params& params,
@@ -187,15 +201,23 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
           params.quic_max_packet_length,
           params.quic_user_agent_id,
           params.quic_max_server_configs_stored_in_properties > 0,
+          params.quic_close_sessions_on_ip_change,
           params.mark_quic_broken_when_network_blackholes,
           params.quic_idle_connection_timeout_seconds,
           params.quic_reduced_ping_timeout_seconds,
+          params.quic_max_time_before_crypto_handshake_seconds,
+          params.quic_max_idle_time_before_crypto_handshake_seconds,
           params.quic_connect_using_default_network,
           params.quic_migrate_sessions_on_network_change,
           params.quic_migrate_sessions_early,
+          params.quic_migrate_sessions_on_network_change_v2,
+          params.quic_migrate_sessions_early_v2,
+          params.quic_max_time_on_non_default_network,
+          params.quic_max_migrations_to_non_default_network_on_path_degrading,
           params.quic_allow_server_migration,
           params.quic_race_cert_verification,
           params.quic_estimate_initial_rtt,
+          params.quic_headers_include_h2_stream_dependency,
           params.quic_connection_options,
           params.quic_client_connection_options,
           params.enable_token_binding),
@@ -210,9 +232,8 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
                          AddDefaultHttp2Settings(params.http2_settings),
                          params.time_func,
                          context.proxy_delegate),
-      http_stream_factory_(new HttpStreamFactoryImpl(this, false)),
-      http_stream_factory_for_websocket_(new HttpStreamFactoryImpl(this, true)),
-      network_stream_throttler_(new NetworkThrottleManagerImpl()),
+      http_stream_factory_(std::make_unique<HttpStreamFactoryImpl>(this)),
+      network_stream_throttler_(std::make_unique<NetworkThrottleManagerImpl>()),
       params_(params),
       context_(context) {
   DCHECK(proxy_service_);
@@ -221,10 +242,10 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
 
   const std::string ssl_session_cache_shard =
       "http_network_session/" + base::IntToString(g_next_shard_id.GetNext());
-  normal_socket_pool_manager_.reset(CreateSocketPoolManager(
-      NORMAL_SOCKET_POOL, context, ssl_session_cache_shard));
-  websocket_socket_pool_manager_.reset(CreateSocketPoolManager(
-      WEBSOCKET_SOCKET_POOL, context, ssl_session_cache_shard));
+  normal_socket_pool_manager_ = CreateSocketPoolManager(
+      NORMAL_SOCKET_POOL, context, ssl_session_cache_shard);
+  websocket_socket_pool_manager_ = CreateSocketPoolManager(
+      WEBSOCKET_SOCKET_POOL, context, ssl_session_cache_shard);
 
   if (params_.enable_http2) {
     next_protos_.push_back(kProtoHTTP2);
@@ -235,14 +256,20 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
   http_server_properties_->SetMaxServerConfigsStoredInProperties(
       params.quic_max_server_configs_stored_in_properties);
 
-  memory_pressure_listener_.reset(new base::MemoryPressureListener(base::Bind(
-      &HttpNetworkSession::OnMemoryPressure, base::Unretained(this))));
+  if (!params_.disable_idle_sockets_close_on_memory_pressure) {
+    memory_pressure_listener_.reset(
+        new base::MemoryPressureListener(base::BindRepeating(
+            &HttpNetworkSession::OnMemoryPressure, base::Unretained(this))));
+  }
+
   base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
 }
 
 HttpNetworkSession::~HttpNetworkSession() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   response_drainers_.clear();
+  // TODO(bnc): CloseAllSessions() is also called in SpdySessionPool destructor,
+  // one of the two calls should be removed.
   spdy_session_pool_.CloseAllSessions();
   base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
 }
@@ -336,10 +363,21 @@ std::unique_ptr<base::Value> HttpNetworkSession::QuicInfoToValue() const {
                    params_.quic_race_cert_verification);
   dict->SetBoolean("disable_bidirectional_streams",
                    params_.quic_disable_bidirectional_streams);
+  dict->SetBoolean("close_sessions_on_ip_change",
+                   params_.quic_close_sessions_on_ip_change);
   dict->SetBoolean("migrate_sessions_on_network_change",
                    params_.quic_migrate_sessions_on_network_change);
   dict->SetBoolean("migrate_sessions_early",
                    params_.quic_migrate_sessions_early);
+  dict->SetBoolean("migrate_sessions_on_network_change_v2",
+                   params_.quic_migrate_sessions_on_network_change_v2);
+  dict->SetBoolean("migrate_sessions_early_v2",
+                   params_.quic_migrate_sessions_early_v2);
+  dict->SetInteger("max_time_on_non_default_network_seconds",
+                   params_.quic_max_time_on_non_default_network.InSeconds());
+  dict->SetInteger(
+      "max_num_migrations_to_non_default_network_on_path_degrading",
+      params_.quic_max_migrations_to_non_default_network_on_path_degrading);
   dict->SetBoolean("allow_server_migration",
                    params_.quic_allow_server_migration);
   dict->SetBoolean("estimate_initial_rtt", params_.quic_estimate_initial_rtt);
@@ -461,9 +499,12 @@ ClientSocketPoolManager* HttpNetworkSession::GetSocketPoolManager(
 
 void HttpNetworkSession::OnMemoryPressure(
     base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  DCHECK(!params_.disable_idle_sockets_close_on_memory_pressure);
+
   switch (memory_pressure_level) {
     case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
       break;
+
     case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
     case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
       CloseIdleConnections();

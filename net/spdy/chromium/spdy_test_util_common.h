@@ -30,6 +30,7 @@
 #include "net/proxy/proxy_server.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/socket_test_util.h"
+#include "net/spdy/chromium/spdy_session.h"
 #include "net/spdy/core/spdy_protocol.h"
 #include "net/spdy/platform/api/spdy_string.h"
 #include "net/spdy/platform/api/spdy_string_piece.h"
@@ -46,7 +47,6 @@ class CTVerifier;
 class CTPolicyEnforcer;
 class HostPortPair;
 class NetLogWithSource;
-class SpdySession;
 class SpdySessionKey;
 class SpdySessionPool;
 class SpdyStream;
@@ -220,6 +220,7 @@ struct SpdySessionDependencies {
   bool enable_http2_alternative_service;
   NetLog* net_log;
   bool http_09_on_non_default_ports_enabled;
+  bool disable_idle_sockets_close_on_memory_pressure;
 };
 
 class SpdyURLRequestContext : public URLRequestContext {
@@ -237,16 +238,6 @@ class SpdyURLRequestContext : public URLRequestContext {
 // Equivalent to pool->GetIfExists(spdy_session_key, NetLogWithSource()) !=
 // NULL.
 bool HasSpdySession(SpdySessionPool* pool, const SpdySessionKey& key);
-
-// Tries to create a SPDY session for the given key but expects the
-// attempt to fail with the given error. A SPDY session for |key| must
-// not already exist. The session will be created but close in the
-// next event loop iteration.
-base::WeakPtr<SpdySession> TryCreateSpdySessionExpectingFailure(
-    HttpNetworkSession* http_session,
-    const SpdySessionKey& key,
-    Error expected_error,
-    const NetLogWithSource& net_log);
 
 // Creates a SPDY session for the given key and puts it in the SPDY
 // session pool in |http_session|. A SPDY session for |key| must not
@@ -276,7 +267,7 @@ base::WeakPtr<SpdySession> CreateFakeSpdySession(SpdySessionPool* pool,
 base::WeakPtr<SpdySession> TryCreateFakeSpdySessionExpectingFailure(
     SpdySessionPool* pool,
     const SpdySessionKey& key,
-    Error expected_error);
+    Error expected_status);
 
 class SpdySessionPoolPeer {
  public:
@@ -382,10 +373,10 @@ class SpdyTestUtil {
                                            RequestPriority priority,
                                            const HostPortPair& host_port_pair);
 
-  // Constructs a SPDY PUSH_PROMISE frame.
+  // Constructs a PUSH_PROMISE frame and a HEADERS frame on the pushed stream.
   // |extra_headers| are the extra header-value pairs, which typically
   // will vary the most between calls.
-  // Returns a SpdySerializedFrame.
+  // Returns a SpdySerializedFrame object with the two frames concatenated.
   SpdySerializedFrame ConstructSpdyPush(const char* const extra_headers[],
                                         int extra_header_count,
                                         int stream_id,
@@ -399,9 +390,11 @@ class SpdyTestUtil {
                                         const char* status,
                                         const char* location);
 
-  SpdySerializedFrame ConstructInitialSpdyPushFrame(SpdyHeaderBlock headers,
-                                                    int stream_id,
-                                                    int associated_stream_id);
+  // Constructs a PUSH_PROMISE frame.
+  SpdySerializedFrame ConstructSpdyPushPromise(
+      SpdyStreamId associated_stream_id,
+      SpdyStreamId stream_id,
+      SpdyHeaderBlock headers);
 
   SpdySerializedFrame ConstructSpdyPushHeaders(
       int stream_id,

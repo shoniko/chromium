@@ -40,7 +40,6 @@
 #include "modules/indexeddb/IDBTracing.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8PerIsolateData.h"
-#include "platform/wtf/PtrUtil.h"
 
 #include <memory>
 
@@ -82,29 +81,6 @@ IDBTransaction* IDBTransaction::CreateVersionChange(
                             old_metadata);
 }
 
-namespace {
-
-class DeactivateTransactionTask : public V8PerIsolateData::EndOfScopeTask {
- public:
-  static std::unique_ptr<DeactivateTransactionTask> Create(
-      IDBTransaction* transaction) {
-    return WTF::WrapUnique(new DeactivateTransactionTask(transaction));
-  }
-
-  void Run() override {
-    transaction_->SetActive(false);
-    transaction_.Clear();
-  }
-
- private:
-  explicit DeactivateTransactionTask(IDBTransaction* transaction)
-      : transaction_(transaction) {}
-
-  Persistent<IDBTransaction> transaction_;
-};
-
-}  // namespace
-
 IDBTransaction::IDBTransaction(ExecutionContext* execution_context,
                                int64_t id,
                                const HashSet<String>& scope,
@@ -140,7 +116,8 @@ IDBTransaction::IDBTransaction(ScriptState* script_state,
 
   DCHECK_EQ(state_, kActive);
   V8PerIsolateData::From(script_state->GetIsolate())
-      ->AddEndOfScopeTask(DeactivateTransactionTask::Create(this));
+      ->AddEndOfScopeTask(
+          WTF::Bind(&IDBTransaction::SetActive, WrapPersistent(this), false));
 
   database_->TransactionCreated(this);
 }
@@ -571,7 +548,7 @@ void IDBTransaction::EnqueueEvent(Event* event) {
 
   EventQueue* event_queue = GetExecutionContext()->GetEventQueue();
   event->SetTarget(this);
-  event_queue->EnqueueEvent(BLINK_FROM_HERE, event);
+  event_queue->EnqueueEvent(FROM_HERE, event);
 }
 
 void IDBTransaction::AbortOutstandingRequests() {

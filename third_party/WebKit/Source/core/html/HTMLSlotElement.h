@@ -42,23 +42,38 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(HTMLSlotElement);
+  static HTMLSlotElement* Create(Document&);
+  static HTMLSlotElement* CreateUserAgentDefaultSlot(Document&);
+  static HTMLSlotElement* CreateUserAgentCustomAssignSlot(Document&);
 
-  const HeapVector<Member<Node>>& AssignedNodes();
+  const HeapVector<Member<Node>>& AssignedNodes() const;
   const HeapVector<Member<Node>>& GetDistributedNodes();
-  const HeapVector<Member<Node>> assignedNodesForBinding(
+  const HeapVector<Member<Node>> AssignedNodesForBinding(
+      const AssignedNodesOptions&);
+  const HeapVector<Member<Element>> AssignedElements();
+  const HeapVector<Member<Element>> AssignedElementsForBinding(
       const AssignedNodesOptions&);
 
+  Node* FirstAssignedNode() const {
+    return assigned_nodes_.IsEmpty() ? nullptr : assigned_nodes_.front().Get();
+  }
+  Node* LastAssignedNode() const {
+    return assigned_nodes_.IsEmpty() ? nullptr : assigned_nodes_.back().Get();
+  }
+
   Node* FirstDistributedNode() const {
-    DCHECK(SupportsDistribution());
+    DCHECK(SupportsAssignment());
     return distributed_nodes_.IsEmpty() ? nullptr
                                         : distributed_nodes_.front().Get();
   }
   Node* LastDistributedNode() const {
-    DCHECK(SupportsDistribution());
+    DCHECK(SupportsAssignment());
     return distributed_nodes_.IsEmpty() ? nullptr
                                         : distributed_nodes_.back().Get();
   }
+
+  Node* AssignedNodeNextTo(const Node&) const;
+  Node* AssignedNodePreviousTo(const Node&) const;
 
   Node* DistributedNodeNextTo(const Node&) const;
   Node* DistributedNodePreviousTo(const Node&) const;
@@ -91,7 +106,7 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
   void ClearDistribution();
   void SaveAndClearDistribution();
 
-  bool SupportsDistribution() const { return IsInV1ShadowTree(); }
+  bool SupportsAssignment() const { return IsInV1ShadowTree(); }
 
   void CheckFallbackAfterInsertedIntoShadowTree();
   void CheckFallbackAfterRemovedFromShadowTree();
@@ -102,7 +117,14 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
   void DispatchSlotChangeEvent();
   void ClearSlotChangeEventEnqueued() { slotchange_event_enqueued_ = false; }
 
+  // For Incremental Shadow DOM
+  void ClearAssignedNodes();
+
   static AtomicString NormalizeSlotName(const AtomicString&);
+
+  // For User-Agent Shadow DOM
+  static const AtomicString& UserAgentCustomAssignSlotName();
+  static const AtomicString& UserAgentDefaultSlotName();
 
   virtual void Trace(blink::Visitor*);
 
@@ -112,16 +134,21 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
   InsertionNotificationRequest InsertedInto(ContainerNode*) final;
   void RemovedFrom(ContainerNode*) final;
   void WillRecalcStyle(StyleRecalcChange) final;
+  void DidRecalcStyle(StyleRecalcChange) final;
 
   void EnqueueSlotChangeEvent();
 
   bool HasSlotableChild() const;
+
+  const HeapVector<Member<Node>>& ChildrenInFlatTreeIfAssignmentIsSupported();
 
   void LazyReattachDistributedNodesNaive();
 
   static void LazyReattachDistributedNodesByDynamicProgramming(
       const HeapVector<Member<Node>>&,
       const HeapVector<Member<Node>>&);
+
+  void SetNeedsDistributionRecalcWillBeSetNeedsAssignmentRecalc();
 
   HeapVector<Member<Node>> assigned_nodes_;
   HeapVector<Member<Node>> distributed_nodes_;

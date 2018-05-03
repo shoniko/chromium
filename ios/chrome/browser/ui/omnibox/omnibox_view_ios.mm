@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/ios/device_util.h"
 #include "base/ios/ios_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/string16.h"
@@ -160,22 +159,24 @@ UIColor* IncognitoSecureTextColor() {
 
 OmniboxViewIOS::OmniboxViewIOS(OmniboxTextFieldIOS* field,
                                WebOmniboxEditController* controller,
+                               LeftImageProvider* left_image_provider,
                                ios::ChromeBrowserState* browser_state)
     : OmniboxView(
           controller,
-          base::MakeUnique<ChromeOmniboxClientIOS>(controller, browser_state)),
+          std::make_unique<ChromeOmniboxClientIOS>(controller, browser_state)),
       browser_state_(browser_state),
       field_(field),
       controller_(controller),
+      left_image_provider_(left_image_provider),
       ignore_popup_updates_(false),
       attributing_display_string_(nil),
       popup_provider_(nullptr) {
   DCHECK(field_);
-  field_delegate_.reset(
-      [[AutocompleteTextFieldDelegate alloc] initWithEditView:this]);
+  field_delegate_ =
+      [[AutocompleteTextFieldDelegate alloc] initWithEditView:this];
 
   if (@available(iOS 11.0, *)) {
-    paste_delegate_.reset([[OmniboxTextFieldPasteDelegate alloc] init]);
+    paste_delegate_ = [[OmniboxTextFieldPasteDelegate alloc] init];
     [field_ setPasteDelegate:paste_delegate_];
   }
 
@@ -183,7 +184,8 @@ OmniboxViewIOS::OmniboxViewIOS(OmniboxTextFieldIOS* field,
   [field_ addTarget:field_delegate_
                 action:@selector(textFieldDidChange:)
       forControlEvents:UIControlEventEditingChanged];
-  use_strikethrough_workaround_ = base::ios::IsRunningOnOrLater(10, 3, 0);
+  use_strikethrough_workaround_ = base::ios::IsRunningOnOrLater(10, 3, 0) &&
+                                  !base::ios::IsRunningOnOrLater(11, 2, 0);
 }
 
 OmniboxViewIOS::~OmniboxViewIOS() {
@@ -262,6 +264,7 @@ void OmniboxViewIOS::UpdatePopup() {
 
 void OmniboxViewIOS::OnTemporaryTextMaybeChanged(
     const base::string16& display_text,
+    const AutocompleteMatch& match,
     bool save_original_selection,
     bool notify_text_changed) {
   SetWindowTextAndCaretPos(display_text, display_text.size(), false, false);
@@ -282,7 +285,7 @@ bool OmniboxViewIOS::OnInlineAutocompleteTextMaybeChanged(
 
 void OmniboxViewIOS::OnBeforePossibleChange() {
   GetState(&state_before_change_);
-  marked_text_before_change_.reset([[field_ markedText] copy]);
+  marked_text_before_change_ = [[field_ markedText] copy];
 }
 
 bool OmniboxViewIOS::OnAfterPossibleChange(bool allow_keyword_ui_change) {
@@ -325,7 +328,13 @@ bool OmniboxViewIOS::DeleteAtEndPressed() {
 
 void OmniboxViewIOS::GetSelectionBounds(base::string16::size_type* start,
                                         base::string16::size_type* end) const {
-  *start = *end = 0;
+  if ([field_ isFirstResponder]) {
+    NSRange selected_range = [field_ selectedNSRange];
+    *start = selected_range.location;
+    *end = selected_range.location + selected_range.length;
+  } else {
+    *start = *end = 0;
+  }
 }
 
 gfx::NativeView OmniboxViewIOS::GetNativeView() const {
@@ -355,7 +364,6 @@ void OmniboxViewIOS::OnDidBeginEditing() {
   // Text attributes (e.g. text color) should not be shown while editing, so
   // strip them out by calling setText (as opposed to setAttributedText).
   [field_ setText:[field_ text]];
-  [field_ enableLeftViewButton:NO];
   OnBeforePossibleChange();
   // In the case where the user taps the fakebox on the Google landing page,
   // the WebToolbarController invokes OnSetFocus before calling
@@ -384,7 +392,6 @@ void OmniboxViewIOS::OnDidBeginEditing() {
 
 void OmniboxViewIOS::OnDidEndEditing() {
   CloseOmniboxPopup();
-  [field_ enableLeftViewButton:YES];
   model()->OnWillKillFocus();
   model()->OnKillFocus();
   if ([field_ isPreEditing])
@@ -654,15 +661,19 @@ void OmniboxViewIOS::UpdateSchemeStyle(const gfx::Range& range) {
     }
 
     NSRange strikethroughRange = range.ToNSRange();
-    // TODO(crbug.com/751801): remove this workaround.
-    // In iOS 11, UITextField has a bug: when the first character has
-    // strikethrough attribute, typing and setting text without strikethrough
-    // attribute will still result in strikethrough. The following is a
-    // workaround that prevents crossing out the first character.
-    if (base::ios::IsRunningOnOrLater(11, 0, 0)) {
-      if (strikethroughRange.location == 0 && strikethroughRange.length > 0) {
-        strikethroughRange.location += 1;
-        strikethroughRange.length -= 1;
+
+    if (base::ios::IsRunningOnOrLater(11, 0, 0) &&
+        !base::ios::IsRunningOnOrLater(11, 2, 0)) {
+      // This is a workaround for an iOS bug (crbug.com/751801) fixed in 11.2.
+      // In iOS 11, UITextField has a bug: when the first character has
+      // strikethrough attribute, typing and setting text without strikethrough
+      // attribute will still result in strikethrough. The following is a
+      // workaround that prevents crossing out the first character.
+      if (base::ios::IsRunningOnOrLater(11, 0, 0)) {
+        if (strikethroughRange.location == 0 && strikethroughRange.length > 0) {
+          strikethroughRange.location += 1;
+          strikethroughRange.length -= 1;
+        }
       }
     }
 
@@ -695,9 +706,11 @@ NSAttributedString* OmniboxViewIOS::ApplyTextAttributes(
 }
 
 void OmniboxViewIOS::UpdateAppearance() {
+  base::string16 text =
+      controller_->GetToolbarModel()->GetFormattedURL(nullptr);
   // If Siri is thinking, treat that as user input being in progress.  It is
   // unsafe to modify the text field while voice entry is pending.
-  if (model()->UpdatePermanentText()) {
+  if (model()->SetPermanentText(text)) {
     // Revert everything to the baseline look.
     RevertAll();
   } else if (!model()->has_focus() &&
@@ -705,8 +718,6 @@ void OmniboxViewIOS::UpdateAppearance() {
     // Even if the change wasn't "user visible" to the model, it still may be
     // necessary to re-color to the URL string.  Only do this if the omnibox is
     // not currently focused.
-    base::string16 text =
-        controller_->GetToolbarModel()->GetFormattedURL(nullptr);
     NSAttributedString* as = ApplyTextAttributes(text);
     [field_ setText:as userTextLength:[as length]];
   }
@@ -776,7 +787,7 @@ bool OmniboxViewIOS::ShouldIgnoreUserInputDueToPendingVoiceSearch() {
 }
 
 void OmniboxViewIOS::SetLeftImage(int imageId) {
-  [field_ setPlaceholderImage:imageId];
+  left_image_provider_->SetLeftImage(imageId);
 }
 
 void OmniboxViewIOS::HideKeyboardAndEndEditing() {

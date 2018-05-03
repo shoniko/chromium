@@ -7,15 +7,17 @@
 
 #include "bindings/core/v8/v8_frame_request_callback.h"
 #include "core/dom/Document.h"
-#include "core/dom/SuspendableObject.h"
+#include "core/dom/PausableObject.h"
 #include "core/dom/events/EventTarget.h"
 #include "device/vr/vr_service.mojom-blink.h"
 #include "modules/vr/VRDisplayCapabilities.h"
 #include "modules/vr/VRLayerInit.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "platform/Timer.h"
+#include "platform/graphics/gpu/XRFrameTransport.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
+#include "platform/wtf/Functional.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
 
@@ -27,6 +29,7 @@ class GLES2Interface;
 
 namespace blink {
 
+class PLATFORM_EXPORT Image;
 class NavigatorVR;
 class VRController;
 class VREyeParameters;
@@ -39,9 +42,8 @@ enum VREye { kVREyeNone, kVREyeLeft, kVREyeRight };
 
 class VRDisplay final : public EventTargetWithInlineData,
                         public ActiveScriptWrappable<VRDisplay>,
-                        public SuspendableObject,
-                        public device::mojom::blink::VRDisplayClient,
-                        public device::mojom::blink::VRSubmitFrameClient {
+                        public PausableObject,
+                        public device::mojom::blink::VRDisplayClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(VRDisplay);
   USING_PRE_FINALIZER(VRDisplay, Dispose);
@@ -90,13 +92,14 @@ class VRDisplay final : public EventTargetWithInlineData,
   // ScriptWrappable implementation.
   bool HasPendingActivity() const final;
 
-  // SuspendableObject:
-  void Suspend() override;
-  void Resume() override;
+  // PausableObject:
+  void Pause() override;
+  void Unpause() override;
 
   void FocusChanged();
 
   void OnMagicWindowVSync(double timestamp);
+  int PendingMagicWindowVSyncId() { return pending_magic_window_vsync_id_; }
 
   void Trace(blink::Visitor*) override;
   void TraceWrappers(const ScriptWrappableVisitor*) const override;
@@ -121,7 +124,9 @@ class VRDisplay final : public EventTargetWithInlineData,
   VRController* Controller();
 
  private:
-  void OnPresentComplete(bool);
+  void OnPresentComplete(
+      bool success,
+      device::mojom::blink::VRDisplayFrameTransportOptionsPtr);
 
   void OnConnected();
   void OnDisconnected();
@@ -129,10 +134,6 @@ class VRDisplay final : public EventTargetWithInlineData,
   void StopPresenting();
 
   void OnPresentChange();
-
-  // VRSubmitFrameClient
-  void OnSubmitFrameTransferred() override;
-  void OnSubmitFrameRendered() override;
 
   // VRDisplayClient
   void OnChanged(device::mojom::blink::VRDisplayInfoPtr) override;
@@ -158,12 +159,13 @@ class VRDisplay final : public EventTargetWithInlineData,
   void ProcessScheduledAnimations(double timestamp);
   void ProcessScheduledWindowAnimations(double timestamp);
 
-  // In order to help the VR device with scheduling, never request a new VSync
-  // until the current frame is either submitted or abandoned. If vrDisplay.rAF
-  // is called earlier, defer the GetVSync until vrDisplay.submitFrame is
-  // called. If the rAF callback exits without submitting a frame, call it at
-  // that time.
+  // Request delivery of a VSync event for either magic window mode or
+  // presenting mode as applicable. May be called more than once per frame, it
+  // ensures that there's at most one VSync request active at a time.
+  // Does nothing if the web application hasn't requested a rAF callback.
   void RequestVSync();
+
+  scoped_refptr<Image> GetFrameImage();
 
   Member<NavigatorVR> navigator_vr_;
   unsigned display_id_ = 0;
@@ -177,6 +179,7 @@ class VRDisplay final : public EventTargetWithInlineData,
   Member<VREyeParameters> eye_parameters_right_;
   device::mojom::blink::VRPosePtr frame_pose_;
   device::mojom::blink::VRPosePtr pending_pose_;
+
 
   // This frame ID is vr-specific and is used to track when frames arrive at the
   // VR compositor so that it knows which poses to use, when to apply bounds
@@ -195,28 +198,32 @@ class VRDisplay final : public EventTargetWithInlineData,
 
   gpu::gles2::GLES2Interface* context_gl_ = nullptr;
   Member<WebGLRenderingContextBase> rendering_context_;
-
-  // Used to keep the image alive until the next frame if using
-  // waitForPreviousTransferToFinish.
-  scoped_refptr<Image> previous_image_;
+  Member<XRFrameTransport> frame_transport_;
 
   TraceWrapperMember<ScriptedAnimationController>
       scripted_animation_controller_;
   bool pending_vrdisplay_raf_ = false;
-  bool pending_vsync_ = false;
-  int pending_vsync_id_ = -1;
+  bool pending_presenting_vsync_ = false;
+  bool pending_magic_window_vsync_ = false;
+  int pending_magic_window_vsync_id_ = -1;
+  base::OnceClosure magic_window_vsync_waiting_for_pose_;
+  WTF::TimeTicks magic_window_pose_request_time_;
+  WTF::TimeTicks magic_window_pose_received_time_;
   bool in_animation_frame_ = false;
   bool did_submit_this_frame_ = false;
   bool display_blurred_ = false;
-  bool pending_previous_frame_render_ = false;
-  bool pending_submit_frame_ = false;
   bool pending_present_request_ = false;
+
+  // Metrics data - indicates whether we've already measured this data so we
+  // don't do it every frame.
+  bool did_log_getFrameData_ = false;
+  bool did_log_requestPresent_ = false;
 
   device::mojom::blink::VRMagicWindowProviderPtr magic_window_provider_;
   device::mojom::blink::VRDisplayHostPtr display_;
 
-  mojo::Binding<device::mojom::blink::VRSubmitFrameClient>
-      submit_frame_client_binding_;
+  bool present_image_needs_copy_ = false;
+
   mojo::Binding<device::mojom::blink::VRDisplayClient> display_client_binding_;
   device::mojom::blink::VRPresentationProviderPtr vr_presentation_provider_;
 

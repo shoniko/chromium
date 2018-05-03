@@ -9,6 +9,7 @@
 
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/command_line.h"
@@ -19,17 +20,14 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/common/open_search_description_document_handler.mojom.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
-#include "chrome/renderer/searchbox/searchbox_extension.h"
 #include "chrome/renderer/web_apps.h"
+#include "components/crash/core/common/crash_key.h"
 #include "components/translate/content/renderer/translate_helper.h"
-#include "content/public/common/associated_interface_provider.h"
-#include "content/public/common/associated_interface_registry.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
@@ -38,6 +36,8 @@
 #include "printing/features/features.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "skia/ext/image_operations.h"
+#include "third_party/WebKit/common/associated_interfaces/associated_interface_provider.h"
+#include "third_party/WebKit/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/WebKit/public/platform/WebImage.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -53,6 +53,10 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "url/gurl.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/renderer/searchbox/searchbox_extension.h"
+#endif  // !defined(OS_ANDROID)
 
 #if BUILDFLAG(ENABLE_PRINTING)
 #include "components/printing/common/print_messages.h"
@@ -73,6 +77,7 @@ static const size_t kMaxIndexChars = 65535;
 
 // Constants for UMA statistic collection.
 static const char kTranslateCaptureText[] = "Translate.CaptureText";
+static const char kTranslatePageCaptured[] = "Translate.PageCaptured";
 
 // For a page that auto-refreshes, we still show the bubble, if
 // the refresh delay is less than this value (in seconds).
@@ -127,12 +132,13 @@ ChromeRenderFrameObserver::ChromeRenderFrameObserver(
     : content::RenderFrameObserver(render_frame),
       translate_helper_(nullptr),
       phishing_classifier_(nullptr) {
-  // Don't do anything else for subframes.
-  if (!render_frame->IsMainFrame())
-    return;
   render_frame->GetAssociatedInterfaceRegistry()->AddInterface(
       base::Bind(&ChromeRenderFrameObserver::OnRenderFrameObserverRequest,
                  base::Unretained(this)));
+  // Don't do anything else for subframes.
+  if (!render_frame->IsMainFrame())
+    return;
+
 #if defined(SAFE_BROWSING_CSD)
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -140,8 +146,7 @@ ChromeRenderFrameObserver::ChromeRenderFrameObserver(
     SetClientSidePhishingDetection(true);
 #endif
   translate_helper_ = new translate::TranslateHelper(
-      render_frame, chrome::ISOLATED_WORLD_ID_TRANSLATE,
-      extensions::kExtensionScheme);
+      render_frame, ISOLATED_WORLD_ID_TRANSLATE, extensions::kExtensionScheme);
 }
 
 ChromeRenderFrameObserver::~ChromeRenderFrameObserver() {
@@ -164,8 +169,6 @@ bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
     return false;
 
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderFrameObserver, message)
-    IPC_MESSAGE_HANDLER(ChromeFrameMsg_GetWebApplicationInfo,
-                        OnGetWebApplicationInfo)
 #if BUILDFLAG(ENABLE_PRINTING)
     IPC_MESSAGE_HANDLER(PrintMsg_PrintNodeUnderContextMenu,
                         OnPrintNodeUnderContextMenu)
@@ -177,7 +180,8 @@ bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
 }
 
 void ChromeRenderFrameObserver::OnSetIsPrerendering(
-    prerender::PrerenderMode mode) {
+    prerender::PrerenderMode mode,
+    const std::string& histogram_prefix) {
   if (mode != prerender::NO_PRERENDER) {
     // If the PrerenderHelper for this frame already exists, don't create it. It
     // can already be created for subframes during handling of
@@ -188,7 +192,7 @@ void ChromeRenderFrameObserver::OnSetIsPrerendering(
 
     // The PrerenderHelper will destroy itself either after recording histograms
     // or on destruction of the RenderView.
-    new prerender::PrerenderHelper(render_frame(), mode);
+    new prerender::PrerenderHelper(render_frame(), mode, histogram_prefix);
   }
 }
 
@@ -211,7 +215,8 @@ void ChromeRenderFrameObserver::RequestThumbnailForContextNode(
   SkBitmap thumbnail;
   gfx::Size original_size;
   if (!context_node.IsNull() && context_node.IsElementNode()) {
-    blink::WebImage image = context_node.To<WebElement>().ImageContents();
+    blink::WebImage image =
+        context_node.To<WebElement>().ImageContents();
     original_size = image.Size();
     thumbnail = Downscale(image,
                           thumbnail_min_area_pixels,
@@ -245,7 +250,6 @@ void ChromeRenderFrameObserver::RequestThumbnailForContextNode(
         break;
       }
   }
-
   callback.Run(thumbnail_data, original_size);
 }
 
@@ -258,7 +262,8 @@ void ChromeRenderFrameObserver::OnPrintNodeUnderContextMenu() {
 #endif
 }
 
-void ChromeRenderFrameObserver::OnGetWebApplicationInfo() {
+void ChromeRenderFrameObserver::GetWebApplicationInfo(
+    const GetWebApplicationInfoCallback& callback) {
   WebLocalFrame* frame = render_frame()->GetWebFrame();
 
   WebApplicationInfo web_app_info;
@@ -295,8 +300,7 @@ void ChromeRenderFrameObserver::OnGetWebApplicationInfo() {
   web_app_info.description =
       web_app_info.description.substr(0, chrome::kMaxMetaTagAttributeLength);
 
-  Send(new ChromeFrameHostMsg_DidGetWebApplicationInfo(routing_id(),
-                                                       web_app_info));
+  std::move(callback).Run(web_app_info);
 }
 
 void ChromeRenderFrameObserver::SetClientSidePhishingDetection(
@@ -353,9 +357,9 @@ void ChromeRenderFrameObserver::DidCommitProvisionalLoad(
   if (frame->Parent())
     return;
 
-  base::debug::SetCrashKeyValue(
-      crash_keys::kViewCount,
-      base::SizeTToString(content::RenderView::GetRenderViewCount()));
+  static crash_reporter::CrashKeyString<8> view_count_key("view-count");
+  view_count_key.Set(
+      base::NumberToString(content::RenderView::GetRenderViewCount()));
 
 #if !defined(OS_ANDROID)
   if ((render_frame()->GetEnabledBindings() &
@@ -368,10 +372,12 @@ void ChromeRenderFrameObserver::DidCommitProvisionalLoad(
 }
 
 void ChromeRenderFrameObserver::DidClearWindowObject() {
+#if !defined(OS_ANDROID)
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kInstantProcess))
     SearchBoxExtension::Install(render_frame()->GetWebFrame());
+#endif  // !defined(OS_ANDROID)
 }
 
 void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
@@ -412,8 +418,10 @@ void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
 
   // We should run language detection only once. Parsing finishes before
   // the page loads, so let's pick that timing.
-  if (translate_helper_ && capture_type == PRELIMINARY_CAPTURE)
+  if (translate_helper_ && capture_type == PRELIMINARY_CAPTURE) {
+    SCOPED_UMA_HISTOGRAM_TIMER(kTranslatePageCaptured);
     translate_helper_->PageCaptured(contents);
+  }
 
   TRACE_EVENT0("renderer", "ChromeRenderFrameObserver::CapturePageText");
 
@@ -456,4 +464,17 @@ void ChromeRenderFrameObserver::SetWindowFeatures(
     blink::mojom::WindowFeaturesPtr window_features) {
   render_frame()->GetRenderView()->GetWebView()->SetWindowFeatures(
       content::ConvertMojoWindowFeaturesToWebWindowFeatures(*window_features));
+}
+
+void ChromeRenderFrameObserver::UpdateBrowserControlsState(
+    content::BrowserControlsState constraints,
+    content::BrowserControlsState current,
+    bool animate) {
+#if defined(OS_ANDROID)
+  render_frame()->GetRenderView()->UpdateBrowserControlsState(constraints,
+                                                              current, animate);
+#else
+  // TODO(https://crbug.com/676224): remove this reporting.
+  mojo::ReportBadMessage("UpdateBrowserControlsState is OS_ANDROID only.");
+#endif
 }

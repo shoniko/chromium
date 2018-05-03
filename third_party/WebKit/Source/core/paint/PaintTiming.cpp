@@ -12,12 +12,14 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/loader/DocumentLoader.h"
+#include "core/loader/InteractiveDetector.h"
 #include "core/loader/ProgressTracker.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/probe/CoreProbes.h"
 #include "core/timing/DOMWindowPerformance.h"
 #include "core/timing/Performance.h"
+#include "platform/CrossThreadFunctional.h"
 #include "platform/Histogram.h"
 #include "platform/WebFrameScheduler.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
@@ -56,7 +58,7 @@ void PaintTiming::MarkFirstPaint() {
   // markFirstPaint().
   if (first_paint_ != 0.0)
     return;
-  SetFirstPaint(MonotonicallyIncreasingTime());
+  SetFirstPaint(CurrentTimeTicksInSeconds());
 }
 
 void PaintTiming::MarkFirstContentfulPaint() {
@@ -66,13 +68,13 @@ void PaintTiming::MarkFirstContentfulPaint() {
   // markFirstContentfulPaint().
   if (first_contentful_paint_ != 0.0)
     return;
-  SetFirstContentfulPaint(MonotonicallyIncreasingTime());
+  SetFirstContentfulPaint(CurrentTimeTicksInSeconds());
 }
 
 void PaintTiming::MarkFirstTextPaint() {
   if (first_text_paint_ != 0.0)
     return;
-  first_text_paint_ = MonotonicallyIncreasingTime();
+  first_text_paint_ = CurrentTimeTicksInSeconds();
   SetFirstContentfulPaint(first_text_paint_);
   RegisterNotifySwapTime(PaintEvent::kFirstTextPaint);
 }
@@ -80,7 +82,7 @@ void PaintTiming::MarkFirstTextPaint() {
 void PaintTiming::MarkFirstImagePaint() {
   if (first_image_paint_ != 0.0)
     return;
-  first_image_paint_ = MonotonicallyIncreasingTime();
+  first_image_paint_ = CurrentTimeTicksInSeconds();
   SetFirstContentfulPaint(first_image_paint_);
   RegisterNotifySwapTime(PaintEvent::kFirstImagePaint);
 }
@@ -107,6 +109,12 @@ void PaintTiming::SetFirstMeaningfulPaint(
       "loading,rail,devtools.timeline", "firstMeaningfulPaint",
       TraceEvent::ToTraceTimestamp(swap_stamp), "frame", GetFrame(),
       "afterUserInput", had_input);
+
+  InteractiveDetector* interactive_detector(
+      InteractiveDetector::From(*GetSupplementable()));
+  if (interactive_detector) {
+    interactive_detector->OnFirstMeaningfulPaintDetected(swap_stamp, had_input);
+  }
 
   // Notify FMP for UMA only if there's no user input before FMP, so that layout
   // changes caused by user interactions wouldn't be considered as FMP.
@@ -178,9 +186,9 @@ void PaintTiming::SetFirstContentfulPaint(double stamp) {
 }
 
 void PaintTiming::RegisterNotifySwapTime(PaintEvent event) {
-  RegisterNotifySwapTime(event,
-                         WTF::Bind(&PaintTiming::ReportSwapTime,
-                                   WrapCrossThreadWeakPersistent(this), event));
+  RegisterNotifySwapTime(
+      event, CrossThreadBind(&PaintTiming::ReportSwapTime,
+                             WrapCrossThreadWeakPersistent(this), event));
 }
 
 void PaintTiming::RegisterNotifySwapTime(PaintEvent event,

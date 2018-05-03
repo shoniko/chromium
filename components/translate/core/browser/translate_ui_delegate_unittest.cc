@@ -53,6 +53,7 @@ class TranslateUIDelegateTest : public ::testing::Test {
         "settings.language.preferred_languages", std::string());
     pref_service_->registry()->RegisterStringPref("intl.accept_languages",
                                                   std::string());
+    pref_service_->registry()->RegisterBooleanPref("translate.enabled", true);
     TranslatePrefs::RegisterProfilePrefs(pref_service_->registry());
 
     client_.reset(new MockTranslateClient(&driver_, pref_service_.get()));
@@ -164,31 +165,6 @@ TEST_F(TranslateUIDelegateTest, ShouldAlwaysTranslateBeCheckedByDefaultNever) {
     EXPECT_FALSE(delegate_->ShouldAlwaysTranslateBeCheckedByDefault());
     prefs->IncrementTranslationAcceptedCount("ar");
   }
-}
-
-TEST_F(TranslateUIDelegateTest, ShouldAlwaysTranslateBeCheckedByDefault2) {
-  const char kGroupName[] = "GroupA";
-  std::map<std::string, std::string> params = {
-      {kAlwaysTranslateOfferThreshold, "2"}};
-  variations::AssociateVariationParams(translate::kTranslateUI2016Q2TrialName,
-                                       kGroupName, params);
-  // need a trial_list to init the global instance used internally
-  // inside CreateFieldTrial().
-  base::FieldTrialList trial_list(nullptr);
-  base::FieldTrialList::CreateFieldTrial(translate::kTranslateUI2016Q2TrialName,
-                                         kGroupName);
-
-  std::unique_ptr<TranslatePrefs> prefs(client_->GetTranslatePrefs());
-  prefs->ResetTranslationAcceptedCount("ar");
-
-  for (int i = 0; i < 2; i++) {
-    EXPECT_FALSE(delegate_->ShouldAlwaysTranslateBeCheckedByDefault());
-    prefs->IncrementTranslationAcceptedCount("ar");
-  }
-  EXPECT_TRUE(delegate_->ShouldAlwaysTranslateBeCheckedByDefault());
-  prefs->IncrementTranslationAcceptedCount("ar");
-
-  EXPECT_FALSE(delegate_->ShouldAlwaysTranslateBeCheckedByDefault());
 }
 
 TEST_F(TranslateUIDelegateTest, LanguageCodes) {

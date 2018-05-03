@@ -6,6 +6,8 @@
 #define ScrollManager_h
 
 #include <deque>
+
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/page/EventWithHitTestResults.h"
 #include "platform/geometry/LayoutSize.h"
@@ -33,8 +35,6 @@ class WebGestureEvent;
 // classes and they call into this class for doing the work.
 class CORE_EXPORT ScrollManager
     : public GarbageCollectedFinalized<ScrollManager> {
-  WTF_MAKE_NONCOPYABLE(ScrollManager);
-
  public:
   explicit ScrollManager(LocalFrame&);
   void Trace(blink::Visitor*);
@@ -120,6 +120,8 @@ class CORE_EXPORT ScrollManager
   WebGestureEvent SynthesizeGestureScrollBegin(
       const WebGestureEvent& update_event);
 
+  void SnapAtGestureScrollEnd();
+
   // NOTE: If adding a new field to this class please ensure that it is
   // cleared in |ScrollManager::clear()|.
 
@@ -145,12 +147,19 @@ class CORE_EXPORT ScrollManager
   // scroll other than the |m_previousGestureScrolledNode|.
   bool delta_consumed_for_scroll_sequence_;
 
+  // True iff some of the delta has been consumed for the current
+  // scroll sequence on the specific axis.
+  bool did_scroll_x_for_scroll_gesture_;
+  bool did_scroll_y_for_scroll_gesture_;
+
   Member<Scrollbar> scrollbar_handling_scroll_gesture_;
 
   Member<PaintLayerScrollableArea> resize_scrollable_area_;
 
   LayoutSize
       offset_from_resize_corner_;  // In the coords of m_resizeScrollableArea.
+
+  DISALLOW_COPY_AND_ASSIGN(ScrollManager);
 };
 
 }  // namespace blink

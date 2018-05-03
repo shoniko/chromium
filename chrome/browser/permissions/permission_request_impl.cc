@@ -41,7 +41,6 @@ PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       return IDR_ANDROID_INFOBAR_GEOLOCATION;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       return IDR_ANDROID_INFOBAR_NOTIFICATIONS;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
       return IDR_ANDROID_INFOBAR_MIDI;
@@ -53,6 +52,8 @@ PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
       return IDR_ANDROID_INFOBAR_MEDIA_STREAM_CAMERA;
     case CONTENT_SETTINGS_TYPE_ACCESSIBILITY_EVENTS:
       return IDR_ANDROID_INFOBAR_ACCESSIBILITY_EVENTS;
+    case CONTENT_SETTINGS_TYPE_CLIPBOARD_READ:
+      return IDR_ANDROID_INFOBAR_WARNING;
     default:
       NOTREACHED();
       return IDR_ANDROID_INFOBAR_WARNING;
@@ -62,7 +63,6 @@ PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       return vector_icons::kLocationOnIcon;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       return vector_icons::kNotificationsIcon;
 #if defined(OS_CHROMEOS)
     // TODO(xhwang): fix this icon, see crrev.com/863263007
@@ -74,11 +74,13 @@ PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
     case CONTENT_SETTINGS_TYPE_PLUGINS:
       return kExtensionIcon;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-      return vector_icons::kMicrophoneIcon;
+      return vector_icons::kMicIcon;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
       return vector_icons::kVideocamIcon;
     case CONTENT_SETTINGS_TYPE_ACCESSIBILITY_EVENTS:
       return vector_icons::kAccessibilityIcon;
+    case CONTENT_SETTINGS_TYPE_CLIPBOARD_READ:
+      return kContentPasteIcon;
     default:
       NOTREACHED();
       return kExtensionIcon;
@@ -91,26 +93,28 @@ base::string16 PermissionRequestImpl::GetMessageText() const {
   int message_id;
   switch (content_settings_type_) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-      message_id = IDS_GEOLOCATION_INFOBAR_QUESTION;
+      message_id = IDS_GEOLOCATION_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
-      message_id = IDS_NOTIFICATION_PERMISSIONS;
+      message_id = IDS_NOTIFICATIONS_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-      message_id = IDS_MIDI_SYSEX_INFOBAR_QUESTION;
+      message_id = IDS_MIDI_SYSEX_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
-      message_id = IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_QUESTION;
+      message_id = IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-      message_id = IDS_MEDIA_CAPTURE_AUDIO_ONLY;
+      message_id = IDS_MEDIA_CAPTURE_AUDIO_ONLY_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-      message_id = IDS_MEDIA_CAPTURE_VIDEO_ONLY;
+      message_id = IDS_MEDIA_CAPTURE_VIDEO_ONLY_INFOBAR_TEXT;
       break;
     case CONTENT_SETTINGS_TYPE_ACCESSIBILITY_EVENTS:
-      message_id = IDS_ACCESSIBILITY_EVENTS_INFOBAR_QUESTION;
+      message_id = IDS_ACCESSIBILITY_EVENTS_INFOBAR_TEXT;
+      break;
+    case CONTENT_SETTINGS_TYPE_CLIPBOARD_READ:
+      message_id = IDS_CLIPBOARD_INFOBAR_TEXT;
       break;
     default:
       NOTREACHED();
@@ -130,7 +134,6 @@ base::string16 PermissionRequestImpl::GetMessageTextFragment() const {
       message_id = IDS_GEOLOCATION_INFOBAR_PERMISSION_FRAGMENT;
       break;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       message_id = IDS_NOTIFICATION_PERMISSIONS_FRAGMENT;
       break;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
@@ -153,6 +156,9 @@ base::string16 PermissionRequestImpl::GetMessageTextFragment() const {
     case CONTENT_SETTINGS_TYPE_ACCESSIBILITY_EVENTS:
       message_id = IDS_ACCESSIBILITY_EVENTS_PERMISSION_FRAGMENT;
       break;
+    case CONTENT_SETTINGS_TYPE_CLIPBOARD_READ:
+      message_id = IDS_CLIPBOARD_PERMISSION_FRAGMENT;
+      break;
     default:
       NOTREACHED();
       return base::string16();
@@ -165,24 +171,20 @@ GURL PermissionRequestImpl::GetOrigin() const {
 }
 
 void PermissionRequestImpl::PermissionGranted() {
-  permission_decided_callback_.Run(persist(), CONTENT_SETTING_ALLOW);
+  permission_decided_callback_.Run(CONTENT_SETTING_ALLOW);
 }
 
 void PermissionRequestImpl::PermissionDenied() {
-  permission_decided_callback_.Run(persist(), CONTENT_SETTING_BLOCK);
+  permission_decided_callback_.Run(CONTENT_SETTING_BLOCK);
 }
 
 void PermissionRequestImpl::Cancelled() {
-  permission_decided_callback_.Run(false, CONTENT_SETTING_DEFAULT);
+  permission_decided_callback_.Run(CONTENT_SETTING_DEFAULT);
 }
 
 void PermissionRequestImpl::RequestFinished() {
   is_finished_ = true;
   delete_callback_.Run();
-}
-
-bool PermissionRequestImpl::ShouldShowPersistenceToggle() const {
-  return PermissionUtil::ShouldShowPersistenceToggle(content_settings_type_);
 }
 
 PermissionRequestType PermissionRequestImpl::GetPermissionRequestType()

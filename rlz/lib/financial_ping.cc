@@ -20,6 +20,7 @@
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "rlz/lib/assert.h"
@@ -241,7 +242,7 @@ class RefCountedWaitableEvent
   }
 
  private:
-  ~RefCountedWaitableEvent() {}
+  ~RefCountedWaitableEvent() = default;
   friend class base::RefCountedThreadSafe<RefCountedWaitableEvent>;
 
   base::WaitableEvent event_;
@@ -371,9 +372,11 @@ bool FinancialPing::PingServer(const char* request, std::string* response) {
     return false;
 
   // Prepare the HTTP request.
-  InternetHandle http_handle = HttpOpenRequestA(connection_handle,
-      "GET", request, NULL, NULL, kFinancialPingResponseObjects,
-      INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_COOKIES, NULL);
+  const DWORD kFlags = INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_COOKIES |
+                       INTERNET_FLAG_SECURE;
+  InternetHandle http_handle =
+      HttpOpenRequestA(connection_handle, "GET", request, NULL, NULL,
+                       kFinancialPingResponseObjects, kFlags, NULL);
   if (!http_handle)
     return false;
 
@@ -406,9 +409,8 @@ bool FinancialPing::PingServer(const char* request, std::string* response) {
 
   return true;
 #else
-  std::string url = base::StringPrintf("http://%s:%d%s",
-                                       kFinancialServer, kFinancialPort,
-                                       request);
+  std::string url =
+      base::StringPrintf("https://%s%s", kFinancialServer, request);
 
   // Use a waitable event to cause this function to block, to match the
   // wininet implementation.
@@ -427,7 +429,11 @@ bool FinancialPing::PingServer(const char* request, std::string* response) {
   background_runner->PostTask(FROM_HERE,
                               base::Bind(&PingRlzServer, url, event));
 
-  bool is_signaled = event->TimedWait(base::TimeDelta::FromMinutes(5));
+  bool is_signaled;
+  {
+    base::ScopedAllowBaseSyncPrimitives allow_base_sync_primitives;
+    is_signaled = event->TimedWait(base::TimeDelta::FromMinutes(5));
+  }
   if (!is_signaled || event->GetResponseCode() != 200)
     return false;
 

@@ -12,7 +12,6 @@
 #include "ash/ash_export.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/public/cpp/shelf_types.h"
-#include "ash/public/cpp/voice_interaction_state.h"
 #include "ash/session/session_observer.h"
 #include "ash/wm/cursor_manager_chromeos.h"
 #include "ash/wm/system_modal_container_event_filter_delegate.h"
@@ -38,10 +37,6 @@ class WindowManagerClient;
 class WindowTreeClient;
 }  // namespace aura
 
-namespace chromeos {
-class AudioA11yController;
-}
-
 namespace app_list {
 class AppList;
 }  // namespace app_list
@@ -57,6 +52,8 @@ class Insets;
 }
 
 namespace ui {
+class ContextFactory;
+class ContextFactoryPrivate;
 class UserActivityDetector;
 class UserActivityPowerManagerNotifier;
 }  // namespace ui
@@ -89,6 +86,7 @@ class AppListDelegateImpl;
 class NativeCursorManagerAsh;
 class AshTouchTransformController;
 class AutoclickController;
+class BacklightsForcedOffSetter;
 class BluetoothNotificationController;
 class BluetoothPowerController;
 class BrightnessControlDelegate;
@@ -96,12 +94,12 @@ class CastConfigController;
 class DisplayColorManager;
 class DisplayConfigurationController;
 class DisplayErrorObserver;
+class DisplayShutdownObserver;
 class DragDropController;
 class EventClientImpl;
 class EventTransformationHandler;
 class FirstRunHelper;
 class FocusCycler;
-class GPUSupport;
 class HighContrastController;
 class HighlighterController;
 class ImeController;
@@ -113,7 +111,7 @@ class LaserPointerController;
 class LocaleNotificationController;
 class LockStateController;
 class LogoutConfirmationController;
-class LockScreenController;
+class LoginScreenController;
 class MagnificationController;
 class TabletModeController;
 class MediaController;
@@ -146,7 +144,6 @@ class ShellDelegate;
 struct ShellInitParams;
 class ShellObserver;
 class ShutdownController;
-class ShutdownObserver;
 class SmsObserver;
 class SplitViewController;
 class StickyKeysController;
@@ -155,6 +152,7 @@ class SystemModalContainerEventFilter;
 class SystemTray;
 class SystemTrayController;
 class SystemTrayNotifier;
+class TimeToFirstPresentRecorder;
 class ToplevelWindowEventHandler;
 class ToastManager;
 class TouchDevicesController;
@@ -163,6 +161,7 @@ class TrayBluetoothHelper;
 class VirtualKeyboardController;
 class VideoActivityNotifier;
 class VideoDetector;
+class VoiceInteractionController;
 class VpnList;
 class WallpaperController;
 class WallpaperDelegate;
@@ -174,7 +173,6 @@ class WindowTreeHostManager;
 
 enum class Config;
 enum class LoginStatus;
-enum class VoiceInteractionState;
 
 // Shell is a singleton object that presents the Shell API and implements the
 // RootWindow's delegate interface.
@@ -188,10 +186,8 @@ class ASH_EXPORT Shell : public SessionObserver,
  public:
   typedef std::vector<RootWindowController*> RootWindowControllerList;
 
-  // A shell must be explicitly created so that it can call |Init()| with the
-  // delegate set. |delegate| can be NULL (if not required for initialization).
-  // Takes ownership of |delegate|.
-  static Shell* CreateInstance(const ShellInitParams& init_params);
+  // Creates the single Shell instance.
+  static Shell* CreateInstance(ShellInitParams init_params);
 
   // Should never be called before |CreateInstance()|.
   static Shell* Get();
@@ -235,6 +231,14 @@ class ASH_EXPORT Shell : public SessionObserver,
                                     int container_id);
   static const aura::Window* GetContainer(const aura::Window* root_window,
                                           int container_id);
+
+  // If a system-modal dialog window is currently open, returns the ID of the
+  // system modal window container that contains the window.
+  // If no system-modal dialogs are open it returns -1.
+  static int GetOpenSystemModalWindowContainerId();
+
+  // Returns true if a system-modal dialog window is currently open.
+  static bool IsSystemModalWindowOpen();
 
   // TODO(sky): move this and WindowManagerClient into ShellMash that is owned
   // by Shell. Doing the move is gated on having mash create Shell.
@@ -308,11 +312,11 @@ class ASH_EXPORT Shell : public SessionObserver,
   AshDisplayController* ash_display_controller() {
     return ash_display_controller_.get();
   }
-  chromeos::AudioA11yController* audio_a11y_controller() {
-    return audio_a11y_controller_.get();
-  }
   AutoclickController* autoclick_controller() {
     return autoclick_controller_.get();
+  }
+  BacklightsForcedOffSetter* backlights_forced_off_setter() {
+    return backlights_forced_off_setter_.get();
   }
   BluetoothPowerController* bluetooth_power_controller() {
     return bluetooth_power_controller_.get();
@@ -321,7 +325,10 @@ class ASH_EXPORT Shell : public SessionObserver,
     return brightness_control_delegate_.get();
   }
   CastConfigController* cast_config() { return cast_config_.get(); }
+
+  // Returns nullptr in mash which has no global cursor manager.
   ::wm::CursorManager* cursor_manager() { return cursor_manager_.get(); }
+
   display::DisplayManager* display_manager() { return display_manager_.get(); }
   DisplayConfigurationController* display_configuration_controller() {
     return display_configuration_controller_.get();
@@ -341,7 +348,6 @@ class ASH_EXPORT Shell : public SessionObserver,
     return event_transformation_handler_.get();
   }
   FocusCycler* focus_cycler() { return focus_cycler_.get(); }
-  GPUSupport* gpu_support() { return gpu_support_.get(); }
   HighlighterController* highlighter_controller() {
     return highlighter_controller_.get();
   }
@@ -359,8 +365,8 @@ class ASH_EXPORT Shell : public SessionObserver,
   LocaleNotificationController* locale_notification_controller() {
     return locale_notification_controller_.get();
   }
-  LockScreenController* lock_screen_controller() {
-    return lock_screen_controller_.get();
+  LoginScreenController* login_screen_controller() {
+    return login_screen_controller_.get();
   }
   LockStateController* lock_state_controller() {
     return lock_state_controller_.get();
@@ -436,6 +442,9 @@ class ASH_EXPORT Shell : public SessionObserver,
   TabletModeController* tablet_mode_controller() {
     return tablet_mode_controller_.get();
   }
+  TimeToFirstPresentRecorder* time_to_first_present_recorder() {
+    return time_to_first_present_recorder_.get();
+  }
   ToastManager* toast_manager() { return toast_manager_.get(); }
   views::corewm::TooltipController* tooltip_controller() {
     return tooltip_controller_.get();
@@ -455,6 +464,9 @@ class ASH_EXPORT Shell : public SessionObserver,
   VirtualKeyboardController* virtual_keyboard_controller() {
     return virtual_keyboard_controller_.get();
   }
+  VoiceInteractionController* voice_interaction_controller() {
+    return voice_interaction_controller_.get();
+  }
   VpnList* vpn_list() { return vpn_list_.get(); }
   WallpaperController* wallpaper_controller() {
     return wallpaper_controller_.get();
@@ -469,6 +481,10 @@ class ASH_EXPORT Shell : public SessionObserver,
   }
   WindowTreeHostManager* window_tree_host_manager() {
     return window_tree_host_manager_.get();
+  }
+
+  ToplevelWindowEventHandler* toplevel_window_event_handler() {
+    return toplevel_window_event_handler_.get();
   }
 
   // Force the shelf to query for it's current visibility state.
@@ -488,18 +504,8 @@ class ASH_EXPORT Shell : public SessionObserver,
   // Returns the system tray on primary display.
   SystemTray* GetPrimarySystemTray();
 
-  static void set_initially_hide_cursor(bool hide) {
-    initially_hide_cursor_ = hide;
-  }
-
   // Starts the animation that occurs on first login.
   void DoInitialWorkspaceAnimation();
-
-  void SetTouchHudProjectionEnabled(bool enabled);
-
-  bool is_touch_hud_projection_enabled() const {
-    return is_touch_hud_projection_enabled_;
-  }
 
   // NOTE: Prefer ScopedRootWindowForNewWindows when setting temporarily.
   void set_root_window_for_new_windows(aura::Window* root) {
@@ -572,28 +578,6 @@ class ASH_EXPORT Shell : public SessionObserver,
 
   void NotifyAppListVisibilityChanged(bool visible, aura::Window* root_window);
 
-  // TODO(kaznacheev) Move voice interaction related methods to a separate
-  // controller (crbug.com/758650)
-  void NotifyVoiceInteractionStatusChanged(VoiceInteractionState state);
-
-  void NotifyVoiceInteractionEnabled(bool enabled);
-
-  void NotifyVoiceInteractionContextEnabled(bool enabled);
-
-  void NotifyVoiceInteractionSetupCompleted(bool completed);
-
-  VoiceInteractionState voice_interaction_state() const {
-    return voice_interaction_state_;
-  }
-
-  bool voice_interaction_settings_enabled() const {
-    return voice_interaction_settings_enabled_;
-  }
-
-  bool voice_interaction_setup_completed() const {
-    return voice_interaction_setup_completed_;
-  }
-
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, TestCursor);
   FRIEND_TEST_ALL_PREFIXES(WindowManagerTest, MouseEventCursors);
@@ -609,7 +593,11 @@ class ASH_EXPORT Shell : public SessionObserver,
         std::unique_ptr<ShellPort> shell_port);
   ~Shell() override;
 
-  void Init(const ShellInitParams& init_params);
+  void Init(ui::ContextFactory* context_factory,
+            ui::ContextFactoryPrivate* context_factory_private);
+
+  // Initializes the display manager and related components.
+  void InitializeDisplayManager();
 
   // Initializes the root window so that it can host browser windows.
   void InitRootWindow(aura::Window* root_window);
@@ -636,10 +624,6 @@ class ASH_EXPORT Shell : public SessionObserver,
   void OnLoginStatusChanged(LoginStatus login_status) override;
   void OnLockStateChanged(bool locked) override;
 
-  // Finalizes the shelf state. Called after the user session is active and
-  // the profile is available.
-  void InitializeShelf();
-
   // Callback for prefs::ConnectToPrefService.
   void OnLocalStatePrefServiceInitialized(
       std::unique_ptr<::PrefService> pref_service);
@@ -649,10 +633,6 @@ class ASH_EXPORT Shell : public SessionObserver,
   // Only valid in mash, for classic ash this is null.
   static aura::WindowTreeClient* window_tree_client_;
   static aura::WindowManagerClient* window_manager_client_;
-
-  // If set before the Shell is initialized, the mouse cursor will be hidden
-  // when the screen is initially created.
-  static bool initially_hide_cursor_;
 
   std::unique_ptr<ShellPort> shell_port_;
 
@@ -666,6 +646,7 @@ class ASH_EXPORT Shell : public SessionObserver,
   std::unique_ptr<AccessibilityController> accessibility_controller_;
   std::unique_ptr<AccessibilityDelegate> accessibility_delegate_;
   std::unique_ptr<AshDisplayController> ash_display_controller_;
+  std::unique_ptr<BacklightsForcedOffSetter> backlights_forced_off_setter_;
   std::unique_ptr<BrightnessControlDelegate> brightness_control_delegate_;
   std::unique_ptr<CastConfigController> cast_config_;
   std::unique_ptr<DragDropController> drag_drop_controller_;
@@ -676,7 +657,7 @@ class ASH_EXPORT Shell : public SessionObserver,
       keyboard_brightness_control_delegate_;
   std::unique_ptr<KeyboardUI> keyboard_ui_;
   std::unique_ptr<LocaleNotificationController> locale_notification_controller_;
-  std::unique_ptr<LockScreenController> lock_screen_controller_;
+  std::unique_ptr<LoginScreenController> login_screen_controller_;
   std::unique_ptr<LogoutConfirmationController> logout_confirmation_controller_;
   std::unique_ptr<TabletModeController> tablet_mode_controller_;
   std::unique_ptr<MediaController> media_controller_;
@@ -694,7 +675,9 @@ class ASH_EXPORT Shell : public SessionObserver,
   std::unique_ptr<SystemTrayNotifier> system_tray_notifier_;
   std::unique_ptr<ToastManager> toast_manager_;
   std::unique_ptr<TouchDevicesController> touch_devices_controller_;
+  std::unique_ptr<TimeToFirstPresentRecorder> time_to_first_present_recorder_;
   std::unique_ptr<TrayAction> tray_action_;
+  std::unique_ptr<VoiceInteractionController> voice_interaction_controller_;
   std::unique_ptr<VpnList> vpn_list_;
   std::unique_ptr<WallpaperController> wallpaper_controller_;
   std::unique_ptr<WallpaperDelegate> wallpaper_delegate_;
@@ -759,7 +742,6 @@ class ASH_EXPORT Shell : public SessionObserver,
   std::unique_ptr<BluetoothPowerController> bluetooth_power_controller_;
   std::unique_ptr<TrayBluetoothHelper> tray_bluetooth_helper_;
   std::unique_ptr<VirtualKeyboardController> virtual_keyboard_controller_;
-  std::unique_ptr<chromeos::AudioA11yController> audio_a11y_controller_;
   // Controls video output device state.
   std::unique_ptr<display::DisplayConfigurator> display_configurator_;
   std::unique_ptr<DisplayColorManager> display_color_manager_;
@@ -770,7 +752,7 @@ class ASH_EXPORT Shell : public SessionObserver,
   std::unique_ptr<display::DisplayChangeObserver> display_change_observer_;
 
   // Listens for shutdown and updates DisplayConfigurator.
-  std::unique_ptr<ShutdownObserver> shutdown_observer_;
+  std::unique_ptr<DisplayShutdownObserver> display_shutdown_observer_;
 
   // Listens for new sms messages and shows notifications.
   std::unique_ptr<SmsObserver> sms_observer_;
@@ -799,32 +781,12 @@ class ASH_EXPORT Shell : public SessionObserver,
   // hide the cursor on Windows.
   std::unique_ptr<::wm::CursorManager> cursor_manager_;
 
-  // Cached state and flags related to voice interaction.
-  // TODO(updowndota) Move the cached voice interaction flags into a separate
-  // controller after the controller is added (crbug.com/758650).
-
-  // Voice interaction state. The intial value should be set to STOPPED to make
-  // sure the burst animation could be correctly shown.
-  VoiceInteractionState voice_interaction_state_ =
-      VoiceInteractionState::STOPPED;
-
-  // Whether voice interaction is enabled in system settings.
-  bool voice_interaction_settings_enabled_ = false;
-
-  // Whether voice intearction setup flow has completed.
-  bool voice_interaction_setup_completed_ = false;
-
   // For testing only: simulate that a modal window is open
-  bool simulate_modal_window_open_for_testing_;
-
-  bool is_touch_hud_projection_enabled_;
+  bool simulate_modal_window_open_for_test_ = false;
 
   // See comment for GetRootWindowForNewWindows().
   aura::Window* root_window_for_new_windows_ = nullptr;
   aura::Window* scoped_root_window_for_new_windows_ = nullptr;
-
-  // Injected content::GPUDataManager support.
-  std::unique_ptr<GPUSupport> gpu_support_;
 
   std::unique_ptr<ImmersiveHandlerFactoryAsh> immersive_handler_factory_;
 

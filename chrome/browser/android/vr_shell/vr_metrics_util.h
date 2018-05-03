@@ -9,25 +9,31 @@
 
 #include "chrome/browser/android/vr_shell/vr_core_info.h"
 #include "chrome/browser/vr/ui_suppressed_element.h"
+#include "device/vr/vr_device.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_types.h"
 
 namespace vr_shell {
 
-enum class ViewerType {
-  UNKNOWN_TYPE = 0,
-  CARDBOARD = 1,
-  DAYDREAM = 2,
-  VIEWER_TYPE_MAX,
-};
-
 class VrMetricsUtil {
  public:
+  // Ensure that this stays in sync with XRRenderPath in enums.xml. Do
+  // not reuse or renumber entries.
+  enum class XRRenderPath : int {
+    kClientWait = 0,
+    kGpuFence = 1,
+
+    // This must be last.
+    kCount
+  };
+
   static void LogGvrVersionForVrViewerType(gvr::ViewerType viewer_type,
                                            const VrCoreInfo& vr_core_info);
   static void LogVrViewerType(gvr::ViewerType viewer_type);
 
+  static void LogXrRenderPathUsed(XRRenderPath);
+
  private:
-  static ViewerType GetVrViewerType(gvr::ViewerType viewer_type);
+  static device::VrViewerType GetVrViewerType(gvr::ViewerType viewer_type);
 
   static bool has_logged_vr_runtime_version_;
 

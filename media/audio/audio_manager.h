@@ -91,7 +91,7 @@ class MEDIA_EXPORT AudioManager {
 
   // Log callback used for sending log messages from a stream to the object
   // that manages the stream.
-  using LogCallback = base::Callback<void(const std::string&)>;
+  using LogCallback = base::RepeatingCallback<void(const std::string&)>;
 
   // Factory for all the supported stream formats. |params| defines parameters
   // of the audio stream to be created.
@@ -251,6 +251,15 @@ class MEDIA_EXPORT AudioManager {
   // GetTaskRunner()).
   virtual std::string GetAssociatedOutputDeviceID(
       const std::string& input_device_id) = 0;
+
+  // These functions return the ID of the default/communications audio
+  // input/output devices respectively.
+  // Implementations that do not support this functionality should return an
+  // empty string.
+  virtual std::string GetDefaultInputDeviceID() = 0;
+  virtual std::string GetDefaultOutputDeviceID() = 0;
+  virtual std::string GetCommunicationsInputDeviceID() = 0;
+  virtual std::string GetCommunicationsOutputDeviceID() = 0;
 
  private:
   friend class AudioSystemHelper;

@@ -284,6 +284,26 @@ class AutofillMetrics {
     NUM_FIELD_TYPE_QUALITY_METRICS
   };
 
+  // Metrics measuring how well rationalization has performed given user's
+  // actual input.
+  enum RationalizationQualityMetric {
+    // Rationalization did make it better for the user. Most commonly, user
+    // have left it empty as rationalization predicted.
+    RATIONALIZATION_GOOD,
+
+    // Rationalization did not make it better or worse. Meaning user have
+    // input some value that would not be filled correctly automatically.
+    RATIONALIZATION_OK,
+
+    // Rationalization did make it worse, user has to fill
+    // in a value that would have been automatically filled
+    // if there was no rationalization at all.
+    RATIONALIZATION_BAD,
+
+    // This must be last.
+    NUM_RATIONALIZATION_QUALITY_METRICS
+  };
+
   enum QualityMetricPredictionSource {
     PREDICTION_SOURCE_UNKNOWN,    // Not used. The prediction source is unknown.
     PREDICTION_SOURCE_HEURISTIC,  // Local heuristic field-type prediction.
@@ -371,6 +391,9 @@ class AutofillMetrics {
     // User entered form data that appears to be a UPI Virtual Payment Address.
     USER_DID_ENTER_UPI_VPA,
 
+    // A field was populated by autofill.
+    FIELD_WAS_AUTOFILLED,
+
     NUM_USER_HAPPINESS_METRICS,
   };
 
@@ -429,14 +452,26 @@ class AutofillMetrics {
     // A dropdown with credit card suggestions was shown, but they were not used
     // to fill the form. Depending on the user submitting a card known by the
     // browser, submitting a card that the browser does not know about,
-    // or Autofill failing to detect the card, one of the following will be
-    // triggered. Only one of the following three metrics will be triggered per
-    // page load.
+    // submitting with an empty card number, submitting with a card number of
+    // wrong size or submitting with a card number that does not pass luhn
+    // check, one of the following will be triggered. At most one of the
+    // following five metrics will be triggered per submit.
     FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_KNOWN_CARD,
     FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_UNKNOWN_CARD,
     FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_NO_CARD,
+    FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_WRONG_SIZE_CARD,
+    FORM_EVENT_SUBMIT_WITHOUT_SELECTING_SUGGESTIONS_FAIL_LUHN_CHECK_CARD,
 
     NUM_FORM_EVENTS,
+  };
+
+  // Indicates submitted card information.
+  enum CardNumberStatus {
+    EMPTY_CARD,
+    WRONG_SIZE_CARD,
+    FAIL_LUHN_CHECK_CARD,
+    KNOWN_CARD,
+    UNKNOWN_CARD
   };
 
   // Form Events for autofill with bank name available for display.
@@ -647,6 +682,11 @@ class AutofillMetrics {
     FormInteractionsUkmLogger* const logger_;
     DISALLOW_IMPLICIT_CONSTRUCTORS(UkmTimestampPin);
   };
+
+  // Friended Helper for recording main frame URLs to UKM.
+  static void UpdateSourceURL(ukm::UkmRecorder* ukm_recorder,
+                              ukm::SourceId source_id,
+                              const GURL& url);
 
   // If a credit card that matches a server card (unmasked or not) was submitted
   // on a form, logs whether the submitted card's expiration date matched the
@@ -922,13 +962,10 @@ class AutofillMetrics {
 
     void OnWillSubmitForm();
 
-    void OnFormSubmitted(bool force_logging);
+    void OnFormSubmitted(bool force_logging,
+                         const CardNumberStatus card_number_status);
 
     void SetBankNameAvailable();
-
-    void DetectedCardInSubmittedForm();
-
-    void SubmittedKnownCard();
 
    private:
     void Log(FormEvent event) const;
@@ -945,8 +982,6 @@ class AutofillMetrics {
     bool has_logged_will_submit_;
     bool has_logged_submitted_;
     bool has_logged_bank_name_available_;
-    bool has_logged_detected_card_in_submitted_form_;
-    bool has_logged_submitted_known_card;
     bool logged_suggestion_filled_was_server_data_;
     bool logged_suggestion_filled_was_masked_server_card_;
 

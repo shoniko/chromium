@@ -53,8 +53,7 @@
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/loader/FrameLoader.h"
 #include "core/typed_arrays/FlexibleArrayBufferView.h"
-#include "core/workers/WorkerGlobalScope.h"
-#include "core/workers/WorkletGlobalScope.h"
+#include "core/workers/WorkerOrWorkletGlobalScope.h"
 #include "core/xml/XPathNSResolver.h"
 #include "platform/bindings/RuntimeCallStats.h"
 #include "platform/bindings/V8BindingMacros.h"
@@ -789,7 +788,7 @@ v8::Local<v8::Context> ToV8Context(ExecutionContext* context,
   if (context->IsDocument()) {
     if (LocalFrame* frame = ToDocument(context)->GetFrame())
       return ToV8Context(frame, world);
-  } else if (context->IsWorkerGlobalScope()) {
+  } else if (context->IsWorkerOrWorkletGlobalScope()) {
     if (WorkerOrWorkletScriptController* script =
             ToWorkerOrWorkletGlobalScope(context)->ScriptController()) {
       if (script->GetScriptState()->ContextIsValid())
@@ -910,11 +909,12 @@ v8::Isolate* ToIsolate(LocalFrame* frame) {
 }
 
 v8::Local<v8::Value> FromJSONString(v8::Isolate* isolate,
+                                    v8::Local<v8::Context> context,
                                     const String& stringified_json,
                                     ExceptionState& exception_state) {
   v8::Local<v8::Value> parsed;
   v8::TryCatch try_catch(isolate);
-  if (!v8::JSON::Parse(isolate, V8String(isolate, stringified_json))
+  if (!v8::JSON::Parse(context, V8String(isolate, stringified_json))
            .ToLocal(&parsed)) {
     if (try_catch.HasCaught())
       exception_state.RethrowV8Exception(try_catch.Exception());

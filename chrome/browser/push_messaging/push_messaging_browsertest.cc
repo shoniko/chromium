@@ -30,6 +30,7 @@
 #include "chrome/browser/gcm/instance_id/instance_id_profile_service.h"
 #include "chrome/browser/gcm/instance_id/instance_id_profile_service_factory.h"
 #include "chrome/browser/notifications/notification_display_service_tester.h"
+#include "chrome/browser/notifications/notification_handler.h"
 #include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/push_messaging/push_messaging_app_identifier.h"
@@ -65,7 +66,7 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/message_center/notification.h"
 
-#if BUILDFLAG(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
 #include "chrome/browser/background/background_mode_manager.h"
 #endif
 
@@ -185,7 +186,7 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
   // Returns true when KeepAlives are not supported by the platform, or when
   // the registration state is equal to the expectation.
   bool IsRegisteredKeepAliveEqualTo(bool expectation) {
-#if BUILDFLAG(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
     return expectation ==
            KeepAliveRegistry::GetInstance()->IsOriginRegistered(
                KeepAliveOrigin::IN_FLIGHT_PUSH_MESSAGE);
@@ -268,7 +269,7 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
   // Returns a vector of the currently displayed Notification objects.
   std::vector<message_center::Notification> GetDisplayedNotifications() {
     return notification_tester_->GetDisplayedNotificationsForType(
-        NotificationCommon::PERSISTENT);
+        NotificationHandler::Type::WEB_PERSISTENT);
   }
 
   // Returns the number of notifications that are currently being shown.
@@ -276,8 +277,8 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
 
   // Removes all shown notifications.
   void RemoveAllNotifications() {
-    notification_tester_->RemoveAllNotifications(NotificationCommon::PERSISTENT,
-                                                 true /* by_user */);
+    notification_tester_->RemoveAllNotifications(
+        NotificationHandler::Type::WEB_PERSISTENT, true /* by_user */);
   }
 
   // To be called when delivery of a push message has finished. The |run_loop|
@@ -292,15 +293,11 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
 
   PushMessagingServiceImpl* push_service() const { return push_service_; }
 
-  void SetSiteEngagementScore(const GURL& url,
-                              double score,
-                              double expected_score) {
-    // There will be a bonus of 5.0 points for having notification permission
-    // granted, so we assert that the final score is as expected.
+  void SetSiteEngagementScore(const GURL& url, double score) {
     SiteEngagementService* service =
         SiteEngagementService::Get(GetBrowser()->profile());
     service->ResetBaseScoreForURL(url, score);
-    EXPECT_EQ(expected_score, service->GetScore(url));
+    EXPECT_EQ(score, service->GetScore(url));
   }
 
   // Matches |tag| against the notification's ID to see if the notification's
@@ -1332,7 +1329,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   // Set the site engagement score for the site. Setting it to 10 means it
   // should have a budget of 4, enough for two non-shown notification, which
   // cost 2 each.
-  SetSiteEngagementScore(web_contents->GetURL(), 5.0, 10.0);
+  SetSiteEngagementScore(web_contents->GetURL(), 10.0);
 
   // If the site is visible in an active tab, we should not force a notification
   // to be shown. Try it twice, since we allow one mistake per 10 push events.
@@ -1435,7 +1432,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   content::WebContents* web_contents =
       GetBrowser()->tab_strip_model()->GetActiveWebContents();
 
-  SetSiteEngagementScore(web_contents->GetURL(), 0.0, 5.0);
+  SetSiteEngagementScore(web_contents->GetURL(), 5.0);
 
   ui_test_utils::NavigateToURLWithDisposition(
       GetBrowser(), GURL("about:blank"),
@@ -2400,8 +2397,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingIncognitoBrowserTest,
   ASSERT_EQ("false - not subscribed", script_result);
 }
 
-// None of the following should matter on ChromeOS: crbug.com/527045
-#if BUILDFLAG(ENABLE_BACKGROUND) && !defined(OS_CHROMEOS)
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
 // Push background mode is disabled by default.
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
                        BackgroundModeDisabledByDefault) {
@@ -2500,4 +2496,4 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBackgroundModeDisabledBrowserTest,
   run_loop.Run();
   ASSERT_FALSE(background_mode_manager->IsBackgroundModeActive());
 }
-#endif  // BUILDFLAG(ENABLE_BACKGROUND) && !defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)

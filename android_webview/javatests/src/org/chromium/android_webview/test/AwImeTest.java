@@ -6,6 +6,7 @@ package org.chromium.android_webview.test;
 
 import android.content.Context;
 import android.support.test.filters.SmallTest;
+import android.view.KeyEvent;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
@@ -18,10 +19,12 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper;
+import org.chromium.content_public.browser.ImeAdapter;
 
 /**
  * Tests for IME (input method editor) on Android WebView.
@@ -63,10 +66,9 @@ public class AwImeTest {
             mTestContainerView.getAwContents().addJavascriptInterface(
                     mTestJavascriptInterface, "test");
             // Let's not test against real input method.
-            mInputMethodManagerWrapper = new TestInputMethodManagerWrapper(
-                    mTestContainerView.getContentViewCore());
-            mTestContainerView.getContentViewCore().getImeAdapterForTest()
-                    .setInputMethodManagerWrapperForTest(mInputMethodManagerWrapper);
+            ImeAdapter imeAdapter = ImeAdapter.fromWebContents(mTestContainerView.getWebContents());
+            imeAdapter.setInputMethodManagerWrapperForTest(
+                    TestInputMethodManagerWrapper.create(imeAdapter));
         });
     }
 
@@ -111,13 +113,16 @@ public class AwImeTest {
         mTestJavascriptInterface.getFocusCallbackHelper().waitForCallback(0);
     }
 
+    private InputConnection getInputConnection() {
+        return ImeAdapter.fromWebContents(mTestContainerView.getWebContents())
+                .getInputConnectionForTest();
+    }
+
     private void waitForNonNullInputConnection() {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                InputConnection inputConnection = mTestContainerView.getContentViewCore()
-                        .getImeAdapterForTest().getInputConnectionForTest();
-                return inputConnection != null;
+                return getInputConnection() != null;
             }
         });
     }
@@ -134,5 +139,72 @@ public class AwImeTest {
         focusOnEditTextAndShowKeyboard();
         focusOnWebViewAndEnableEditing();
         waitForNonNullInputConnection();
+    }
+
+    /**
+     * Tests moving focus out of a WebView by calling InputConnection#sendKeyEvent() with a dpad
+     * keydown event.
+     */
+    // https://crbug.com/787651
+    // Flaky! - https://crbug.com/795423
+    @Test
+    // @SmallTest
+    @DisabledTest
+    public void testImeDpadMovesFocusOutOfWebView() throws Throwable {
+        loadContentEditableBody();
+        focusOnEditTextAndShowKeyboard();
+        focusOnWebViewAndEnableEditing();
+        waitForNonNullInputConnection();
+
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return mActivityTestRule.getActivity().getCurrentFocus() == mTestContainerView;
+            }
+        });
+
+        ThreadUtils.runOnUiThreadBlocking((Runnable) () -> {
+            getInputConnection().sendKeyEvent(
+                    new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));
+        });
+
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return mActivityTestRule.getActivity().getCurrentFocus() == mEditText;
+            }
+        });
+    }
+
+    /**
+     * Tests moving focus out of a WebView by calling View#dispatchKeyEvent() with a dpad
+     * keydown event.
+     */
+    @Test
+    @SmallTest
+    public void testDpadDispatchKeyEventMovesFocusOutOfWebView() throws Throwable {
+        loadContentEditableBody();
+        focusOnEditTextAndShowKeyboard();
+        focusOnWebViewAndEnableEditing();
+        waitForNonNullInputConnection();
+
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return mActivityTestRule.getActivity().getCurrentFocus() == mTestContainerView;
+            }
+        });
+
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            mTestContainerView.dispatchKeyEvent(
+                    new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));
+        });
+
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return mActivityTestRule.getActivity().getCurrentFocus() == mEditText;
+            }
+        });
     }
 }

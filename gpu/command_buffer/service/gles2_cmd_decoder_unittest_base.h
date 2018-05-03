@@ -17,6 +17,7 @@
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/context_group.h"
+#include "gpu/command_buffer/service/decoder_client.h"
 #include "gpu/command_buffer/service/framebuffer_manager.h"
 #include "gpu/command_buffer/service/gl_context_mock.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
@@ -48,7 +49,7 @@ namespace gles2 {
 class MemoryTracker;
 
 class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
-                             public GLES2DecoderClient {
+                             public DecoderClient {
  public:
   GLES2DecoderTestBase();
   ~GLES2DecoderTestBase() override;
@@ -411,13 +412,28 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
                                      GLenum bind_target,
                                      GLenum target,
                                      GLint level,
-                                     GLenum internal_format,
                                      GLenum format,
                                      GLenum type,
                                      GLint xoffset,
                                      GLint yoffset,
                                      GLsizei width,
-                                     GLsizei height);
+                                     GLsizei height,
+                                     GLuint bound_pixel_unpack_buffer);
+
+  void SetupClearTexture3DExpectations(GLsizeiptr buffer_size,
+                                       GLenum target,
+                                       GLuint tex_service_id,
+                                       GLint level,
+                                       GLenum format,
+                                       GLenum type,
+                                       size_t tex_sub_image_3d_num_calls,
+                                       GLint* xoffset,
+                                       GLint* yoffset,
+                                       GLint* zoffset,
+                                       GLsizei* width,
+                                       GLsizei* height,
+                                       GLsizei* depth,
+                                       GLuint bound_pixel_unpack_buffer);
 
   void SetupExpectationsForRestoreClearState(GLclampf restore_red,
                                              GLclampf restore_green,
@@ -739,8 +755,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
           bound_vertex_array_object_(0) {
     }
 
-    ~MockGLStates() {
-    }
+    ~MockGLStates() = default;
 
     void OnBindArrayBuffer(GLuint id) {
       bound_array_buffer_object_ = id;
@@ -769,6 +784,8 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
   void SetupMockGLBehaviors();
 
   void SetupInitStateManualExpectations(bool es3_capable);
+  void SetupInitStateManualExpectationsForWindowRectanglesEXT(GLenum mode,
+                                                              GLint count);
   void SetupInitStateManualExpectationsForDoLineWidth(GLfloat width);
 
   GpuPreferences gpu_preferences_;
@@ -806,7 +823,7 @@ MATCHER_P2(PointsToArray, array, size, "") {
 }
 
 class GLES2DecoderPassthroughTestBase : public testing::Test,
-                                        public GLES2DecoderClient {
+                                        public DecoderClient {
  public:
   GLES2DecoderPassthroughTestBase(ContextType context_type);
   ~GLES2DecoderPassthroughTestBase() override;
@@ -966,7 +983,7 @@ class GLES2DecoderPassthroughTestBase : public testing::Test,
   uint32_t immediate_buffer_[64];
 
  private:
-  ContextCreationAttribHelper context_creation_attribs_;
+  ContextCreationAttribs context_creation_attribs_;
   GpuPreferences gpu_preferences_;
   MailboxManagerImpl mailbox_manager_;
   ShaderTranslatorCache shader_translator_cache_;

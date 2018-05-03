@@ -23,7 +23,19 @@
 #include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "ios/web/public/web_thread.h"
+#include "ios/web_view/internal/content_settings/web_view_cookie_settings_factory.h"
+#include "ios/web_view/internal/content_settings/web_view_host_content_settings_map_factory.h"
+#include "ios/web_view/internal/language/web_view_language_model_factory.h"
+#include "ios/web_view/internal/language/web_view_url_language_histogram_factory.h"
 #include "ios/web_view/internal/pref_names.h"
+#include "ios/web_view/internal/signin/web_view_account_fetcher_service_factory.h"
+#include "ios/web_view/internal/signin/web_view_account_tracker_service_factory.h"
+#include "ios/web_view/internal/signin/web_view_gaia_cookie_manager_service_factory.h"
+#include "ios/web_view/internal/signin/web_view_oauth2_token_service_factory.h"
+#include "ios/web_view/internal/signin/web_view_signin_client_factory.h"
+#include "ios/web_view/internal/signin/web_view_signin_error_controller_factory.h"
+#include "ios/web_view/internal/signin/web_view_signin_manager_factory.h"
+#include "ios/web_view/internal/translate/web_view_translate_ranker_factory.h"
 #include "ios/web_view/internal/web_view_url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -70,9 +82,7 @@ WebViewBrowserState::WebViewBrowserState(bool off_the_record)
 
   base::ThreadRestrictions::SetIOAllowed(wasIOAllowed);
 
-  ActiveStateManager* active_state_manager =
-      ActiveStateManager::FromBrowserState(this);
-  active_state_manager->SetActive(true);
+  ActiveStateManager::FromBrowserState(this)->SetActive(true);
 
   BrowserStateDependencyManager::GetInstance()->CreateBrowserStateServices(
       this);
@@ -81,6 +91,8 @@ WebViewBrowserState::WebViewBrowserState(bool off_the_record)
 WebViewBrowserState::~WebViewBrowserState() {
   BrowserStateDependencyManager::GetInstance()->DestroyBrowserStateServices(
       this);
+
+  ActiveStateManager::FromBrowserState(this)->SetActive(false);
 }
 
 PrefService* WebViewBrowserState::GetPrefs() {
@@ -113,8 +125,22 @@ void WebViewBrowserState::RegisterPrefs(
   // the HTTP header.
   pref_registry->RegisterStringPref(prefs::kAcceptLanguages,
                                     l10n_util::GetLocaleOverride());
-  pref_registry->RegisterBooleanPref(prefs::kEnableTranslate, true);
+  pref_registry->RegisterBooleanPref(prefs::kOfferTranslateEnabled, true);
   translate::TranslatePrefs::RegisterProfilePrefs(pref_registry);
+
+  // Instantiate all factories to setup dependency graph for pref registration.
+  WebViewCookieSettingsFactory::GetInstance();
+  WebViewHostContentSettingsMapFactory::GetInstance();
+  WebViewAccountFetcherServiceFactory::GetInstance();
+  WebViewAccountTrackerServiceFactory::GetInstance();
+  WebViewGaiaCookieManagerServiceFactory::GetInstance();
+  WebViewLanguageModelFactory::GetInstance();
+  WebViewOAuth2TokenServiceFactory::GetInstance();
+  WebViewSigninClientFactory::GetInstance();
+  WebViewSigninErrorControllerFactory::GetInstance();
+  WebViewSigninManagerFactory::GetInstance();
+  WebViewTranslateRankerFactory::GetInstance();
+  WebViewUrlLanguageHistogramFactory::GetInstance();
 
   BrowserStateDependencyManager::GetInstance()
       ->RegisterBrowserStatePrefsForServices(this, pref_registry);

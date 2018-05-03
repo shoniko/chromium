@@ -61,6 +61,8 @@ const OncFieldSignature eap_fields[] = {
     // Deprecated.
     {::onc::eap::kServerCARef, &kStringSignature},
     {::onc::eap::kServerCARefs, &kStringListSignature},
+    {::onc::eap::kSubjectMatch, &kStringSignature},
+    {::onc::eap::kTLSVersionMax, &kStringSignature},
     {::onc::eap::kUseProactiveKeyCaching, &kBoolSignature},
     {::onc::eap::kUseSystemCAs, &kBoolSignature},
     {NULL}};
@@ -136,9 +138,9 @@ const OncFieldSignature openvpn_fields[] = {
     {::onc::openvpn::kStaticChallenge, &kStringSignature},
     {::onc::openvpn::kTLSAuthContents, &kStringSignature},
     {::onc::openvpn::kTLSRemote, &kStringSignature},
+    {::onc::openvpn::kTLSVersionMin, &kStringSignature},
     {::onc::openvpn::kUserAuthenticationType, &kStringSignature},
     {::onc::vpn::kUsername, &kStringSignature},
-    // Not supported, yet.
     {::onc::openvpn::kVerb, &kStringSignature},
     {::onc::openvpn::kVerifyHash, &kStringSignature},
     {::onc::openvpn::kVerifyX509, &kVerifyX509Signature},

@@ -30,12 +30,12 @@
 #ifndef ShapeValue_h
 #define ShapeValue_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/style/BasicShapes.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "core/style/DataEquivalency.h"
 #include "core/style/StyleImage.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -86,9 +86,10 @@ class ShapeValue final : public GarbageCollectedFinalized<ShapeValue> {
  private:
   ShapeValue(scoped_refptr<BasicShape> shape, CSSBoxType css_box)
       : type_(kShape), shape_(std::move(shape)), css_box_(css_box) {}
-  ShapeValue(ShapeValueType type) : type_(type), css_box_(kBoxMissing) {}
+  ShapeValue(ShapeValueType type)
+      : type_(type), css_box_(CSSBoxType::kMissing) {}
   ShapeValue(StyleImage* image)
-      : type_(kImage), image_(image), css_box_(kContentBox) {}
+      : type_(kImage), image_(image), css_box_(CSSBoxType::kContent) {}
   ShapeValue(CSSBoxType css_box) : type_(kBox), css_box_(css_box) {}
 
   ShapeValueType type_;

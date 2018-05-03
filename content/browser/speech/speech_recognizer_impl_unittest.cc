@@ -55,7 +55,7 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
         volume_(-1.0f) {
     // SpeechRecognizer takes ownership of sr_engine.
     SpeechRecognitionEngine* sr_engine =
-        new SpeechRecognitionEngine(NULL /* URLRequestContextGetter */);
+        new SpeechRecognitionEngine(nullptr /* URLRequestContextGetter */);
     SpeechRecognitionEngine::Config config;
     config.audio_num_bits_per_sample =
         SpeechRecognizerImpl::kNumBitsPerAudioSample;
@@ -66,7 +66,7 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
     const int kTestingSessionId = 1;
 
     audio_manager_.reset(new media::MockAudioManager(
-        base::MakeUnique<media::TestAudioThread>(true)));
+        std::make_unique<media::TestAudioThread>(true)));
     audio_manager_->SetInputStreamParameters(
         media::AudioParameters::UnavailableDeviceParams());
     audio_system_ =
@@ -169,7 +169,7 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
   }
 
   void TearDown() override {
-    AudioInputController::set_factory_for_testing(NULL);
+    AudioInputController::set_factory_for_testing(nullptr);
   }
 
   void CopyPacketToAudioBus() {

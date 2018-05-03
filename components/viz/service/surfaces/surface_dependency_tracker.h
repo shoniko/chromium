@@ -27,7 +27,8 @@ class SurfaceManager;
 // BeginFrames.
 class VIZ_SERVICE_EXPORT SurfaceDependencyTracker {
  public:
-  explicit SurfaceDependencyTracker(SurfaceManager* surface_manager);
+  SurfaceDependencyTracker(SurfaceManager* surface_manager,
+                           uint32_t number_of_frames_to_deadline);
   ~SurfaceDependencyTracker();
 
   // Called when |surface| has a pending CompositorFrame and it wishes to be
@@ -37,8 +38,8 @@ class VIZ_SERVICE_EXPORT SurfaceDependencyTracker {
   void OnSurfaceActivated(Surface* surface);
   void OnSurfaceDependenciesChanged(
       Surface* surface,
-      const base::flat_set<SurfaceId>& added_dependencies,
-      const base::flat_set<SurfaceId>& removed_dependencies);
+      const base::flat_set<FrameSinkId>& added_dependencies,
+      const base::flat_set<FrameSinkId>& removed_dependencies);
   void OnSurfaceDiscarded(Surface* surface);
 
  private:
@@ -62,12 +63,12 @@ class VIZ_SERVICE_EXPORT SurfaceDependencyTracker {
 
   SurfaceManager* const surface_manager_;
 
-  // A map from a SurfaceId to the set of Surfaces blocked on that SurfaceId.
-  std::unordered_map<SurfaceId, base::flat_set<SurfaceId>, SurfaceIdHash>
-      blocked_surfaces_from_dependency_;
+  const uint32_t number_of_frames_to_deadline_;
 
-  // The set of SurfaceIds corresponding that are known to have blockers.
-  base::flat_set<SurfaceId> blocked_surfaces_by_id_;
+  // A map from a FrameSinkId to the set of Surfaces that are blocked on
+  // surfaces associated with that FrameSinkId.
+  std::unordered_map<FrameSinkId, base::flat_set<SurfaceId>, FrameSinkIdHash>
+      blocked_surfaces_from_dependency_;
 
   // The set of SurfaceIds corresponding to Surfaces that have active
   // CompositorFrames with missing dependencies.

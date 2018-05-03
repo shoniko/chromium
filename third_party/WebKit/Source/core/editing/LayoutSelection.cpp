@@ -32,14 +32,16 @@
 #include "core/layout/LayoutText.h"
 #include "core/layout/LayoutTextFragment.h"
 #include "core/layout/LayoutView.h"
+#include "core/layout/ng/inline/ng_offset_mapping.h"
+#include "core/layout/ng/inline/ng_physical_text_fragment.h"
 #include "core/paint/PaintLayer.h"
 
 namespace blink {
 
 SelectionPaintRange::SelectionPaintRange(LayoutObject* start_layout_object,
-                                         base::Optional<int> start_offset,
+                                         WTF::Optional<unsigned> start_offset,
                                          LayoutObject* end_layout_object,
-                                         base::Optional<int> end_offset)
+                                         WTF::Optional<unsigned> end_offset)
     : start_layout_object_(start_layout_object),
       start_offset_(start_offset),
       end_layout_object_(end_layout_object),
@@ -57,7 +59,7 @@ LayoutObject* SelectionPaintRange::StartLayoutObject() const {
   return start_layout_object_;
 }
 
-base::Optional<int> SelectionPaintRange::StartOffset() const {
+WTF::Optional<unsigned> SelectionPaintRange::StartOffset() const {
   DCHECK(!IsNull());
   return start_offset_;
 }
@@ -67,13 +69,13 @@ LayoutObject* SelectionPaintRange::EndLayoutObject() const {
   return end_layout_object_;
 }
 
-base::Optional<int> SelectionPaintRange::EndOffset() const {
+WTF::Optional<unsigned> SelectionPaintRange::EndOffset() const {
   DCHECK(!IsNull());
   return end_offset_;
 }
 
 SelectionPaintRange::Iterator::Iterator(const SelectionPaintRange* range) {
-  if (!range) {
+  if (!range || range->IsNull()) {
     current_ = nullptr;
     return;
   }
@@ -160,31 +162,59 @@ static EphemeralRangeInFlatTree CalcSelectionInFlatTree(
 }
 
 // LayoutObjects each has SelectionState of kStart, kEnd, kStartAndEnd, or
-// kInside
+// kInside.
 using SelectedLayoutObjects = HashSet<LayoutObject*>;
+// OldSelectedLayoutObjects is current selected LayoutObjects with
+// current SelectionState which is kStart, kEnd, kStartAndEnd or kInside.
+using OldSelectedLayoutObjects = HashMap<LayoutObject*, SelectionState>;
 
 #ifndef NDEBUG
-void PrintPaintInvalidationSet(const SelectedLayoutObjects& selected_objects) {
+void PrintSelectedLayoutObjects(
+    const SelectedLayoutObjects& new_selected_objects) {
+  std::stringstream stream;
+  stream << std::endl;
+  for (LayoutObject* layout_object : new_selected_objects) {
+    PrintLayoutObjectForSelection(stream, layout_object);
+    stream << std::endl;
+  }
+  LOG(INFO) << stream.str();
+}
+
+void PrintOldSelectedLayoutObjects(
+    const OldSelectedLayoutObjects& old_selected_objects) {
+  std::stringstream stream;
+  stream << std::endl;
+  for (const auto& key_pair : old_selected_objects) {
+    LayoutObject* layout_object = key_pair.key;
+    SelectionState old_state = key_pair.value;
+    PrintLayoutObjectForSelection(stream, layout_object);
+    stream << " old: " << old_state << std::endl;
+  }
+  LOG(INFO) << stream.str();
+}
+
+void PrintSelectionPaintRange(const SelectionPaintRange& paint_range) {
   std::stringstream stream;
   stream << std::endl << "layout_objects:" << std::endl;
-  for (LayoutObject* layout_object : selected_objects) {
+  for (LayoutObject* layout_object : paint_range) {
+    PrintLayoutObjectForSelection(stream, layout_object);
+    stream << std::endl;
+  }
+  LOG(INFO) << stream.str();
+}
+
+void PrintSelectionStateInLayoutView(const FrameSelection& selection) {
+  std::stringstream stream;
+  stream << std::endl << "layout_objects:" << std::endl;
+  LayoutView* layout_view = selection.GetDocument().GetLayoutView();
+  for (LayoutObject* layout_object = layout_view; layout_object;
+       layout_object = layout_object->NextInPreOrder()) {
     PrintLayoutObjectForSelection(stream, layout_object);
     stream << std::endl;
   }
   LOG(INFO) << stream.str();
 }
 #endif
-
-static SelectedLayoutObjects CollectInvalidationSet(
-    const SelectionPaintRange& range) {
-  if (range.IsNull())
-    return SelectedLayoutObjects();
-
-  SelectedLayoutObjects invalidation_set;
-  for (LayoutObject* runner : range)
-    invalidation_set.insert(runner);
-  return invalidation_set;
-}
 
 // This class represents a selection range in layout tree and each LayoutObject
 // is SelectionState-marked.
@@ -194,9 +224,9 @@ class NewPaintRangeAndSelectedLayoutObjects {
  public:
   NewPaintRangeAndSelectedLayoutObjects() = default;
   NewPaintRangeAndSelectedLayoutObjects(SelectionPaintRange paint_range,
-                                        SelectedLayoutObjects invalidation_set)
+                                        SelectedLayoutObjects selected_objects)
       : paint_range_(paint_range),
-        selected_objects_(std::move(invalidation_set)) {}
+        selected_objects_(std::move(selected_objects)) {}
   NewPaintRangeAndSelectedLayoutObjects(
       NewPaintRangeAndSelectedLayoutObjects&& other) {
     paint_range_ = other.paint_range_;
@@ -217,66 +247,141 @@ class NewPaintRangeAndSelectedLayoutObjects {
   DISALLOW_COPY_AND_ASSIGN(NewPaintRangeAndSelectedLayoutObjects);
 };
 
-static void SetShouldInvalidateIfNeeds(LayoutObject* layout_object) {
+static void SetShouldInvalidateIfNeeded(LayoutObject* layout_object) {
   if (layout_object->ShouldInvalidateSelection())
     return;
   layout_object->SetShouldInvalidateSelection();
 
-  // We should invalidate if parent of |layout_object| is LayoutSVGText because
-  // SVGRootInlineBoxPainter::Paint() paints selection for |layout_object| in
-  // LayoutSVGText and it is invoked when parent LayoutSVGText is invalidated.
+  // We should invalidate if ancestor of |layout_object| is LayoutSVGText
+  // because SVGRootInlineBoxPainter::Paint() paints selection for
+  // |layout_object| in/ LayoutSVGText and it is invoked when parent
+  // LayoutSVGText is invalidated.
   // That is different from InlineTextBoxPainter::Paint() which paints
   // LayoutText selection when LayoutText is invalidated.
-  LayoutObject* const parent = layout_object->Parent();
-  if (!parent || !parent->IsSVGText() || parent->ShouldInvalidateSelection())
+  if (!layout_object->IsSVG())
     return;
-  parent->SetShouldInvalidateSelection();
+  for (LayoutObject* parent = layout_object->Parent(); parent;
+       parent = parent->Parent()) {
+    if (parent->IsSVGRoot())
+      return;
+    if (parent->IsSVGText()) {
+      if (!parent->ShouldInvalidateSelection())
+        parent->SetShouldInvalidateSelection();
+      return;
+    }
+  }
+}
+
+static void SetSelectionStateIfNeeded(LayoutObject* layout_object,
+                                      SelectionState state) {
+  DCHECK_NE(state, SelectionState::kContain) << layout_object;
+  DCHECK_NE(state, SelectionState::kNone) << layout_object;
+  if (layout_object->GetSelectionState() == state)
+    return;
+  // TODO(yoichio): Once we make LayoutObject::SetSelectionState() tribial, use
+  // it directly.
+  layout_object->LayoutObject::SetSelectionState(state);
+
+  // Set containing block SelectionState kContain for CSS ::selection style.
+  // See LayoutObject::InvalidatePaintForSelection().
+  for (LayoutObject* containing_block = layout_object->ContainingBlock();
+       containing_block;
+       containing_block = containing_block->ContainingBlock()) {
+    if (containing_block->GetSelectionState() == SelectionState::kContain)
+      return;
+    containing_block->LayoutObject::SetSelectionState(SelectionState::kContain);
+  }
 }
 
 // Set ShouldInvalidateSelection flag of LayoutObjects
 // comparing them in |new_range| and |old_range|.
 static void SetShouldInvalidateSelection(
     const NewPaintRangeAndSelectedLayoutObjects& new_range,
-    const SelectionPaintRange& old_range) {
-  const SelectedLayoutObjects& new_invalidation_set = new_range.LayoutObjects();
-  SelectedLayoutObjects old_invalidation_set =
-      CollectInvalidationSet(old_range);
-
-  // We invalidate each LayoutObject which is
-  // - included in new selection range and has valid SelectionState(!= kNone).
-  // - included in old selection range
-  // Invalidate new selected LayoutObjects.
-  for (LayoutObject* layout_object : new_invalidation_set) {
-    if (layout_object->GetSelectionState() != SelectionState::kNone) {
-      SetShouldInvalidateIfNeeds(layout_object);
-      old_invalidation_set.erase(layout_object);
+    const SelectionPaintRange& old_range,
+    const OldSelectedLayoutObjects& old_selected_objects) {
+  // We invalidate each LayoutObject in new SelectionPaintRange which
+  // has SelectionState of kStart, kEnd, kStartAndEnd, or kInside
+  // and is not in old SelectionPaintRange.
+  for (LayoutObject* layout_object : new_range.LayoutObjects()) {
+    if (old_selected_objects.Contains(layout_object))
       continue;
-    }
+    const SelectionState new_state = layout_object->GetSelectionState();
+    DCHECK_NE(new_state, SelectionState::kContain) << layout_object;
+    DCHECK_NE(new_state, SelectionState::kNone) << layout_object;
+    SetShouldInvalidateIfNeeded(layout_object);
+  }
+  // For LayoutObject in old SelectionPaintRange, we invalidate LayoutObjects
+  // each of:
+  // 1. LayoutObject was painted and would not be painted.
+  // 2. LayoutObject was not painted and would be painted.
+  for (const auto& key_value : old_selected_objects) {
+    LayoutObject* const layout_object = key_value.key;
+    const SelectionState old_state = key_value.value;
+    const SelectionState new_state = layout_object->GetSelectionState();
+    if (new_state == old_state)
+      continue;
+    DCHECK(new_state != SelectionState::kNone ||
+           old_state != SelectionState::kNone)
+        << layout_object;
+    DCHECK_NE(new_state, SelectionState::kContain) << layout_object;
+    DCHECK_NE(old_state, SelectionState::kContain) << layout_object;
+    SetShouldInvalidateIfNeeded(layout_object);
   }
 
-  // Invalidate previous selected LayoutObjects except already invalidated
-  // above.
-  for (LayoutObject* layout_object : old_invalidation_set) {
-    const SelectionState old_state = layout_object->GetSelectionState();
-    layout_object->SetSelectionStateIfNeeded(SelectionState::kNone);
-    if (layout_object->GetSelectionState() == old_state)
-      continue;
-    SetShouldInvalidateIfNeeds(layout_object);
-  }
+  // Invalidate Selection start/end is moving on a same node.
+  const SelectionPaintRange& new_paint_range = new_range.PaintRange();
+  if (new_paint_range.IsNull() || old_range.IsNull())
+    return;
+  if (new_paint_range.StartLayoutObject()->IsText() &&
+      new_paint_range.StartLayoutObject() == old_range.StartLayoutObject() &&
+      new_paint_range.StartOffset() != old_range.StartOffset())
+    SetShouldInvalidateIfNeeded(new_paint_range.StartLayoutObject());
+  if (new_paint_range.EndLayoutObject()->IsText() &&
+      new_paint_range.EndLayoutObject() == old_range.EndLayoutObject() &&
+      new_paint_range.EndOffset() != old_range.EndOffset())
+    SetShouldInvalidateIfNeeded(new_paint_range.EndLayoutObject());
 }
 
-base::Optional<int> LayoutSelection::SelectionStart() const {
+WTF::Optional<unsigned> LayoutSelection::SelectionStart() const {
   DCHECK(!HasPendingSelection());
   if (paint_range_.IsNull())
-    return base::nullopt;
+    return WTF::nullopt;
   return paint_range_.StartOffset();
 }
 
-base::Optional<int> LayoutSelection::SelectionEnd() const {
+WTF::Optional<unsigned> LayoutSelection::SelectionEnd() const {
   DCHECK(!HasPendingSelection());
   if (paint_range_.IsNull())
-    return base::nullopt;
+    return WTF::nullopt;
   return paint_range_.EndOffset();
+}
+
+static OldSelectedLayoutObjects ResetOldSelectedLayoutObjects(
+    const SelectionPaintRange& old_range) {
+  OldSelectedLayoutObjects old_selected_objects;
+  HashSet<LayoutObject*> containing_block_set;
+  for (LayoutObject* layout_object : old_range) {
+    const SelectionState old_state = layout_object->GetSelectionState();
+    if (old_state == SelectionState::kNone)
+      continue;
+    if (old_state != SelectionState::kContain)
+      old_selected_objects.insert(layout_object, old_state);
+    // TODO(yoichio): Once we make LayoutObject::SetSelectionState() trivial,
+    // use it directly.
+    layout_object->LayoutObject::SetSelectionState(SelectionState::kNone);
+
+    // Reset containing block SelectionState for CSS ::selection style.
+    // See LayoutObject::InvalidatePaintForSelection().
+    for (LayoutObject* containing_block = layout_object->ContainingBlock();
+         containing_block;
+         containing_block = containing_block->ContainingBlock()) {
+      if (containing_block_set.Contains(containing_block))
+        break;
+      containing_block->LayoutObject::SetSelectionState(SelectionState::kNone);
+      containing_block_set.insert(containing_block);
+    }
+  }
+  return old_selected_objects;
 }
 
 void LayoutSelection::ClearSelection() {
@@ -289,36 +394,33 @@ void LayoutSelection::ClearSelection() {
   if (paint_range_.IsNull())
     return;
 
-  for (auto layout_object : paint_range_) {
-    const SelectionState old_state = layout_object->GetSelectionState();
-    layout_object->SetSelectionStateIfNeeded(SelectionState::kNone);
-    if (layout_object->GetSelectionState() == old_state)
-      continue;
-    layout_object->SetShouldInvalidateSelection();
-  }
+  const OldSelectedLayoutObjects& old_selected_objects =
+      ResetOldSelectedLayoutObjects(paint_range_);
+  for (LayoutObject* const layout_object : old_selected_objects.Keys())
+    SetShouldInvalidateIfNeeded(layout_object);
 
   // Reset selection.
   paint_range_ = SelectionPaintRange();
 }
 
-static base::Optional<int> ComputeStartOffset(
+static WTF::Optional<unsigned> ComputeStartOffset(
     const LayoutObject& layout_object,
     const PositionInFlatTree& position) {
   Node* const layout_node = layout_object.GetNode();
   if (!layout_node || !layout_node->IsTextNode())
-    return base::nullopt;
+    return WTF::nullopt;
 
   if (layout_node == position.AnchorNode())
     return position.OffsetInContainerNode();
   return 0;
 }
 
-static base::Optional<int> ComputeEndOffset(
+static WTF::Optional<unsigned> ComputeEndOffset(
     const LayoutObject& layout_object,
     const PositionInFlatTree& position) {
   Node* const layout_node = layout_object.GetNode();
   if (!layout_node || !layout_node->IsTextNode())
-    return base::nullopt;
+    return WTF::nullopt;
 
   if (layout_node == position.AnchorNode())
     return position.OffsetInContainerNode();
@@ -338,118 +440,112 @@ static void MarkSelected(SelectedLayoutObjects* selected_objects,
                          LayoutObject* layout_object,
                          SelectionState state) {
   DCHECK(layout_object->CanBeSelectionLeaf());
-  layout_object->SetSelectionStateIfNeeded(state);
+  SetSelectionStateIfNeeded(layout_object, state);
   selected_objects->insert(layout_object);
 }
 
-static void MarkSelectedInside(SelectedLayoutObjects* invalidation_set,
+static void MarkSelectedInside(SelectedLayoutObjects* selected_objects,
                                LayoutObject* layout_object) {
-  MarkSelected(invalidation_set, layout_object, SelectionState::kInside);
+  MarkSelected(selected_objects, layout_object, SelectionState::kInside);
   LayoutTextFragment* const first_letter_part =
       FirstLetterPartFor(layout_object);
   if (!first_letter_part)
     return;
-  MarkSelected(invalidation_set, first_letter_part, SelectionState::kInside);
+  MarkSelected(selected_objects, first_letter_part, SelectionState::kInside);
 }
 
 static NewPaintRangeAndSelectedLayoutObjects MarkStartAndEndInOneNode(
-    SelectedLayoutObjects invalidation_set,
+    SelectedLayoutObjects selected_objects,
     LayoutObject* layout_object,
-    base::Optional<int> start_offset,
-    base::Optional<int> end_offset) {
+    WTF::Optional<unsigned> start_offset,
+    WTF::Optional<unsigned> end_offset) {
   if (!layout_object->GetNode()->IsTextNode()) {
     DCHECK(!start_offset.has_value());
     DCHECK(!end_offset.has_value());
-    MarkSelected(&invalidation_set, layout_object,
+    MarkSelected(&selected_objects, layout_object,
                  SelectionState::kStartAndEnd);
-    return {{layout_object, base::nullopt, layout_object, base::nullopt},
-            std::move(invalidation_set)};
+    return {{layout_object, WTF::nullopt, layout_object, WTF::nullopt},
+            std::move(selected_objects)};
   }
 
   DCHECK(start_offset.has_value());
   DCHECK(end_offset.has_value());
-  DCHECK_GE(start_offset.value(), 0);
   DCHECK_GE(end_offset.value(), start_offset.value());
   if (start_offset.value() == end_offset.value())
     return {};
   LayoutTextFragment* const first_letter_part =
       FirstLetterPartFor(layout_object);
   if (!first_letter_part) {
-    MarkSelected(&invalidation_set, layout_object,
+    MarkSelected(&selected_objects, layout_object,
                  SelectionState::kStartAndEnd);
     return {{layout_object, start_offset, layout_object, end_offset},
-            std::move(invalidation_set)};
+            std::move(selected_objects)};
   }
-  const unsigned unsigned_start = static_cast<unsigned>(start_offset.value());
-  const unsigned unsigned_end = static_cast<unsigned>(end_offset.value());
+  const unsigned unsigned_start = start_offset.value();
+  const unsigned unsigned_end = end_offset.value();
   LayoutTextFragment* const remaining_part =
       ToLayoutTextFragment(layout_object);
   if (unsigned_start >= remaining_part->Start()) {
     // Case 1: The selection starts and ends in remaining part.
     DCHECK_GT(unsigned_end, remaining_part->Start());
-    MarkSelected(&invalidation_set, remaining_part,
+    MarkSelected(&selected_objects, remaining_part,
                  SelectionState::kStartAndEnd);
-    return {{remaining_part,
-             static_cast<int>(unsigned_start - remaining_part->Start()),
-             remaining_part,
-             static_cast<int>(unsigned_end - remaining_part->Start())},
-            std::move(invalidation_set)};
+    return {{remaining_part, unsigned_start - remaining_part->Start(),
+             remaining_part, unsigned_end - remaining_part->Start()},
+            std::move(selected_objects)};
   }
   if (unsigned_end <= remaining_part->Start()) {
     // Case 2: The selection starts and ends in first letter part.
-    MarkSelected(&invalidation_set, first_letter_part,
+    MarkSelected(&selected_objects, first_letter_part,
                  SelectionState::kStartAndEnd);
     return {{first_letter_part, start_offset, first_letter_part, end_offset},
-            std::move(invalidation_set)};
+            std::move(selected_objects)};
   }
   // Case 3: The selection starts in first-letter part and ends in remaining
   // part.
   DCHECK_GT(unsigned_end, remaining_part->Start());
-  MarkSelected(&invalidation_set, first_letter_part, SelectionState::kStart);
-  MarkSelected(&invalidation_set, remaining_part, SelectionState::kEnd);
+  MarkSelected(&selected_objects, first_letter_part, SelectionState::kStart);
+  MarkSelected(&selected_objects, remaining_part, SelectionState::kEnd);
   return {{first_letter_part, start_offset, remaining_part,
-           static_cast<int>(unsigned_end - remaining_part->Start())},
-          std::move(invalidation_set)};
+           unsigned_end - remaining_part->Start()},
+          std::move(selected_objects)};
 }
 
 // LayoutObjectAndOffset represents start or end of SelectionPaintRange.
 struct LayoutObjectAndOffset {
   STACK_ALLOCATED();
   LayoutObject* layout_object;
-  base::Optional<int> offset;
+  WTF::Optional<unsigned> offset;
 
   explicit LayoutObjectAndOffset(LayoutObject* passed_layout_object)
-      : layout_object(passed_layout_object), offset(base::nullopt) {
+      : layout_object(passed_layout_object), offset(WTF::nullopt) {
     DCHECK(passed_layout_object);
     DCHECK(!passed_layout_object->GetNode()->IsTextNode());
   }
-  LayoutObjectAndOffset(LayoutText* layout_text, int passed_offset)
+  LayoutObjectAndOffset(LayoutText* layout_text, unsigned passed_offset)
       : layout_object(layout_text), offset(passed_offset) {
     DCHECK(layout_object);
-    DCHECK_GE(passed_offset, 0);
   }
 };
 
-LayoutObjectAndOffset MarkStart(SelectedLayoutObjects* invalidation_set,
+LayoutObjectAndOffset MarkStart(SelectedLayoutObjects* selected_objects,
                                 LayoutObject* start_layout_object,
-                                base::Optional<int> start_offset) {
+                                WTF::Optional<unsigned> start_offset) {
   if (!start_layout_object->GetNode()->IsTextNode()) {
     DCHECK(!start_offset.has_value());
-    MarkSelected(invalidation_set, start_layout_object, SelectionState::kStart);
+    MarkSelected(selected_objects, start_layout_object, SelectionState::kStart);
     return LayoutObjectAndOffset(start_layout_object);
   }
 
   DCHECK(start_offset.has_value());
-  DCHECK_GE(start_offset.value(), 0);
-  const unsigned unsigned_offset = static_cast<unsigned>(start_offset.value());
+  const unsigned unsigned_offset = start_offset.value();
   LayoutText* const start_layout_text = ToLayoutText(start_layout_object);
   if (unsigned_offset >= start_layout_text->TextStartOffset()) {
     // |start_offset| is within |start_layout_object| whether it has first
     // letter part or not.
-    MarkSelected(invalidation_set, start_layout_object, SelectionState::kStart);
+    MarkSelected(selected_objects, start_layout_object, SelectionState::kStart);
     return {start_layout_text,
-            static_cast<int>(unsigned_offset -
-                             start_layout_text->TextStartOffset())};
+            unsigned_offset - start_layout_text->TextStartOffset()};
   }
 
   // |start_layout_object| has first letter part and |start_offset| is within
@@ -457,36 +553,34 @@ LayoutObjectAndOffset MarkStart(SelectedLayoutObjects* invalidation_set,
   LayoutTextFragment* const first_letter_part =
       FirstLetterPartFor(start_layout_object);
   DCHECK(first_letter_part);
-  MarkSelected(invalidation_set, first_letter_part, SelectionState::kStart);
-  MarkSelected(invalidation_set, start_layout_text, SelectionState::kInside);
+  MarkSelected(selected_objects, first_letter_part, SelectionState::kStart);
+  MarkSelected(selected_objects, start_layout_text, SelectionState::kInside);
   return {first_letter_part, start_offset.value()};
 }
 
-LayoutObjectAndOffset MarkEnd(SelectedLayoutObjects* invalidation_set,
+LayoutObjectAndOffset MarkEnd(SelectedLayoutObjects* selected_objects,
                               LayoutObject* end_layout_object,
-                              base::Optional<int> end_offset) {
+                              WTF::Optional<unsigned> end_offset) {
   if (!end_layout_object->GetNode()->IsTextNode()) {
     DCHECK(!end_offset.has_value());
-    MarkSelected(invalidation_set, end_layout_object, SelectionState::kEnd);
+    MarkSelected(selected_objects, end_layout_object, SelectionState::kEnd);
     return LayoutObjectAndOffset(end_layout_object);
   }
 
   DCHECK(end_offset.has_value());
-  DCHECK_GE(end_offset.value(), 0);
-  const unsigned unsigned_offset = static_cast<unsigned>(end_offset.value());
+  const unsigned unsigned_offset = end_offset.value();
   LayoutText* const end_layout_text = ToLayoutText(end_layout_object);
   if (unsigned_offset >= end_layout_text->TextStartOffset()) {
     // |end_offset| is within |end_layout_object| whether it has first
     // letter part or not.
-    MarkSelected(invalidation_set, end_layout_object, SelectionState::kEnd);
+    MarkSelected(selected_objects, end_layout_object, SelectionState::kEnd);
     if (LayoutTextFragment* const first_letter_part =
             FirstLetterPartFor(end_layout_object)) {
-      MarkSelected(invalidation_set, first_letter_part,
+      MarkSelected(selected_objects, first_letter_part,
                    SelectionState::kInside);
     }
-    return {
-        end_layout_text,
-        static_cast<int>(unsigned_offset - end_layout_text->TextStartOffset())};
+    return {end_layout_text,
+            unsigned_offset - end_layout_text->TextStartOffset()};
   }
 
   // |end_layout_object| has first letter part and |end_offset| is within
@@ -494,22 +588,115 @@ LayoutObjectAndOffset MarkEnd(SelectedLayoutObjects* invalidation_set,
   LayoutTextFragment* const first_letter_part =
       FirstLetterPartFor(end_layout_object);
   DCHECK(first_letter_part);
-  MarkSelected(invalidation_set, first_letter_part, SelectionState::kEnd);
+  MarkSelected(selected_objects, first_letter_part, SelectionState::kEnd);
   return {first_letter_part, end_offset.value()};
 }
 
 static NewPaintRangeAndSelectedLayoutObjects MarkStartAndEndInTwoNodes(
-    SelectedLayoutObjects invalidation_set,
+    SelectedLayoutObjects selected_objects,
     LayoutObject* start_layout_object,
-    base::Optional<int> start_offset,
+    WTF::Optional<unsigned> start_offset,
     LayoutObject* end_layout_object,
-    base::Optional<int> end_offset) {
+    WTF::Optional<unsigned> end_offset) {
   const LayoutObjectAndOffset& start =
-      MarkStart(&invalidation_set, start_layout_object, start_offset);
+      MarkStart(&selected_objects, start_layout_object, start_offset);
   const LayoutObjectAndOffset& end =
-      MarkEnd(&invalidation_set, end_layout_object, end_offset);
+      MarkEnd(&selected_objects, end_layout_object, end_offset);
   return {{start.layout_object, start.offset, end.layout_object, end.offset},
-          std::move(invalidation_set)};
+          std::move(selected_objects)};
+}
+
+static WTF::Optional<unsigned> GetTextContentOffset(
+    LayoutObject* layout_object,
+    WTF::Optional<unsigned> node_offset) {
+  DCHECK(layout_object->EnclosingNGBlockFlow());
+  // |layout_object| is start or end of selection and offset is only valid
+  // if it is LayoutText.
+  if (!layout_object->IsText())
+    return WTF::nullopt;
+  // There are LayoutText that selection can't be inside it(BR, WBR,
+  // LayoutCounter).
+  if (!node_offset.has_value())
+    return WTF::nullopt;
+  const Position position_in_dom(*layout_object->GetNode(),
+                                 node_offset.value());
+  const NGOffsetMapping* const offset_mapping =
+      NGOffsetMapping::GetFor(position_in_dom);
+  DCHECK(offset_mapping);
+  const WTF::Optional<unsigned>& ng_offset =
+      offset_mapping->GetTextContentOffset(position_in_dom);
+  return ng_offset;
+}
+
+static NewPaintRangeAndSelectedLayoutObjects ComputeNewPaintRange(
+    const NewPaintRangeAndSelectedLayoutObjects& new_range,
+    LayoutObject* start_layout_object,
+    WTF::Optional<unsigned> start_node_offset,
+    LayoutObject* end_layout_object,
+    WTF::Optional<unsigned> end_node_offset) {
+  if (new_range.PaintRange().IsNull())
+    return {};
+  LayoutObject* const start = new_range.PaintRange().StartLayoutObject();
+  // If LayoutObject is not in NG, use legacy offset.
+  const WTF::Optional<unsigned> start_offset =
+      start->EnclosingNGBlockFlow()
+          ? GetTextContentOffset(start_layout_object, start_node_offset)
+          : new_range.PaintRange().StartOffset();
+
+  LayoutObject* const end = new_range.PaintRange().EndLayoutObject();
+  const WTF::Optional<unsigned> end_offset =
+      end->EnclosingNGBlockFlow()
+          ? GetTextContentOffset(end_layout_object, end_node_offset)
+          : new_range.PaintRange().EndOffset();
+
+  return {{start, start_offset, end, end_offset},
+          std::move(new_range.LayoutObjects())};
+}
+
+// ClampOffset modifies |offset| fixed in a range of |text_fragment| start/end
+// offsets.
+static unsigned ClampOffset(unsigned offset,
+                            const NGPhysicalTextFragment& text_fragment) {
+  return std::min(std::max(offset, text_fragment.StartOffset()),
+                  text_fragment.EndOffset());
+}
+
+std::pair<unsigned, unsigned> LayoutSelection::SelectionStartEndForNG(
+    const NGPhysicalTextFragment& text_fragment) {
+  // FrameSelection holds selection offsets in layout block flow at
+  // LayoutSelection::Commit() if selection starts/ends within Text that
+  // each LayoutObject::SelectionState indicates.
+  // These offset can out of |text_fragment| because SelectionState is of each
+  // LayoutText and not |text_fragment|.
+  switch (text_fragment.GetLayoutObject()->GetSelectionState()) {
+    case SelectionState::kStart: {
+      DCHECK(SelectionStart().has_value());
+      unsigned start_in_block = SelectionStart().value_or(0);
+      return {ClampOffset(start_in_block, text_fragment),
+              text_fragment.EndOffset()};
+    }
+    case SelectionState::kEnd: {
+      DCHECK(SelectionEnd().has_value());
+      unsigned end_in_block =
+          SelectionEnd().value_or(text_fragment.EndOffset());
+      return {text_fragment.StartOffset(),
+              ClampOffset(end_in_block, text_fragment)};
+    }
+    case SelectionState::kStartAndEnd: {
+      DCHECK(SelectionStart().has_value());
+      DCHECK(SelectionEnd().has_value());
+      unsigned start_in_block = SelectionStart().value_or(0);
+      unsigned end_in_block =
+          SelectionEnd().value_or(text_fragment.EndOffset());
+      return {ClampOffset(start_in_block, text_fragment),
+              ClampOffset(end_in_block, text_fragment)};
+    }
+    case SelectionState::kInside:
+      return {text_fragment.StartOffset(), text_fragment.EndOffset()};
+    default:
+      // This block is not included in selection.
+      return {0, 0};
+  }
 }
 
 static NewPaintRangeAndSelectedLayoutObjects
@@ -555,19 +742,24 @@ CalcSelectionRangeAndSetSelectionState(const FrameSelection& frame_selection) {
   }
 
   // Compute offset. It has value iff start/end is text.
-  const base::Optional<int> start_offset = ComputeStartOffset(
+  const WTF::Optional<unsigned> start_offset = ComputeStartOffset(
       *start_layout_object, selection.StartPosition().ToOffsetInAnchor());
-  const base::Optional<int> end_offset = ComputeEndOffset(
+  const WTF::Optional<unsigned> end_offset = ComputeEndOffset(
       *end_layout_object, selection.EndPosition().ToOffsetInAnchor());
 
-  if (start_layout_object == end_layout_object) {
-    return MarkStartAndEndInOneNode(std::move(selected_objects),
-                                    start_layout_object, start_offset,
-                                    end_offset);
-  }
-  return MarkStartAndEndInTwoNodes(std::move(selected_objects),
-                                   start_layout_object, start_offset,
-                                   end_layout_object, end_offset);
+  NewPaintRangeAndSelectedLayoutObjects new_range =
+      start_layout_object == end_layout_object
+          ? MarkStartAndEndInOneNode(std::move(selected_objects),
+                                     start_layout_object, start_offset,
+                                     end_offset)
+          : MarkStartAndEndInTwoNodes(std::move(selected_objects),
+                                      start_layout_object, start_offset,
+                                      end_layout_object, end_offset);
+
+  if (!RuntimeEnabledFeatures::LayoutNGPaintFragmentsEnabled())
+    return new_range;
+  return ComputeNewPaintRange(new_range, start_layout_object, start_offset,
+                              end_layout_object, end_offset);
 }
 
 void LayoutSelection::SetHasPendingSelection() {
@@ -584,16 +776,17 @@ void LayoutSelection::Commit() {
             DocumentLifecycle::kLayoutClean);
   DocumentLifecycle::DisallowTransitionScope disallow_transition(
       frame_selection_->GetDocument().Lifecycle());
+
+  const OldSelectedLayoutObjects& old_selected_objects =
+      ResetOldSelectedLayoutObjects(paint_range_);
   const NewPaintRangeAndSelectedLayoutObjects& new_range =
       CalcSelectionRangeAndSetSelectionState(*frame_selection_);
-  const SelectionPaintRange& new_paint_range = new_range.PaintRange();
-  if (new_paint_range.IsNull()) {
-    ClearSelection();
-    return;
-  }
   DCHECK(frame_selection_->GetDocument().GetLayoutView()->GetFrameView());
-  SetShouldInvalidateSelection(new_range, paint_range_);
-  paint_range_ = new_paint_range;
+  SetShouldInvalidateSelection(new_range, paint_range_, old_selected_objects);
+
+  paint_range_ = new_range.PaintRange();
+  if (paint_range_.IsNull())
+    return;
   // TODO(yoichio): Remove this if state.
   // This SelectionState reassignment is ad-hoc patch for
   // prohibiting use-after-free(crbug.com/752715).
@@ -612,12 +805,12 @@ void LayoutSelection::Commit() {
        paint_range_.EndLayoutObject()->GetSelectionState() !=
            SelectionState::kStartAndEnd)) {
     if (paint_range_.StartLayoutObject() == paint_range_.EndLayoutObject()) {
-      paint_range_.StartLayoutObject()->SetSelectionStateIfNeeded(
+      paint_range_.StartLayoutObject()->LayoutObject::SetSelectionState(
           SelectionState::kStartAndEnd);
     } else {
-      paint_range_.StartLayoutObject()->SetSelectionStateIfNeeded(
+      paint_range_.StartLayoutObject()->LayoutObject::SetSelectionState(
           SelectionState::kStart);
-      paint_range_.EndLayoutObject()->SetSelectionStateIfNeeded(
+      paint_range_.EndLayoutObject()->LayoutObject::SetSelectionState(
           SelectionState::kEnd);
     }
   }
@@ -655,10 +848,12 @@ IntRect LayoutSelection::SelectionBounds() {
 
   // Create a single bounding box rect that encloses the whole selection.
   LayoutRect selected_rect;
-  const SelectedLayoutObjects& current_map =
-      CollectInvalidationSet(paint_range_);
-  for (auto layout_object : current_map)
+  for (LayoutObject* layout_object : paint_range_) {
+    const SelectionState state = layout_object->GetSelectionState();
+    if (state == SelectionState::kContain || state == SelectionState::kNone)
+      continue;
     selected_rect.Unite(SelectionRectForLayoutObject(layout_object));
+  }
 
   return PixelSnappedIntRect(selected_rect);
 }

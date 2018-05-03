@@ -10,7 +10,6 @@
 #include <string>
 
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/values.h"
@@ -48,7 +47,7 @@ class FakeProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
         response_(response) {
   }
 
-  ~FakeProtocolHandler() override {}
+  ~FakeProtocolHandler() override = default;
 
   net::URLRequestJob* MaybeCreateJob(
       net::URLRequest* request,
@@ -71,7 +70,7 @@ class FakeFailingProtocolHandler
       net::Error net_error)
       : failure_phase_(failure_phase), net_error_(net_error) {}
 
-  ~FakeFailingProtocolHandler() override {}
+  ~FakeFailingProtocolHandler() override = default;
 
   net::URLRequestJob* MaybeCreateJob(
       net::URLRequest* request,
@@ -89,19 +88,19 @@ class SetResponseURLRequestContext: public net::TestURLRequestContext {
  public:
   void SetResponse(const std::string& headers, const std::string& response) {
     std::unique_ptr<net::URLRequestJobFactoryImpl> factory =
-        base::MakeUnique<net::URLRequestJobFactoryImpl>();
+        std::make_unique<net::URLRequestJobFactoryImpl>();
     factory->SetProtocolHandler(
-        "https", base::MakeUnique<FakeProtocolHandler>(headers, response));
+        "https", std::make_unique<FakeProtocolHandler>(headers, response));
     context_storage_.set_job_factory(std::move(factory));
   }
 
   void SetErrorResponse(net::URLRequestFailedJob::FailurePhase failure_phase,
                         net::Error net_error) {
     std::unique_ptr<net::URLRequestJobFactoryImpl> factory =
-        base::MakeUnique<net::URLRequestJobFactoryImpl>();
+        std::make_unique<net::URLRequestJobFactoryImpl>();
     factory->SetProtocolHandler(
         "https",
-        base::MakeUnique<FakeFailingProtocolHandler>(failure_phase, net_error));
+        std::make_unique<FakeFailingProtocolHandler>(failure_phase, net_error));
     context_storage_.set_job_factory(std::move(factory));
   }
 };
@@ -135,7 +134,7 @@ class TokenValidatorFactoryImplTest : public testing::Test {
     key_pair_ = RsaKeyPair::FromString(kTestRsaKeyPair);
     request_context_getter_ = new net::TestURLRequestContextGetter(
         message_loop_.task_runner(),
-        base::MakeUnique<SetResponseURLRequestContext>());
+        std::make_unique<SetResponseURLRequestContext>());
     ThirdPartyAuthConfig config;
     config.token_url = GURL(kTokenUrl);
     config.token_validation_url = GURL(kTokenValidationUrl);

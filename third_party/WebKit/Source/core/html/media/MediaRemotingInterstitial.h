@@ -8,14 +8,12 @@
 #include "core/html/HTMLDivElement.h"
 #include "platform/Timer.h"
 #include "platform/WebTaskRunner.h"
+#include "public/platform/WebLocalizedString.h"
 
 namespace blink {
 
 class HTMLImageElement;
 class HTMLVideoElement;
-class MediaRemotingExitButtonElement;
-class MediaRemotingCastMessageElement;
-class MediaRemotingCastIconElement;
 
 // Media Remoting UI. DOM structure looks like:
 //
@@ -23,27 +21,30 @@ class MediaRemotingCastIconElement;
 //     (-internal-media-remoting-interstitial)
 // +-HTMLImageElement
 // |    (-internal-media-remoting-background-image)
-// \-MediaRemotingCastIconElement
+// \-HTMLDivElement
 // |    (-internal-media-remoting-cast-icon)
-// \-MediaRemotingCastMessageElement
+// \-HTMLDivElement
 // |    (-internal-media-remoting-cast-text-message)
-// \-MediaRemotingExitButtonElement
-//      (-internal-media-remoting-disable-button)
+// |-HTMLDivElement
+//      (-internal-media-remoting-toast-message)
 class MediaRemotingInterstitial final : public HTMLDivElement {
  public:
   explicit MediaRemotingInterstitial(HTMLVideoElement&);
 
-  // Show/Hide Media Remoting interstitial. |remote_device_friendly_name| will
-  // be shown in the UI to indicate which device the content is rendered on. An
+  // Show Media Remoting interstitial. |remote_device_friendly_name| will be
+  // shown in the UI to indicate which device the content is rendered on. An
   // empty name indicates an unknown remote device. A default message will be
   // shown in this case.
   void Show(const WebString& remote_device_friendly_name);
-  void Hide();
+
+  // Hide Media Remoting interstitial. A text message may be displayed for five
+  // seconds according to |error_msg|.
+  void Hide(WebLocalizedString::Name error_msg);
 
   void OnPosterImageChanged();
 
   // Query for whether the remoting interstitial is visible.
-  bool IsVisible() const { return should_be_visible_; }
+  bool IsVisible() const { return state_ == VISIBLE; }
 
   HTMLVideoElement& GetVideoElement() const { return *video_element_; }
 
@@ -58,14 +59,19 @@ class MediaRemotingInterstitial final : public HTMLDivElement {
 
   // Indicates whether the interstitial should be visible. It is set/changed
   // when Show()/Hide() is called.
-  bool should_be_visible_ = false;
+  enum State {
+    HIDDEN,   // The interstitial is currently not showing.
+    VISIBLE,  // The interstitial is currently visible except the toast.
+    TOAST,    // Only the toast is visible.
+  };
+  State state_ = HIDDEN;
 
-  TaskRunnerTimer<MediaRemotingInterstitial> toggle_insterstitial_timer_;
+  TaskRunnerTimer<MediaRemotingInterstitial> toggle_interstitial_timer_;
   Member<HTMLVideoElement> video_element_;
   Member<HTMLImageElement> background_image_;
-  Member<MediaRemotingExitButtonElement> exit_button_;
-  Member<MediaRemotingCastIconElement> cast_icon_;
-  Member<MediaRemotingCastMessageElement> cast_text_message_;
+  Member<HTMLDivElement> cast_icon_;
+  Member<HTMLDivElement> cast_text_message_;
+  Member<HTMLDivElement> toast_message_;
 };
 
 }  // namespace blink

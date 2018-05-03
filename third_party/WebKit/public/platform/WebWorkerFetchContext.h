@@ -7,10 +7,14 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
 #include "public/platform/WebApplicationCacheHost.h"
 #include "public/platform/WebDocumentSubresourceFilter.h"
 #include "public/platform/WebURL.h"
-#include "public/platform/scheduler/single_thread_task_runner.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace blink {
 
@@ -25,9 +29,10 @@ class WebDocumentSubresourceFilter;
 // used to create a new WebURLLoader instance in the worker thread.
 class WebWorkerFetchContext {
  public:
-  virtual ~WebWorkerFetchContext() {}
+  virtual ~WebWorkerFetchContext() = default;
 
-  virtual void InitializeOnWorkerThread(SingleThreadTaskRunnerRefPtr) = 0;
+  virtual void InitializeOnWorkerThread(
+      scoped_refptr<base::SingleThreadTaskRunner>) = 0;
 
   // Returns a new WebURLLoaderFactory which is associated with the worker
   // context. It can be called only once.
@@ -41,10 +46,6 @@ class WebWorkerFetchContext {
   // Whether the fetch context is controlled by a service worker.
   virtual bool IsControlledByServiceWorker() const = 0;
 
-  // The flag for Data Saver.
-  virtual void SetDataSaverEnabled(bool) = 0;
-  virtual bool IsDataSaverEnabled() const = 0;
-
   // This flag is used to block all mixed content in subframes.
   virtual void SetIsOnSubframe(bool) {}
   virtual bool IsOnSubframe() const { return false; }
@@ -56,8 +57,8 @@ class WebWorkerFetchContext {
   virtual WebURL SiteForCookies() const = 0;
 
   // Reports the certificate error to the browser process.
-  virtual void DidRunContentWithCertificateErrors(const WebURL& url) {}
-  virtual void DidDisplayContentWithCertificateErrors(const WebURL& url) {}
+  virtual void DidRunContentWithCertificateErrors() {}
+  virtual void DidDisplayContentWithCertificateErrors() {}
 
   // Reports that the security origin has run active content from an insecure
   // source.

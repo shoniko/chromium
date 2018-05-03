@@ -18,7 +18,6 @@
 
 class Browser;
 class Tab;
-class TabStrip;
 struct TabRendererData;
 
 namespace content {
@@ -64,7 +63,6 @@ class BrowserTabStripController : public TabStripController,
   void ShowContextMenuForTab(Tab* tab,
                              const gfx::Point& p,
                              ui::MenuSourceType source_type) override;
-  void UpdateLoadingAnimations() override;
   int HasAvailableDragActions() const override;
   void OnDropIndexUpdate(int index, bool drop_before) override;
   void PerformDrop(bool drop_before, int index, const GURL& url) override;
@@ -86,6 +84,10 @@ class BrowserTabStripController : public TabStripController,
                      int model_index,
                      bool is_active) override;
   void TabDetachedAt(content::WebContents* contents, int model_index) override;
+  void ActiveTabChanged(content::WebContents* old_contents,
+                        content::WebContents* new_contents,
+                        int index,
+                        int reason) override;
   void TabSelectionChanged(TabStripModel* tab_strip_model,
                            const ui::ListSelectionModel& old_model) override;
   void TabMoved(content::WebContents* contents,
@@ -107,23 +109,19 @@ class BrowserTabStripController : public TabStripController,
 
   const Browser* browser() const { return browser_view_->browser(); }
 
- protected:
-  // The context in which SetTabRendererDataFromModel is being called.
+ private:
+  class TabContextMenuContents;
+
+  // The context in which TabRendererDataFromModel is being called.
   enum TabStatus {
     NEW_TAB,
     EXISTING_TAB
   };
 
-  // Sets the TabRendererData from the TabStripModel.
-  virtual void SetTabRendererDataFromModel(content::WebContents* contents,
+  // Returns the TabRendererData for the specified tab.
+  TabRendererData TabRendererDataFromModel(content::WebContents* contents,
                                            int model_index,
-                                           TabRendererData* data,
                                            TabStatus tab_status);
-
-  const TabStrip* tabstrip() const { return tabstrip_; }
-
- private:
-  class TabContextMenuContents;
 
   // Invokes tabstrip_->SetTabData.
   void SetTabDataAt(content::WebContents* web_contents, int model_index);

@@ -14,7 +14,6 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_conversions.h"
@@ -28,6 +27,7 @@
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "third_party/skia/include/core/SkRegion.h"
+#include "third_party/skia/include/gpu/GrTypes.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -296,6 +296,8 @@ class GLHelper::CopyTextureToImpl
     void SetScaler(std::unique_ptr<GLHelper::ScalerInterface> scaler) override;
 
     GLHelper::ScalerInterface* scaler() const override;
+
+    bool IsFlippingOutput() const override;
 
     void ReadbackYUV(const gpu::Mailbox& mailbox,
                      const gpu::SyncToken& sync_token,
@@ -867,9 +869,7 @@ void GLHelper::DeleteTexture(GLuint texture_id) {
 }
 
 void GLHelper::GenerateSyncToken(gpu::SyncToken* sync_token) {
-  const uint64_t fence_sync = gl_->InsertFenceSyncCHROMIUM();
-  gl_->ShallowFlushCHROMIUM();
-  gl_->GenSyncTokenCHROMIUM(fence_sync, sync_token->GetData());
+  gl_->GenSyncTokenCHROMIUM(sync_token->GetData());
 }
 
 void GLHelper::WaitSyncToken(const gpu::SyncToken& sync_token) {
@@ -880,7 +880,7 @@ gpu::MailboxHolder GLHelper::ProduceMailboxHolderFromTexture(
     GLuint texture_id) {
   gpu::Mailbox mailbox;
   gl_->GenMailboxCHROMIUM(mailbox.name);
-  gl_->ProduceTextureDirectCHROMIUM(texture_id, GL_TEXTURE_2D, mailbox.name);
+  gl_->ProduceTextureDirectCHROMIUM(texture_id, mailbox.name);
 
   gpu::SyncToken sync_token;
   GenerateSyncToken(&sync_token);
@@ -894,8 +894,7 @@ GLuint GLHelper::ConsumeMailboxToTexture(const gpu::Mailbox& mailbox,
     return 0;
   if (sync_token.HasData())
     WaitSyncToken(sync_token);
-  GLuint texture =
-      gl_->CreateAndConsumeTextureCHROMIUM(GL_TEXTURE_2D, mailbox.name);
+  GLuint texture = gl_->CreateAndConsumeTextureCHROMIUM(mailbox.name);
   return texture;
 }
 
@@ -954,6 +953,13 @@ gfx::Size I420Converter::GetChromaPlaneTextureSize(
     const gfx::Size& output_size) {
   return gfx::Size((output_size.width() + 7) / 8,
                    (output_size.height() + 1) / 2);
+}
+
+// static
+uint32_t ReadbackYUVInterface::GetGrGLBackendStateChanges() {
+  return kTextureBinding_GrGLBackendState | kView_GrGLBackendState |
+         kVertex_GrGLBackendState | kProgram_GrGLBackendState |
+         kRenderTarget_GrGLBackendState;
 }
 
 namespace {
@@ -1117,6 +1123,10 @@ GLHelper::CopyTextureToImpl::ReadbackYUVImpl::scaler() const {
   return scaler_.get();
 }
 
+bool GLHelper::CopyTextureToImpl::ReadbackYUVImpl::IsFlippingOutput() const {
+  return I420ConverterImpl::IsFlippingOutput();
+}
+
 void GLHelper::CopyTextureToImpl::ReadbackYUVImpl::ReadbackYUV(
     const gpu::Mailbox& mailbox,
     const gpu::SyncToken& sync_token,
@@ -1204,7 +1214,7 @@ GLHelper::CopyTextureToImpl::CreateReadbackPipelineYUV(bool flip_vertically,
   if (supported == GLHelperReadbackSupport::SWIZZLE)
     swizzle = kSwizzleBGRA;
 
-  return base::MakeUnique<ReadbackYUVImpl>(
+  return std::make_unique<ReadbackYUVImpl>(
       gl_, this, helper_->scaler_impl_.get(), flip_vertically, swizzle,
       use_mrt && (max_draw_buffers_ >= 2));
 }
@@ -1215,6 +1225,26 @@ std::unique_ptr<ReadbackYUVInterface> GLHelper::CreateReadbackPipelineYUV(
   InitCopyTextToImpl();
   return copy_texture_to_impl_->CreateReadbackPipelineYUV(flip_vertically,
                                                           use_mrt);
+}
+
+ReadbackYUVInterface* GLHelper::GetReadbackPipelineYUV(
+    bool vertically_flip_texture) {
+  ReadbackYUVInterface* yuv_reader = nullptr;
+  if (vertically_flip_texture) {
+    if (!shared_readback_yuv_flip_) {
+      shared_readback_yuv_flip_ = CreateReadbackPipelineYUV(
+          vertically_flip_texture, true /* use_mrt */);
+    }
+    yuv_reader = shared_readback_yuv_flip_.get();
+  } else {
+    if (!shared_readback_yuv_noflip_) {
+      shared_readback_yuv_noflip_ = CreateReadbackPipelineYUV(
+          vertically_flip_texture, true /* use_mrt */);
+    }
+    yuv_reader = shared_readback_yuv_noflip_.get();
+  }
+  DCHECK(!yuv_reader->scaler());
+  return yuv_reader;
 }
 
 GLHelperReadbackSupport* GLHelper::GetReadbackSupport() {

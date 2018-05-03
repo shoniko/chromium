@@ -12,6 +12,7 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/extensions/extension_action_test_util.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/load_error_reporter.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
@@ -112,6 +113,7 @@ class ToolbarControllerTest : public CocoaProfileTest {
     extensions::ExtensionSystem::Get(profile())
         ->extension_service()
         ->AddExtension(extension.get());
+    extensions::LoadErrorReporter::Init(true);
     ToolbarActionsModel* model =
         extensions::extension_action_test_util::CreateToolbarModelForProfile(
             profile());
@@ -119,14 +121,13 @@ class ToolbarControllerTest : public CocoaProfileTest {
 
     resizeDelegate_.reset([[ViewResizerPong alloc] init]);
 
-    CommandUpdater* updater =
-        browser()->command_controller()->command_updater();
+    CommandUpdater* updater = browser()->command_controller();
     // The default state for the commands is true, set a couple to false to
     // ensure they get picked up correct on initialization
     updater->UpdateCommandEnabled(IDC_BACK, false);
     updater->UpdateCommandEnabled(IDC_FORWARD, false);
     bar_.reset([[TestToolbarController alloc]
-        initWithCommands:browser()->command_controller()->command_updater()
+        initWithCommands:browser()->command_controller()
                  profile:profile()
                  browser:browser()]);
     [[bar_ toolbarView] setResizeDelegate:resizeDelegate_.get()];
@@ -178,7 +179,7 @@ TEST_VIEW(ToolbarControllerTest, [bar_ view])
 
 // Test the initial state that everything is sync'd up
 TEST_F(ToolbarControllerTest, InitialState) {
-  CommandUpdater* updater = browser()->command_controller()->command_updater();
+  CommandUpdater* updater = browser()->command_controller();
   CompareState(updater, [bar_ toolbarViews]);
 }
 
@@ -311,7 +312,7 @@ TEST_F(ToolbarControllerTest, UpdateEnabledState) {
   EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_FORWARD));
   chrome::UpdateCommandEnabled(browser(), IDC_BACK, true);
   chrome::UpdateCommandEnabled(browser(), IDC_FORWARD, true);
-  CommandUpdater* updater = browser()->command_controller()->command_updater();
+  CommandUpdater* updater = browser()->command_controller();
   CompareState(updater, [bar_ toolbarViews]);
 
   // Change an unwatched command and ensure the last state does not change.
@@ -462,7 +463,7 @@ TEST_F(ToolbarControllerRTLTest, ElementOrder) {
   }
 }
 
-class BrowserRemovedObserver : public chrome::BrowserListObserver {
+class BrowserRemovedObserver : public BrowserListObserver {
  public:
   BrowserRemovedObserver() { BrowserList::AddObserver(this); }
   ~BrowserRemovedObserver() override { BrowserList::RemoveObserver(this); }

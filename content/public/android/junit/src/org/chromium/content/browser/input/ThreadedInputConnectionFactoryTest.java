@@ -13,6 +13,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
+import android.os.Build;
 import android.os.Handler;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -30,7 +31,7 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
-import org.robolectric.internal.ShadowExtractor;
+import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.ThreadUtils;
@@ -43,9 +44,8 @@ import java.util.concurrent.Callable;
  * Unit tests for {@ThreadedInputConnectionFactory}.
  */
 @RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
+@Config(manifest = Config.NONE, sdk = Build.VERSION_CODES.LOLLIPOP)
 public class ThreadedInputConnectionFactoryTest {
-
     /**
      * A testable version of ThreadedInputConnectionFactory.
      */
@@ -95,7 +95,7 @@ public class ThreadedInputConnectionFactoryTest {
     }
 
     @Mock
-    private ImeAdapter mImeAdapter;
+    private ImeAdapterImpl mImeAdapter;
     @Mock
     private View mContainerView;
     @Mock
@@ -123,13 +123,13 @@ public class ThreadedInputConnectionFactoryTest {
 
         mContext = Mockito.mock(Context.class);
         mContainerView = Mockito.mock(View.class);
-        mImeAdapter = Mockito.mock(ImeAdapter.class);
+        mImeAdapter = Mockito.mock(ImeAdapterImpl.class);
         mInputMethodManager = Mockito.mock(InputMethodManager.class);
 
         mFactory = new TestFactory(new InputMethodManagerWrapper(mContext));
         mFactory.onWindowFocusChanged(true);
         mImeHandler = mFactory.getHandler();
-        mImeShadowLooper = (ShadowLooper) ShadowExtractor.extract(mImeHandler.getLooper());
+        mImeShadowLooper = (ShadowLooper) Shadow.extract(mImeHandler.getLooper());
 
         when(mContext.getSystemService(Context.INPUT_METHOD_SERVICE))
                 .thenReturn(mInputMethodManager);

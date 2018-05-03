@@ -122,6 +122,22 @@ ItemPosition FlexItem::Alignment() const {
                                                 box->StyleRef());
 }
 
+void FlexItem::UpdateAutoMarginsInMainAxis(LayoutUnit auto_margin_offset) {
+  DCHECK_GE(auto_margin_offset, LayoutUnit());
+
+  if (algorithm->IsHorizontalFlow()) {
+    if (box->Style()->MarginLeft().IsAuto())
+      box->SetMarginLeft(auto_margin_offset);
+    if (box->Style()->MarginRight().IsAuto())
+      box->SetMarginRight(auto_margin_offset);
+  } else {
+    if (box->Style()->MarginTop().IsAuto())
+      box->SetMarginTop(auto_margin_offset);
+    if (box->Style()->MarginBottom().IsAuto())
+      box->SetMarginBottom(auto_margin_offset);
+  }
+}
+
 void FlexLine::FreezeViolations(Vector<FlexItem*>& violations) {
   for (size_t i = 0; i < violations.size(); ++i) {
     DCHECK(!violations[i]->frozen) << i;
@@ -265,6 +281,82 @@ LayoutUnit FlexLine::ApplyMainAxisAutoMarginAdjustment() {
   return size_of_auto_margin;
 }
 
+void FlexLine::ComputeLineItemsPosition(LayoutUnit main_axis_offset,
+                                        LayoutUnit& cross_axis_offset) {
+  // Recalculate the remaining free space. The adjustment for flex factors
+  // between 0..1 means we can't just use remainingFreeSpace here.
+  remaining_free_space = container_main_inner_size;
+  for (size_t i = 0; i < line_items.size(); ++i) {
+    FlexItem& flex_item = line_items[i];
+    DCHECK(!flex_item.box->IsOutOfFlowPositioned());
+    remaining_free_space -= flex_item.FlexedMarginBoxSize();
+  }
+
+  const StyleContentAlignmentData justify_content =
+      FlexLayoutAlgorithm::ResolvedJustifyContent(*algorithm->Style());
+
+  LayoutUnit auto_margin_offset = ApplyMainAxisAutoMarginAdjustment();
+  const LayoutUnit available_free_space = remaining_free_space;
+  main_axis_offset += FlexLayoutAlgorithm::InitialContentPositionOffset(
+      available_free_space, justify_content, line_items.size());
+  LayoutUnit max_descent;  // Used when align-items: baseline.
+  LayoutUnit max_child_cross_axis_extent;
+  bool should_flip_main_axis = !algorithm->Style()->IsColumnFlexDirection() &&
+                               !algorithm->IsLeftToRightFlow();
+  for (size_t i = 0; i < line_items.size(); ++i) {
+    FlexItem& flex_item = line_items[i];
+
+    DCHECK(!flex_item.box->IsOutOfFlowPositioned());
+
+    flex_item.UpdateAutoMarginsInMainAxis(auto_margin_offset);
+
+    LayoutUnit child_cross_axis_margin_box_extent;
+    if (flex_item.Alignment() == ItemPosition::kBaseline &&
+        !flex_item.HasAutoMarginsInCrossAxis()) {
+      LayoutUnit ascent = flex_item.MarginBoxAscent();
+      LayoutUnit descent =
+          (flex_item.CrossAxisMarginExtent() + flex_item.cross_axis_size) -
+          ascent;
+
+      max_ascent = std::max(max_ascent, ascent);
+      max_descent = std::max(max_descent, descent);
+
+      child_cross_axis_margin_box_extent = max_ascent + max_descent;
+    } else {
+      child_cross_axis_margin_box_extent = flex_item.cross_axis_intrinsic_size +
+                                           flex_item.CrossAxisMarginExtent();
+    }
+    max_child_cross_axis_extent = std::max(max_child_cross_axis_extent,
+                                           child_cross_axis_margin_box_extent);
+
+    main_axis_offset += flex_item.FlowAwareMarginStart();
+
+    LayoutUnit child_main_extent = flex_item.FlexedBorderBoxSize();
+    // In an RTL column situation, this will apply the margin-right/margin-end
+    // on the left. This will be fixed later in flipForRightToLeftColumn.
+    flex_item.desired_location = LayoutPoint(
+        should_flip_main_axis
+            ? container_logical_width - main_axis_offset - child_main_extent
+            : main_axis_offset,
+        cross_axis_offset + flex_item.FlowAwareMarginBefore());
+    main_axis_offset += child_main_extent + flex_item.FlowAwareMarginEnd();
+
+    if (i != line_items.size() - 1) {
+      // The last item does not get extra space added.
+      main_axis_offset +=
+          FlexLayoutAlgorithm::ContentDistributionSpaceBetweenChildren(
+              available_free_space, justify_content, line_items.size());
+    }
+  }
+
+  main_axis_extent = main_axis_offset;
+
+  this->cross_axis_offset = cross_axis_offset;
+  cross_axis_extent = max_child_cross_axis_extent;
+
+  cross_axis_offset += max_child_cross_axis_extent;
+}
+
 FlexLayoutAlgorithm::FlexLayoutAlgorithm(const ComputedStyle* style,
                                          LayoutUnit line_break_length,
                                          Vector<FlexItem>& all_items)
@@ -342,7 +434,7 @@ FlexLayoutAlgorithm::ContentAlignmentNormalBehavior() {
   // flex-start (ignoring the specified fallback alignment, if any).
   // https://drafts.csswg.org/css-align/#distribution-flex
   static const StyleContentAlignmentData kNormalBehavior = {
-      kContentPositionNormal, kContentDistributionStretch};
+      ContentPosition::kNormal, ContentDistributionType::kStretch};
   return kNormalBehavior;
 }
 
@@ -375,6 +467,9 @@ TransformedWritingMode FlexLayoutAlgorithm::GetTransformedWritingMode(
       return style.IsLeftToRightDirection()
                  ? TransformedWritingMode::kTopToBottomWritingMode
                  : TransformedWritingMode::kBottomToTopWritingMode;
+    // TODO(layout-dev): Sideways-lr and sideways-rl are not yet supported.
+    default:
+      break;
   }
   NOTREACHED();
   return TransformedWritingMode::kTopToBottomWritingMode;
@@ -390,9 +485,9 @@ StyleContentAlignmentData FlexLayoutAlgorithm::ResolvedJustifyContent(
   OverflowAlignment overflow = style.JustifyContentOverflowAlignment();
   // For flex, justify-content: stretch behaves as flex-start:
   // https://drafts.csswg.org/css-align/#distribution-flex
-  if (distribution == kContentDistributionStretch) {
-    position = kContentPositionFlexStart;
-    distribution = kContentDistributionDefault;
+  if (distribution == ContentDistributionType::kStretch) {
+    position = ContentPosition::kFlexStart;
+    distribution = ContentDistributionType::kDefault;
   }
   return StyleContentAlignmentData(position, distribution, overflow);
 }
@@ -411,23 +506,62 @@ ItemPosition FlexLayoutAlgorithm::AlignmentForChild(
     const ComputedStyle& flexbox_style,
     const ComputedStyle& child_style) {
   ItemPosition align =
-      child_style.ResolvedAlignSelf(kItemPositionStretch, &flexbox_style)
+      child_style.ResolvedAlignSelf(ItemPosition::kStretch, &flexbox_style)
           .GetPosition();
-  DCHECK_NE(align, kItemPositionAuto);
-  DCHECK_NE(align, kItemPositionNormal);
+  DCHECK_NE(align, ItemPosition::kAuto);
+  DCHECK_NE(align, ItemPosition::kNormal);
 
-  if (align == kItemPositionBaseline &&
+  if (align == ItemPosition::kBaseline &&
       IsHorizontalFlow(flexbox_style) != child_style.IsHorizontalWritingMode())
-    align = kItemPositionFlexStart;
+    align = ItemPosition::kFlexStart;
 
   if (flexbox_style.FlexWrap() == EFlexWrap::kWrapReverse) {
-    if (align == kItemPositionFlexStart)
-      align = kItemPositionFlexEnd;
-    else if (align == kItemPositionFlexEnd)
-      align = kItemPositionFlexStart;
+    if (align == ItemPosition::kFlexStart)
+      align = ItemPosition::kFlexEnd;
+    else if (align == ItemPosition::kFlexEnd)
+      align = ItemPosition::kFlexStart;
   }
 
   return align;
+}
+
+LayoutUnit FlexLayoutAlgorithm::InitialContentPositionOffset(
+    LayoutUnit available_free_space,
+    const StyleContentAlignmentData& data,
+    unsigned number_of_items) {
+  if (data.GetPosition() == ContentPosition::kFlexEnd)
+    return available_free_space;
+  if (data.GetPosition() == ContentPosition::kCenter)
+    return available_free_space / 2;
+  if (data.Distribution() == ContentDistributionType::kSpaceAround) {
+    if (available_free_space > 0 && number_of_items)
+      return available_free_space / (2 * number_of_items);
+
+    return available_free_space / 2;
+  }
+  if (data.Distribution() == ContentDistributionType::kSpaceEvenly) {
+    if (available_free_space > 0 && number_of_items)
+      return available_free_space / (number_of_items + 1);
+    // Fallback to 'center'
+    return available_free_space / 2;
+  }
+  return LayoutUnit();
+}
+
+LayoutUnit FlexLayoutAlgorithm::ContentDistributionSpaceBetweenChildren(
+    LayoutUnit available_free_space,
+    const StyleContentAlignmentData& data,
+    unsigned number_of_items) {
+  if (available_free_space > 0 && number_of_items > 1) {
+    if (data.Distribution() == ContentDistributionType::kSpaceBetween)
+      return available_free_space / (number_of_items - 1);
+    if (data.Distribution() == ContentDistributionType::kSpaceAround ||
+        data.Distribution() == ContentDistributionType::kStretch)
+      return available_free_space / number_of_items;
+    if (data.Distribution() == ContentDistributionType::kSpaceEvenly)
+      return available_free_space / (number_of_items + 1);
+  }
+  return LayoutUnit();
 }
 
 }  // namespace blink

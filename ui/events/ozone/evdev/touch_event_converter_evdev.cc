@@ -40,10 +40,10 @@ namespace {
 const int kMaxTrackingId = 0xffff;  // TRKID_MAX in kernel.
 
 struct TouchCalibration {
-  int bezel_left;
-  int bezel_right;
-  int bezel_top;
-  int bezel_bottom;
+  int bezel_left = 0;
+  int bezel_right = 0;
+  int bezel_top = 0;
+  int bezel_bottom = 0;
 };
 
 // Convert tilt from [min, min + num_values) to [-90deg, +90deg)
@@ -115,7 +115,7 @@ const int kTrackingIdForUnusedSlot = -1;
 namespace ui {
 
 TouchEventConverterEvdev::TouchEventConverterEvdev(
-    ScopedInputDevice fd,
+    base::ScopedFD fd,
     base::FilePath path,
     int id,
     const EventDeviceInfo& devinfo,
@@ -129,7 +129,6 @@ TouchEventConverterEvdev::TouchEventConverterEvdev(
                           devinfo.product_id()),
       input_device_fd_(std::move(fd)),
       dispatcher_(dispatcher) {
-
   touch_evdev_debug_buffer_.Initialize(devinfo);
 }
 
@@ -187,7 +186,7 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
 
   // Apply --touch-calibration.
   if (type() == INPUT_DEVICE_INTERNAL) {
-    TouchCalibration cal = {};
+    TouchCalibration cal;
     GetTouchCalibration(&cal);
     x_min_tuxels_ += cal.bezel_left;
     x_num_tuxels_ -= cal.bezel_left + cal.bezel_right;
@@ -520,7 +519,7 @@ void TouchEventConverterEvdev::ReportTouchEvent(
     base::TimeTicks timestamp) {
   ui::PointerDetails details(event.reported_tool_type, /* pointer_id*/ 0,
                              event.radius_x, event.radius_y, event.pressure,
-                             event.tilt_x, event.tilt_y);
+                             /* twist */ 0, event.tilt_x, event.tilt_y);
   int flags = event.btn_stylus.down ? ui::EventFlags::EF_LEFT_MOUSE_BUTTON : 0;
   dispatcher_->DispatchTouchEvent(TouchEventParams(
       input_device_.id, event.slot, event_type, gfx::PointF(event.x, event.y),

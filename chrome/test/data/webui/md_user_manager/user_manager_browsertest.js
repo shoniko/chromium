@@ -5,12 +5,12 @@
 /** @fileoverview Tests for the Material Design user manager page. */
 
 /** @const {string} Path to root from chrome/test/data/webui/md_user_manager/ */
-var ROOT_PATH = '../../../../../';
+const ROOT_PATH = '../../../../../';
 
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(
     [ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js']);
-GEN('#include "base/command_line.h"');
+GEN('#include "chrome/common/chrome_features.h"');
 
 /**
  * @constructor
@@ -25,8 +25,7 @@ UserManagerBrowserTest.prototype = {
   browsePreload: 'chrome://md-user-manager/',
 
   /** @override */
-  commandLineSwitches: [{switchName: 'enable-features',
-                         switchValue: 'SupervisedUserCreation'}],
+  featureList: ['features::kSupervisedUserCreation', ''],
 
   /** @override */
   extraLibraries: PolymerTest.getLibraries(ROOT_PATH).concat([

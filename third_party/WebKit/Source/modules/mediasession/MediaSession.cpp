@@ -225,7 +225,7 @@ void MediaSession::DidReceiveAction(
   if (iter == action_handlers_.end())
     return;
 
-  iter->value->call(this);
+  iter->value->InvokeAndReportException(this);
 }
 
 void MediaSession::Trace(blink::Visitor* visitor) {
@@ -238,6 +238,7 @@ void MediaSession::Trace(blink::Visitor* visitor) {
 void MediaSession::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   for (auto handler : action_handlers_.Values())
     visitor->TraceWrappers(handler);
+  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

@@ -36,6 +36,7 @@ extern const char kStabilityBreakpadRegistrationSuccess[];
 extern const char kStabilityBreakpadRegistrationFail[];
 extern const char kStabilityChildProcessCrashCount[];
 extern const char kStabilityCrashCount[];
+extern const char kStabilityCrashCountWithoutGmsCoreUpdate[];
 extern const char kStabilityDebuggerPresent[];
 extern const char kStabilityDebuggerNotPresent[];
 extern const char kStabilityDeferredCount[];
@@ -45,6 +46,7 @@ extern const char kStabilityExtensionRendererCrashCount[];
 extern const char kStabilityExtensionRendererFailedLaunchCount[];
 extern const char kStabilityExtensionRendererLaunchCount[];
 extern const char kStabilityExitedCleanly[];
+extern const char kStabilityGmsCoreVersion[];
 extern const char kStabilityIncompleteSessionEndCount[];
 extern const char kStabilityLaunchCount[];
 extern const char kStabilityPageLoadCount[];
@@ -68,12 +70,6 @@ extern const char kUninstallMetricsUptimeSec[];
 extern const char kUkmCellDataUse[];
 extern const char kUmaCellDataUse[];
 extern const char kUserCellDataUse[];
-
-// Preferences for recording information about the tabs and windows usage.
-extern const char kTabStatsTotalTabCountMax[];
-extern const char kTabStatsMaxTabsPerWindow[];
-extern const char kTabStatsWindowCountMax[];
-extern const char kTabStatsDailySample[];
 
 }  // namespace prefs
 }  // namespace metrics

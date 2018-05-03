@@ -729,6 +729,7 @@ interface Document : Node
     getter origin
     getter plugins
     getter pointerLockElement
+    getter policy
     getter preferredStylesheetSet
     getter readyState
     getter referrer
@@ -1731,6 +1732,7 @@ interface HTMLIFrameElement : HTMLElement
     getter marginHeight
     getter marginWidth
     getter name
+    getter policy
     getter sandbox
     getter scrolling
     getter src
@@ -3217,6 +3219,7 @@ interface PerformanceResourceTiming : PerformanceEntry
     getter secureConnectionStart
     getter workerStart
     method constructor
+    method toJSON
 interface PerformanceTiming
     getter connectEnd
     getter connectStart
@@ -4428,7 +4431,6 @@ interface ShadowRoot : DocumentFragment
     getter activeElement
     getter host
     getter innerHTML
-    getter olderShadowRoot
     getter styleSheets
     method cloneNode
     method constructor

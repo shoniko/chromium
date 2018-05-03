@@ -15,16 +15,16 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "ui/message_center/notifier_settings.h"
+#include "ui/message_center/notifier_id.h"
 
 ExtensionNotifierController::ExtensionNotifierController(Observer* observer)
     : observer_(observer) {}
 
 ExtensionNotifierController::~ExtensionNotifierController() {}
 
-std::vector<std::unique_ptr<message_center::Notifier>>
+std::vector<ash::mojom::NotifierUiDataPtr>
 ExtensionNotifierController::GetNotifierList(Profile* profile) {
-  std::vector<std::unique_ptr<message_center::Notifier>> notifiers;
+  std::vector<ash::mojom::NotifierUiDataPtr> ui_data;
   const extensions::ExtensionSet& extension_set =
       extensions::ExtensionRegistry::Get(profile)->enabled_extensions();
   // The extension icon size has to be 32x32 at least to load bigger icons if
@@ -53,13 +53,14 @@ ExtensionNotifierController::GetNotifierList(Profile* profile) {
         message_center::NotifierId::APPLICATION, extension->id());
     NotifierStateTracker* const notifier_state_tracker =
         NotifierStateTrackerFactory::GetForProfile(profile);
-    notifiers.emplace_back(new message_center::Notifier(
+    ui_data.push_back(ash::mojom::NotifierUiData::New(
         notifier_id, base::UTF8ToUTF16(extension->name()),
-        notifier_state_tracker->IsNotifierEnabled(notifier_id)));
+        notifier_state_tracker->IsNotifierEnabled(notifier_id),
+        false /* enforced */, gfx::ImageSkia()));
     app_icon_loader_->FetchImage(extension->id());
   }
 
-  return notifiers;
+  return ui_data;
 }
 
 void ExtensionNotifierController::SetNotifierEnabled(
@@ -71,37 +72,10 @@ void ExtensionNotifierController::SetNotifierEnabled(
   observer_->OnNotifierEnabledChanged(notifier_id, enabled);
 }
 
-bool ExtensionNotifierController::HasAdvancedSettings(
-    Profile* profile,
-    const message_center::NotifierId& notifier_id) const {
-  const std::string& extension_id = notifier_id.id;
-
-  extensions::EventRouter* event_router = extensions::EventRouter::Get(profile);
-
-  return event_router->ExtensionHasEventListener(
-      extension_id, extensions::api::notifications::OnShowSettings::kEventName);
-}
-
-void ExtensionNotifierController::OnNotifierAdvancedSettingsRequested(
-    Profile* profile,
-    const message_center::NotifierId& notifier_id,
-    const std::string* notification_id) {
-  const std::string& extension_id = notifier_id.id;
-
-  extensions::EventRouter* event_router = extensions::EventRouter::Get(profile);
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
-
-  std::unique_ptr<extensions::Event> event(new extensions::Event(
-      extensions::events::NOTIFICATIONS_ON_SHOW_SETTINGS,
-      extensions::api::notifications::OnShowSettings::kEventName,
-      std::move(args)));
-  event_router->DispatchEventToExtension(extension_id, std::move(event));
-}
-
 void ExtensionNotifierController::OnAppImageUpdated(
     const std::string& id,
     const gfx::ImageSkia& image) {
   observer_->OnIconImageUpdated(
       message_center::NotifierId(message_center::NotifierId::APPLICATION, id),
-      gfx::Image(image));
+      image);
 }

@@ -24,7 +24,9 @@ class VectorIcon : public TexturedElement {
   explicit VectorIcon(int maximum_width_pixels);
   ~VectorIcon() override;
 
+  // TODO(vollick): should just use TexturedElement::SetForegroundColor.
   void SetColor(SkColor color);
+  SkColor GetColor() const;
   void SetIcon(const gfx::VectorIcon& icon);
 
   static void DrawVectorIcon(gfx::Canvas* canvas,

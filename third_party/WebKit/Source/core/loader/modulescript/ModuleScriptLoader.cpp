@@ -5,14 +5,14 @@
 #include "core/loader/modulescript/ModuleScriptLoader.h"
 
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/Modulator.h"
-#include "core/dom/ModuleScript.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/loader/modulescript/DocumentModuleScriptFetcher.h"
 #include "core/loader/modulescript/ModuleScriptFetcher.h"
 #include "core/loader/modulescript/ModuleScriptLoaderClient.h"
 #include "core/loader/modulescript/ModuleScriptLoaderRegistry.h"
 #include "core/loader/modulescript/WorkletModuleScriptFetcher.h"
+#include "core/script/Modulator.h"
+#include "core/script/ModuleScript.h"
 #include "core/workers/MainThreadWorkletGlobalScope.h"
 #include "platform/loader/fetch/Resource.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
@@ -23,15 +23,19 @@
 namespace blink {
 
 ModuleScriptLoader::ModuleScriptLoader(Modulator* modulator,
+                                       const ScriptFetchOptions& options,
                                        ModuleScriptLoaderRegistry* registry,
                                        ModuleScriptLoaderClient* client)
-    : modulator_(modulator), registry_(registry), client_(client) {
+    : modulator_(modulator),
+      options_(options),
+      registry_(registry),
+      client_(client) {
   DCHECK(modulator);
   DCHECK(registry);
   DCHECK(client);
 }
 
-ModuleScriptLoader::~ModuleScriptLoader() {}
+ModuleScriptLoader::~ModuleScriptLoader() = default;
 
 #if DCHECK_IS_ON()
 const char* ModuleScriptLoader::StateToString(ModuleScriptLoader::State state) {
@@ -78,9 +82,6 @@ void ModuleScriptLoader::Fetch(const ModuleScriptFetchRequest& module_request,
                                ModuleGraphLevel level) {
   // https://html.spec.whatwg.org/#fetch-a-single-module-script
 
-  // Save "options" for its use in Step 8-.
-  options_ = module_request.Options();
-
   // Step 4. "Set moduleMap[url] to "fetching"." [spec text]
   AdvanceState(State::kFetching);
 
@@ -98,10 +99,6 @@ void ModuleScriptLoader::Fetch(const ModuleScriptFetchRequest& module_request,
   // [spec text]
   // [SMSR]
   // https://html.spec.whatwg.org/multipage/webappapis.html#set-up-the-module-script-request
-
-  // [SMSR] "... its integrity metadata to options's integrity metadata, ..."
-  // [spec text]
-  // TODO(kouhei): Implement.
 
   // [SMSR] "... its parser metadata to options's parser metadata, ..."
   // [spec text]
@@ -121,6 +118,12 @@ void ModuleScriptLoader::Fetch(const ModuleScriptFetchRequest& module_request,
   // Note: |options| should not be modified after here.
   FetchParameters fetch_params(resource_request, options);
 
+  // [SMSR] "... its integrity metadata to options's integrity metadata, ..."
+  // [spec text]
+  fetch_params.SetIntegrityMetadata(options_.GetIntegrityMetadata());
+  fetch_params.MutableResourceRequest().SetFetchIntegrity(
+      options_.GetIntegrityAttributeValue());
+
   // [SMSR] "Set request's cryptographic nonce metadata to options's
   // cryptographic nonce, ..." [spec text]
   fetch_params.SetContentSecurityPolicyNonce(options_.Nonce());
@@ -133,10 +136,12 @@ void ModuleScriptLoader::Fetch(const ModuleScriptFetchRequest& module_request,
 
   // Step 5. "... referrer is referrer, ..." [spec text]
   if (!module_request.GetReferrer().IsNull()) {
-    resource_request.SetHTTPReferrer(SecurityPolicy::GenerateReferrer(
-        modulator_->GetReferrerPolicy(), module_request.Url(),
-        module_request.GetReferrer()));
+    fetch_params.MutableResourceRequest().SetHTTPReferrer(
+        SecurityPolicy::GenerateReferrer(module_request.GetReferrerPolicy(),
+                                         module_request.Url(),
+                                         module_request.GetReferrer()));
   }
+
   // Step 5. "... and client is fetch client settings object." [spec text]
   // -> set by ResourceFetcher
 
@@ -149,7 +154,8 @@ void ModuleScriptLoader::Fetch(const ModuleScriptFetchRequest& module_request,
   fetch_params.SetDefer(FetchParameters::kLazyLoad);
   // [nospec] Unlike defer/async classic scripts, module scripts are fetched at
   // High priority.
-  fetch_params.MutableResourceRequest().SetPriority(kResourceLoadPriorityHigh);
+  fetch_params.MutableResourceRequest().SetPriority(
+      ResourceLoadPriority::kHigh);
 
   // Use UTF-8, according to Step 9:
   // "Let source text be the result of UTF-8 decoding response's body."
@@ -171,7 +177,7 @@ void ModuleScriptLoader::Fetch(const ModuleScriptFetchRequest& module_request,
 
 void ModuleScriptLoader::NotifyFetchFinished(
     const WTF::Optional<ModuleScriptCreationParams>& params,
-    ConsoleMessage* error_message) {
+    const HeapVector<Member<ConsoleMessage>>& error_messages) {
   // [nospec] Abort the steps if the browsing context is discarded.
   if (!modulator_->HasValidContext()) {
     AdvanceState(State::kFinished);
@@ -179,12 +185,12 @@ void ModuleScriptLoader::NotifyFetchFinished(
   }
 
   // Note: "conditions" referred in Step 8 is implemented in
-  // WasModuleLoadSuccessful() in ModuleScriptFetcher.cpp.
+  // WasModuleLoadSuccessful() in DocumentModuleScriptFetcher.cpp.
   // Step 8. "If any of the following conditions are met, set moduleMap[url] to
   // null, asynchronously complete this algorithm with null, and abort these
   // steps." [spec text]
   if (!params.has_value()) {
-    if (error_message) {
+    for (ConsoleMessage* error_message : error_messages) {
       ExecutionContext::From(modulator_->GetScriptState())
           ->AddConsoleMessage(error_message);
     }
@@ -197,9 +203,9 @@ void ModuleScriptLoader::NotifyFetchFinished(
   // Step 10. "Let module script be the result of creating a module script given
   // source text, module map settings object, response's url, and options."
   // [spec text]
-  module_script_ = ModuleScript::Create(params->GetSourceText(), modulator_,
-                                        params->GetResponseUrl(), options_,
-                                        params->GetAccessControlStatus());
+  module_script_ = ModuleScript::Create(
+      params->GetSourceText(), modulator_, params->GetResponseUrl(),
+      params->GetResponseUrl(), options_, params->GetAccessControlStatus());
 
   AdvanceState(State::kFinished);
 }

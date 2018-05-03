@@ -26,6 +26,7 @@
 #ifndef UseCounter_h
 #define UseCounter_h
 
+#include "base/macros.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CoreExport.h"
 #include "core/css/parser/CSSParserMode.h"
@@ -34,7 +35,6 @@
 #include "platform/heap/HeapAllocator.h"
 #include "platform/wtf/BitVector.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -42,7 +42,6 @@ class CSSStyleSheet;
 class Document;
 class EnumerationHistogram;
 class ExecutionContext;
-class KURL;
 class LocalFrame;
 class StyleSheetContents;
 // Definition for UseCounter features can be found in:
@@ -63,9 +62,12 @@ class StyleSheetContents;
 // Changes on UseCounter are observable by UseCounter::Observer.
 class CORE_EXPORT UseCounter {
   DISALLOW_NEW();
-  WTF_MAKE_NONCOPYABLE(UseCounter);
 
  public:
+  // The context determines whether a feature is reported to UMA histograms. For
+  // example, when the context is set to kDisabledContext, no features will be
+  // reported to UMA, but features may still be marked as seen to avoid multiple
+  // console warnings for deprecation.
   enum Context {
     kDefaultContext,
     // Counters for SVGImages (lifetime independent from other pages).
@@ -124,7 +126,7 @@ class CORE_EXPORT UseCounter {
   void AddObserver(Observer*);
 
   // Invoked when a new document is loaded into the main frame of the page.
-  void DidCommitLoad(const KURL&);
+  void DidCommitLoad(const LocalFrame*);
 
   static int MapCSSPropertyIdToCSSSampleIdForHistogram(CSSPropertyID);
 
@@ -169,31 +171,14 @@ class CORE_EXPORT UseCounter {
   // the duration of a page but can change when a new page is loaded.
   Context context_;
 
-  // Track what features/properties have been reported to the (non-legacy)
-  // histograms.
+  // Track what features/properties have been reported to the histograms.
   BitVector features_recorded_;
   BitVector css_recorded_;
   BitVector animated_css_recorded_;
 
   HeapHashSet<Member<Observer>> observers_;
 
-  // Encapsulates the work to preserve the old "FeatureObserver" histogram with
-  // original semantics
-  // TODO(rbyers): remove this - http://crbug.com/676837
-  class CORE_EXPORT LegacyCounter {
-   public:
-    LegacyCounter();
-    ~LegacyCounter();
-    void CountFeature(WebFeature);
-    void CountCSS(CSSPropertyID);
-    void UpdateMeasurements();
-
-   private:
-    // Tracks what features/properties need to be reported to the legacy
-    // histograms.
-    BitVector feature_bits_;
-    BitVector css_bits_;
-  } legacy_counter_;
+  DISALLOW_COPY_AND_ASSIGN(UseCounter);
 };
 
 }  // namespace blink

@@ -13,10 +13,10 @@
 #include "content/common/render_frame_message_filter.mojom.h"
 #include "content/public/browser/browser_associated_interface.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "content/public/common/network_service.mojom.h"
 #include "content/public/common/three_d_api_types.h"
 #include "net/cookies/canonical_cookie.h"
 #include "ppapi/features/features.h"
+#include "services/network/public/interfaces/network_service.mojom.h"
 #include "third_party/WebKit/public/web/WebTreeScopeType.h"
 
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -26,6 +26,10 @@
 struct FrameHostMsg_CreateChildFrame_Params;
 struct FrameHostMsg_DownloadUrl_Params;
 class GURL;
+
+namespace mojo {
+class MessagePipeHandle;
+}
 
 namespace net {
 class URLRequestContext;
@@ -92,6 +96,7 @@ class CONTENT_EXPORT RenderFrameMessageFilter
   // Browser process defines them for the renderer process.
   void OnCreateChildFrame(const FrameHostMsg_CreateChildFrame_Params& params,
                           int* new_render_frame_id,
+                          mojo::MessagePipeHandle* new_interface_provider,
                           base::UnguessableToken* devtools_frame_token);
   void OnCookiesEnabled(int render_frame_id,
                         const GURL& url,
@@ -122,7 +127,8 @@ class CONTENT_EXPORT RenderFrameMessageFilter
   void SetCookie(int32_t render_frame_id,
                  const GURL& url,
                  const GURL& site_for_cookies,
-                 const std::string& cookie) override;
+                 const std::string& cookie_line,
+                 SetCookieCallback callback) override;
   void GetCookies(int render_frame_id,
                   const GURL& url,
                   const GURL& site_for_cookies,

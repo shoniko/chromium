@@ -22,14 +22,16 @@
 namespace cc {
 namespace {
 
-class RasterBufferImpl : public RasterBuffer {
+class BitmapRasterBufferImpl : public RasterBuffer {
  public:
-  RasterBufferImpl(LayerTreeResourceProvider* resource_provider,
-                   const Resource* resource,
-                   uint64_t resource_content_id,
-                   uint64_t previous_content_id)
-      : lock_(resource_provider, resource->id()),
-        resource_(resource),
+  BitmapRasterBufferImpl(LayerTreeResourceProvider* resource_provider,
+                         const ResourcePool::InUsePoolResource& in_use_resource,
+                         uint64_t resource_content_id,
+                         uint64_t previous_content_id)
+      : lock_(resource_provider,
+              in_use_resource.software_backing_resource_id()),
+        resource_format_(in_use_resource.format()),
+        resource_size_(in_use_resource.size()),
         resource_has_previous_content_(
             resource_content_id && resource_content_id == previous_content_id) {
   }
@@ -52,17 +54,18 @@ class RasterBufferImpl : public RasterBuffer {
 
     size_t stride = 0u;
     RasterBufferProvider::PlaybackToMemory(
-        lock_.sk_bitmap().getPixels(), resource_->format(), resource_->size(),
-        stride, raster_source, raster_full_rect, playback_rect, transform,
+        lock_.sk_bitmap().getPixels(), resource_format_, resource_size_, stride,
+        raster_source, raster_full_rect, playback_rect, transform,
         lock_.color_space_for_raster(), playback_settings);
   }
 
  private:
-  ResourceProvider::ScopedWriteLockSoftware lock_;
-  const Resource* resource_;
+  LayerTreeResourceProvider::ScopedWriteLockSoftware lock_;
+  const viz::ResourceFormat resource_format_;
+  const gfx::Size resource_size_;
   bool resource_has_previous_content_;
 
-  DISALLOW_COPY_AND_ASSIGN(RasterBufferImpl);
+  DISALLOW_COPY_AND_ASSIGN(BitmapRasterBufferImpl);
 };
 
 }  // namespace
@@ -78,20 +81,15 @@ BitmapRasterBufferProvider::BitmapRasterBufferProvider(
     LayerTreeResourceProvider* resource_provider)
     : resource_provider_(resource_provider) {}
 
-BitmapRasterBufferProvider::~BitmapRasterBufferProvider() {}
+BitmapRasterBufferProvider::~BitmapRasterBufferProvider() = default;
 
 std::unique_ptr<RasterBuffer>
 BitmapRasterBufferProvider::AcquireBufferForRaster(
-    const Resource* resource,
+    const ResourcePool::InUsePoolResource& resource,
     uint64_t resource_content_id,
     uint64_t previous_content_id) {
-  return std::unique_ptr<RasterBuffer>(new RasterBufferImpl(
-      resource_provider_, resource, resource_content_id, previous_content_id));
-}
-
-void BitmapRasterBufferProvider::ReleaseBufferForRaster(
-    std::unique_ptr<RasterBuffer> buffer) {
-  // Nothing to do here. RasterBufferImpl destructor cleans up after itself.
+  return std::make_unique<BitmapRasterBufferImpl>(
+      resource_provider_, resource, resource_content_id, previous_content_id);
 }
 
 void BitmapRasterBufferProvider::OrderingBarrier() {
@@ -115,13 +113,13 @@ bool BitmapRasterBufferProvider::CanPartialRasterIntoProvidedResource() const {
 }
 
 bool BitmapRasterBufferProvider::IsResourceReadyToDraw(
-    viz::ResourceId resource_id) const {
+    const ResourcePool::InUsePoolResource& resource) const {
   // Bitmap resources are immediately ready to draw.
   return true;
 }
 
 uint64_t BitmapRasterBufferProvider::SetReadyToDrawCallback(
-    const ResourceProvider::ResourceIdArray& resource_ids,
+    const std::vector<const ResourcePool::InUsePoolResource*>& resources,
     const base::Closure& callback,
     uint64_t pending_callback_id) const {
   // Bitmap resources are immediately ready to draw.

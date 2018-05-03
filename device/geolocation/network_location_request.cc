@@ -15,12 +15,13 @@
 #include "base/json/json_writer.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "device/geolocation/geoposition.h"
 #include "device/geolocation/location_arbitrator.h"
+#include "device/geolocation/public/cpp/geoposition.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -61,8 +62,8 @@ void RecordUmaEvent(NetworkLocationRequestEvent event) {
 }
 
 void RecordUmaResponseCode(int code) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Geolocation.NetworkLocationRequest.ResponseCode",
-                              code);
+  base::UmaHistogramSparse("Geolocation.NetworkLocationRequest.ResponseCode",
+                           code);
 }
 
 void RecordUmaAccessPoints(int count) {
@@ -91,14 +92,14 @@ void GetLocationFromResponse(bool http_post_result,
                              const std::string& response_body,
                              const base::Time& wifi_timestamp,
                              const GURL& server_url,
-                             Geoposition* position);
+                             mojom::Geoposition* position);
 
 // Parses the server response body. Returns true if parsing was successful.
 // Sets |*position| to the parsed location if a valid fix was received,
 // otherwise leaves it unchanged.
 bool ParseServerResponse(const std::string& response_body,
                          const base::Time& wifi_timestamp,
-                         Geoposition* position);
+                         mojom::Geoposition* position);
 void AddWifiData(const WifiData& wifi_data,
                  int age_milliseconds,
                  base::DictionaryValue* request);
@@ -114,7 +115,7 @@ NetworkLocationRequest::NetworkLocationRequest(
       api_key_(api_key),
       location_response_callback_(callback) {}
 
-NetworkLocationRequest::~NetworkLocationRequest() {}
+NetworkLocationRequest::~NetworkLocationRequest() = default;
 
 bool NetworkLocationRequest::MakeRequest(
     const WifiData& wifi_data,
@@ -172,7 +173,7 @@ void NetworkLocationRequest::OnURLFetchComplete(const net::URLFetcher* source) {
   int response_code = source->GetResponseCode();
   RecordUmaResponseCode(response_code);
 
-  Geoposition position;
+  mojom::Geoposition position;
   std::string data;
   source->GetResponseAsString(&data);
   GetLocationFromResponse(status.is_success(), response_code, data,
@@ -282,8 +283,8 @@ void AddWifiData(const WifiData& wifi_data,
 
 void FormatPositionError(const GURL& server_url,
                          const std::string& message,
-                         Geoposition* position) {
-  position->error_code = Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
+                         mojom::Geoposition* position) {
+  position->error_code = mojom::Geoposition::ErrorCode::POSITION_UNAVAILABLE;
   position->error_message = "Network location provider at '";
   position->error_message += server_url.GetOrigin().spec();
   position->error_message += "' : ";
@@ -298,7 +299,7 @@ void GetLocationFromResponse(bool http_post_result,
                              const std::string& response_body,
                              const base::Time& wifi_timestamp,
                              const GURL& server_url,
-                             Geoposition* position) {
+                             mojom::Geoposition* position) {
   DCHECK(position);
 
   // HttpPost can fail for a number of reasons. Most likely this is because
@@ -325,7 +326,7 @@ void GetLocationFromResponse(bool http_post_result,
   }
   // The response was successfully parsed, but it may not be a valid
   // position fix.
-  if (!position->Validate()) {
+  if (!ValidateGeoposition(*position)) {
     FormatPositionError(server_url, "Did not provide a good position fix",
                         position);
     RecordUmaEvent(NETWORK_LOCATION_REQUEST_EVENT_RESPONSE_INVALID_FIX);
@@ -356,10 +357,10 @@ bool GetAsDouble(const base::DictionaryValue& object,
 
 bool ParseServerResponse(const std::string& response_body,
                          const base::Time& wifi_timestamp,
-                         Geoposition* position) {
+                         mojom::Geoposition* position) {
   DCHECK(position);
-  DCHECK(!position->Validate());
-  DCHECK(position->error_code == Geoposition::ERROR_CODE_NONE);
+  DCHECK(!ValidateGeoposition(*position));
+  DCHECK(position->error_code == mojom::Geoposition::ErrorCode::NONE);
   DCHECK(!wifi_timestamp.is_null());
 
   if (response_body.empty()) {
@@ -378,7 +379,7 @@ bool ParseServerResponse(const std::string& response_body,
     return false;
   }
 
-  if (!response_value->IsType(base::Value::Type::DICTIONARY)) {
+  if (!response_value->is_dict()) {
     VLOG(1) << "ParseServerResponse() : Unexpected response type "
             << response_value->type();
     return false;
@@ -396,8 +397,8 @@ bool ParseServerResponse(const std::string& response_body,
   }
   DCHECK(location_value);
 
-  if (!location_value->IsType(base::Value::Type::DICTIONARY)) {
-    if (!location_value->IsType(base::Value::Type::NONE)) {
+  if (!location_value->is_dict()) {
+    if (!location_value->is_none()) {
       VLOG(1) << "ParseServerResponse() : Unexpected location type "
               << location_value->type();
       // If the network provider was unable to provide a position fix, it should

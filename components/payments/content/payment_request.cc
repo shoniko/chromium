@@ -33,11 +33,14 @@ PaymentRequest::PaymentRequest(
     content::WebContents* web_contents,
     std::unique_ptr<ContentPaymentRequestDelegate> delegate,
     PaymentRequestWebContentsManager* manager,
+    PaymentRequestDisplayManager* display_manager,
     mojo::InterfaceRequest<mojom::PaymentRequest> request,
     ObserverForTest* observer_for_testing)
     : web_contents_(web_contents),
       delegate_(std::move(delegate)),
       manager_(manager),
+      display_manager_(display_manager),
+      display_handle_(nullptr),
       binding_(this, std::move(request)),
       top_level_origin_(url_formatter::FormatUrlForSecurityDisplay(
           web_contents_->GetLastCommittedURL())),
@@ -90,14 +93,14 @@ void PaymentRequest::Init(mojom::PaymentRequestClientPtr client,
   if (!allowed_origin || invalid_ssl) {
     // Don't show UI. Resolve .canMakepayment() with "false". Reject .show()
     // with "NotSupportedError".
-    spec_ = base::MakeUnique<PaymentRequestSpec>(
+    spec_ = std::make_unique<PaymentRequestSpec>(
         mojom::PaymentOptions::New(), mojom::PaymentDetails::New(),
         std::vector<mojom::PaymentMethodDataPtr>(), this,
         delegate_->GetApplicationLocale());
-    state_ = base::MakeUnique<PaymentRequestState>(
-        web_contents_->GetBrowserContext(), top_level_origin_, frame_origin_,
-        spec_.get(), this, delegate_->GetApplicationLocale(),
-        delegate_->GetPersonalDataManager(), delegate_.get(), &journey_logger_);
+    state_ = std::make_unique<PaymentRequestState>(
+        web_contents_, top_level_origin_, frame_origin_, spec_.get(), this,
+        delegate_->GetApplicationLocale(), delegate_->GetPersonalDataManager(),
+        delegate_.get(), &journey_logger_);
     return;
   }
 
@@ -114,13 +117,13 @@ void PaymentRequest::Init(mojom::PaymentRequestClientPtr client,
     return;
   }
 
-  spec_ = base::MakeUnique<PaymentRequestSpec>(
+  spec_ = std::make_unique<PaymentRequestSpec>(
       std::move(options), std::move(details), std::move(method_data), this,
       delegate_->GetApplicationLocale());
-  state_ = base::MakeUnique<PaymentRequestState>(
-      web_contents_->GetBrowserContext(), top_level_origin_, frame_origin_,
-      spec_.get(), this, delegate_->GetApplicationLocale(),
-      delegate_->GetPersonalDataManager(), delegate_.get(), &journey_logger_);
+  state_ = std::make_unique<PaymentRequestState>(
+      web_contents_, top_level_origin_, frame_origin_, spec_.get(), this,
+      delegate_->GetApplicationLocale(), delegate_->GetPersonalDataManager(),
+      delegate_.get(), &journey_logger_);
 
   journey_logger_.SetRequestedInformation(
       spec_->request_shipping(), spec_->request_payer_email(),
@@ -155,7 +158,8 @@ void PaymentRequest::Show() {
   }
 
   // A tab can display only one PaymentRequest UI at a time.
-  if (!manager_->CanShow(this)) {
+  display_handle_ = display_manager_->TryShow(delegate_.get());
+  if (!display_handle_) {
     LOG(ERROR) << "A PaymentRequest UI is already showing";
     journey_logger_.SetNotShown(
         JourneyLogger::NOT_SHOWN_REASON_CONCURRENT_REQUESTS);
@@ -172,19 +176,28 @@ void PaymentRequest::Show() {
     return;
   }
 
-  if (!state_->AreRequestedMethodsSupported()) {
+  // TODO(crbug.com/783811): Display a spinner when checking whether
+  // the methods are supported asynchronously for better user experience.
+  state_->AreRequestedMethodsSupported(
+      base::BindOnce(&PaymentRequest::AreRequestedMethodsSupportedCallback,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void PaymentRequest::AreRequestedMethodsSupportedCallback(
+    bool methods_supported) {
+  if (methods_supported) {
+    journey_logger_.SetEventOccurred(JourneyLogger::EVENT_SHOWN);
+
+    DCHECK(display_handle_);
+    display_handle_->Show(this);
+  } else {
     journey_logger_.SetNotShown(
         JourneyLogger::NOT_SHOWN_REASON_NO_SUPPORTED_PAYMENT_METHOD);
     client_->OnError(mojom::PaymentErrorReason::NOT_SUPPORTED);
     if (observer_for_testing_)
       observer_for_testing_->OnNotSupportedError();
     OnConnectionTerminated();
-    return;
   }
-
-  journey_logger_.SetEventOccurred(JourneyLogger::EVENT_SHOWN);
-
-  delegate_->ShowDialog(this);
 }
 
 void PaymentRequest::UpdateWith(mojom::PaymentDetailsPtr details) {
@@ -202,6 +215,10 @@ void PaymentRequest::UpdateWith(mojom::PaymentDetailsPtr details) {
   }
 
   spec_->UpdateWith(std::move(details));
+}
+
+void PaymentRequest::NoUpdatedPaymentDetails() {
+  spec_->RecomputeSpecForDetails();
 }
 
 void PaymentRequest::Abort() {
@@ -257,6 +274,15 @@ void PaymentRequest::OnPaymentResponseAvailable(
     mojom::PaymentResponsePtr response) {
   journey_logger_.SetEventOccurred(
       JourneyLogger::EVENT_RECEIVED_INSTRUMENT_DETAILS);
+
+  // Do not send invalid response to client.
+  if (response->method_name.empty() || response->stringified_details.empty()) {
+    RecordFirstAbortReason(
+        JourneyLogger::ABORT_REASON_INSTRUMENT_DETAILS_ERROR);
+    delegate_->ShowErrorMessage();
+    return;
+  }
+
   client_->OnPaymentResponse(std::move(response));
 }
 
@@ -316,6 +342,10 @@ void PaymentRequest::Pay() {
   journey_logger_.SetEventOccurred(JourneyLogger::EVENT_PAY_CLICKED);
   journey_logger_.SetEventOccurred(JourneyLogger::EVENT_SELECTED_CREDIT_CARD);
   state_->GeneratePaymentResponse();
+}
+
+void PaymentRequest::HideIfNecessary() {
+  display_handle_.reset();
 }
 
 void PaymentRequest::RecordFirstAbortReason(

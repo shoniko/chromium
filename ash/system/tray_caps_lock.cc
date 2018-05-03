@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "ash/accessibility/accessibility_delegate.h"
+#include "ash/accessibility/accessibility_controller.h"
 #include "ash/ime/ime_controller.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/public/cpp/config.h"
@@ -14,7 +14,6 @@
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/system/system_notifier.h"
 #include "ash/system/tray/actionable_view.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_item_style.h"
@@ -49,6 +48,7 @@ namespace {
 const int kCaptionRightPadding = 6;
 
 const char kCapsLockNotificationId[] = "capslock";
+const char kNotifierCapsLock[] = "ash.caps-lock";
 
 bool IsCapsLockEnabled() {
   return Shell::Get()->ime_controller()->IsCapsLockEnabled();
@@ -75,33 +75,16 @@ std::unique_ptr<Notification> CreateNotification() {
       IsSearchKeyMappedToCapsLock()
           ? IDS_ASH_STATUS_TRAY_CAPS_LOCK_CANCEL_BY_SEARCH
           : IDS_ASH_STATUS_TRAY_CAPS_LOCK_CANCEL_BY_ALT_SEARCH;
-  std::unique_ptr<Notification> notification;
-  if (message_center::IsNewStyleNotificationEnabled()) {
-    notification = Notification::CreateSystemNotification(
-        message_center::NOTIFICATION_TYPE_SIMPLE, kCapsLockNotificationId,
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_CAPS_LOCK_ENABLED),
-        l10n_util::GetStringUTF16(string_id), gfx::Image(),
-        base::string16() /* display_source */, GURL(),
-        message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
-                                   system_notifier::kNotifierCapsLock),
-        message_center::RichNotificationData(), nullptr,
-        kNotificationCapslockIcon,
-        message_center::SystemNotificationWarningLevel::NORMAL);
-  } else {
-    notification = std::make_unique<Notification>(
-        message_center::NOTIFICATION_TYPE_SIMPLE, kCapsLockNotificationId,
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_CAPS_LOCK_ENABLED),
-        l10n_util::GetStringUTF16(string_id),
-        gfx::Image(
-            gfx::CreateVectorIcon(kSystemMenuCapsLockIcon,
-                                  TrayPopupItemStyle::GetIconColor(
-                                      TrayPopupItemStyle::ColorStyle::ACTIVE))),
-        base::string16() /* display_source */, GURL(),
-        message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
-                                   system_notifier::kNotifierCapsLock),
-        message_center::RichNotificationData(), nullptr);
-  }
-  return notification;
+  return Notification::CreateSystemNotification(
+      message_center::NOTIFICATION_TYPE_SIMPLE, kCapsLockNotificationId,
+      l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_CAPS_LOCK_ENABLED),
+      l10n_util::GetStringUTF16(string_id), gfx::Image(),
+      base::string16() /* display_source */, GURL(),
+      message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
+                                 kNotifierCapsLock),
+      message_center::RichNotificationData(), nullptr,
+      kNotificationCapslockIcon,
+      message_center::SystemNotificationWarningLevel::NORMAL);
 }
 
 }  // namespace
@@ -115,7 +98,7 @@ class CapsLockDefaultView : public ActionableView {
     shortcut_label_->SetEnabled(false);
 
     TriView* tri_view(TrayPopupUtils::CreateDefaultRowView());
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
     AddChildView(tri_view);
 
     auto* image = TrayPopupUtils::CreateMainImageView();
@@ -140,7 +123,7 @@ class CapsLockDefaultView : public ActionableView {
             0, 0, 0, kCaptionRightPadding + kTrayPopupLabelRightPadding));
   }
 
-  ~CapsLockDefaultView() override {}
+  ~CapsLockDefaultView() override = default;
 
   // Updates the label text and the shortcut text.
   void Update(bool caps_lock_enabled) {
@@ -222,8 +205,9 @@ void TrayCapsLock::OnCapsLockChanged(bool enabled) {
   caps_lock_enabled_ = enabled;
 
   // Send an a11y alert.
-  Shell::Get()->accessibility_delegate()->TriggerAccessibilityAlert(
-      enabled ? A11Y_ALERT_CAPS_ON : A11Y_ALERT_CAPS_OFF);
+  Shell::Get()->accessibility_controller()->TriggerAccessibilityAlert(
+      enabled ? mojom::AccessibilityAlert::CAPS_ON
+              : mojom::AccessibilityAlert::CAPS_OFF);
 
   if (tray_view())
     tray_view()->SetVisible(caps_lock_enabled_);

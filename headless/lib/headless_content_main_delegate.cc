@@ -4,6 +4,7 @@
 
 #include "headless/lib/headless_content_main_delegate.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/base_switches.h"
@@ -17,6 +18,7 @@
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/crash/content/app/breakpad_linux.h"
+#include "components/crash/core/common/crash_key.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_switches.h"
 #include "headless/lib/browser/headless_browser_impl.h"
@@ -85,6 +87,9 @@ bool HeadlessContentMainDelegate::BasicStartupComplete(int* exit_code) {
   if (browser_->options()->disable_sandbox)
     command_line->AppendSwitch(switches::kNoSandbox);
 
+  if (!browser_->options()->enable_resource_scheduler)
+    command_line->AppendSwitch(switches::kDisableResourceScheduler);
+
 #if defined(USE_OZONE)
   // The headless backend is automatically chosen for a headless build, but also
   // adding it here allows us to run in a non-headless build too.
@@ -99,6 +104,12 @@ bool HeadlessContentMainDelegate::BasicStartupComplete(int* exit_code) {
       command_line->AppendSwitch(switches::kDisableGpu);
     }
   }
+
+  // Headless uses a software output device which will cause us to fall back to
+  // software compositing anyway, but only after attempting and failing to
+  // initialize GPU compositing. We disable GPU compositing here explicitly to
+  // preempt this attempt.
+  command_line->AppendSwitch(switches::kDisableGpuCompositing);
 
   SetContentClient(&content_client_);
   return false;
@@ -183,6 +194,8 @@ void HeadlessContentMainDelegate::InitCrashReporter(
   g_headless_crash_client.Pointer()->set_crash_dumps_dir(
       browser_->options()->crash_dumps_dir);
 
+  crash_reporter::InitializeCrashKeys();
+
 #if defined(HEADLESS_USE_BREAKPAD)
   if (!browser_->options()->enable_crash_reporter) {
     DCHECK(!breakpad::IsCrashReporterEnabled());
@@ -227,7 +240,8 @@ int HeadlessContentMainDelegate::RunProcess(
   if (!process_type.empty())
     return -1;
 
-  base::trace_event::TraceLog::GetInstance()->SetProcessName("HeadlessBrowser");
+  base::trace_event::TraceLog::GetInstance()->set_process_name(
+      "HeadlessBrowser");
   base::trace_event::TraceLog::GetInstance()->SetProcessSortIndex(
       kTraceEventBrowserProcessSortIndex);
 
@@ -248,7 +262,7 @@ int HeadlessContentMainDelegate::RunProcess(
 }
 #endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
 
-#if !defined(OS_MACOSX) && defined(OS_POSIX) && !defined(OS_ANDROID)
+#if defined(OS_LINUX)
 void HeadlessContentMainDelegate::ZygoteForked() {
   const base::CommandLine& command_line(
       *base::CommandLine::ForCurrentProcess());
@@ -261,7 +275,7 @@ void HeadlessContentMainDelegate::ZygoteForked() {
   breakpad::InitCrashReporter(process_type);
 #endif
 }
-#endif
+#endif  // defined(OS_LINUX)
 
 // static
 HeadlessContentMainDelegate* HeadlessContentMainDelegate::GetInstance() {
@@ -333,7 +347,7 @@ void HeadlessContentMainDelegate::InitializeResourceBundle() {
 content::ContentBrowserClient*
 HeadlessContentMainDelegate::CreateContentBrowserClient() {
   browser_client_ =
-      base::MakeUnique<HeadlessContentBrowserClient>(browser_.get());
+      std::make_unique<HeadlessContentBrowserClient>(browser_.get());
   return browser_client_.get();
 }
 #endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
@@ -341,13 +355,13 @@ HeadlessContentMainDelegate::CreateContentBrowserClient() {
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
 content::ContentRendererClient*
 HeadlessContentMainDelegate::CreateContentRendererClient() {
-  renderer_client_ = base::MakeUnique<HeadlessContentRendererClient>();
+  renderer_client_ = std::make_unique<HeadlessContentRendererClient>();
   return renderer_client_.get();
 }
 
 content::ContentUtilityClient*
 HeadlessContentMainDelegate::CreateContentUtilityClient() {
-  utility_client_ = base::MakeUnique<HeadlessContentUtilityClient>(
+  utility_client_ = std::make_unique<HeadlessContentUtilityClient>(
       browser_->options()->user_agent);
   return utility_client_.get();
 }

@@ -1,3 +1,4 @@
+// This file is generated. Do not edit.
 #ifndef VPX_DSP_RTCD_H_
 #define VPX_DSP_RTCD_H_
 
@@ -901,23 +902,23 @@ RTCD_EXTERN void (*vpx_h_predictor_8x8)(uint8_t* dst,
                                         const uint8_t* left);
 
 void vpx_hadamard_16x16_c(const int16_t* src_diff,
-                          int src_stride,
+                          ptrdiff_t src_stride,
                           int16_t* coeff);
 void vpx_hadamard_16x16_neon(const int16_t* src_diff,
-                             int src_stride,
+                             ptrdiff_t src_stride,
                              int16_t* coeff);
 RTCD_EXTERN void (*vpx_hadamard_16x16)(const int16_t* src_diff,
-                                       int src_stride,
+                                       ptrdiff_t src_stride,
                                        int16_t* coeff);
 
 void vpx_hadamard_8x8_c(const int16_t* src_diff,
-                        int src_stride,
+                        ptrdiff_t src_stride,
                         int16_t* coeff);
 void vpx_hadamard_8x8_neon(const int16_t* src_diff,
-                           int src_stride,
+                           ptrdiff_t src_stride,
                            int16_t* coeff);
 RTCD_EXTERN void (*vpx_hadamard_8x8)(const int16_t* src_diff,
-                                     int src_stride,
+                                     ptrdiff_t src_stride,
                                      int16_t* coeff);
 
 void vpx_he_predictor_4x4_c(uint8_t* dst,

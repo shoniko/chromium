@@ -89,7 +89,14 @@ class WebWidget {
   // Called to run through the entire set of document lifecycle phases needed
   // to render a frame of the web widget. This MUST be called before Paint,
   // and it may result in calls to WebWidgetClient::didInvalidateRect.
-  virtual void UpdateAllLifecyclePhases() {}
+  virtual void UpdateAllLifecyclePhases() { UpdateLifecycle(); }
+
+  // Selectively runs all lifecycle phases or all phases excluding paint. The
+  // latter can be used to trigger side effects of updating layout and
+  // animations if painting is not required.
+  enum class LifecycleUpdate { kPrePaint, kAll };
+  virtual void UpdateLifecycle(
+      LifecycleUpdate requested_update = LifecycleUpdate::kAll) {}
 
   // Called to paint the rectangular region within the WebWidget
   // onto the specified canvas at (viewPort.x,viewPort.y). You MUST call
@@ -133,9 +140,6 @@ class WebWidget {
   // Called to inform the WebWidget of the mouse cursor's visibility.
   virtual void SetCursorVisibilityState(bool is_visible) {}
 
-  // Check whether the given point hits any registered touch event handlers.
-  virtual bool HasTouchEventHandlersAt(const WebPoint&) { return true; }
-
   // Applies viewport related properties during a commit from the compositor
   // thread.
   virtual void ApplyViewportDeltas(const WebFloatSize& visual_viewport_delta,
@@ -153,29 +157,11 @@ class WebWidget {
   // Called to inform the WebWidget that it has gained or lost keyboard focus.
   virtual void SetFocus(bool) {}
 
-  // Fetches the character range of the current composition, also called the
-  // "marked range."
-  virtual WebRange CompositionRange() { return WebRange(); }
-
   // Returns the anchor and focus bounds of the current selection.
   // If the selection range is empty, it returns the caret bounds.
   virtual bool SelectionBounds(WebRect& anchor, WebRect& focus) const {
     return false;
   }
-
-  // Returns the text direction at the start and end bounds of the current
-  // selection.  If the selection range is empty, it returns false.
-  virtual bool SelectionTextDirection(WebTextDirection& start,
-                                      WebTextDirection& end) const {
-    return false;
-  }
-
-  // Returns true if the selection range is nonempty and its anchor is first
-  // (i.e its anchor is its start).
-  virtual bool IsSelectionAnchorFirst() const { return false; }
-
-  // Changes the text direction of the selected input node.
-  virtual void SetTextDirection(WebTextDirection) {}
 
   // Returns true if the WebWidget is currently animating a GestureFling.
   virtual bool IsFlinging() const { return false; }
@@ -235,7 +221,7 @@ class WebWidget {
   virtual void ShowContextMenu(WebMenuSourceType) {}
 
  protected:
-  ~WebWidget() {}
+  ~WebWidget() = default;
 };
 
 }  // namespace blink

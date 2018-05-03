@@ -14,7 +14,6 @@
 #include "cc/paint/image_provider.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "components/viz/common/traced_value.h"
-#include "skia/ext/analysis_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorSpaceXformCanvas.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
@@ -75,7 +74,10 @@ void RasterSource::PlaybackToCanvas(SkCanvas* input_canvas,
     raster_canvas = color_transform_canvas.get();
   }
 
-  ClearCanvasForPlayback(raster_canvas);
+  // Some tests want to avoid complicated clearing logic for consistency.
+  if (settings.clear_canvas_before_raster)
+    ClearCanvasForPlayback(raster_canvas);
+
   RasterCommon(raster_canvas, settings.image_provider);
 }
 
@@ -148,15 +150,14 @@ void RasterSource::ClearCanvasForPlayback(SkCanvas* canvas) const {
 }
 
 void RasterSource::RasterCommon(SkCanvas* raster_canvas,
-                                ImageProvider* image_provider,
-                                SkPicture::AbortCallback* callback) const {
+                                ImageProvider* image_provider) const {
   if (image_provider)
     image_provider->BeginRaster();
 
   DCHECK(display_list_.get());
   int repeat_count = std::max(1, slow_down_raster_scale_factor_for_debug_);
   for (int i = 0; i < repeat_count; ++i)
-    display_list_->Raster(raster_canvas, image_provider, callback);
+    display_list_->Raster(raster_canvas, image_provider);
 
   if (image_provider)
     image_provider->EndRaster();

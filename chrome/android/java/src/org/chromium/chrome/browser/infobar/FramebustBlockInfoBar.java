@@ -5,53 +5,41 @@
 package org.chromium.chrome.browser.infobar;
 
 import android.net.Uri;
-import android.support.v4.text.BidiFormatter;
-import android.text.SpannableString;
-import android.text.SpannableStringBuilder;
-import android.text.Spanned;
-import android.text.method.LinkMovementMethod;
-import android.view.Gravity;
+import android.support.annotation.StringRes;
 import android.view.LayoutInflater;
-import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.interventions.FramebustBlockMessageDelegate;
-import org.chromium.chrome.browser.interventions.FramebustBlockMessageDelegateBridge;
 import org.chromium.components.url_formatter.UrlFormatter;
-import org.chromium.ui.text.NoUnderlineClickableSpan;
 
 /**
  * This InfoBar is shown to let the user know about a blocked Framebust and offer to
  * continue the redirection by tapping on a link.
- *
- * {@link FramebustBlockMessageDelegate} defines the messages shown in the infobar and
- * the target of the link.
  */
 public class FramebustBlockInfoBar extends InfoBar {
-    private final FramebustBlockMessageDelegate mDelegate;
+    private final String mBlockedUrl;
 
     /** Whether the infobar should be shown as a mini-infobar or a classic expanded one. */
     private boolean mIsExpanded;
 
     @VisibleForTesting
-    public FramebustBlockInfoBar(FramebustBlockMessageDelegate delegate) {
-        super(delegate.getIconResourceId(), null, null);
-        mDelegate = delegate;
+    public FramebustBlockInfoBar(String blockedUrl) {
+        super(R.drawable.infobar_chrome, null, null);
+        mBlockedUrl = blockedUrl;
     }
 
     @Override
     public void onButtonClicked(boolean isPrimaryButton) {
         assert isPrimaryButton;
-        onCloseButtonClicked();
+        onButtonClicked(ActionType.OK);
     }
 
     @Override
     public void createContent(InfoBarLayout layout) {
-        layout.setMessage(mDelegate.getLongMessage());
+        layout.setMessage(getString(R.string.redirect_blocked_message));
         InfoBarControlLayout control = layout.addControlLayout();
 
         ViewGroup ellipsizerView =
@@ -61,10 +49,8 @@ public class FramebustBlockInfoBar extends InfoBar {
         // Formatting the URL and requesting to omit the scheme might still include it for some of
         // them (e.g. file, filesystem). We split the output of the formatting to make sure we don't
         // end up duplicating it.
-        String url = mDelegate.getBlockedUrl();
-        String formattedUrl =
-                UrlFormatter.formatUrlForSecurityDisplay(mDelegate.getBlockedUrl(), true);
-        String scheme = Uri.parse(url).getScheme() + "://";
+        String formattedUrl = UrlFormatter.formatUrlForSecurityDisplay(mBlockedUrl, true);
+        String scheme = Uri.parse(mBlockedUrl).getScheme() + "://";
 
         TextView schemeView = ellipsizerView.findViewById(R.id.url_scheme);
         schemeView.setText(scheme);
@@ -75,26 +61,15 @@ public class FramebustBlockInfoBar extends InfoBar {
         ellipsizerView.setOnClickListener(view -> onLinkClicked());
 
         control.addView(ellipsizerView);
-        layout.setButtons(getContext().getResources().getString(R.string.ok), null);
+        layout.setButtons(getContext().getResources().getString(R.string.got_it), null);
     }
 
     @Override
     protected void createCompactLayoutContent(InfoBarCompactLayout layout) {
-        final int messagePadding = getContext().getResources().getDimensionPixelOffset(
-                R.dimen.reader_mode_infobar_text_padding);
-
-        SpannableStringBuilder builder = new SpannableStringBuilder();
-        builder.append(BidiFormatter.getInstance().unicodeWrap(mDelegate.getShortMessage()));
-        builder.append(" ");
-        builder.append(makeDetailsLink());
-
-        TextView prompt = new TextView(getContext(), null);
-        prompt.setText(builder);
-        prompt.setMovementMethod(LinkMovementMethod.getInstance());
-        prompt.setGravity(Gravity.CENTER_VERTICAL);
-        prompt.setPadding(0, messagePadding, 0, messagePadding);
-
-        layout.addContent(prompt, 1f);
+        new InfoBarCompactLayout.MessageBuilder(layout)
+                .withText(getString(R.string.redirect_blocked_short_message))
+                .withLink(R.string.details_link, view -> onLinkClicked())
+                .buildAndInsert();
     }
 
     @Override
@@ -110,27 +85,20 @@ public class FramebustBlockInfoBar extends InfoBar {
             return;
         }
 
-        mDelegate.onLinkTapped();
+        super.onLinkClicked();
     }
 
-    /**
-     * Creates and sets up the "Details" link that allows going from the mini to the full infobar.
-     */
-    private SpannableString makeDetailsLink() {
-        String label = getContext().getResources().getString(R.string.details_link);
-        SpannableString link = new SpannableString(label);
-        link.setSpan(new NoUnderlineClickableSpan() {
-            @Override
-            public void onClick(View view) {
-                onLinkClicked();
-            }
-        }, 0, label.length(), Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
-        return link;
+    @VisibleForTesting
+    public String getBlockedUrl() {
+        return mBlockedUrl;
+    }
+
+    private String getString(@StringRes int stringResId) {
+        return getContext().getString(stringResId);
     }
 
     @CalledByNative
-    private static FramebustBlockInfoBar create(long nativeFramebustBlockMessageDelegateBridge) {
-        return new FramebustBlockInfoBar(
-                new FramebustBlockMessageDelegateBridge(nativeFramebustBlockMessageDelegateBridge));
+    private static FramebustBlockInfoBar create(String blockedUrl) {
+        return new FramebustBlockInfoBar(blockedUrl);
     }
 }

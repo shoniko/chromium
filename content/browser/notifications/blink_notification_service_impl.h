@@ -6,13 +6,16 @@
 #define CONTENT_BROWSER_NOTIFICATIONS_BLINK_NOTIFICATION_SERVICE_IMPL_H_
 
 #include "base/macros.h"
+#include "content/public/browser/browser_context.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "third_party/WebKit/public/platform/modules/notifications/notification_service.mojom.h"
+#include "url/origin.h"
 
 namespace content {
 
 class PlatformNotificationContextImpl;
+struct PlatformNotificationData;
 class ResourceContext;
 
 // Implementation of the NotificationService used for Web Notifications. Is
@@ -22,14 +25,17 @@ class BlinkNotificationServiceImpl : public blink::mojom::NotificationService {
  public:
   BlinkNotificationServiceImpl(
       PlatformNotificationContextImpl* notification_context,
+      BrowserContext* browser_context,
       ResourceContext* resource_context,
       int render_process_id,
+      const url::Origin& origin,
       mojo::InterfaceRequest<blink::mojom::NotificationService> request);
   ~BlinkNotificationServiceImpl() override;
 
   // blink::mojom::NotificationService implementation.
-  void GetPermissionStatus(const std::string& origin,
-                           GetPermissionStatusCallback callback) override;
+  void GetPermissionStatus(GetPermissionStatusCallback callback) override;
+  void DisplayNonPersistentNotification(
+      const PlatformNotificationData& platform_notification_data) override;
 
  private:
   // Called when an error is detected on binding_.
@@ -38,9 +44,14 @@ class BlinkNotificationServiceImpl : public blink::mojom::NotificationService {
   // The notification context that owns this service instance.
   PlatformNotificationContextImpl* notification_context_;
 
+  BrowserContext* browser_context_;
+
   ResourceContext* resource_context_;
 
   int render_process_id_;
+
+  // The origin that this notification service is communicating with.
+  url::Origin origin_;
 
   mojo::Binding<blink::mojom::NotificationService> binding_;
 

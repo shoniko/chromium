@@ -18,14 +18,17 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "chrome/browser/chrome_service.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/common/network_service.mojom.h"
+#include "content/public/common/resource_type.h"
 #include "extensions/features/features.h"
 #include "media/media_features.h"
 #include "ppapi/features/features.h"
+#include "services/network/public/interfaces/network_service.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
 class ChromeContentBrowserClientParts;
+class PrefRegistrySimple;
 
 namespace base {
 class CommandLine;
@@ -64,6 +67,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   ChromeContentBrowserClient();
   ~ChromeContentBrowserClient() override;
 
+  // TODO(https://crbug.com/787567): This file is about calls from content/ out
+  // to chrome/ to get values or notify about events, but both of these
+  // functions are from chrome/ to chrome/ and don't involve content/ at all.
+  // That suggests they belong somewhere else at the chrome/ layer.
+  static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Notification that the application locale has changed. This allows us to
@@ -91,6 +99,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       bool* in_memory) override;
   content::WebContentsViewDelegate* GetWebContentsViewDelegate(
       content::WebContents* web_contents) override;
+  bool AllowGpuLaunchRetryOnIOThread() override;
   void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
   GURL GetEffectiveURL(content::BrowserContext* browser_context,
                        const GURL& url) override;
@@ -100,6 +109,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                                        const GURL& effective_site_url) override;
   bool ShouldLockToOrigin(content::BrowserContext* browser_context,
                           const GURL& effective_site_url) override;
+  bool ShouldBypassDocumentBlocking(
+      const url::Origin& initiator,
+      const GURL& url,
+      content::ResourceType resource_type) override;
   void GetAdditionalWebUISchemes(
       std::vector<std::string>* additional_schemes) override;
   void GetAdditionalViewSourceSchemes(
@@ -133,12 +146,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::SiteInstance* site_instance,
       const GURL& current_url,
       const GURL& new_url) override;
-  bool ShouldSwapProcessesForRedirect(
-      content::BrowserContext* browser_context,
-      const GURL& current_url,
-      const GURL& new_url) override;
   bool ShouldAssignSiteForURL(const GURL& url) override;
   std::vector<url::Origin> GetOriginsRequiringDedicatedProcess() override;
+  bool IsFileAccessAllowed(const base::FilePath& path,
+                           const base::FilePath& absolute_path,
+                           const base::FilePath& profile_path) override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
   void AdjustUtilityServiceProcessCommandLine(
@@ -148,9 +160,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::string GetAcceptLangs(content::BrowserContext* context) override;
   const gfx::ImageSkia* GetDefaultFavicon() override;
   bool IsDataSaverEnabled(content::BrowserContext* context) override;
-  std::unique_ptr<net::HttpRequestHeaders>
-  GetAdditionalNavigationRequestHeaders(content::BrowserContext* context,
-                                        const GURL& url) const override;
+  void NavigationRequestStarted(
+      int frame_tree_node_id,
+      const GURL& url,
+      std::unique_ptr<net::HttpRequestHeaders>* extra_headers,
+      int* extra_load_flags) override;
   bool AllowAppCache(const GURL& manifest_url,
                      const GURL& first_party,
                      content::ResourceContext* context) override;
@@ -159,6 +173,13 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& first_party,
       content::ResourceContext* context,
       const base::Callback<content::WebContents*(void)>& wc_getter) override;
+  bool AllowSharedWorker(const GURL& worker_url,
+                         const GURL& main_frame_url,
+                         const std::string& name,
+                         const url::Origin& constructor_origin,
+                         content::BrowserContext* context,
+                         int render_process_id,
+                         int render_frame_id) override;
   bool AllowGetCookie(const GURL& url,
                       const GURL& first_party,
                       const net::CookieList& cookie_list,
@@ -167,7 +188,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                       int render_frame_id) override;
   bool AllowSetCookie(const GURL& url,
                       const GURL& first_party,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       content::ResourceContext* context,
                       int render_process_id,
                       int render_frame_id,
@@ -276,7 +297,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& url) override;
   void OverridePageVisibilityState(
       content::RenderFrameHost* render_frame_host,
-      blink::WebPageVisibilityState* visibility_state) override;
+      blink::mojom::PageVisibilityState* visibility_state) override;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetAdditionalMappedFilesForChildProcess(
@@ -291,7 +312,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 #endif
   void ExposeInterfacesToRenderer(
       service_manager::BinderRegistry* registry,
-      content::AssociatedInterfaceRegistry* associated_registry,
+      blink::AssociatedInterfaceRegistry* associated_registry,
       content::RenderProcessHost* render_process_host) override;
   void ExposeInterfacesToMediaService(
       service_manager::BinderRegistry* registry,
@@ -300,10 +321,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle interface_pipe) override;
-  bool BindAssociatedInterfaceRequestFromFrame(
-      content::RenderFrameHost* render_frame_host,
+  void BindInterfaceRequestFromWorker(
+      content::RenderProcessHost* render_process_host,
+      const url::Origin& origin,
       const std::string& interface_name,
-      mojo::ScopedInterfaceEndpointHandle* handle) override;
+      mojo::ScopedMessagePipeHandle interface_pipe) override;
   void BindInterfaceRequest(
       const service_manager::BindSourceInfo& source_info,
       const std::string& interface_name,
@@ -336,7 +358,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::unique_ptr<content::MemoryCoordinatorDelegate>
   GetMemoryCoordinatorDelegate() override;
   ::rappor::RapporService* GetRapporService() override;
-  content::mojom::NetworkContextPtr CreateNetworkContext(
+  network::mojom::NetworkContextPtr CreateNetworkContext(
       content::BrowserContext* context,
       bool in_memory,
       const base::FilePath& relative_partition_path) override;
@@ -353,7 +375,29 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const base::CommandLine& command_line) override;
   std::vector<std::unique_ptr<content::URLLoaderThrottle>>
   CreateURLLoaderThrottles(
-      const base::Callback<content::WebContents*()>& wc_getter) override;
+      const base::Callback<content::WebContents*()>& wc_getter,
+      content::NavigationUIData* navigation_ui_data) override;
+  void RegisterNonNetworkNavigationURLLoaderFactories(
+      content::RenderFrameHost* frame_host,
+      NonNetworkURLLoaderFactoryMap* factories) override;
+  void RegisterNonNetworkSubresourceURLLoaderFactories(
+      content::RenderFrameHost* frame_host,
+      const GURL& frame_url,
+      NonNetworkURLLoaderFactoryMap* factories) override;
+  bool AllowRenderingMhtmlOverHttp(
+      content::NavigationUIData* navigation_ui_data) override;
+  bool ShouldForceDownloadResource(const GURL& url,
+                                   const std::string& mime_type) override;
+  void CreateUsbDeviceManager(
+      content::RenderFrameHost* render_frame_host,
+      device::mojom::UsbDeviceManagerRequest request) override;
+  void CreateUsbChooserService(
+      content::RenderFrameHost* render_frame_host,
+      device::mojom::UsbChooserServiceRequest request) override;
+  bool ShowPaymentHandlerWindow(
+      content::BrowserContext* browser_context,
+      const GURL& url,
+      base::OnceCallback<void(bool, int, int)> callback) override;
 
  protected:
   static bool HandleWebUI(GURL* url, content::BrowserContext* browser_context);
@@ -364,8 +408,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   friend class DisableWebRtcEncryptionFlagTest;
   friend class InProcessBrowserTest;
 
-  // Populate |frame_interfaces_|.
-  void InitFrameInterfaces();
+  // Populate |frame_interfaces_|, |frame_interfaces_parameterized_| and
+  // |worker_interfaces_parameterized_|.
+  void InitWebContextInterfaces();
 
 #if BUILDFLAG(ENABLE_WEBRTC)
   // Copies disable WebRTC encryption switch depending on the channel.
@@ -427,6 +472,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::unique_ptr<
       service_manager::BinderRegistryWithArgs<content::RenderFrameHost*>>
       frame_interfaces_parameterized_;
+  std::unique_ptr<
+      service_manager::BinderRegistryWithArgs<content::RenderProcessHost*,
+                                              const url::Origin&>>
+      worker_interfaces_parameterized_;
 
   base::WeakPtrFactory<ChromeContentBrowserClient> weak_factory_;
 

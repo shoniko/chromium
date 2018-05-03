@@ -14,8 +14,8 @@ import android.os.Parcel;
 import android.os.ParcelUuid;
 import android.os.Parcelable;
 import android.support.annotation.Nullable;
-import android.util.Pair;
 
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
@@ -42,10 +42,8 @@ import org.chromium.ui.OverscrollRefreshHandler;
 import org.chromium.ui.base.EventForwarder;
 import org.chromium.ui.base.WindowAndroid;
 
-import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -55,9 +53,9 @@ import java.util.UUID;
  * object.
  */
 @JNINamespace("content")
-// TODO(tedchoc): Remove the package restriction once this class moves to a non-public content
-//               package whose visibility will be enforced via DEPS.
-/* package */ class WebContentsImpl implements WebContents, RenderFrameHostDelegate {
+public class WebContentsImpl implements WebContents, RenderFrameHostDelegate {
+    private static final String TAG = "cr_WebContentsImpl";
+
     private static final String PARCEL_VERSION_KEY = "version";
     private static final String PARCEL_WEBCONTENTS_KEY = "webcontents";
     private static final String PARCEL_PROCESS_GUARD_KEY = "processguard";
@@ -162,11 +160,13 @@ import java.util.UUID;
         }
     }
 
+    // Cached copy of all positions and scales as reported by the renderer.
+    private RenderCoordinates mRenderCoordinates;
+
     private InternalsHolder mInternalsHolder;
 
     private static class WebContentsInternalsImpl implements WebContentsInternals {
-        public HashSet<Object> retainedObjects;
-        public HashMap<String, Pair<Object, Class>> injectedObjects;
+        public HashMap<Class, WebContentsUserData> userDataMap;
     }
 
     private WebContentsImpl(
@@ -178,9 +178,11 @@ import java.util.UUID;
         // inside WebContentsImpl. It holds a strong reference until an embedder invokes
         // |setInternalsHolder| to get the internals handed over to it.
         WebContentsInternalsImpl internals = new WebContentsInternalsImpl();
-        internals.retainedObjects = new HashSet<Object>();
-        internals.injectedObjects = new HashMap<String, Pair<Object, Class>>();
-        nativeCreateJavaBridgeDispatcherHost(mNativeWebContentsAndroid, internals.retainedObjects);
+        internals.userDataMap = new HashMap<>();
+
+        mRenderCoordinates = new RenderCoordinates();
+        mRenderCoordinates.reset();
+
         mInternalsHolder = new DefaultInternalsHolder();
         mInternalsHolder.set(internals);
     }
@@ -502,12 +504,12 @@ import java.util.UUID;
     }
 
     @Override
-    public void requestSmartClipExtract(
-            int x, int y, int width, int height, RenderCoordinates coordinateSpace) {
+    public void requestSmartClipExtract(int x, int y, int width, int height) {
         if (mSmartClipCallback == null) return;
         mSmartClipCallback.storeRequestRect(new Rect(x, y, x + width, y + height));
+        RenderCoordinates coordinateSpace = getRenderCoordinates();
         float dpi = coordinateSpace.getDeviceScaleFactor();
-        y -= coordinateSpace.getContentOffsetYPix();
+        y = (int) (y - coordinateSpace.getContentOffsetYPix());
         nativeRequestSmartClipExtract(mNativeWebContentsAndroid, mSmartClipCallback,
                 (int) (x / dpi), (int) (y / dpi), (int) (width / dpi), (int) (height / dpi));
     }
@@ -690,40 +692,51 @@ import java.util.UUID;
         return new Rect(0, 0, width, height);
     }
 
-    @Override
-    public Map<String, Pair<Object, Class>> getJavascriptInterfaces() {
+    /**
+     * Returns {@link RenderCoordinates}. This method is intended for use in content layer only.
+     */
+    public RenderCoordinates getRenderCoordinates() {
+        return mRenderCoordinates;
+    }
+
+    /**
+     * Sets {@link WebContentsUserData} object in {@code UserDataMap}.
+     * <p>
+     * Note: This should be only called by {@link WebContentsUserData}.
+     * @param key Key of the generic object to set (its class instance).
+     * @param data The wrapper {@link WebContentsUserData} of the generic object to store.
+     */
+    void setUserData(Class key, WebContentsUserData data) {
+        Map<Class, WebContentsUserData> userDataMap = getUserDataMap();
+        if (userDataMap == null) {
+            Log.e(TAG, "UserDataMap can't be found");
+            return;
+        }
+        assert !userDataMap.containsKey(key); // Do not allow duplicated Data
+        userDataMap.put(key, data);
+    }
+
+    /**
+     * Gets {@link WebContentsUserData} object from {@code UserDataMap}.
+     * <p>
+     * Note: This should be only called by {@link WebContentsUserData}.
+     * @param key Key of the generic object wrapped in {@link WebContentsUserData}.
+     * @return The {@link WebContentUserData} wrapping the object associated with the key.
+     */
+    WebContentsUserData getUserData(Class key) {
+        Map<Class, WebContentsUserData> userDataMap = getUserDataMap();
+        return userDataMap != null ? userDataMap.get(key) : null;
+    }
+
+    /**
+     * Note: This should be only called by {@link WebContentsUserData}.
+     * @return {@code UserDataMap} that contains internal user data. {@code null} if
+     *         the map is already gc'ed.
+     */
+    Map<Class, WebContentsUserData> getUserDataMap() {
         WebContentsInternals internals = mInternalsHolder.get();
         if (internals == null) return null;
-        return ((WebContentsInternalsImpl) internals).injectedObjects;
-    }
-
-    @Override
-    public void setAllowJavascriptInterfacesInspection(boolean allow) {
-        nativeSetAllowJavascriptInterfacesInspection(mNativeWebContentsAndroid, allow);
-    }
-
-    @Override
-    public void addPossiblyUnsafeJavascriptInterface(
-            Object object, String name, Class<? extends Annotation> requiredAnnotation) {
-        if (mNativeWebContentsAndroid != 0 && object != null) {
-            Map<String, Pair<Object, Class>> jsInterface = getJavascriptInterfaces();
-            // The interface map is available as long as the callsite is alive, which should
-            // hold true since it is the callsite that is invoking this API.
-            assert jsInterface != null;
-            jsInterface.put(name, new Pair<Object, Class>(object, requiredAnnotation));
-            nativeAddJavascriptInterface(
-                    mNativeWebContentsAndroid, object, name, requiredAnnotation);
-        }
-    }
-
-    @Override
-    public void removeJavascriptInterface(String name) {
-        Map<String, Pair<Object, Class>> jsInterface = getJavascriptInterfaces();
-        assert jsInterface != null;
-        jsInterface.remove(name);
-        if (mNativeWebContentsAndroid != 0) {
-            nativeRemoveJavascriptInterface(mNativeWebContentsAndroid, name);
-        }
+        return ((WebContentsInternalsImpl) internals).userDataMap;
     }
 
     // This is static to avoid exposing a public destroy method on the native side of this class.
@@ -732,8 +745,6 @@ import java.util.UUID;
     private static native WebContents nativeFromNativePtr(long webContentsAndroidPtr);
 
     private native WindowAndroid nativeGetTopLevelNativeWindow(long nativeWebContentsAndroid);
-    private native void nativeCreateJavaBridgeDispatcherHost(
-            long nativeWebContentsAndroid, Object retainedJavascriptObjects);
     private native RenderFrameHost nativeGetMainFrame(long nativeWebContentsAndroid);
     private native String nativeGetTitle(long nativeWebContentsAndroid);
     private native String nativeGetVisibleURL(long nativeWebContentsAndroid);
@@ -800,9 +811,4 @@ import java.util.UUID;
     private native Rect nativeGetFullscreenVideoSize(long nativeWebContentsAndroid);
     private native void nativeSetSize(long nativeWebContentsAndroid, int width, int height);
     private native EventForwarder nativeGetOrCreateEventForwarder(long nativeWebContentsAndroid);
-    private native void nativeSetAllowJavascriptInterfacesInspection(
-            long nativeWebContentsAndroid, boolean allow);
-    private native void nativeAddJavascriptInterface(
-            long nativeWebContentsAndroid, Object object, String name, Class requiredAnnotation);
-    private native void nativeRemoveJavascriptInterface(long nativeWebContentsAndroid, String name);
 }

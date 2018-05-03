@@ -1473,6 +1473,12 @@ void DiskCacheBackendTest::BackendTrimInvalidEntry2() {
   ANNOTATE_IGNORE_READS_AND_WRITES_BEGIN();
   EXPECT_GE(30, cache_->GetEntryCount());
   ANNOTATE_IGNORE_READS_AND_WRITES_END();
+
+  // For extra messiness, the integrity check for the cache can actually cause
+  // evictions if it's over-capacity, which would race with above. So change the
+  // size we pass to CheckCacheIntegrity (but don't mess with existing backend's
+  // state.
+  size_ = 0;
 }
 
 // We'll be leaking memory from this test.
@@ -2168,7 +2174,7 @@ void DiskCacheBackendTest::BackendTransaction(const std::string& name,
   cache_.reset();
   cache_impl_ = NULL;
 
-  ASSERT_TRUE(CheckCacheIntegrity(cache_path_, new_eviction_, mask));
+  ASSERT_TRUE(CheckCacheIntegrity(cache_path_, new_eviction_, MaxSize(), mask));
   success_ = true;
 }
 
@@ -2427,7 +2433,8 @@ TEST_F(DiskCacheBackendTest, DeleteOld) {
   ASSERT_THAT(cb.GetResult(rv), IsOk());
   base::ThreadRestrictions::SetIOAllowed(prev);
   cache_.reset();
-  EXPECT_TRUE(CheckCacheIntegrity(cache_path_, new_eviction_, mask_));
+  EXPECT_TRUE(CheckCacheIntegrity(cache_path_, new_eviction_, /*max_size = */ 0,
+                                  mask_));
 }
 #endif
 
@@ -3258,8 +3265,9 @@ TEST_F(DiskCacheBackendTest, MemoryOnlyBackendEviction) {
   BackendEviction();
 }
 
-// TODO(gavinp): Enable BackendEviction test for simple cache after performance
-// problems are addressed. See crbug.com/588184 for more information.
+// TODO(morlovich): Enable BackendEviction test for simple cache after
+// performance problems are addressed. See crbug.com/588184 for more
+// information.
 
 // This overly specific looking test is a regression test aimed at
 // crbug.com/589186.
@@ -3907,7 +3915,7 @@ TEST_F(DiskCacheBackendTest, SimpleCacheOverBlockfileCache) {
 
   // Check that the |SimpleBackendImpl| does not favor this structure.
   disk_cache::SimpleBackendImpl* simple_cache =
-      new disk_cache::SimpleBackendImpl(cache_path_, nullptr, 0,
+      new disk_cache::SimpleBackendImpl(cache_path_, nullptr, nullptr, 0,
                                         net::DISK_CACHE, nullptr, nullptr);
   net::TestCompletionCallback cb;
   int rv = simple_cache->Init(cb.callback());

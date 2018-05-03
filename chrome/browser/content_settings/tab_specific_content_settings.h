@@ -17,6 +17,7 @@
 #include "base/scoped_observer.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
+#include "chrome/browser/ui/blocked_content/framebust_block_tab_helper.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/browser/content_settings_usages_state.h"
@@ -35,6 +36,10 @@ class NavigationHandle;
 namespace net {
 class CookieOptions;
 }
+
+namespace url {
+class Origin;
+}  // namespace url
 
 // TODO(msramek): Media is storing their state in TabSpecificContentSettings:
 // |microphone_camera_state_| without being tied to a single content setting.
@@ -115,7 +120,7 @@ class TabSpecificContentSettings
       const base::Callback<content::WebContents*(void)>& wc_getter,
       const GURL& url,
       const GURL& first_party_url,
-      const std::string& cookie_line,
+      const net::CanonicalCookie& cookie,
       const net::CookieOptions& options,
       bool blocked_by_policy);
 
@@ -170,6 +175,14 @@ class TabSpecificContentSettings
       bool blocked_by_policy_javascript,
       bool blocked_by_policy_cookie);
 
+  // Called when a specific Shared Worker was accessed.
+  static void SharedWorkerAccessed(int render_process_id,
+                                   int render_frame_id,
+                                   const GURL& worker_url,
+                                   const std::string& name,
+                                   const url::Origin& constructor_origin,
+                                   bool blocked_by_policy);
+
   // Resets the |content_settings_status_|, except for
   // information which are needed for navigation: CONTENT_SETTINGS_TYPE_COOKIES
   // for cookies and service workers, and CONTENT_SETTINGS_TYPE_JAVASCRIPT for
@@ -187,6 +200,16 @@ class TabSpecificContentSettings
 
   // Changes the |content_blocked_| entry for popups.
   void SetPopupsBlocked(bool blocked);
+
+  // Called when audio has been blocked on the page.
+  void OnAudioBlocked();
+
+  // Updates the blocked framebust icon in the location bar. The
+  // |click_callback| will be called (if it is non-null) if the blocked URL is
+  // ever clicked on in the resulting UI.
+  void OnFramebustBlocked(
+      const GURL& blocked_url,
+      FramebustBlockTabHelper::ClickCallback click_callback);
 
   // Returns whether a particular kind of content has been blocked for this
   // page.
@@ -312,7 +335,7 @@ class TabSpecificContentSettings
                      bool blocked_by_policy);
   void OnCookieChanged(const GURL& url,
                        const GURL& first_party_url,
-                       const std::string& cookie_line,
+                       const net::CanonicalCookie& cookie,
                        const net::CookieOptions& options,
                        bool blocked_by_policy);
   void OnFileSystemAccessed(const GURL& url,
@@ -326,6 +349,10 @@ class TabSpecificContentSettings
   void OnServiceWorkerAccessed(const GURL& scope,
                                bool blocked_by_policy_javascript,
                                bool blocked_by_policy_cookie);
+  void OnSharedWorkerAccessed(const GURL& worker_url,
+                              const std::string& name,
+                              const url::Origin& constructor_origin,
+                              bool blocked_by_policy);
   void OnWebDatabaseAccessed(const GURL& url,
                              const base::string16& name,
                              const base::string16& display_name,
@@ -361,8 +388,12 @@ class TabSpecificContentSettings
   // Block all content. Used for testing content setting bubbles.
   void BlockAllContentForTesting();
 
-  // This method is called to update the sound status.
-  void OnAudioStateChanged(bool is_audible);
+  // Stores content settings changed by the user via PageInfo.
+  void ContentSettingChangedViaPageInfo(ContentSettingsType type);
+
+  // Returns true if the user changed the given ContentSettingsType via PageInfo
+  // since the last navigation.
+  bool HasContentSettingChangedViaPageInfo(ContentSettingsType type) const;
 
  private:
   friend class content::WebContentsUserData<TabSpecificContentSettings>;
@@ -396,20 +427,14 @@ class TabSpecificContentSettings
   // Clears the MIDI settings.
   void ClearMidiContentSettings();
 
+  // Clears settings changed by the user via PageInfo since the last navigation.
+  void ClearContentSettingsChangedViaPageInfo();
+
   // Updates Geolocation settings on navigation.
   void GeolocationDidNavigate(content::NavigationHandle* navigation_handle);
 
   // Updates MIDI settings on navigation.
   void MidiDidNavigate(content::NavigationHandle* navigation_handle);
-
-  // Checks whether sound has been blocked when the sound setting is updated.
-  void OnSoundContentSettingUpdated();
-
-  // Sets sound as blocked if site is muted and sound is playing.
-  void CheckSoundBlocked(bool is_audible);
-
-  // Gets the current sound setting state.
-  ContentSetting GetSoundContentSetting() const;
 
   // All currently registered |SiteDataObserver|s.
   base::ObserverList<SiteDataObserver> observer_list_;
@@ -466,11 +491,12 @@ class TabSpecificContentSettings
   std::string media_stream_requested_audio_device_;
   std::string media_stream_requested_video_device_;
 
-  // Holds the previous committed url during a navigation.
-  GURL previous_url_;
-
   // Observer to watch for content settings changed.
   ScopedObserver<HostContentSettingsMap, content_settings::Observer> observer_;
+
+  // Stores content settings changed by the user via page info since the last
+  // navigation. Used to determine whether to display the settings in page info.
+  std::set<ContentSettingsType> content_settings_changed_via_page_info_;
 
   DISALLOW_COPY_AND_ASSIGN(TabSpecificContentSettings);
 };

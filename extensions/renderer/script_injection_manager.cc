@@ -9,6 +9,7 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -18,9 +19,9 @@
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_set.h"
-#include "extensions/common/feature_switch.h"
 #include "extensions/renderer/async_scripts_run_info.h"
 #include "extensions/renderer/extension_frame_helper.h"
 #include "extensions/renderer/extension_injection_host.h"
@@ -192,7 +193,7 @@ void ScriptInjectionManager::RFOHelper::DidFinishDocumentLoad() {
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kScriptIdleTimeoutInMs));
 
-  if (FeatureSwitch::yield_between_content_script_runs()->IsEnabled()) {
+  if (base::FeatureList::IsEnabled(features::kYieldBetweenContentScriptRuns)) {
     ExtensionFrameHelper::Get(render_frame())
         ->ScheduleAtDocumentIdle(
             base::Bind(&ScriptInjectionManager::RFOHelper::RunIdle,
@@ -202,7 +203,7 @@ void ScriptInjectionManager::RFOHelper::DidFinishDocumentLoad() {
 
 void ScriptInjectionManager::RFOHelper::DidFinishLoad() {
   DCHECK(content::RenderThread::Get());
-  if (!FeatureSwitch::yield_between_content_script_runs()->IsEnabled()) {
+  if (!base::FeatureList::IsEnabled(features::kYieldBetweenContentScriptRuns)) {
     // Ensure that we don't block any UI progress by running scripts.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&ScriptInjectionManager::RFOHelper::RunIdle,
@@ -224,8 +225,10 @@ void ScriptInjectionManager::RFOHelper::OnStop() {
   // for 204/205/downloads since these don't notify the renderer. However the
   // browser does fire the OnStop IPC. So use that signal instead to avoid
   // keeping the frame in a START state indefinitely which leads to deadlocks.
-  if (content::IsBrowserSideNavigationEnabled())
-    DidFailProvisionalLoad(blink::WebURLError());
+  if (content::IsBrowserSideNavigationEnabled()) {
+    DidFailProvisionalLoad(
+        blink::WebURLError(net::ERR_FAILED, blink::WebURL()));
+  }
 }
 
 void ScriptInjectionManager::RFOHelper::OnExecuteCode(
@@ -417,7 +420,7 @@ void ScriptInjectionManager::InjectScripts(
 
   ScriptsRunInfo scripts_run_info(frame, run_location);
   scoped_refptr<AsyncScriptsRunInfo> async_run_info;
-  if (FeatureSwitch::yield_between_content_script_runs()->IsEnabled())
+  if (base::FeatureList::IsEnabled(features::kYieldBetweenContentScriptRuns))
     async_run_info = base::MakeRefCounted<AsyncScriptsRunInfo>(run_location);
 
   for (auto iter = frame_injections.begin(); iter != frame_injections.end();) {
@@ -477,8 +480,7 @@ void ScriptInjectionManager::HandleExecuteCode(
 
   std::unique_ptr<ScriptInjection> injection(new ScriptInjection(
       std::unique_ptr<ScriptInjector>(new ProgrammaticScriptInjector(params)),
-      render_frame, std::move(injection_host),
-      static_cast<UserScript::RunLocation>(params.run_at),
+      render_frame, std::move(injection_host), params.run_at,
       activity_logging_enabled_));
 
   FrameStatusMap::const_iterator iter = frame_statuses_.find(render_frame);

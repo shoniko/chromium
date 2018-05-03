@@ -10,6 +10,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/snapshots/snapshot_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/ui/activity_services/share_to_data.h"
 #import "ios/testing/ocmock_complex_type_helper.h"
@@ -21,10 +22,14 @@
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "ui/base/test/ios/ui_image_test_utils.h"
+#include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using ui::test::uiimage_utils::UIImagesAreEqual;
+using ui::test::uiimage_utils::UIImageWithSizeAndSolidColor;
 
 namespace {
 const char kExpectedUrl[] = "http://www.testurl.net/";
@@ -46,9 +51,8 @@ const char kExpectedTitle[] = "title";
 }
 
 - (instancetype)initWithWebState:(std::unique_ptr<web::TestWebState>)webState {
-  self = [super
-      initWithRepresentedObject:[OCMockObject niceMockForClass:[Tab class]]];
-  if (self) {
+  id representedObject = [OCMockObject niceMockForClass:[Tab class]];
+  if ((self = [super initWithRepresentedObject:representedObject])) {
     _webState = std::move(webState);
   }
   return self;
@@ -77,6 +81,16 @@ class ShareToDataBuilderTest : public PlatformTest {
     web_state->SetBrowserState(chrome_browser_state_.get());
     web_state->SetVisibleURL(GURL(kExpectedUrl));
 
+    // Set a view to the WebState to allow generating a snapshot.
+    CGRect frame = {CGPointZero, CGSizeMake(300, 400)};
+    UIView* view = [[UIView alloc] initWithFrame:frame];
+    view.backgroundColor = [UIColor blueColor];
+    web_state->SetView(view);
+
+    // Attach SnapshotTabHelper to allow snapshot generation.
+    SnapshotTabHelper::CreateForWebState(web_state.get(),
+                                         [[NSUUID UUID] UUIDString]);
+
     tab_ = [[ShareToDataBuilderTestTabMock alloc]
         initWithWebState:std::move(web_state)];
     OCMockObject* tab_mock = static_cast<OCMockObject*>(tab_);
@@ -85,12 +99,6 @@ class ShareToDataBuilderTest : public PlatformTest {
     NSString* expected_title = base::SysUTF8ToNSString(kExpectedTitle);
     [[[tab_mock stub] andReturnValue:OCMOCK_VALUE(ptr)] browserState];
     [[[tab_mock stub] andReturn:expected_title] title];
-
-    UIImage* tab_snapshot =
-        ui::test::uiimage_utils::UIImageWithSizeAndSolidColor(
-            CGSizeMake(300, 400), [UIColor blueColor]);
-    [[[tab_mock stub] andReturn:tab_snapshot] generateSnapshotWithOverlay:NO
-                                                         visibleFrameOnly:YES];
   }
 
   void TearDown() override {
@@ -111,21 +119,43 @@ class ShareToDataBuilderTest : public PlatformTest {
   DISALLOW_COPY_AND_ASSIGN(ShareToDataBuilderTest);
 };
 
-// Verifies that ShareToData is constructed properly for a given Tab.
-TEST_F(ShareToDataBuilderTest, TestSharePageCommandHandling) {
-  ShareToData* actual_data = activity_services::ShareToDataForTab(tab());
+// Verifies that ShareToData is constructed properly for a given Tab when there
+// is a URL provided for share extensions.
+TEST_F(ShareToDataBuilderTest, TestSharePageCommandHandlingNpShareUrl) {
+  const char* kExpectedShareUrl = "http://www.testurl.com/";
+  ShareToData* actual_data =
+      activity_services::ShareToDataForTab(tab(), GURL(kExpectedShareUrl));
 
   ASSERT_TRUE(actual_data);
-  EXPECT_EQ(kExpectedUrl, actual_data.url);
+  EXPECT_EQ(kExpectedShareUrl, actual_data.shareURL);
+  EXPECT_EQ(kExpectedUrl, actual_data.passwordManagerURL);
   EXPECT_NSEQ(base::SysUTF8ToNSString(kExpectedTitle), actual_data.title);
   EXPECT_TRUE(actual_data.isOriginalTitle);
   EXPECT_FALSE(actual_data.isPagePrintable);
 
-  CGSize size = CGSizeMake(40, 40);
-  EXPECT_TRUE(ui::test::uiimage_utils::UIImagesAreEqual(
+  const CGSize size = CGSizeMake(40, 40);
+  EXPECT_TRUE(UIImagesAreEqual(
       actual_data.thumbnailGenerator(size),
-      ui::test::uiimage_utils::UIImageWithSizeAndSolidColor(
-          size, [UIColor blueColor])));
+      UIImageWithSizeAndSolidColor(size, [UIColor blueColor])));
+}
+
+// Verifies that ShareToData is constructed properly for a given Tab when the
+// URL designated for share extensions is empty.
+TEST_F(ShareToDataBuilderTest, TestSharePageCommandHandlingNoShareUrl) {
+  ShareToData* actual_data =
+      activity_services::ShareToDataForTab(tab(), GURL());
+
+  ASSERT_TRUE(actual_data);
+  EXPECT_EQ(kExpectedUrl, actual_data.shareURL);
+  EXPECT_EQ(kExpectedUrl, actual_data.passwordManagerURL);
+  EXPECT_NSEQ(base::SysUTF8ToNSString(kExpectedTitle), actual_data.title);
+  EXPECT_TRUE(actual_data.isOriginalTitle);
+  EXPECT_FALSE(actual_data.isPagePrintable);
+
+  const CGSize size = CGSizeMake(40, 40);
+  EXPECT_TRUE(UIImagesAreEqual(
+      actual_data.thumbnailGenerator(size),
+      UIImageWithSizeAndSolidColor(size, [UIColor blueColor])));
 }
 
 // Verifies that |ShareToDataForTab()| returns nil if the Tab is in the process
@@ -133,5 +163,5 @@ TEST_F(ShareToDataBuilderTest, TestSharePageCommandHandling) {
 TEST_F(ShareToDataBuilderTest, TestReturnsNilWhenClosing) {
   [tab_mock() close];
 
-  EXPECT_EQ(nil, activity_services::ShareToDataForTab(tab()));
+  EXPECT_EQ(nil, activity_services::ShareToDataForTab(tab(), GURL()));
 }

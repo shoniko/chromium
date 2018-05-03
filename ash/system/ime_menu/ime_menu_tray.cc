@@ -4,6 +4,7 @@
 
 #include "ash/system/ime_menu/ime_menu_tray.h"
 
+#include "ash/accessibility/accessibility_controller.h"
 #include "ash/accessibility/accessibility_delegate.h"
 #include "ash/ash_constants.h"
 #include "ash/ime/ime_controller.h"
@@ -109,7 +110,7 @@ class ImeMenuLabel : public views::Label {
     // truncated.
     SetBorder(views::CreateEmptyBorder(gfx::Insets(0, 6)));
   }
-  ~ImeMenuLabel() override {}
+  ~ImeMenuLabel() override = default;
 
   // views:Label:
   gfx::Size CalculatePreferredSize() const override {
@@ -137,9 +138,10 @@ class ImeTitleView : public views::View, public views::ButtonListener {
         views::CreateSolidSidedBorder(0, 0, kSeparatorWidth, 0,
                                       kMenuSeparatorColor),
         gfx::Insets(kMenuSeparatorVerticalPadding - kSeparatorWidth, 0)));
-    auto* box_layout = new views::BoxLayout(views::BoxLayout::kHorizontal);
+    auto box_layout =
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal);
     box_layout->set_minimum_cross_axis_size(kTrayPopupItemMinHeight);
-    SetLayoutManager(box_layout);
+    views::BoxLayout* layout_ptr = SetLayoutManager(std::move(box_layout));
     auto* title_label =
         new views::Label(l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_IME));
     title_label->SetBorder(
@@ -149,7 +151,7 @@ class ImeTitleView : public views::View, public views::ButtonListener {
     style.SetupLabel(title_label);
 
     AddChildView(title_label);
-    box_layout->SetFlexForView(title_label, 1);
+    layout_ptr->SetFlexForView(title_label, 1);
 
     if (show_settings_button) {
       settings_button_ = CreateImeMenuButton(
@@ -166,7 +168,7 @@ class ImeTitleView : public views::View, public views::ButtonListener {
     ShowIMESettings();
   }
 
-  ~ImeTitleView() override {}
+  ~ImeTitleView() override = default;
 
  private:
   // Settings button that is only used if the emoji, handwriting and voice
@@ -189,7 +191,7 @@ class ImeButtonsView : public views::View, public views::ButtonListener {
     Init(show_emoji, show_handwriting, show_voice);
   }
 
-  ~ImeButtonsView() override {}
+  ~ImeButtonsView() override = default;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override {
@@ -221,9 +223,10 @@ class ImeButtonsView : public views::View, public views::ButtonListener {
 
  private:
   void Init(bool show_emoji, bool show_handwriting, bool show_voice) {
-    auto* box_layout = new views::BoxLayout(views::BoxLayout::kHorizontal);
+    auto box_layout =
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal);
     box_layout->set_minimum_cross_axis_size(kTrayPopupItemMinHeight);
-    SetLayoutManager(box_layout);
+    SetLayoutManager(std::move(box_layout));
     SetBorder(views::CreatePaddedBorder(
         views::CreateSolidSidedBorder(kSeparatorWidth, 0, 0, 0,
                                       kMenuSeparatorColor),
@@ -277,7 +280,7 @@ class ImeMenuListView : public ImeListView {
     set_should_focus_ime_after_selection_with_keyboard(true);
   }
 
-  ~ImeMenuListView() override {}
+  ~ImeMenuListView() override = default;
 
  protected:
   void Layout() override {
@@ -444,6 +447,8 @@ void ImeMenuTray::ClickedOutsideBubble() {
 }
 
 bool ImeMenuTray::PerformAction(const ui::Event& event) {
+  UserMetricsRecorder::RecordUserClick(
+      LoginMetricsRecorder::LockScreenUserClickTarget::kImeTray);
   if (bubble_)
     CloseBubble();
   else
@@ -506,14 +511,12 @@ base::string16 ImeMenuTray::GetAccessibleNameForBubble() {
 }
 
 bool ImeMenuTray::ShouldEnableExtraKeyboardAccessibility() {
-  return Shell::Get()->accessibility_delegate()->IsSpokenFeedbackEnabled();
+  return Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled();
 }
 
 void ImeMenuTray::HideBubble(const views::TrayBubbleView* bubble_view) {
   HideBubbleWithView(bubble_view);
 }
-
-void ImeMenuTray::OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) {}
 
 void ImeMenuTray::OnKeyboardClosed() {
   if (InputMethodManager::Get())

@@ -52,6 +52,7 @@ const char kChromeExtension[] =
 
 // Constants used in handling postMessage() messages.
 const char kType[] = "type";
+const char kJSId[] = "id";
 // Viewport message arguments. (Page -> Plugin).
 const char kJSViewportType[] = "viewport";
 const char kJSUserInitiated[] = "userInitiated";
@@ -135,15 +136,22 @@ const char kJSGetSelectedTextReplyType[] = "getSelectedTextReply";
 const char kJSSelectedText[] = "selectedText";
 
 // Get the named destination with the given name (Page -> Plugin)
-const char KJSGetNamedDestinationType[] = "getNamedDestination";
-const char KJSGetNamedDestination[] = "namedDestination";
+const char kJSGetNamedDestinationType[] = "getNamedDestination";
+const char kJSGetNamedDestination[] = "namedDestination";
 // Reply with the page number of the named destination (Plugin -> Page)
 const char kJSGetNamedDestinationReplyType[] = "getNamedDestinationReply";
 const char kJSNamedDestinationPageNumber[] = "pageNumber";
 
+const char kJSTransformPagePointType[] = "transformPagePoint";
+const char kJSTransformPagePointReplyType[] = "transformPagePointReply";
+
 // Selecting text in document (Plugin -> Page)
 const char kJSSetIsSelectingType[] = "setIsSelecting";
 const char kJSIsSelecting[] = "isSelecting";
+
+// Notify when the document was changed and edit mode is toggled.
+const char kJSSetIsEditModeType[] = "setIsEditMode";
+const char kJSIsEditMode[] = "isEditMode";
 
 // Notify when a form field is focused (Plugin -> Page)
 const char kJSFieldFocusType[] = "formFocusChange";
@@ -171,6 +179,10 @@ enum PDFFeatures {
   HAS_BOOKMARKS = 2,
   FEATURES_COUNT
 };
+
+// Used for UMA. Do not delete entries, and keep in sync with histograms.xml
+// and pdfium/public/fpdf_annot.h.
+const int kAnnotationTypesCount = 28;
 
 PP_Var GetLinkAtPosition(PP_Instance instance, PP_Point point) {
   pp::Var var;
@@ -580,6 +592,7 @@ void OutOfProcessInstance::HandleMessage(const pp::Var& message) {
   } else if (type == kJSPrintType) {
     Print();
   } else if (type == kJSSaveType) {
+    engine_->KillFormFocus();
     pp::PDF::SaveAs(this);
   } else if (type == kJSRotateClockwiseType) {
     RotateClockwise();
@@ -655,14 +668,30 @@ void OutOfProcessInstance::HandleMessage(const pp::Var& message) {
     reply.Set(pp::Var(kType), pp::Var(kJSGetSelectedTextReplyType));
     reply.Set(pp::Var(kJSSelectedText), selected_text);
     PostMessage(reply);
-  } else if (type == KJSGetNamedDestinationType &&
-             dict.Get(pp::Var(KJSGetNamedDestination)).is_string()) {
+  } else if (type == kJSGetNamedDestinationType &&
+             dict.Get(pp::Var(kJSGetNamedDestination)).is_string()) {
     int page_number = engine_->GetNamedDestinationPage(
-        dict.Get(pp::Var(KJSGetNamedDestination)).AsString());
+        dict.Get(pp::Var(kJSGetNamedDestination)).AsString());
     pp::VarDictionary reply;
     reply.Set(pp::Var(kType), pp::Var(kJSGetNamedDestinationReplyType));
     if (page_number >= 0)
       reply.Set(pp::Var(kJSNamedDestinationPageNumber), page_number);
+    PostMessage(reply);
+  } else if (type == kJSTransformPagePointType &&
+             dict.Get(pp::Var(kJSPageNumber)).is_int() &&
+             dict.Get(pp::Var(kJSPageX)).is_int() &&
+             dict.Get(pp::Var(kJSPageY)).is_int() &&
+             dict.Get(pp::Var(kJSId)).is_int()) {
+    std::pair<int, int> xy =
+        engine_->TransformPagePoint(dict.Get(pp::Var(kJSPageNumber)).AsInt(),
+                                    {dict.Get(pp::Var(kJSPageX)).AsInt(),
+                                     dict.Get(pp::Var(kJSPageY)).AsInt()});
+
+    pp::VarDictionary reply;
+    reply.Set(pp::Var(kType), pp::Var(kJSTransformPagePointReplyType));
+    reply.Set(pp::Var(kJSPositionX), xy.first);
+    reply.Set(pp::Var(kJSPositionY), xy.second);
+    reply.Set(pp::Var(kJSId), dict.Get(pp::Var(kJSId)).AsInt());
     PostMessage(reply);
   } else {
     NOTREACHED();
@@ -771,6 +800,11 @@ void OutOfProcessInstance::DidChangeView(const pp::View& view) {
     engine_->ScrolledToXPosition(scroll_offset_float.x() * device_scale_);
     engine_->ScrolledToYPosition(scroll_offset_float.y() * device_scale_);
   }
+}
+
+void OutOfProcessInstance::DidChangeFocus(bool has_focus) {
+  if (!has_focus)
+    engine_->KillFormFocus();
 }
 
 void OutOfProcessInstance::GetPrintPresetOptionsFromDocument(
@@ -1164,8 +1198,11 @@ void OutOfProcessInstance::DocumentSizeUpdated(const pp::Size& size) {
   dimensions.Set(kJSDocumentWidth, pp::Var(document_size_.width()));
   dimensions.Set(kJSDocumentHeight, pp::Var(document_size_.height()));
   pp::VarArray page_dimensions_array;
-  int num_pages = engine_->GetNumberOfPages();
-  for (int i = 0; i < num_pages; ++i) {
+  size_t num_pages = engine_->GetNumberOfPages();
+  if (page_is_processed_.size() < num_pages)
+    page_is_processed_.resize(num_pages);
+
+  for (size_t i = 0; i < num_pages; ++i) {
     pp::Rect page_rect = engine_->GetPageRect(i);
     pp::VarDictionary page_dimensions;
     page_dimensions.Set(kJSPageX, pp::Var(page_rect.x()));
@@ -1187,8 +1224,10 @@ void OutOfProcessInstance::Invalidate(const pp::Rect& rect) {
 }
 
 void OutOfProcessInstance::Scroll(const pp::Point& point) {
-  if (!image_data_.is_null())
+  if (!image_data_.is_null()) {
     paint_manager_.ScrollRect(available_area_, point);
+    pp::PDF::DidScroll(GetPluginInstance());
+  }
 }
 
 void OutOfProcessInstance::ScrollToX(int x_in_screen_coords) {
@@ -1284,6 +1323,30 @@ void OutOfProcessInstance::NotifySelectedFindResultChanged(
     int current_find_index) {
   DCHECK_GE(current_find_index, -1);
   SelectedFindResultChanged(current_find_index);
+}
+
+void OutOfProcessInstance::NotifyPageBecameVisible(
+    const PDFEngine::PageFeatures* page_features) {
+  if (!page_features || !page_features->IsInitialized() ||
+      page_features->index >= static_cast<int>(page_is_processed_.size()) ||
+      page_is_processed_[page_features->index]) {
+    return;
+  }
+
+  for (const int annotation_type : page_features->annotation_types) {
+    DCHECK_GE(annotation_type, 0);
+    DCHECK_LT(annotation_type, kAnnotationTypesCount);
+    if (annotation_type < 0 || annotation_type >= kAnnotationTypesCount)
+      continue;
+
+    if (annotation_types_counted_.find(annotation_type) ==
+        annotation_types_counted_.end()) {
+      HistogramEnumeration("PDF.AnnotationType", annotation_type,
+                           kAnnotationTypesCount);
+      annotation_types_counted_.insert(annotation_type);
+    }
+  }
+  page_is_processed_[page_features->index] = true;
 }
 
 void OutOfProcessInstance::GetDocumentPassword(
@@ -1738,6 +1801,13 @@ void OutOfProcessInstance::IsSelectingChanged(bool is_selecting) {
   PostMessage(message);
   if (is_selecting)
     PrintPreviewHistogramEnumeration(SELECT_TEXT);
+}
+
+void OutOfProcessInstance::IsEditModeChanged(bool is_edit_mode) {
+  pp::VarDictionary message;
+  message.Set(kType, kJSSetIsEditModeType);
+  message.Set(kJSIsEditMode, pp::Var(is_edit_mode));
+  PostMessage(message);
 }
 
 void OutOfProcessInstance::ProcessPreviewPageInfo(const std::string& url,

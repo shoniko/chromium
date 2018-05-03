@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -43,9 +44,8 @@
 #include "components/search_provider_logos/logo_service.h"
 #include "components/search_provider_logos/logo_tracker.h"
 #include "components/strings/grit/components_strings.h"
+#include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/browser_thread.h"
-#include "crypto/secure_hash.h"
-#include "net/base/hash_value.h"
 #include "net/base/url_util.h"
 #include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -121,6 +121,9 @@ std::unique_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
   AddString(translated_strings.get(), "attributionIntro",
             IDS_NEW_TAB_ATTRIBUTION_INTRO);
   AddString(translated_strings.get(), "title", IDS_NEW_TAB_TITLE);
+  AddString(translated_strings.get(), "mostVisitedTitle",
+            IDS_NEW_TAB_MOST_VISITED);
+
   if (is_google) {
     AddString(translated_strings.get(), "searchboxPlaceholder",
               IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT);
@@ -163,6 +166,9 @@ std::string GetConfigData(bool is_google, const GURL& google_base_url) {
   config_data.Set("translatedStrings", GetTranslatedStrings(is_google));
   config_data.SetBoolean("isGooglePage", is_google);
   config_data.SetString("googleBaseUrl", google_base_url.spec());
+  config_data.SetBoolean(
+      "isAccessibleBrowser",
+      content::BrowserAccessibilityState::GetInstance()->IsAccessibleBrowser());
 
   bool is_voice_search_enabled =
       base::FeatureList::IsEnabled(features::kVoiceSearchOnLocalNtp);
@@ -180,28 +186,12 @@ std::string GetConfigData(bool is_google, const GURL& google_base_url) {
   return config_data_js;
 }
 
-std::string GetIntegritySha256Value(const std::string& data) {
-  // Compute the sha256 hash.
-  net::SHA256HashValue hash_value;
-  std::unique_ptr<crypto::SecureHash> hash(
-      crypto::SecureHash::Create(crypto::SecureHash::SHA256));
-  hash->Update(data.data(), data.size());
-  hash->Finish(&hash_value, sizeof(hash_value));
-
-  // Base64-encode it.
-  base::StringPiece hash_value_str(
-      reinterpret_cast<const char*>(hash_value.data), sizeof(hash_value));
-  std::string result;
-  base::Base64Encode(hash_value_str, &result);
-  return result;
-}
-
 std::string GetThemeCSS(Profile* profile) {
   SkColor background_color =
       ThemeService::GetThemeProviderForProfile(profile)
           .GetColor(ThemeProperties::COLOR_NTP_BACKGROUND);
 
-  return base::StringPrintf("body { background-color: #%02X%02X%02X; }",
+  return base::StringPrintf("html { background-color: #%02X%02X%02X; }",
                             SkColorGetR(background_color),
                             SkColorGetG(background_color),
                             SkColorGetB(background_color));
@@ -231,14 +221,104 @@ std::string ConvertLogoImageToBase64(const EncodedLogo& logo) {
                             logo.metadata.mime_type.c_str(), base64.c_str());
 }
 
+std::string LogoTypeToString(search_provider_logos::LogoType type) {
+  switch (type) {
+    case search_provider_logos::LogoType::SIMPLE:
+      return "SIMPLE";
+    case search_provider_logos::LogoType::ANIMATED:
+      return "ANIMATED";
+    case search_provider_logos::LogoType::INTERACTIVE:
+      return "INTERACTIVE";
+  }
+  NOTREACHED();
+  return std::string();
+}
+
 std::unique_ptr<base::DictionaryValue> ConvertLogoMetadataToDict(
     const LogoMetadata& meta) {
   auto result = base::MakeUnique<base::DictionaryValue>();
+  result->SetString("type", LogoTypeToString(meta.type));
   result->SetString("onClickUrl", meta.on_click_url.spec());
   result->SetString("altText", meta.alt_text);
   result->SetString("mimeType", meta.mime_type);
   result->SetString("animatedUrl", meta.animated_url.spec());
+  result->SetInteger("iframeWidthPx", meta.iframe_width_px);
+  result->SetInteger("iframeHeightPx", meta.iframe_height_px);
+  result->SetString("logUrl", meta.log_url.spec());
+  result->SetString("ctaLogUrl", meta.cta_log_url.spec());
+
+  GURL full_page_url = meta.full_page_url;
+  if (base::GetFieldTrialParamByFeatureAsBool(
+          features::kDoodlesOnLocalNtp,
+          "local_ntp_interactive_doodles_prevent_redirects",
+          /*default_value=*/true) &&
+      meta.type == search_provider_logos::LogoType::INTERACTIVE &&
+      full_page_url.is_valid()) {
+    // Prevent the server from redirecting to ccTLDs. This is a temporary
+    // workaround, until the server doesn't redirect these requests by default.
+    full_page_url = net::AppendQueryParameter(full_page_url, "gws_rd", "cr");
+  }
+  result->SetString("fullPageUrl", full_page_url.spec());
+
+  // If support for interactive Doodles is disabled, treat them as simple
+  // Doodles instead and use the full page URL as the target URL.
+  if (meta.type == search_provider_logos::LogoType::INTERACTIVE &&
+      !base::GetFieldTrialParamByFeatureAsBool(features::kDoodlesOnLocalNtp,
+                                               "local_ntp_interactive_doodles",
+                                               /*default_value=*/true)) {
+    result->SetString(
+        "type", LogoTypeToString(search_provider_logos::LogoType::SIMPLE));
+    result->SetString("onClickUrl", meta.full_page_url.spec());
+  }
+
   return result;
+}
+
+// Note: Code that runs on the IO thread is implemented as non-member functions,
+// to avoid accidentally accessing member data that's owned by the UI thread.
+
+bool ShouldServiceRequestIOThread(const GURL& url,
+                                  content::ResourceContext* resource_context,
+                                  int render_process_id) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+
+  DCHECK(url.host_piece() == chrome::kChromeSearchLocalNtpHost);
+  if (!InstantIOContext::ShouldServiceRequest(url, resource_context,
+                                              render_process_id)) {
+    return false;
+  }
+
+  if (url.SchemeIs(chrome::kChromeSearchScheme)) {
+    std::string filename;
+    webui::ParsePathAndScale(url, &filename, nullptr);
+    for (size_t i = 0; i < arraysize(kResources); ++i) {
+      if (filename == kResources[i].filename)
+        return true;
+    }
+  }
+  return false;
+}
+
+std::string GetContentSecurityPolicyScriptSrcIOThread() {
+#if !defined(GOOGLE_CHROME_BUILD)
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kLocalNtpReload)) {
+    // While live-editing the local NTP files, turn off CSP.
+    return "script-src * 'unsafe-inline';";
+  }
+#endif  // !defined(GOOGLE_CHROME_BUILD)
+
+  return base::StringPrintf(
+      "script-src 'strict-dynamic' 'sha256-%s' 'sha256-%s';",
+      LOCAL_NTP_JS_INTEGRITY, VOICE_JS_INTEGRITY);
+}
+
+std::string GetContentSecurityPolicyChildSrcIOThread() {
+  // Allow embedding of the most visited iframe, as well as the account
+  // switcher and the notifications dropdown from the One Google Bar, and/or
+  // the iframe for interactive Doodles.
+  return base::StringPrintf("child-src %s https://*.google.com/;",
+                            chrome::kChromeSearchMostVisitedUrl);
 }
 
 }  // namespace
@@ -246,20 +326,8 @@ std::unique_ptr<base::DictionaryValue> ConvertLogoMetadataToDict(
 class LocalNtpSource::GoogleSearchProviderTracker
     : public TemplateURLServiceObserver {
  public:
-  using SearchProviderIsGoogleChangedCallback =
-      base::Callback<void(bool is_google)>;
-
-  using GoogleBaseUrlChangedCallback =
-      base::Callback<void(const GURL& google_base_url)>;
-
-  GoogleSearchProviderTracker(
-      TemplateURLService* service,
-      const SearchProviderIsGoogleChangedCallback& is_google_callback,
-      const GoogleBaseUrlChangedCallback& google_base_url_callback)
-      : service_(service),
-        is_google_callback_(is_google_callback),
-        google_base_url_callback_(google_base_url_callback),
-        is_google_(false) {
+  explicit GoogleSearchProviderTracker(TemplateURLService* service)
+      : service_(service), is_google_(false) {
     DCHECK(service_);
     service_->AddObserver(this);
     is_google_ = search::DefaultSearchProviderIsGoogle(service_);
@@ -277,15 +345,8 @@ class LocalNtpSource::GoogleSearchProviderTracker
 
  private:
   void OnTemplateURLServiceChanged() override {
-    bool old_is_google = is_google_;
     is_google_ = search::DefaultSearchProviderIsGoogle(service_);
-    if (is_google_ != old_is_google)
-      is_google_callback_.Run(is_google_);
-
-    const GURL old_google_base_url = google_base_url_;
     google_base_url_ = GURL(service_->search_terms_data().GoogleBaseURLValue());
-    if (google_base_url_ != old_google_base_url)
-      google_base_url_callback_.Run(google_base_url_);
   }
 
   void OnTemplateURLServiceShuttingDown() override {
@@ -294,8 +355,6 @@ class LocalNtpSource::GoogleSearchProviderTracker
   }
 
   TemplateURLService* service_;
-  SearchProviderIsGoogleChangedCallback is_google_callback_;
-  GoogleBaseUrlChangedCallback google_base_url_callback_;
 
   bool is_google_;
   GURL google_base_url_;
@@ -416,8 +475,6 @@ LocalNtpSource::LocalNtpSource(Profile* profile)
           OneGoogleBarServiceFactory::GetForProfile(profile_)),
       one_google_bar_service_observer_(this),
       logo_service_(nullptr),
-      default_search_provider_is_google_(false),
-      default_search_provider_is_google_io_thread_(false),
       weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -434,15 +491,8 @@ LocalNtpSource::LocalNtpSource(Profile* profile)
   TemplateURLService* template_url_service =
       TemplateURLServiceFactory::GetForProfile(profile_);
   if (template_url_service) {
-    google_tracker_ = base::MakeUnique<GoogleSearchProviderTracker>(
-        template_url_service,
-        base::Bind(&LocalNtpSource::DefaultSearchProviderIsGoogleChanged,
-                   base::Unretained(this)),
-        base::Bind(&LocalNtpSource::GoogleBaseUrlChanged,
-                   base::Unretained(this)));
-    DefaultSearchProviderIsGoogleChanged(
-        google_tracker_->DefaultSearchProviderIsGoogle());
-    GoogleBaseUrlChanged(google_tracker_->GetGoogleBaseUrl());
+    google_tracker_ =
+        base::MakeUnique<GoogleSearchProviderTracker>(template_url_service);
   }
 }
 
@@ -461,7 +511,8 @@ void LocalNtpSource::StartDataRequest(
   std::string stripped_path = StripParameters(path);
   if (stripped_path == kConfigDataFilename) {
     std::string config_data_js =
-        GetConfigData(default_search_provider_is_google_, google_base_url_);
+        GetConfigData(google_tracker_->DefaultSearchProviderIsGoogle(),
+                      google_tracker_->GetGoogleBaseUrl());
     callback.Run(base::RefCountedString::TakeString(&config_data_js));
     return;
   }
@@ -520,13 +571,6 @@ void LocalNtpSource::StartDataRequest(
     std::string html = ui::ResourceBundle::GetSharedInstance()
                            .GetRawDataResource(IDR_LOCAL_NTP_HTML)
                            .as_string();
-    std::string config_integrity = base::StringPrintf(
-        kIntegrityFormat,
-        GetIntegritySha256Value(
-            GetConfigData(default_search_provider_is_google_, google_base_url_))
-            .c_str());
-    base::ReplaceFirstSubstringAfterOffset(&html, 0, "{{CONFIG_INTEGRITY}}",
-                                           config_integrity);
     std::string local_ntp_integrity =
         base::StringPrintf(kIntegrityFormat, LOCAL_NTP_JS_INTEGRITY);
     base::ReplaceFirstSubstringAfterOffset(&html, 0, "{{LOCAL_NTP_INTEGRITY}}",
@@ -582,62 +626,30 @@ bool LocalNtpSource::ShouldServiceRequest(
     int render_process_id) const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-  DCHECK(url.host_piece() == chrome::kChromeSearchLocalNtpHost);
-  if (!InstantIOContext::ShouldServiceRequest(url, resource_context,
-                                              render_process_id)) {
-    return false;
-  }
-
-  if (url.SchemeIs(chrome::kChromeSearchScheme)) {
-    std::string filename;
-    webui::ParsePathAndScale(url, &filename, nullptr);
-    for (size_t i = 0; i < arraysize(kResources); ++i) {
-      if (filename == kResources[i].filename)
-        return true;
-    }
-  }
-  return false;
+  return ShouldServiceRequestIOThread(url, resource_context, render_process_id);
 }
 
 std::string LocalNtpSource::GetContentSecurityPolicyScriptSrc() const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-#if !defined(GOOGLE_CHROME_BUILD)
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kLocalNtpReload)) {
-    // While live-editing the local NTP files, turn off CSP.
-    return "script-src * 'unsafe-inline';";
-  }
-#endif  // !defined(GOOGLE_CHROME_BUILD)
-
-  return base::StringPrintf(
-      "script-src 'strict-dynamic' 'sha256-%s' 'sha256-%s' 'sha256-%s';",
-      GetIntegritySha256Value(
-          GetConfigData(default_search_provider_is_google_io_thread_,
-                        google_base_url_io_thread_))
-          .c_str(),
-      LOCAL_NTP_JS_INTEGRITY, VOICE_JS_INTEGRITY);
+  return GetContentSecurityPolicyScriptSrcIOThread();
 }
 
 std::string LocalNtpSource::GetContentSecurityPolicyChildSrc() const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-  if (one_google_bar_service_) {
-    // Allow embedding of the most visited iframe, as well as the account
-    // switcher and the notifications dropdown from the One Google Bar.
-    return base::StringPrintf("child-src %s https://*.google.com/;",
-                              chrome::kChromeSearchMostVisitedUrl);
-  }
-  // Allow embedding of the most visited iframe.
-  return base::StringPrintf("child-src %s;",
-                            chrome::kChromeSearchMostVisitedUrl);
+  return GetContentSecurityPolicyChildSrcIOThread();
 }
 
 void LocalNtpSource::OnOneGoogleBarDataUpdated() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
   ServeOneGoogleBar(one_google_bar_service_->one_google_bar_data());
 }
 
 void LocalNtpSource::OnOneGoogleBarServiceShuttingDown() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
   one_google_bar_service_observer_.RemoveAll();
   one_google_bar_service_ = nullptr;
 }
@@ -671,40 +683,6 @@ void LocalNtpSource::ServeOneGoogleBar(
     }
   }
   one_google_bar_requests_.clear();
-}
-
-void LocalNtpSource::DefaultSearchProviderIsGoogleChanged(bool is_google) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  default_search_provider_is_google_ = is_google;
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
-      base::BindOnce(
-          &LocalNtpSource::SetDefaultSearchProviderIsGoogleOnIOThread,
-          weak_ptr_factory_.GetWeakPtr(), is_google));
-}
-
-void LocalNtpSource::SetDefaultSearchProviderIsGoogleOnIOThread(
-    bool is_google) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-
-  default_search_provider_is_google_io_thread_ = is_google;
-}
-
-void LocalNtpSource::GoogleBaseUrlChanged(const GURL& google_base_url) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  google_base_url_ = google_base_url;
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&LocalNtpSource::SetGoogleBaseUrlOnIOThread,
-                     weak_ptr_factory_.GetWeakPtr(), google_base_url));
-}
-
-void LocalNtpSource::SetGoogleBaseUrlOnIOThread(const GURL& google_base_url) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-
-  google_base_url_io_thread_ = google_base_url;
 }
 
 LocalNtpSource::OneGoogleBarRequest::OneGoogleBarRequest(

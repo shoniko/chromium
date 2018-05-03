@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "media/gpu/android/codec_image.h"
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_task_environment.h"
 #include "gpu/command_buffer/service/texture_manager.h"
@@ -38,9 +39,9 @@ class CodecImageTest : public testing::Test {
   CodecImageTest() = default;
 
   void SetUp() override {
-    auto codec = base::MakeUnique<NiceMock<MockMediaCodecBridge>>();
+    auto codec = std::make_unique<NiceMock<MockMediaCodecBridge>>();
     codec_ = codec.get();
-    wrapper_ = base::MakeUnique<CodecWrapper>(
+    wrapper_ = std::make_unique<CodecWrapper>(
         CodecSurfacePair(std::move(codec), new AVDASurfaceBundle()),
         base::Bind(&base::DoNothing));
     ON_CALL(*codec_, DequeueOutputBuffer(_, _, _, _, _, _, _))
@@ -67,7 +68,7 @@ class CodecImageTest : public testing::Test {
     context_ = nullptr;
     share_group_ = nullptr;
     surface_ = nullptr;
-    gl::init::ShutdownGL();
+    gl::init::ShutdownGL(false);
     wrapper_->TakeCodecSurfacePair();
   }
 
@@ -77,11 +78,13 @@ class CodecImageTest : public testing::Test {
       CodecImage::DestructionCb destruction_cb = kNoop) {
     std::unique_ptr<CodecOutputBuffer> buffer;
     wrapper_->DequeueOutputBuffer(nullptr, nullptr, &buffer);
-    return new CodecImage(
+    scoped_refptr<CodecImage> image = new CodecImage(
         std::move(buffer), kind == kSurfaceTexture ? surface_texture_ : nullptr,
         base::BindRepeating(&PromotionHintReceiver::OnPromotionHint,
-                            base::Unretained(&promotion_hint_receiver_)),
-        std::move(destruction_cb));
+                            base::Unretained(&promotion_hint_receiver_)));
+
+    image->SetDestructionCb(std::move(destruction_cb));
+    return image;
   }
 
   base::test::ScopedTaskEnvironment scoped_task_environment_;
@@ -267,6 +270,24 @@ TEST_F(CodecImageTest, RenderToFrontBufferRestoresGLContext) {
   context = nullptr;
   share_group = nullptr;
   surface = nullptr;
+}
+
+TEST_F(CodecImageTest, ScheduleOverlayPlaneDoesntSendDuplicateHints) {
+  // SOP should send only one promotion hint unless the position changes.
+  auto i = NewImage(kOverlay);
+  // Also verify that it sends the appropriate promotion hint so that the
+  // overlay is positioned properly.
+  PromotionHintAggregator::Hint hint1(gfx::Rect(1, 2, 3, 4), true);
+  PromotionHintAggregator::Hint hint2(gfx::Rect(5, 6, 7, 8), true);
+  EXPECT_CALL(promotion_hint_receiver_, OnPromotionHint(hint1)).Times(1);
+  EXPECT_CALL(promotion_hint_receiver_, OnPromotionHint(hint2)).Times(1);
+  i->ScheduleOverlayPlane(gfx::AcceleratedWidget(), 0, gfx::OverlayTransform(),
+                          hint1.screen_rect, gfx::RectF());
+  i->ScheduleOverlayPlane(gfx::AcceleratedWidget(), 0, gfx::OverlayTransform(),
+                          hint1.screen_rect, gfx::RectF());
+  // Sending a different rectangle should send another hint.
+  i->ScheduleOverlayPlane(gfx::AcceleratedWidget(), 0, gfx::OverlayTransform(),
+                          hint2.screen_rect, gfx::RectF());
 }
 
 }  // namespace media

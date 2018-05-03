@@ -12,6 +12,7 @@ import static org.chromium.chrome.test.util.ChromeRestriction.RESTRICTION_TYPE_D
 import static org.chromium.chrome.test.util.ChromeRestriction.RESTRICTION_TYPE_DEVICE_NON_DAYDREAM;
 import static org.chromium.chrome.test.util.ChromeRestriction.RESTRICTION_TYPE_VIEWER_DAYDREAM;
 
+import android.app.Activity;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 
@@ -21,30 +22,33 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.vr_shell.mock.MockVrDaydreamApi;
 import org.chromium.chrome.browser.vr_shell.rules.ChromeTabbedActivityVrTestRule;
 import org.chromium.chrome.browser.vr_shell.util.NfcSimUtils;
 import org.chromium.chrome.browser.vr_shell.util.VrShellDelegateUtils;
 import org.chromium.chrome.browser.vr_shell.util.VrTransitionUtils;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
 
+import java.lang.ref.WeakReference;
+import java.util.List;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * End-to-end tests for state transitions in VR, e.g. exiting WebVR presentation
  * into the VR browser.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG, "enable-features=VrShell"})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class VrShellTransitionTest {
     // We explicitly instantiate a rule here instead of using parameterization since this class
     // only ever runs in ChromeTabbedActivity.
@@ -127,6 +131,54 @@ public class VrShellTransitionTest {
     }
 
     /**
+     * Verifies that browser successfully transitions from 2D chrome to the VR
+     * browser when Chrome gets a VR intent.
+     */
+    @Test
+    @Restriction(RESTRICTION_TYPE_DEVICE_DAYDREAM)
+    @MediumTest
+    @CommandLineFlags.Add("enable-features=VrLaunchIntents")
+    public void testVrIntentStartsVrShell() {
+        // Send a VR intent, which will open the link in a CTA.
+        String url = VrTestFramework.getHtmlTestFile("test_navigation_2d_page");
+        VrTransitionUtils.sendVrLaunchIntent(
+                url, mVrTestRule.getActivity(), false /* autopresent */);
+
+        // Wait until a CTA is opened due to the intent
+        final AtomicReference<ChromeTabbedActivity> cta =
+                new AtomicReference<ChromeTabbedActivity>();
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                List<WeakReference<Activity>> list = ApplicationStatus.getRunningActivities();
+                for (WeakReference<Activity> ref : list) {
+                    Activity activity = ref.get();
+                    if (activity == null) continue;
+                    if (activity instanceof ChromeTabbedActivity) {
+                        cta.set((ChromeTabbedActivity) activity);
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }, POLL_TIMEOUT_LONG_MS, POLL_CHECK_INTERVAL_SHORT_MS);
+
+        // Wait until the tab is ready
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                if (cta.get().getActivityTab() == null) return false;
+                return !cta.get().getActivityTab().isLoading();
+            }
+        }, POLL_TIMEOUT_LONG_MS, POLL_CHECK_INTERVAL_SHORT_MS);
+
+        VrTransitionUtils.waitForVrEntry(POLL_TIMEOUT_LONG_MS);
+        Assert.assertTrue(VrShellDelegate.isInVr());
+        Assert.assertEquals("Url correct", url,
+                mVrTestRule.getActivity().getActivityTab().getWebContents().getVisibleUrl());
+    }
+
+    /**
      * Verifies that browser does not enter VR mode on Non-Daydream-ready devices.
      */
     @Test
@@ -199,5 +251,37 @@ public class VrShellTransitionTest {
         // We aren't comparing for equality because there is some rounding that occurs.
         Assert.assertTrue(VrTestFramework.pollJavaScriptBoolean(
                 javascript, POLL_TIMEOUT_LONG_MS, mVrTestFramework.getFirstTabWebContents()));
+    }
+
+    /**
+     * Tests that entering WebVR presentation from the VR browser, exiting presentation, and
+     * re-entering presentation works. This is a regression test for crbug.com/799999.
+     */
+    @Test
+    @CommandLineFlags.Add("enable-webvr")
+    @Restriction(RESTRICTION_TYPE_VIEWER_DAYDREAM)
+    @MediumTest
+    public void testWebVrReEntryFromVrBrowser() throws InterruptedException, TimeoutException {
+        VrTransitionUtils.forceEnterVr();
+        VrTransitionUtils.waitForVrEntry(POLL_TIMEOUT_LONG_MS);
+        EmulatedVrController controller = new EmulatedVrController(mVrTestRule.getActivity());
+
+        mVrTestFramework.loadUrlAndAwaitInitialization(
+                VrTestFramework.getHtmlTestFile("test_webvr_reentry_from_vr_browser"),
+                PAGE_LOAD_TIMEOUT_S);
+        VrTransitionUtils.enterPresentationOrFail(mVrTestFramework.getFirstTabCvc());
+
+        VrTestFramework.executeStepAndWait(
+                "stepVerifyFirstPresent()", mVrTestFramework.getFirstTabWebContents());
+        // The bug does not reproduce with vrDisplay.exitPresent(), so use the controller to exit.
+        controller.pressReleaseAppButton();
+        VrTestFramework.executeStepAndWait(
+                "stepVerifyMagicWindow()", mVrTestFramework.getFirstTabWebContents());
+
+        VrTransitionUtils.enterPresentationOrFail(mVrTestFramework.getFirstTabCvc());
+        VrTestFramework.executeStepAndWait(
+                "stepVerifySecondPresent()", mVrTestFramework.getFirstTabWebContents());
+
+        VrTestFramework.endTest(mVrTestFramework.getFirstTabWebContents());
     }
 }

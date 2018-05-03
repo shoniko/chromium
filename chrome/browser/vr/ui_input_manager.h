@@ -8,9 +8,11 @@
 #include <memory>
 #include <vector>
 
+#include "base/time/time.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/vector3d_f.h"
+#include "ui/gfx/transform.h"
 
 namespace blink {
 class WebGestureEvent;
@@ -20,6 +22,9 @@ namespace vr {
 
 class UiScene;
 class UiElement;
+struct ControllerModel;
+struct ReticleModel;
+struct TextInputInfo;
 
 using GestureList = std::vector<std::unique_ptr<blink::WebGestureEvent>>;
 
@@ -30,18 +35,37 @@ class UiInputManager {
   enum ButtonState {
     UP,       // The button is released.
     DOWN,     // The button is pressed.
-    CLICKED,  // Since the last update the button has been pressed and released.
-              // The button is released now.
   };
+
+  // When testing, it can be useful to hit test directly along the laser.
+  // Updating the strategy permits this behavior, but it should not be used in
+  // production. In production, we hit test along a ray that extends from the
+  // world origin to a point far along the laser.
+  enum HitTestStrategy {
+    PROJECT_TO_WORLD_ORIGIN,
+    PROJECT_TO_LASER_ORIGIN_FOR_TEST,
+  };
+
   explicit UiInputManager(UiScene* scene);
   ~UiInputManager();
   // TODO(tiborg): Use generic gesture type instead of blink::WebGestureEvent.
-  void HandleInput(const gfx::Vector3dF& laser_direction,
-                   const gfx::Point3F& laser_origin,
-                   ButtonState button_state,
-                   GestureList* gesture_list,
-                   gfx::Point3F* out_target_point,
-                   UiElement** out_reticle_render_target);
+  void HandleInput(base::TimeTicks current_time,
+                   const ControllerModel& controller_model,
+                   ReticleModel* reticle_model,
+                   GestureList* gesture_list);
+
+  // Text input related.
+  void RequestFocus(int element_id);
+  void RequestUnfocus(int element_id);
+  void OnInputEdited(const TextInputInfo& info);
+  void OnInputCommitted(const TextInputInfo& info);
+  void OnKeyboardHidden();
+
+  bool controller_quiescent() const { return controller_quiescent_; }
+
+  void set_hit_test_strategy(HitTestStrategy strategy) {
+    hit_test_strategy_ = strategy;
+  }
 
  private:
   void SendFlingCancel(GestureList* gesture_list,
@@ -54,35 +78,38 @@ class UiInputManager {
                        const gfx::PointF& target_point);
   void SendScrollUpdate(GestureList* gesture_list,
                         const gfx::PointF& target_point);
-  void SendHoverLeave(UiElement* target);
-  bool SendHoverEnter(UiElement* target, const gfx::PointF& target_point);
-  void SendHoverMove(const gfx::PointF& target_point);
+
+  void SendHoverEvents(UiElement* target, const gfx::PointF& target_point);
+  void SendMove(UiElement* element, const gfx::PointF& target_point);
   void SendButtonDown(UiElement* target,
                       const gfx::PointF& target_point,
                       ButtonState button_state);
-  void SendButtonUp(UiElement* target,
-                    const gfx::PointF& target_point,
-                    ButtonState button_state);
-  void GetVisualTargetElement(const gfx::Vector3dF& laser_direction,
-                              const gfx::Point3F& laser_origin,
-                              gfx::Vector3dF* out_eye_to_target,
-                              gfx::Point3F* out_target_point,
-                              UiElement** out_target_element,
-                              gfx::PointF* out_target_local_point) const;
+  bool SendButtonUp(const gfx::PointF& target_point, ButtonState button_state);
+  void GetVisualTargetElement(const ControllerModel& controller_model,
+                              ReticleModel* reticle_model) const;
+  void UpdateQuiescenceState(base::TimeTicks current_time,
+                             const ControllerModel& controller_model);
+
+  void UnfocusFocusedElement();
 
   UiScene* scene_;
-  // TODO(mthiesse): We need to handle elements being removed, and update this
-  // state appropriately.
-  UiElement* hover_target_ = nullptr;
+  int hover_target_id_ = 0;
   // TODO(mthiesse): We shouldn't have a fling target. Elements should fling
   // independently and we should only cancel flings on the relevant element
   // when we do cancel flings.
-  UiElement* fling_target_ = nullptr;
-  UiElement* input_locked_element_ = nullptr;
+  int fling_target_id_ = 0;
+  int input_capture_element_id_ = 0;
+  int focused_element_id_ = 0;
   bool in_click_ = false;
   bool in_scroll_ = false;
 
+  HitTestStrategy hit_test_strategy_ = HitTestStrategy::PROJECT_TO_WORLD_ORIGIN;
+
   ButtonState previous_button_state_ = ButtonState::UP;
+
+  base::TimeTicks last_significant_controller_update_time_;
+  gfx::Transform last_significant_controller_transform_;
+  bool controller_quiescent_ = false;
 };
 
 }  // namespace vr

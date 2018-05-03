@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/safe_browsing/db/database_manager.h"
@@ -341,5 +342,86 @@ INSTANTIATE_TEST_CASE_P(,
                         ::testing::Values(SecondaryUiMd::ENABLED,
                                           SecondaryUiMd::DISABLED),
                         &SecondaryUiMdStatusToString);
+
+// Class for testing interactive dialogs.
+class DownloadDangerPromptBrowserTest : public DialogBrowserTest {
+ protected:
+  enum InvocationType { USER_INITIATED, FROM_DOWNLOAD_API };
+  DownloadDangerPromptBrowserTest() : download_url_(kTestDownloadUrl) {}
+
+  void RunTest(content::DownloadDangerType danger_type,
+               InvocationType invocation_type) {
+    danger_type_ = danger_type;
+    invocation_type_ = invocation_type;
+
+    ShowAndVerifyUi();
+  }
+
+ private:
+  void ShowUi(const std::string& name) override {
+    ON_CALL(download_, GetURL()).WillByDefault(ReturnRef(download_url_));
+    ON_CALL(download_, GetReferrerUrl())
+        .WillByDefault(ReturnRef(GURL::EmptyGURL()));
+    ON_CALL(download_, GetBrowserContext())
+        .WillByDefault(Return(browser()->profile()));
+    ON_CALL(download_, GetTargetFilePath())
+        .WillByDefault(ReturnRef(empty_file_path_));
+    ON_CALL(download_, IsDangerous()).WillByDefault(Return(true));
+    ON_CALL(download_, GetFileNameToReportUser())
+        .WillByDefault(Return(base::FilePath(FILE_PATH_LITERAL("evil.exe"))));
+
+    // Set up test-specific parameters
+    ON_CALL(download_, GetDangerType()).WillByDefault(Return(danger_type_));
+
+    DownloadDangerPrompt::Create(
+        &download_, browser()->tab_strip_model()->GetActiveWebContents(),
+        invocation_type_ == FROM_DOWNLOAD_API, DownloadDangerPrompt::OnDone());
+  }
+
+  const GURL download_url_;
+  const base::FilePath empty_file_path_;
+
+  content::DownloadDangerType danger_type_;
+  InvocationType invocation_type_;
+  content::MockDownloadItem download_;
+
+  DISALLOW_COPY_AND_ASSIGN(DownloadDangerPromptBrowserTest);
+};
+
+IN_PROC_BROWSER_TEST_F(DownloadDangerPromptBrowserTest,
+                       InvokeUi_DangerousFile) {
+  RunTest(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE, USER_INITIATED);
+}
+IN_PROC_BROWSER_TEST_F(DownloadDangerPromptBrowserTest,
+                       InvokeUi_DangerousFileFromApi) {
+  RunTest(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE, FROM_DOWNLOAD_API);
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadDangerPromptBrowserTest, InvokeUi_DangerousUrl) {
+  RunTest(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL, USER_INITIATED);
+}
+IN_PROC_BROWSER_TEST_F(DownloadDangerPromptBrowserTest,
+                       InvokeUi_DangerousUrlFromApi) {
+  RunTest(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL, FROM_DOWNLOAD_API);
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadDangerPromptBrowserTest,
+                       InvokeUi_UncommonContent) {
+  RunTest(content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT, USER_INITIATED);
+}
+IN_PROC_BROWSER_TEST_F(DownloadDangerPromptBrowserTest,
+                       InvokeUi_UncommonContentFromApi) {
+  RunTest(content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT, FROM_DOWNLOAD_API);
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadDangerPromptBrowserTest,
+                       InvokeUi_PotentiallyUnwanted) {
+  RunTest(content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED, USER_INITIATED);
+}
+IN_PROC_BROWSER_TEST_F(DownloadDangerPromptBrowserTest,
+                       InvokeUi_PotentiallyUnwantedFromApi) {
+  RunTest(content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED,
+          FROM_DOWNLOAD_API);
+}
 
 }  // namespace safe_browsing

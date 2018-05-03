@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
 #import "ios/chrome/browser/sessions/session_window_ios.h"
 #import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
@@ -28,7 +27,7 @@ namespace {
 class SerializableTestWebState : public web::TestWebState {
  public:
   static std::unique_ptr<web::WebState> Create() {
-    return base::MakeUnique<SerializableTestWebState>();
+    return std::make_unique<SerializableTestWebState>();
   }
 
   static std::unique_ptr<web::WebState> CreateWithSessionStorage(
@@ -144,5 +143,5 @@ TEST_F(WebStateListSerializationTest, SerializationRoundTrip) {
 
   // Verify that the WebUsageEnabled bit is left to default value.
   for (int i = 0; i < restored_web_state_list.count(); ++i)
-    EXPECT_FALSE(restored_web_state_list.GetWebStateAt(i)->IsWebUsageEnabled());
+    EXPECT_TRUE(restored_web_state_list.GetWebStateAt(i)->IsWebUsageEnabled());
 }

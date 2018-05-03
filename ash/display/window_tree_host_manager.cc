@@ -33,6 +33,7 @@
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
+#include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tracker.h"
@@ -40,6 +41,7 @@
 #include "ui/base/class_property.h"
 #include "ui/base/ime/input_method_factory.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/ui_base_switches_util.h"
 #include "ui/compositor/compositor.h"
 #include "ui/display/display.h"
 #include "ui/display/display_layout.h"
@@ -94,6 +96,11 @@ void ClearDisplayPropertiesOnHost(AshWindowTreeHost* ash_host) {
 aura::Window* GetWindow(AshWindowTreeHost* ash_host) {
   CHECK(ash_host->AsWindowTreeHost());
   return ash_host->AsWindowTreeHost()->window();
+}
+
+bool ShouldUpdateMirrorWindowController() {
+  return aura::Env::GetInstance()->mode() == aura::Env::Mode::LOCAL ||
+         !::switches::IsMusHostingViz();
 }
 
 }  // namespace
@@ -178,7 +185,7 @@ WindowTreeHostManager::WindowTreeHostManager()
   primary_display_id = display::kInvalidDisplayId;
 }
 
-WindowTreeHostManager::~WindowTreeHostManager() {}
+WindowTreeHostManager::~WindowTreeHostManager() = default;
 
 void WindowTreeHostManager::Start() {
   display::Screen::GetScreen()->AddObserver(this);
@@ -277,7 +284,10 @@ aura::Window* WindowTreeHostManager::GetRootWindowForDisplayId(int64_t id) {
 AshWindowTreeHost* WindowTreeHostManager::GetAshWindowTreeHostForDisplayId(
     int64_t display_id) {
   const auto host = window_tree_hosts_.find(display_id);
-  return host == window_tree_hosts_.end() ? nullptr : host->second;
+  if (host != window_tree_hosts_.end())
+    return host->second;
+  return mirror_window_controller_->GetAshWindowTreeHostForDisplayId(
+      display_id);
 }
 
 aura::Window::Windows WindowTreeHostManager::GetAllRootWindows() {
@@ -459,7 +469,14 @@ void WindowTreeHostManager::UpdateMouseLocationAfterDisplayChange() {
   if (target_location_in_native !=
           cursor_location_in_native_coords_for_restore_ ||
       target_display_id != cursor_display_id_for_restore_) {
-    dst_root_window->MoveCursorTo(target_location_in_root);
+    // TODO(oshima): Moving the cursor was necessary for x11, but We
+    // probably do not have to do this any more on ozone.  Consider
+    // just notifying the cursor location change.
+    if (Shell::Get()->cursor_manager() &&
+        Shell::Get()->cursor_manager()->IsCursorVisible()) {
+      dst_root_window->MoveCursorTo(target_location_in_root);
+    }
+
   } else if (target_location_in_screen !=
              cursor_location_in_screen_coords_for_restore_) {
     // The cursor's native position did not change but its screen position did
@@ -493,8 +510,8 @@ void WindowTreeHostManager::OnDisplayAdded(const display::Display& display) {
   // create new WTH for primary display instead of reusing.
   if (primary_tree_host_for_replace_ &&
       (GetRootWindowSettings(GetWindow(primary_tree_host_for_replace_))
-               ->display_id == display::DisplayManager::kUnifiedDisplayId ||
-       display.id() == display::DisplayManager::kUnifiedDisplayId)) {
+               ->display_id == display::kUnifiedDisplayId ||
+       display.id() == display::kUnifiedDisplayId)) {
     DCHECK_EQ(display::kInvalidDisplayId, primary_display_id);
     primary_display_id = display.id();
 
@@ -649,7 +666,9 @@ void WindowTreeHostManager::OnHostResized(aura::WindowTreeHost* host) {
   display::DisplayManager* display_manager = GetDisplayManager();
   if (display_manager->UpdateDisplayBounds(display.id(),
                                            host->GetBoundsInPixels())) {
-    mirror_window_controller_->UpdateWindow();
+    // The window server controls mirroring in Mus, not Ash.
+    if (ShouldUpdateMirrorWindowController())
+      mirror_window_controller_->UpdateWindow();
     cursor_window_controller_->UpdateContainer();
   }
 }
@@ -658,7 +677,9 @@ void WindowTreeHostManager::CreateOrUpdateMirroringDisplay(
     const display::DisplayInfoList& info_list) {
   if (GetDisplayManager()->IsInMirrorMode() ||
       GetDisplayManager()->IsInUnifiedMode()) {
-    mirror_window_controller_->UpdateWindow(info_list);
+    // The window server controls mirroring in Mus, not Ash.
+    if (ShouldUpdateMirrorWindowController())
+      mirror_window_controller_->UpdateWindow(info_list);
     cursor_window_controller_->UpdateContainer();
   } else {
     NOTREACHED();
@@ -666,7 +687,9 @@ void WindowTreeHostManager::CreateOrUpdateMirroringDisplay(
 }
 
 void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
-  mirror_window_controller_->CloseIfNotNecessary();
+  // The window server controls mirroring in Mus, not Ash.
+  if (ShouldUpdateMirrorWindowController())
+    mirror_window_controller_->CloseIfNotNecessary();
   // If cursor_compositing is enabled for large cursor, the cursor window is
   // always on the desktop display (the visible cursor on the non-desktop
   // display is drawn through compositor mirroring). Therefore, it's unnecessary
@@ -702,8 +725,7 @@ void WindowTreeHostManager::PostDisplayConfigurationChange() {
     display::DisplayIdList list = display_manager->GetCurrentDisplayIdList();
     const display::DisplayLayout& layout =
         layout_store->GetRegisteredDisplayLayout(list);
-    layout_store->UpdateMultiDisplayState(
-        list, display_manager->IsInMirrorMode(), layout.default_unified);
+    layout_store->UpdateDefaultUnified(list, layout.default_unified);
     if (display::Screen::GetScreen()->GetNumDisplays() > 1) {
       SetPrimaryDisplayId(layout.primary_id == display::kInvalidDisplayId
                               ? list[0]
@@ -725,6 +747,11 @@ void WindowTreeHostManager::PostDisplayConfigurationChange() {
   for (auto& observer : observers_)
     observer.OnDisplayConfigurationChanged();
   UpdateMouseLocationAfterDisplayChange();
+
+  // Enable cursor compositing, so that cursor could be mirrored to destination
+  // displays along with other display content through reflector.
+  if (display_manager->is_multi_mirroring_enabled())
+    Shell::Get()->UpdateCursorCompositingEnabled();
 }
 
 display::DisplayConfigurator* WindowTreeHostManager::display_configurator() {
@@ -756,8 +783,10 @@ AshWindowTreeHost* WindowTreeHostManager::AddWindowTreeHostForDisplay(
       GetDisplayManager()->GetDisplayInfo(display.id());
   AshWindowTreeHostInitParams params_with_bounds(init_params);
   params_with_bounds.initial_bounds = display_info.bounds_in_native();
-  params_with_bounds.offscreen =
-      display.id() == display::DisplayManager::kUnifiedDisplayId;
+  if (display.id() == display::kUnifiedDisplayId) {
+    params_with_bounds.offscreen = true;
+    params_with_bounds.mirroring_delegate = mirror_window_controller();
+  }
   params_with_bounds.display_id = display.id();
   params_with_bounds.device_scale_factor = display.device_scale_factor();
   params_with_bounds.ui_scale_factor = display_info.configured_ui_scale();

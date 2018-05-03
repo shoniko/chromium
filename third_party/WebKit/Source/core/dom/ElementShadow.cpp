@@ -57,18 +57,16 @@ ShadowRoot& ElementShadow::AddShadowRoot(Element& shadow_host,
   EventDispatchForbiddenScope assert_no_event_dispatch;
   ScriptForbiddenScope forbid_script;
 
-  if (type == ShadowRootType::V0 && shadow_root_) {
-    DCHECK_EQ(shadow_root_->GetType(), ShadowRootType::V0);
-    Deprecation::CountDeprecation(shadow_host.GetDocument(),
-                                  WebFeature::kElementCreateShadowRootMultiple);
-  }
+  // Multiple ShadowRoots are removed.
+  // TODO(kochi): Further cleanup of unnecessary code for multiple shadow.
+  DCHECK(!shadow_root_);
 
   if (shadow_root_) {
     // TODO(hayato): Is the order, from the youngest to the oldest, important?
     for (ShadowRoot* root = &YoungestShadowRoot(); root;
          root = root->OlderShadowRoot())
       root->LazyReattachIfAttached();
-  } else if (type == ShadowRootType::V0 || type == ShadowRootType::kUserAgent) {
+  } else if (type == ShadowRootType::V0) {
     DCHECK(!element_shadow_v0_);
     element_shadow_v0_ = ElementShadowV0::Create(*this);
   }
@@ -109,7 +107,6 @@ void ElementShadow::AppendShadowRoot(ShadowRoot& shadow_root) {
 
 void ElementShadow::Attach(const Node::AttachContext& context) {
   Node::AttachContext children_context(context);
-  children_context.resolved_style = nullptr;
 
   for (ShadowRoot* root = &YoungestShadowRoot(); root;
        root = root->OlderShadowRoot()) {
@@ -120,14 +117,22 @@ void ElementShadow::Attach(const Node::AttachContext& context) {
 
 void ElementShadow::Detach(const Node::AttachContext& context) {
   Node::AttachContext children_context(context);
-  children_context.resolved_style = nullptr;
+  children_context.clear_invalidation = true;
 
   for (ShadowRoot* root = &YoungestShadowRoot(); root;
        root = root->OlderShadowRoot())
     root->DetachLayoutTree(children_context);
 }
 
+void ElementShadow::SetNeedsDistributionRecalcWillBeSetNeedsAssignmentRecalc() {
+  if (RuntimeEnabledFeatures::IncrementalShadowDOMEnabled() && IsV1())
+    YoungestShadowRoot().SetNeedsAssignmentRecalc();
+  else
+    SetNeedsDistributionRecalc();
+}
+
 void ElementShadow::SetNeedsDistributionRecalc() {
+  DCHECK(!(RuntimeEnabledFeatures::IncrementalShadowDOMEnabled() && IsV1()));
   if (needs_distribution_recalc_)
     return;
   needs_distribution_recalc_ = true;

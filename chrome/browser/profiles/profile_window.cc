@@ -45,8 +45,8 @@
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/signin_pref_names.h"
-#include "components/signin/core/common/signin_switches.h"
+#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/signin/core/browser/signin_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/features/features.h"
 #include "net/base/escape.h"
@@ -88,7 +88,7 @@ void UnblockExtensions(Profile* profile) {
 
 // Handles running a callback when a new Browser for the given profile
 // has been completely created.
-class BrowserAddedForProfileObserver : public chrome::BrowserListObserver {
+class BrowserAddedForProfileObserver : public BrowserListObserver {
  public:
   BrowserAddedForProfileObserver(
       Profile* profile,

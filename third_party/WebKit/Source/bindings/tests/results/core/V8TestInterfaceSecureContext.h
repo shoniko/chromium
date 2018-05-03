@@ -42,7 +42,14 @@ class V8TestInterfaceSecureContext {
     visitor->TraceWrappersFromGeneratedCode(scriptWrappable->ToImpl<TestInterfaceSecureContext>());
   }
   static const int internalFieldCount = kV8DefaultWrapperInternalFieldCount;
-  CORE_EXPORT static void preparePrototypeAndInterfaceObject(v8::Local<v8::Context>, const DOMWrapperWorld&, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate);
+
+  CORE_EXPORT static void InstallConditionalFeatures(
+      v8::Local<v8::Context>,
+      const DOMWrapperWorld&,
+      v8::Local<v8::Object> instanceObject,
+      v8::Local<v8::Object> prototypeObject,
+      v8::Local<v8::Function> interfaceObject,
+      v8::Local<v8::FunctionTemplate> interfaceTemplate);
 
   // Callback functions
 
@@ -75,6 +82,7 @@ class V8TestInterfaceSecureContext {
 template <>
 struct NativeValueTraits<TestInterfaceSecureContext> : public NativeValueTraitsBase<TestInterfaceSecureContext> {
   CORE_EXPORT static TestInterfaceSecureContext* NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+  CORE_EXPORT static TestInterfaceSecureContext* NullValue() { return nullptr; }
 };
 
 template <>

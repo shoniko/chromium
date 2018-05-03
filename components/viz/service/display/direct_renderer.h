@@ -26,7 +26,6 @@
 namespace cc {
 class FilterOperations;
 class OutputSurface;
-class ScopedResource;
 }  // namespace cc
 
 namespace gfx {
@@ -57,7 +56,6 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   void SetVisible(bool visible);
   void DecideRenderPassAllocationsForFrame(
       const RenderPassList& render_passes_in_draw_order);
-  bool HasAllocatedResourcesForTesting(RenderPassId render_pass_id) const;
   void DrawFrame(RenderPassList* render_passes_in_draw_order,
                  float device_scale_factor,
                  const gfx::Size& device_viewport_size);
@@ -68,22 +66,14 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   virtual void DidReceiveTextureInUseResponses(
       const gpu::TextureInUseResponses& responses) {}
 
-  // Allow tests to enlarge the texture size of non-root render passes to
-  // verify cases where the texture doesn't match the render pass size.
-  void SetEnlargePassTextureAmountForTesting(const gfx::Size& amount) {
-    enlarge_pass_texture_amount_ = amount;
-  }
-
   // Public for tests that poke at internals.
   struct VIZ_SERVICE_EXPORT DrawingFrame {
     DrawingFrame();
     ~DrawingFrame();
-    gfx::Rect ComputeScissorRectForRenderPass() const;
 
     const RenderPassList* render_passes_in_draw_order = nullptr;
     const RenderPass* root_render_pass = nullptr;
     const RenderPass* current_render_pass = nullptr;
-    const cc::ScopedResource* current_texture = nullptr;
 
     gfx::Rect root_damage_rect;
     std::vector<gfx::Rect> root_content_bounds;
@@ -97,8 +87,13 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
     DCLayerOverlayList dc_layer_overlay_list;
   };
 
-  void DisableColorChecksForTesting() {
-    disable_color_checks_for_testing_ = true;
+  void SetCurrentFrameForTesting(const DrawingFrame& frame);
+  bool HasAllocatedResourcesForTesting(
+      const RenderPassId& render_pass_id) const;
+  // Allow tests to enlarge the texture size of non-root render passes to
+  // verify cases where the texture doesn't match the render pass size.
+  void SetEnlargePassTextureAmountForTesting(const gfx::Size& amount) {
+    enlarge_pass_texture_amount_ = amount;
   }
 
  protected:
@@ -108,6 +103,11 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
     SURFACE_INITIALIZATION_MODE_PRESERVE,
     SURFACE_INITIALIZATION_MODE_SCISSORED_CLEAR,
     SURFACE_INITIALIZATION_MODE_FULL_SURFACE_CLEAR,
+  };
+
+  struct RenderPassRequirements {
+    gfx::Size size;
+    bool mipmap = false;
   };
 
   static gfx::RectF QuadVertexRect();
@@ -131,9 +131,7 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
                       const gfx::Rect& render_pass_scissor);
   void SetScissorTestRectInDrawSpace(const gfx::Rect& draw_space_rect);
 
-  static gfx::Size RenderPassTextureSize(const RenderPass* render_pass);
-  static cc::ResourceProvider::TextureHint RenderPassTextureHint(
-      const RenderPass* render_pass);
+  gfx::Size RenderPassTextureSize(const RenderPass* render_pass);
 
   void FlushPolygons(
       base::circular_deque<std::unique_ptr<DrawPolygon>>* poly_list,
@@ -141,7 +139,13 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
       bool use_render_pass_scissor);
   void DrawRenderPassAndExecuteCopyRequests(RenderPass* render_pass);
   void DrawRenderPass(const RenderPass* render_pass);
-  bool UseRenderPass(const RenderPass* render_pass);
+  // Returns true if it detects that we do not need to draw the render pass.
+  // This may be because the RenderPass is already cached, or because it is
+  // entirely clipped out, for instance.
+  bool CanSkipRenderPass(const RenderPass* render_pass) const;
+  void UseRenderPass(const RenderPass* render_pass);
+  gfx::Rect ComputeScissorRectForRenderPass(
+      const RenderPass* render_pass) const;
 
   void DoDrawPolygon(const DrawPolygon& poly,
                      const gfx::Rect& render_pass_scissor,
@@ -153,9 +157,19 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
 
   // Private interface implemented by subclasses for use by DirectRenderer.
   virtual bool CanPartialSwap() = 0;
-  virtual ResourceFormat BackbufferFormat() const = 0;
+  virtual void UpdateRenderPassTextures(
+      const RenderPassList& render_passes_in_draw_order,
+      const base::flat_map<RenderPassId, RenderPassRequirements>&
+          render_passes_in_frame) = 0;
+  virtual void AllocateRenderPassResourceIfNeeded(
+      const RenderPassId& render_pass_id,
+      const RenderPassRequirements& requirements) = 0;
+  virtual bool IsRenderPassResourceAllocated(
+      const RenderPassId& render_pass_id) const = 0;
+  virtual gfx::Size GetRenderPassTextureSize(
+      const RenderPassId& render_pass_id) = 0;
   virtual void BindFramebufferToOutputSurface() = 0;
-  virtual bool BindFramebufferToTexture(const cc::ScopedResource* resource) = 0;
+  virtual void BindFramebufferToTexture(const RenderPassId render_pass_id) = 0;
   virtual void SetScissorTestRect(const gfx::Rect& scissor_rect) = 0;
   virtual void PrepareSurfaceForPass(
       SurfaceInitializationMode initialization_mode,
@@ -207,9 +221,6 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   // DirectComposition layers needed to be used.
   int frames_since_using_dc_layers_ = 0;
 
-  // A map from RenderPass id to the texture used to draw the RenderPass from.
-  base::flat_map<RenderPassId, std::unique_ptr<cc::ScopedResource>>
-      render_pass_textures_;
   // A map from RenderPass id to the single quad present in and replacing the
   // RenderPass.
   base::flat_map<RenderPassId, TileDrawQuad> render_pass_bypass_quads_;
@@ -240,8 +251,6 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
     DCHECK(current_frame_valid_);
     return &current_frame_;
   }
-
-  void SetCurrentFrameForTesting(const DrawingFrame& frame);
 
  private:
   bool initialized_ = false;

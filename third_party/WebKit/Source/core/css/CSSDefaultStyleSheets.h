@@ -24,6 +24,7 @@
 #ifndef CSSDefaultStyleSheets_h
 #define CSSDefaultStyleSheets_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
@@ -37,7 +38,6 @@ class StyleSheetContents;
 
 class CSSDefaultStyleSheets
     : public GarbageCollectedFinalized<CSSDefaultStyleSheets> {
-  WTF_MAKE_NONCOPYABLE(CSSDefaultStyleSheets);
 
  public:
   CORE_EXPORT static CSSDefaultStyleSheets& Instance();
@@ -65,11 +65,13 @@ class CSSDefaultStyleSheets
     return fullscreen_style_sheet_.Get();
   }
 
+  void PrepareForLeakDetection();
+
   // Media Controls UA stylesheet loading is handled by the media_controls
   // module.
   class CORE_EXPORT UAStyleSheetLoader {
    public:
-    UAStyleSheetLoader(){};
+    UAStyleSheetLoader() = default;
     virtual ~UAStyleSheetLoader() = default;
     virtual String GetUAStyleSheet() = 0;
 
@@ -85,6 +87,7 @@ class CSSDefaultStyleSheets
 
  private:
   CSSDefaultStyleSheets();
+  void InitializeDefaultStyles();
 
   Member<RuleSet> default_style_;
   Member<RuleSet> default_quirks_style_;
@@ -102,6 +105,7 @@ class CSSDefaultStyleSheets
   Member<StyleSheetContents> fullscreen_style_sheet_;
 
   std::unique_ptr<UAStyleSheetLoader> media_controls_style_sheet_loader_;
+  DISALLOW_COPY_AND_ASSIGN(CSSDefaultStyleSheets);
 };
 
 }  // namespace blink

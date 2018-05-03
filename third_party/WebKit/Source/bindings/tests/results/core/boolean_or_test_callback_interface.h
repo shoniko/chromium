@@ -14,13 +14,14 @@
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/NativeValueTraits.h"
+#include "bindings/core/v8/Nullable.h"
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class TestCallbackInterface;
+class V8TestCallbackInterface;
 
 class CORE_EXPORT BooleanOrTestCallbackInterface final {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
@@ -34,9 +35,9 @@ class CORE_EXPORT BooleanOrTestCallbackInterface final {
   static BooleanOrTestCallbackInterface FromBoolean(bool);
 
   bool IsTestCallbackInterface() const { return type_ == SpecificType::kTestCallbackInterface; }
-  TestCallbackInterface* GetAsTestCallbackInterface() const;
-  void SetTestCallbackInterface(TestCallbackInterface*);
-  static BooleanOrTestCallbackInterface FromTestCallbackInterface(TestCallbackInterface*);
+  V8TestCallbackInterface* GetAsTestCallbackInterface() const;
+  void SetTestCallbackInterface(V8TestCallbackInterface*);
+  static BooleanOrTestCallbackInterface FromTestCallbackInterface(V8TestCallbackInterface*);
 
   BooleanOrTestCallbackInterface(const BooleanOrTestCallbackInterface&);
   ~BooleanOrTestCallbackInterface();
@@ -52,7 +53,7 @@ class CORE_EXPORT BooleanOrTestCallbackInterface final {
   SpecificType type_;
 
   bool boolean_;
-  Member<TestCallbackInterface> test_callback_interface_;
+  Member<V8TestCallbackInterface> test_callback_interface_;
 
   friend CORE_EXPORT v8::Local<v8::Value> ToV8(const BooleanOrTestCallbackInterface&, v8::Local<v8::Object>, v8::Isolate*);
 };
@@ -77,6 +78,7 @@ inline void V8SetReturnValue(const CallbackInfo& callbackInfo, BooleanOrTestCall
 template <>
 struct NativeValueTraits<BooleanOrTestCallbackInterface> : public NativeValueTraitsBase<BooleanOrTestCallbackInterface> {
   CORE_EXPORT static BooleanOrTestCallbackInterface NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+  CORE_EXPORT static BooleanOrTestCallbackInterface NullValue() { return BooleanOrTestCallbackInterface(); }
 };
 
 template <>

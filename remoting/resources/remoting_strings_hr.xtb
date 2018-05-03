@@ -102,6 +102,7 @@ Informacije o privatnosti potražite u Googleovim pravilima o privatnosti (http:
 <translation id="3106379468611574572">Udaljeno računalo ne odgovara na zahtjev za povezivanje. Provjerite je li na mreži i pokušajte ponovo.</translation>
 <translation id="310979712355504754">Izbriši sve</translation>
 <translation id="3150823315463303127">Host nije uspio pročitati pravila.</translation>
+<translation id="3171922709365450819">Klijent ne podržava taj uređaj jer je potrebna autentifikacija treće strane.</translation>
 <translation id="3194245623920924351">Udaljena radna površina Chrome</translation>
 <translation id="3197730452537982411">Udaljena radna površina</translation>
 <translation id="324272851072175193">Pošalji te upute e-poštom</translation>
@@ -337,6 +338,7 @@ PC</translation>
 <translation id="8998327464021325874">Kontroler Udaljene radne površine Chrome</translation>
 <translation id="9016232822027372900">Svejedno poveži</translation>
 <translation id="906458777597946297">Maksimiziranje prozora</translation>
+<translation id="9111855907838866522">Povezani ste s udaljenim uređajem. Da biste otvorili izbornik, prstima dodirnite zaslon.</translation>
 <translation id="9126115402994542723">Nemoj ponovo tražiti PIN prilikom povezivanja s tim hostom s ovog uređaja.</translation>
 <translation id="9149580767411232853">Zadrži cijelu udaljenu radnu površinu vidljivom</translation>
 <translation id="9149992051684092333">Da biste započeli dijeliti radnu površinu, pošaljite pristupni kôd u nastavku osobi koja će vam pomagati.</translation>

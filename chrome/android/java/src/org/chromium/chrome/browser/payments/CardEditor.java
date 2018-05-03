@@ -305,16 +305,13 @@ public class CardEditor extends EditorBase<AutofillPaymentInstrument>
             String method = data.supportedMethods[i];
             if (mCardIssuerNetworks.containsKey(method)) {
                 addAcceptedNetwork(method);
-            } else if (AutofillPaymentApp.BASIC_CARD_METHOD_NAME.equals(method)) {
-                Set<String> basicCardNetworks = AutofillPaymentApp.convertBasicCardToNetworks(data);
-                if (basicCardNetworks != null) {
-                    mAcceptedBasicCardIssuerNetworks.addAll(basicCardNetworks);
-                    for (String network : basicCardNetworks) {
-                        addAcceptedNetwork(network);
-                    }
+            } else if (BasicCardUtils.BASIC_CARD_METHOD_NAME.equals(method)) {
+                Set<String> basicCardNetworks = BasicCardUtils.convertBasicCardToNetworks(data);
+                mAcceptedBasicCardIssuerNetworks.addAll(basicCardNetworks);
+                for (String network : basicCardNetworks) {
+                    addAcceptedNetwork(network);
                 }
-
-                mAcceptedBasicCardTypes.addAll(AutofillPaymentApp.convertBasicCardToTypes(data));
+                mAcceptedBasicCardTypes.addAll(BasicCardUtils.convertBasicCardToTypes(data));
             }
         }
     }
@@ -403,7 +400,7 @@ public class CardEditor extends EditorBase<AutofillPaymentInstrument>
 
             String methodName = card.getBasicCardIssuerNetwork();
             if (mAcceptedBasicCardIssuerNetworks.contains(methodName)) {
-                methodName = AutofillPaymentApp.BASIC_CARD_METHOD_NAME;
+                methodName = BasicCardUtils.BASIC_CARD_METHOD_NAME;
             }
             assert methodName != null;
 
@@ -674,6 +671,7 @@ public class CardEditor extends EditorBase<AutofillPaymentInstrument>
         mBillingAddressField = EditorFieldModel.createDropdown(
                 mContext.getString(R.string.autofill_credit_card_editor_billing_address),
                 billingAddresses, mContext.getString(R.string.select));
+        mBillingAddressField.setDisplayPlusIcon(true);
 
         // The billing address is required.
         mBillingAddressField.setRequiredErrorMessage(

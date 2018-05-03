@@ -79,9 +79,9 @@ class FeedbackTest : public ExtensionBrowserTest {
     extensions::FeedbackPrivateAPI* api =
         extensions::FeedbackPrivateAPI::GetFactoryInstance()->Get(
             browser()->profile());
-    api->RequestFeedbackForFlow("Test description", "Test tag",
-                                extra_diagnostics, GURL("http://www.test.com"),
-                                flow);
+    api->RequestFeedbackForFlow("Test description", "Test placeholder",
+                                "Test tag", extra_diagnostics,
+                                GURL("http://www.test.com"), flow);
   }
 };
 
@@ -129,8 +129,6 @@ IN_PROC_BROWSER_TEST_F(FeedbackTest, MAYBE_ShowLoginFeedback) {
   EXPECT_TRUE(bool_result);
 }
 
-// Tests that there's an option in the email drop down box with a value
-// 'anonymous_user'.
 // Disabled for ASan due to flakiness on Mac ASan 64 Tests (1).
 // See crbug.com/757243.
 #if defined(ADDRESS_SANITIZER)
@@ -138,6 +136,8 @@ IN_PROC_BROWSER_TEST_F(FeedbackTest, MAYBE_ShowLoginFeedback) {
 #else
 #define MAYBE_AnonymousUser AnonymousUser
 #endif
+// Tests that there's an option in the email drop down box with a value
+// 'anonymous_user'.
 IN_PROC_BROWSER_TEST_F(FeedbackTest, MAYBE_AnonymousUser) {
   WaitForExtensionViewsToLoad();
 
@@ -167,9 +167,16 @@ IN_PROC_BROWSER_TEST_F(FeedbackTest, MAYBE_AnonymousUser) {
   EXPECT_TRUE(bool_result);
 }
 
+// Disabled for ASan due to flakiness on Mac ASan 64 Tests (1).
+// See crbug.com/757243.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_ExtraDiagnostics DISABLED_ExtraDiagnostics
+#else
+#define MAYBE_ExtraDiagnostics ExtraDiagnostics
+#endif
 // Ensures that when extra diagnostics are provided with feedback, they are
 // injected properly in the system information.
-IN_PROC_BROWSER_TEST_F(FeedbackTest, ExtraDiagnostics) {
+IN_PROC_BROWSER_TEST_F(FeedbackTest, MAYBE_ExtraDiagnostics) {
   WaitForExtensionViewsToLoad();
 
   ASSERT_TRUE(IsFeedbackAppAvailable());

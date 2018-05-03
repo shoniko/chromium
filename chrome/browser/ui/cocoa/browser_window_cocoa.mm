@@ -399,15 +399,6 @@ bool BrowserWindowCocoa::IsFullscreenBubbleVisible() const {
   return false;  // Currently only called from toolkit-views page_info.
 }
 
-void BrowserWindowCocoa::MaybeShowNewBackShortcutBubble(bool forward) {
-  [controller_ exclusiveAccessController]->MaybeShowNewBackShortcutBubble(
-      forward);
-}
-
-void BrowserWindowCocoa::HideNewBackShortcutBubble() {
-  [controller_ exclusiveAccessController]->HideNewBackShortcutBubble();
-}
-
 LocationBar* BrowserWindowCocoa::GetLocationBar() const {
   return [controller_ locationBarBridge];
 }
@@ -684,9 +675,9 @@ void BrowserWindowCocoa::ShowAvatarBubbleFromAvatarButton(
   profiles::BubbleViewMode bubble_view_mode;
   profiles::BubbleViewModeFromAvatarBubbleMode(mode, &bubble_view_mode);
 
-  if (SigninViewController::ShouldShowModalSigninForMode(bubble_view_mode)) {
-    browser_->signin_view_controller()->ShowModalSignin(bubble_view_mode,
-                                                        browser_, access_point);
+  if (SigninViewController::ShouldShowSigninForMode(bubble_view_mode)) {
+    browser_->signin_view_controller()->ShowSignin(bubble_view_mode, browser_,
+                                                   access_point);
   } else {
     AvatarBaseController* controller = [controller_ avatarButtonController];
     NSView* anchor = [controller buttonView];

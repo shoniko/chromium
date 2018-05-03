@@ -6,7 +6,6 @@ package org.chromium.android_webview.test;
 
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
-import android.test.MoreAsserts;
 import android.util.Pair;
 
 import org.junit.After;
@@ -170,6 +169,46 @@ public class CookieManagerTest {
         String cookie = "name=test";
         mCookieManager.setCookie(url, cookie);
         Assert.assertEquals(cookie, mCookieManager.getCookie(url));
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"AndroidWebView", "Privacy"})
+    public void testSetCookieWithDomainForUrl() throws Throwable {
+        // If the app passes ".www.example.com" or "http://.www.example.com", the glue layer "fixes"
+        // this to "http:///.www.example.com"
+        String url = "http:///.www.example.com";
+        String sameSubdomainUrl = "http://a.www.example.com";
+        String differentSubdomainUrl = "http://different.sub.example.com";
+        String cookie = "name=test";
+        mCookieManager.setCookie(url, cookie);
+        Assert.assertEquals(cookie, mCookieManager.getCookie(sameSubdomainUrl));
+        Assert.assertNull(mCookieManager.getCookie(differentSubdomainUrl));
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"AndroidWebView", "Privacy"})
+    public void testSetCookieWithDomainForUrlAndExistingDomainAttribute() throws Throwable {
+        String url = "http:///.www.example.com";
+        String differentSubdomainUrl = "http://different.sub.example.com";
+        String cookie = "name=test";
+        mCookieManager.setCookie(url, cookie + "; doMaIN \t  =.example.com");
+        Assert.assertEquals(cookie, mCookieManager.getCookie(url));
+        Assert.assertEquals(cookie, mCookieManager.getCookie(differentSubdomainUrl));
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"AndroidWebView", "Privacy"})
+    public void testSetCookieWithDomainForUrlWithTrailingSemicolonInCookie() throws Throwable {
+        String url = "http:///.www.example.com";
+        String sameSubdomainUrl = "http://a.www.example.com";
+        String differentSubdomainUrl = "http://different.sub.example.com";
+        String cookie = "name=test";
+        mCookieManager.setCookie(url, cookie + ";");
+        Assert.assertEquals(cookie, mCookieManager.getCookie(sameSubdomainUrl));
+        Assert.assertNull(mCookieManager.getCookie(differentSubdomainUrl));
     }
 
     @Test
@@ -767,8 +806,9 @@ public class CookieManagerTest {
         for (String cookie : cookies) {
             foundCookieNames.add(cookie.substring(0, cookie.indexOf("=")).trim());
         }
-        MoreAsserts.assertEquals(
-                foundCookieNames, new HashSet<String>(Arrays.asList(expectedCookieNames)));
+        List<String> expectedCookieNamesList = Arrays.asList(expectedCookieNames);
+        Assert.assertEquals(foundCookieNames.size(), expectedCookieNamesList.size());
+        Assert.assertTrue(foundCookieNames.containsAll(expectedCookieNamesList));
     }
 
     private String makeExpiringCookie(String cookie, int secondsTillExpiry) {

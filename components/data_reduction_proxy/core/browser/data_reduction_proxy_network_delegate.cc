@@ -125,8 +125,8 @@ void RecordContentLengthHistograms(bool lofi_low_header_added,
                                    int64_t original_content_length,
                                    const base::TimeDelta& freshness_lifetime,
                                    DataReductionProxyRequestType request_type) {
-  // Add the current resource to these histograms only when a valid
-  // X-Original-Content-Length header is present.
+  // Add the current resource to these histograms only when the content length
+  // is valid.
   if (original_content_length >= 0) {
     UMA_HISTOGRAM_COUNTS_1M("Net.HttpContentLengthWithValidOCL",
                             received_content_length);
@@ -149,7 +149,7 @@ void RecordContentLengthHistograms(bool lofi_low_header_added,
 
   } else {
     // Presume the original content length is the same as the received content
-    // length if the X-Original-Content-Header is not present.
+    // length.
     original_content_length = received_content_length;
   }
   UMA_HISTOGRAM_COUNTS_1M("Net.HttpContentLength", received_content_length);
@@ -536,16 +536,9 @@ void DataReductionProxyNetworkDelegate::OnCompletedInternal(
   DataReductionProxyRequestType request_type = GetDataReductionProxyRequestType(
       *request, configurator_->GetProxyConfig(), *data_reduction_proxy_config_);
 
-  // Determine the original content length if present.
-  int64_t original_content_length =
-      request->response_headers()
-          ? request->response_headers()->GetInt64HeaderValue(
-                "x-original-content-length")
-          : -1;
-
   CalculateAndRecordDataUsage(*request, request_type);
-
-  RecordContentLength(*request, request_type, original_content_length);
+  RecordContentLength(*request, request_type,
+                      util::CalculateOCLFromOFCL(*request));
   RecordAcceptTransformReceivedUMA(*request);
 }
 
@@ -558,14 +551,25 @@ void DataReductionProxyNetworkDelegate::OnHeadersReceivedInternal(
   if (!original_response_headers ||
       original_response_headers->IsRedirect(nullptr))
     return;
-  if (IsEmptyImagePreview(*original_response_headers)) {
-    DataReductionProxyData* data =
-        DataReductionProxyData::GetDataAndCreateIfNecessary(request);
-    data->set_lofi_received(true);
-  } else if (IsLitePagePreview(*original_response_headers)) {
-    DataReductionProxyData* data =
-        DataReductionProxyData::GetDataAndCreateIfNecessary(request);
-    data->set_lite_page_received(true);
+
+  switch (ParseResponseTransform(*original_response_headers)) {
+    case TRANSFORM_LITE_PAGE:
+      DataReductionProxyData::GetDataAndCreateIfNecessary(request)
+          ->set_lite_page_received(true);
+      break;
+    case TRANSFORM_PAGE_POLICIES_EMPTY_IMAGE:
+      DataReductionProxyData::GetDataAndCreateIfNecessary(request)
+          ->set_lofi_policy_received(true);
+      break;
+    case TRANSFORM_EMPTY_IMAGE:
+      DataReductionProxyData::GetDataAndCreateIfNecessary(request)
+          ->set_lofi_received(true);
+      break;
+    case TRANSFORM_IDENTITY:
+    case TRANSFORM_COMPRESSED_VIDEO:
+    case TRANSFORM_NONE:
+    case TRANSFORM_UNKNOWN:
+      break;
   }
   if (data_reduction_proxy_io_data_ &&
       data_reduction_proxy_io_data_->lofi_decider() &&

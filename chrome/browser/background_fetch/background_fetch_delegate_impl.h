@@ -81,9 +81,9 @@ class BackgroundFetchDelegateImpl
   void PauseDownload(const offline_items_collection::ContentId& id) override;
   void ResumeDownload(const offline_items_collection::ContentId& id,
                       bool has_user_gesture) override;
-  const offline_items_collection::OfflineItem* GetItemById(
-      const offline_items_collection::ContentId& id) override;
-  OfflineItemList GetAllItems() override;
+  void GetItemById(const offline_items_collection::ContentId& id,
+                   SingleItemCallback callback) override;
+  void GetAllItems(MultipleItemCallback callback) override;
   void GetVisualsForItem(const offline_items_collection::ContentId& id,
                          const VisualsCallback& callback) override;
   void AddObserver(Observer* observer) override;
@@ -109,6 +109,7 @@ class BackgroundFetchDelegateImpl
     const url::Origin origin;
     int completed_parts;
     const int total_parts;
+    bool cancelled;
 
     // Set of DownloadService GUIDs that are currently downloading. They are
     // added by DownloadUrl and are removed when the download completes, fails
@@ -120,6 +121,11 @@ class BackgroundFetchDelegateImpl
    private:
     DISALLOW_COPY_AND_ASSIGN(JobDetails);
   };
+
+  // Updates the OfflineItem that controls the contents of download
+  // notifications and notifies any OfflineContentProvider::Observer that was
+  // registered with this instance.
+  void UpdateOfflineItemAndUpdateObservers(JobDetails* job_details);
 
   void OnDownloadReceived(const std::string& guid,
                           download::DownloadParams::StartResult result);

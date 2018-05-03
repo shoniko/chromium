@@ -7,11 +7,19 @@
 
 #import <Foundation/Foundation.h>
 
+class SadTabTabHelper;
+
+namespace web {
+class WebState;
+}
+
 // Delegate for SadTabTabHelper.
 @protocol SadTabTabHelperDelegate<NSObject>
 
 // Asks the delegate to present a SadTabView.
-- (void)presentSadTabForRepeatedFailure:(BOOL)repeatedFailure;
+- (void)sadTabTabHelper:(SadTabTabHelper*)tabHelper
+    presentSadTabForWebState:(web::WebState*)webState
+             repeatedFailure:(BOOL)repeatedFailure;
 
 @end
 

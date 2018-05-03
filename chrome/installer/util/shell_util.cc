@@ -9,7 +9,6 @@
 
 #include "chrome/installer/util/shell_util.h"
 
-#include <windows.h>
 #include <objbase.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -25,6 +24,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -33,7 +33,7 @@
 #include "base/macros.h"
 #include "base/md5.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -763,6 +763,9 @@ bool LaunchDefaultAppsSettingsModernDialog(const wchar_t* protocol) {
       L"windows.immersivecontrolpanel_cw5n1h2txyewy"
       L"!microsoft.windows.immersivecontrolpanel";
 
+  static constexpr base::Feature kHighlightProtocolInWindowsSettings{
+      "HighlightProtocolInWindowsSettings", base::FEATURE_ENABLED_BY_DEFAULT};
+
   Microsoft::WRL::ComPtr<IApplicationActivationManager> activator;
   HRESULT hr = ::CoCreateInstance(CLSID_ApplicationActivationManager, nullptr,
                                   CLSCTX_ALL, IID_PPV_ARGS(&activator));
@@ -772,7 +775,8 @@ bool LaunchDefaultAppsSettingsModernDialog(const wchar_t* protocol) {
     hr = activator->ActivateApplication(kControlPanelAppModelId,
                                         L"page=SettingsPageAppsDefaults",
                                         AO_NONE, &pid);
-    if (SUCCEEDED(hr)) {
+    if (SUCCEEDED(hr) &&
+        base::FeatureList::IsEnabled(kHighlightProtocolInWindowsSettings)) {
       hr = activator->ActivateApplication(
           kControlPanelAppModelId,
           base::StringPrintf(L"page=SettingsPageAppsDefaults&target=%ls",
@@ -782,8 +786,8 @@ bool LaunchDefaultAppsSettingsModernDialog(const wchar_t* protocol) {
     }
     if (SUCCEEDED(hr))
       return true;
-    UMA_HISTOGRAM_SPARSE_SLOWLY("DefaultBrowser.ActivateSettings.ErrorHresult",
-                                hr);
+    base::UmaHistogramSparse("DefaultBrowser.ActivateSettings.ErrorHresult",
+                             hr);
   }
   return false;
 }
@@ -1085,6 +1089,11 @@ base::win::ShortcutProperties TranslateShortcutProperties(
 
   if (properties.has_app_id())
     shortcut_properties.set_app_id(properties.app_id);
+
+  if (properties.has_toast_activator_clsid()) {
+    shortcut_properties.set_toast_activator_clsid(
+        properties.toast_activator_clsid);
+  }
 
   return shortcut_properties;
 }

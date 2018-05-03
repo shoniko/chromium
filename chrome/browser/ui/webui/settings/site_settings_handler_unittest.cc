@@ -35,7 +35,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "components/user_manager/scoped_user_manager.h"
 #endif
 
 namespace {
@@ -61,7 +61,7 @@ class ContentSettingSourceSetter {
 
   void SetPolicyDefault(ContentSetting setting) {
     prefs_->SetManagedPref(GetPrefNameForDefaultPermissionSetting(),
-                           base::MakeUnique<base::Value>(setting));
+                           std::make_unique<base::Value>(setting));
   }
 
   const char* GetPrefNameForDefaultPermissionSetting() {
@@ -92,9 +92,8 @@ class SiteSettingsHandlerTest : public testing::Test {
             CONTENT_SETTINGS_TYPE_COOKIES)),
         handler_(&profile_) {
 #if defined(OS_CHROMEOS)
-    mock_user_manager_ = new chromeos::MockUserManager;
-    user_manager_enabler_.reset(
-        new chromeos::ScopedUserManagerEnabler(mock_user_manager_));
+    user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
+        std::make_unique<chromeos::MockUserManager>());
 #endif
   }
 
@@ -286,8 +285,7 @@ class SiteSettingsHandlerTest : public testing::Test {
   content::TestWebUI web_ui_;
   SiteSettingsHandler handler_;
 #if defined(OS_CHROMEOS)
-  chromeos::MockUserManager* mock_user_manager_;  // Not owned.
-  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<user_manager::ScopedUserManager> user_manager_enabler_;
 #endif
 };
 
@@ -375,7 +373,7 @@ TEST_F(SiteSettingsHandlerTest, DefaultSettingSource) {
   base::ListValue get_origin_permissions_args;
   get_origin_permissions_args.AppendString(kCallbackId);
   get_origin_permissions_args.AppendString(google);
-  auto category_list = base::MakeUnique<base::ListValue>();
+  auto category_list = std::make_unique<base::ListValue>();
   category_list->AppendString(kNotifications);
   get_origin_permissions_args.Append(std::move(category_list));
 
@@ -437,7 +435,7 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetOriginPermissions) {
   get_args.AppendString(kCallbackId);
   get_args.AppendString(origin_with_port);
   {
-    auto category_list = base::MakeUnique<base::ListValue>();
+    auto category_list = std::make_unique<base::ListValue>();
     category_list->AppendString(kNotifications);
     get_args.Append(std::move(category_list));
   }
@@ -450,7 +448,7 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetOriginPermissions) {
   base::ListValue set_args;
   set_args.AppendString(origin_with_port);
   {
-    auto category_list = base::MakeUnique<base::ListValue>();
+    auto category_list = std::make_unique<base::ListValue>();
     category_list->AppendString(kNotifications);
     set_args.Append(std::move(category_list));
   }
@@ -462,7 +460,7 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetOriginPermissions) {
   // Reset things back to how they were.
   base::ListValue reset_args;
   reset_args.AppendString(origin_with_port);
-  auto category_list = base::MakeUnique<base::ListValue>();
+  auto category_list = std::make_unique<base::ListValue>();
   category_list->AppendString(kNotifications);
   reset_args.Append(std::move(category_list));
   reset_args.AppendString(
@@ -485,7 +483,7 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetForInvalidURLs) {
   get_args.AppendString(kCallbackId);
   get_args.AppendString(origin);
   {
-    auto category_list = base::MakeUnique<base::ListValue>();
+    auto category_list = std::make_unique<base::ListValue>();
     category_list->AppendString(kNotifications);
     get_args.Append(std::move(category_list));
   }
@@ -500,7 +498,7 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetForInvalidURLs) {
   base::ListValue set_args;
   set_args.AppendString(origin);
   {
-    auto category_list = base::MakeUnique<base::ListValue>();
+    auto category_list = std::make_unique<base::ListValue>();
     category_list->AppendString(kNotifications);
     set_args.Append(std::move(category_list));
   }
@@ -590,7 +588,7 @@ TEST_F(SiteSettingsHandlerTest, ExtensionDisplayName) {
   get_origin_permissions_args.AppendString(kCallbackId);
   get_origin_permissions_args.AppendString(test_extension_url);
   {
-    auto category_list = base::MakeUnique<base::ListValue>();
+    auto category_list = std::make_unique<base::ListValue>();
     category_list->AppendString(kNotifications);
     get_origin_permissions_args.Append(std::move(category_list));
   }
@@ -668,7 +666,7 @@ class SiteSettingsHandlerInfobarTest : public BrowserWithTestWindowTest {
 
   void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
-    handler_ = base::MakeUnique<SiteSettingsHandler>(profile());
+    handler_ = std::make_unique<SiteSettingsHandler>(profile());
     handler()->set_web_ui(web_ui());
     handler()->AllowJavascript();
     web_ui()->ClearTrackedCalls();
@@ -779,7 +777,7 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
   base::ListValue set_args;
   set_args.AppendString(origin_anchor_string);
   {
-    auto category_list = base::MakeUnique<base::ListValue>();
+    auto category_list = std::make_unique<base::ListValue>();
     category_list->AppendString(kNotifications);
     set_args.Append(std::move(category_list));
   }
@@ -836,7 +834,7 @@ TEST_F(SiteSettingsHandlerInfobarTest, SettingPermissionsTriggersInfobar) {
   // Reset all permissions.
   base::ListValue reset_args;
   reset_args.AppendString(origin_anchor_string);
-  auto category_list = base::MakeUnique<base::ListValue>();
+  auto category_list = std::make_unique<base::ListValue>();
   category_list->AppendString(kNotifications);
   reset_args.Append(std::move(category_list));
   reset_args.AppendString(

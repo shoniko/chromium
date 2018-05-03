@@ -10,7 +10,6 @@
 #include "base/containers/adapters.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
 #include "components/autofill/core/browser/autofill_profile.h"
@@ -28,6 +27,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "ios/chrome/browser/application_context.h"
+#include "ios/chrome/browser/autofill/address_normalizer_factory.h"
 #include "ios/chrome/browser/autofill/validation_rules_storage_factory.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/payments/ios_payment_instrument.h"
@@ -89,13 +89,6 @@ PaymentRequest::PaymentRequest(
       web_state_(web_state),
       personal_data_manager_(personal_data_manager),
       payment_request_ui_delegate_(payment_request_ui_delegate),
-      address_normalizer_(
-          GetAddressInputSource(
-              personal_data_manager_->GetURLRequestContextGetter()),
-          GetAddressInputStorage()),
-      address_normalization_manager_(
-          &address_normalizer_,
-          GetApplicationContext()->GetApplicationLocale()),
       selected_shipping_profile_(nullptr),
       selected_contact_profile_(nullptr),
       selected_payment_method_(nullptr),
@@ -104,7 +97,7 @@ PaymentRequest::PaymentRequest(
       journey_logger_(IsIncognito(), GetLastCommittedURL(), GetUkmRecorder()),
       payment_instruments_ready_(false),
       ios_instrument_finder_(
-          personal_data_manager_->GetURLRequestContextGetter(),
+          GetApplicationContext()->GetSystemURLRequestContext(),
           payment_request_ui_delegate_) {
   PopulateAvailableShippingOptions();
   PopulateProfileCache();
@@ -130,17 +123,6 @@ PaymentRequest::PaymentRequest(
     if (!contact_profiles_.empty() &&
         profile_comparator_.IsContactInfoComplete(contact_profiles_[0])) {
       selected_contact_profile_ = contact_profiles_[0];
-    }
-  }
-
-  // Kickoff the process of loading the rules (which is asynchronous) for each
-  // profile's country, to get faster address normalization later.
-  for (const autofill::AutofillProfile* profile :
-       personal_data_manager_->GetProfilesToSuggest()) {
-    std::string countryCode =
-        base::UTF16ToUTF8(profile->GetRawInfo(autofill::ADDRESS_HOME_COUNTRY));
-    if (autofill::data_util::IsValidCountryCode(countryCode)) {
-      address_normalizer_.LoadRulesForRegion(countryCode);
     }
   }
 
@@ -188,13 +170,13 @@ void PaymentRequest::DoFullCardRequest(
 }
 
 autofill::AddressNormalizer* PaymentRequest::GetAddressNormalizer() {
-  return &address_normalizer_;
+  return autofill::AddressNormalizerFactory::GetInstance();
 }
 
 autofill::RegionDataLoader* PaymentRequest::GetRegionDataLoader() {
   return new autofill::RegionDataLoaderImpl(
       GetAddressInputSource(
-          personal_data_manager_->GetURLRequestContextGetter())
+          GetApplicationContext()->GetSystemURLRequestContext())
           .release(),
       GetAddressInputStorage().release(), GetApplicationLocale());
 }
@@ -280,9 +262,9 @@ PaymentShippingType PaymentRequest::shipping_type() const {
 CurrencyFormatter* PaymentRequest::GetOrCreateCurrencyFormatter() {
   if (!currency_formatter_) {
     DCHECK(web_payment_request_.details.total);
-    currency_formatter_ = base::MakeUnique<CurrencyFormatter>(
-        web_payment_request_.details.total->amount.currency,
-        web_payment_request_.details.total->amount.currency_system,
+    currency_formatter_ = std::make_unique<CurrencyFormatter>(
+        web_payment_request_.details.total->amount->currency,
+        web_payment_request_.details.total->amount->currency_system,
         GetApplicationLocale());
   }
   return currency_formatter_.get();
@@ -290,13 +272,19 @@ CurrencyFormatter* PaymentRequest::GetOrCreateCurrencyFormatter() {
 
 autofill::AddressNormalizationManager*
 PaymentRequest::GetAddressNormalizationManager() {
-  return &address_normalization_manager_;
+  if (!address_normalization_manager_) {
+    address_normalization_manager_ =
+        std::make_unique<autofill::AddressNormalizationManager>(
+            GetAddressNormalizer(),
+            GetApplicationContext()->GetApplicationLocale());
+  }
+  return address_normalization_manager_.get();
 }
 
 autofill::AutofillProfile* PaymentRequest::AddAutofillProfile(
     const autofill::AutofillProfile& profile) {
   profile_cache_.push_back(
-      base::MakeUnique<autofill::AutofillProfile>(profile));
+      std::make_unique<autofill::AutofillProfile>(profile));
 
   contact_profiles_.push_back(profile_cache_.back().get());
   shipping_profiles_.push_back(profile_cache_.back().get());
@@ -312,23 +300,25 @@ const PaymentDetailsModifier* PaymentRequest::GetApplicableModifier(
   }
 
   for (const auto& modifier : web_payment_request_.details.modifiers) {
-    std::vector<std::string> supported_networks;
-    std::set<autofill::CreditCard::CardType> supported_types;
+    std::set<std::string> supported_card_networks_set;
+    std::set<autofill::CreditCard::CardType> supported_card_types_set;
     // The following 4 variables are unused.
     std::set<std::string> unused_basic_card_specified_networks;
-    std::set<std::string> unused_supported_card_networks_set;
+    std::vector<std::string> unused_supported_card_networks;
     std::vector<GURL> unused_url_payment_method_identifiers;
     std::set<std::string> unused_payment_method_identifiers;
-    PopulateValidatedMethodData({modifier.method_data}, &supported_networks,
-                                &unused_basic_card_specified_networks,
-                                &unused_supported_card_networks_set,
-                                &supported_types,
-                                &unused_url_payment_method_identifiers,
-                                &unused_payment_method_identifiers);
+    PopulateValidatedMethodData(
+        {modifier.method_data}, &unused_supported_card_networks,
+        &unused_basic_card_specified_networks, &supported_card_networks_set,
+        &supported_card_types_set, &unused_url_payment_method_identifiers,
+        &unused_payment_method_identifiers);
 
     if (selected_instrument->IsValidForModifier(
-            modifier.method_data.supported_methods, supported_networks,
-            supported_types, !modifier.method_data.supported_types.empty())) {
+            modifier.method_data.supported_methods,
+            !modifier.method_data.supported_networks.empty(),
+            supported_card_networks_set,
+            !modifier.method_data.supported_types.empty(),
+            supported_card_types_set)) {
       return &modifier;
     }
   }
@@ -347,7 +337,7 @@ void PaymentRequest::PopulateProfileCache() {
 
   for (const auto* profile : profiles_to_suggest) {
     profile_cache_.push_back(
-        base::MakeUnique<autofill::AutofillProfile>(*profile));
+        std::make_unique<autofill::AutofillProfile>(*profile));
   }
 }
 
@@ -402,7 +392,7 @@ AutofillPaymentInstrument* PaymentRequest::AddAutofillPaymentInstrument(
 
   // AutofillPaymentInstrument makes a copy of |credit_card| so it is
   // effectively owned by this object.
-  payment_method_cache_.push_back(base::MakeUnique<AutofillPaymentInstrument>(
+  payment_method_cache_.push_back(std::make_unique<AutofillPaymentInstrument>(
       method_name, credit_card, matches_merchant_card_type_exactly,
       billing_profiles(), GetApplicationLocale(), this));
 
@@ -431,10 +421,21 @@ bool PaymentRequest::CanMakePayment() const {
   return false;
 }
 
+bool PaymentRequest::IsAbleToPay() {
+  return selected_payment_method() != nullptr &&
+         (selected_shipping_option() != nullptr || !request_shipping()) &&
+         (selected_shipping_profile() != nullptr || !request_shipping()) &&
+         (selected_contact_profile() != nullptr || !RequestContactInfo());
+}
+
+bool PaymentRequest::RequestContactInfo() {
+  return request_payer_name() || request_payer_email() || request_payer_phone();
+}
+
 void PaymentRequest::InvokePaymentApp(
     id<PaymentResponseHelperConsumer> consumer) {
   DCHECK(selected_payment_method());
-  response_helper_ = base::MakeUnique<PaymentResponseHelper>(consumer, this);
+  response_helper_ = std::make_unique<PaymentResponseHelper>(consumer, this);
   selected_payment_method()->InvokePaymentApp(response_helper_.get());
 }
 

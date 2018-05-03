@@ -147,6 +147,10 @@ void Checkbox::SetChecked(bool checked) {
   UpdateImage();
 }
 
+void Checkbox::SetMultiLine(bool multi_line) {
+  label()->SetMultiLine(multi_line);
+}
+
 // TODO(tetsui): Remove this method and |use_md_| when MD for secondary UI
 // becomes default and IsSecondaryUiMaterial() is tautology.
 bool Checkbox::UseMd() const {
@@ -262,13 +266,12 @@ const gfx::VectorIcon& Checkbox::GetVectorIcon() const {
 
 SkColor Checkbox::GetIconImageColor(bool checked) const {
   DCHECK(UseMd());
-  const ui::NativeTheme* theme = GetNativeTheme();
   return checked
-             ? theme->GetSystemColor(
+             ? GetNativeTheme()->GetSystemColor(
                    ui::NativeTheme::kColorId_FocusedBorderColor)
              // When unchecked, the icon color matches push button text color.
-             : style::GetColor(style::CONTEXT_BUTTON_MD, style::STYLE_PRIMARY,
-                               theme);
+             : style::GetColor(*this, style::CONTEXT_BUTTON_MD,
+                               style::STYLE_PRIMARY);
 }
 
 void Checkbox::NotifyClick(const ui::Event& event) {

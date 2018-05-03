@@ -24,7 +24,7 @@ MessagePumpDefault::MessagePumpDefault()
       event_(WaitableEvent::ResetPolicy::AUTOMATIC,
              WaitableEvent::InitialState::NOT_SIGNALED) {}
 
-MessagePumpDefault::~MessagePumpDefault() {}
+MessagePumpDefault::~MessagePumpDefault() = default;
 
 void MessagePumpDefault::Run(Delegate* delegate) {
   AutoReset<bool> auto_reset_keep_running(&keep_running_, true);
@@ -89,7 +89,7 @@ void MessagePumpDefault::ScheduleDelayedWork(
 void MessagePumpDefault::SetTimerSlack(TimerSlack timer_slack) {
   thread_latency_qos_policy_data_t policy{};
   policy.thread_latency_qos_tier = timer_slack == TIMER_SLACK_MAXIMUM
-                                       ? LATENCY_QOS_TIER_5
+                                       ? LATENCY_QOS_TIER_3
                                        : LATENCY_QOS_TIER_UNSPECIFIED;
   mac::ScopedMachSendRight thread_port(mach_thread_self());
   kern_return_t kr =

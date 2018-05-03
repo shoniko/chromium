@@ -41,6 +41,7 @@
 #include "components/cdm/browser/cdm_message_filter_android.h"
 #include "components/crash/content/browser/crash_dump_observer_android.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
+#include "components/policy/content/policy_blacklist_navigation_throttle.h"
 #include "components/safe_browsing/browser/browser_url_loader_throttle.h"
 #include "components/safe_browsing/browser/mojo_safe_browsing_impl.h"
 #include "components/spellcheck/spellcheck_build_features.h"
@@ -62,6 +63,7 @@
 #include "content/public/common/url_loader_throttle.h"
 #include "content/public/common/web_preferences.h"
 #include "net/android/network_library.h"
+#include "net/log/net_log.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_info.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
@@ -81,6 +83,7 @@ using content::WebContents;
 
 namespace android_webview {
 namespace {
+static bool g_should_create_task_scheduler = true;
 
 // TODO(sgurun) move this to its own file.
 // This class filters out incoming aw_contents related IPC messages for the
@@ -191,7 +194,7 @@ AwBrowserContext* AwContentBrowserClient::GetAwBrowserContext() {
   return AwBrowserContext::GetDefault();
 }
 
-AwContentBrowserClient::AwContentBrowserClient() {
+AwContentBrowserClient::AwContentBrowserClient() : net_log_(new net::NetLog()) {
   frame_interfaces_.AddInterface(
       base::Bind(&autofill::ContentAutofillDriverFactory::BindAutofillDriver));
   // Although WebView does not support password manager feature, renderer code
@@ -325,18 +328,14 @@ bool AwContentBrowserClient::AllowGetCookie(const GURL& url,
 
 bool AwContentBrowserClient::AllowSetCookie(const GURL& url,
                                             const GURL& first_party,
-                                            const std::string& cookie_line,
+                                            const net::CanonicalCookie& cookie,
                                             content::ResourceContext* context,
                                             int render_process_id,
                                             int render_frame_id,
                                             const net::CookieOptions& options) {
-  return AwCookieAccessPolicy::GetInstance()->AllowSetCookie(url,
-                                                             first_party,
-                                                             cookie_line,
-                                                             context,
-                                                             render_process_id,
-                                                             render_frame_id,
-                                                             options);
+  return AwCookieAccessPolicy::GetInstance()->AllowSetCookie(
+      url, first_party, cookie, context, render_process_id, render_frame_id,
+      options);
 }
 
 void AwContentBrowserClient::AllowWorkerFileSystem(
@@ -344,8 +343,7 @@ void AwContentBrowserClient::AllowWorkerFileSystem(
     content::ResourceContext* context,
     const std::vector<std::pair<int, int> >& render_frames,
     base::Callback<void(bool)> callback) {
-  // Android WebView does not yet support web workers.
-  callback.Run(false);
+  callback.Run(true);
 }
 
 bool AwContentBrowserClient::AllowWorkerIndexedDB(
@@ -353,8 +351,7 @@ bool AwContentBrowserClient::AllowWorkerIndexedDB(
     const base::string16& name,
     content::ResourceContext* context,
     const std::vector<std::pair<int, int> >& render_frames) {
-  // Android WebView does not yet support web workers.
-  return false;
+  return true;
 }
 
 content::QuotaPermissionContext*
@@ -442,7 +439,7 @@ void AwContentBrowserClient::ResourceDispatcherHostCreated() {
 }
 
 net::NetLog* AwContentBrowserClient::GetNetLog() {
-  return browser_context_->GetAwURLRequestContext()->GetNetLog();
+  return net_log_.get();
 }
 
 base::FilePath AwContentBrowserClient::GetDefaultDownloadDirectory() {
@@ -523,6 +520,8 @@ AwContentBrowserClient::CreateThrottlesForNavigation(
     throttles.push_back(
         navigation_interception::InterceptNavigationDelegate::CreateThrottleFor(
             navigation_handle));
+    throttles.push_back(base::MakeUnique<PolicyBlacklistNavigationThrottle>(
+        navigation_handle, browser_context_.get()));
   }
   return throttles;
 }
@@ -558,7 +557,7 @@ void AwContentBrowserClient::BindInterfaceRequestFromFrame(
 
 void AwContentBrowserClient::ExposeInterfacesToRenderer(
     service_manager::BinderRegistry* registry,
-    content::AssociatedInterfaceRegistry* associated_registry,
+    blink::AssociatedInterfaceRegistry* associated_registry,
     content::RenderProcessHost* render_process_host) {
   if (base::FeatureList::IsEnabled(features::kNetworkService)) {
     registry->AddInterface(
@@ -574,7 +573,8 @@ void AwContentBrowserClient::ExposeInterfacesToRenderer(
 
 std::vector<std::unique_ptr<content::URLLoaderThrottle>>
 AwContentBrowserClient::CreateURLLoaderThrottles(
-    const base::Callback<content::WebContents*()>& wc_getter) {
+    const base::Callback<content::WebContents*()>& wc_getter,
+    content::NavigationUIData* navigation_ui_data) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(base::FeatureList::IsEnabled(features::kNetworkService));
 
@@ -647,6 +647,15 @@ bool AwContentBrowserClient::ShouldOverrideUrlLoading(
   base::string16 url = base::UTF8ToUTF16(gurl.possibly_invalid_spec());
   return client_bridge->ShouldOverrideUrlLoading(url, has_user_gesture,
                                                  is_redirect, is_main_frame);
+}
+
+bool AwContentBrowserClient::ShouldCreateTaskScheduler() {
+  return g_should_create_task_scheduler;
+}
+
+// static
+void AwContentBrowserClient::DisableCreatingTaskScheduler() {
+  g_should_create_task_scheduler = false;
 }
 
 }  // namespace android_webview

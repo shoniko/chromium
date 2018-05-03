@@ -18,6 +18,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/task_manager/providers/task.h"
+#include "chrome/browser/task_manager/sampling/shared_sampler.h"
 #include "chrome/browser/task_manager/sampling/task_group_sampler.h"
 #include "chrome/browser/task_manager/task_manager_observer.h"
 #include "components/nacl/common/features.h"
@@ -98,6 +99,7 @@ class TaskGroup {
   int64_t gdi_peak_handles() const { return gdi_peak_handles_; }
   int64_t user_current_handles() const { return user_current_handles_; }
   int64_t user_peak_handles() const { return user_peak_handles_; }
+  int64_t hard_faults_per_second() const { return hard_faults_per_second_; }
 #endif  // defined(OS_WIN)
 
 #if BUILDFLAG(ENABLE_NACL)
@@ -120,23 +122,17 @@ class TaskGroup {
   void RefreshNaClDebugStubPort(int child_process_unique_id);
   void OnRefreshNaClDebugStubPortDone(int port);
 #endif
-
-  void OnCpuRefreshDone(double cpu_usage);
-
-  void OnStartTimeRefreshDone(base::Time start_time);
-
-  void OnCpuTimeRefreshDone(base::TimeDelta cpu_time);
-
-  void OnPhysicalMemoryUsageRefreshDone(int64_t physical_bytes);
-  void OnMemoryUsageRefreshDone(MemoryUsageStats memory_usage);
-
-  void OnIdleWakeupsRefreshDone(int idle_wakeups_per_second);
-
 #if defined(OS_LINUX)
   void OnOpenFdCountRefreshDone(int open_fd_count);
 #endif  // defined(OS_LINUX)
 
+  void OnCpuRefreshDone(double cpu_usage);
+  void OnMemoryUsageRefreshDone(MemoryUsageStats memory_usage);
   void OnProcessPriorityDone(bool is_backgrounded);
+  void OnIdleWakeupsRefreshDone(int idle_wakeups_per_second);
+
+  void OnSamplerRefreshDone(
+      base::Optional<SharedSampler::SamplingResult> results);
 
   void OnBackgroundRefreshTypeFinished(int64_t finished_refresh_type);
 
@@ -183,15 +179,16 @@ class TaskGroup {
   int64_t gdi_peak_handles_;
   int64_t user_current_handles_;
   int64_t user_peak_handles_;
+  int64_t hard_faults_per_second_;
 #endif  // defined(OS_WIN)
 #if BUILDFLAG(ENABLE_NACL)
   int nacl_debug_stub_port_;
 #endif  // BUILDFLAG(ENABLE_NACL)
-  int idle_wakeups_per_second_;
 #if defined(OS_LINUX)
   // The number of file descriptors currently open by the process.
   int open_fd_count_;
 #endif  // defined(OS_LINUX)
+  int idle_wakeups_per_second_;
   bool gpu_memory_has_duplicates_;
   bool is_backgrounded_;
 

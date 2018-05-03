@@ -14,6 +14,8 @@
 #include "base/process/process.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_scheduler/post_task.h"
+#include "components/update_client/component.h"
+#include "components/update_client/configurator.h"
 #include "components/update_client/task_traits.h"
 
 namespace {
@@ -43,12 +45,18 @@ void ActionRunner::WaitForCommand(base::Process process) {
       process.WaitForExitWithTimeout(kMaxWaitTime, &exit_code);
   base::DeleteFile(unpack_path_, true);
   main_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(run_complete_, succeeded, exit_code, 0));
+      FROM_HERE,
+      base::BindOnce(std::move(run_complete_), succeeded, exit_code, 0));
 }
 
 base::CommandLine ActionRunner::MakeCommandLine(
     const base::FilePath& unpack_path) const {
-  return base::CommandLine(unpack_path.Append(kRecoveryFileName));
+  base::CommandLine command_line(unpack_path.Append(kRecoveryFileName));
+  if (!component_.config()->IsPerUserInstall())
+    command_line.AppendSwitch("system");
+  command_line.AppendSwitchASCII(
+      "browser-version", component_.config()->GetBrowserVersion().GetString());
+  return command_line;
 }
 
 }  // namespace update_client

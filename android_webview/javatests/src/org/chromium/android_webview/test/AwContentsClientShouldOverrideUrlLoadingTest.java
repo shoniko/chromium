@@ -22,7 +22,6 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JSUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
@@ -35,11 +34,13 @@ import org.chromium.content.browser.test.util.TestCallbackHelperContainer
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageStartedHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnReceivedErrorHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.NavigationHistory;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -798,7 +799,6 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
     }
 
     @Test
-    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testCallDestroyInCallback() throws Throwable {
@@ -827,6 +827,51 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
         mShouldOverrideUrlLoadingHelper.waitForCallback(shouldOverrideUrlLoadingCallCount);
 
         mActivityTestRule.pollUiThread(() -> AwContents.getNativeInstanceCount() == 0);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Navigation"})
+    public void testReloadingUrlDoesNotBreakBackForwardList() throws Throwable {
+        class ReloadInCallbackClient extends TestAwContentsClient {
+            @Override
+            public boolean shouldOverrideUrlLoading(AwContentsClient.AwWebResourceRequest request) {
+                mAwContents.loadUrl(request.url);
+                return true;
+            }
+        }
+
+        setupWithProvidedContentsClient(new ReloadInCallbackClient());
+        mShouldOverrideUrlLoadingHelper = mContentsClient.getShouldOverrideUrlLoadingHelper();
+
+        final String linkUrl =
+                addPageToTestServer("/foo.html", "<html><body>hello world</body></html>");
+        final String html = CommonResources.makeHtmlPageWithSimpleLinkTo(linkUrl);
+        final String firstUrl = addPageToTestServer("/first.html", html);
+        CallbackHelper onPageFinishedHelper = mContentsClient.getOnPageFinishedHelper();
+        mActivityTestRule.loadUrlSync(mAwContents, onPageFinishedHelper, firstUrl);
+
+        int pageFinishedCount = onPageFinishedHelper.getCallCount();
+        clickOnLinkUsingJs();
+        onPageFinishedHelper.waitForCallback(pageFinishedCount);
+
+        Assert.assertEquals(linkUrl, mAwContents.getUrl());
+        Assert.assertTrue("Should have a navigation history", mAwContents.canGoBack());
+        NavigationHistory navHistory = mAwContents.getNavigationHistory();
+        Assert.assertEquals(2, navHistory.getEntryCount());
+        Assert.assertEquals(1, navHistory.getCurrentEntryIndex());
+        Assert.assertEquals(linkUrl, navHistory.getEntryAtIndex(1).getUrl());
+
+        pageFinishedCount = onPageFinishedHelper.getCallCount();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> mAwContents.goBack());
+        onPageFinishedHelper.waitForCallback(pageFinishedCount);
+
+        Assert.assertFalse("Should not be able to navigate backward", mAwContents.canGoBack());
+        Assert.assertEquals(firstUrl, mAwContents.getUrl());
+        navHistory = mAwContents.getNavigationHistory();
+        Assert.assertEquals(2, navHistory.getEntryCount());
+        Assert.assertEquals(0, navHistory.getCurrentEntryIndex());
+        Assert.assertEquals(firstUrl, navHistory.getEntryAtIndex(0).getUrl());
     }
 
     @Test
@@ -1035,6 +1080,60 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
     public void testWindowOpenHttpUrlInPopupAddsTrailingSlash() throws Throwable {
         final String popupPath = "http://example.com";
         verifyShouldOverrideUrlLoadingInPopup(popupPath, popupPath + "/");
+    }
+
+    private final static String BAD_SCHEME = "badscheme://";
+
+    // AwContentsClient handling an invalid network scheme
+    private static class BadSchemeClient extends TestAwContentsClient {
+        CountDownLatch mLatch = new CountDownLatch(1);
+
+        @Override
+        public boolean shouldOverrideUrlLoading(AwWebResourceRequest request) {
+            if (request.url.startsWith(BAD_SCHEME)) {
+                mLatch.countDown();
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public void onReceivedError(int errorCode, String description, String failingUrl) {
+            super.onReceivedError(errorCode, description, failingUrl);
+            throw new RuntimeException("we should not receive an error code! " + failingUrl);
+        }
+
+        @Override
+        public void onReceivedError2(AwWebResourceRequest request, AwWebResourceError error) {
+            super.onReceivedError2(request, error);
+            throw new RuntimeException("we should not receive an error code! " + request.url);
+        }
+
+        public void waitForLatch() {
+            try {
+                Assert.assertTrue(mLatch.await(WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS));
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testCalledOnServerRedirectInvalidScheme() throws Throwable {
+        BadSchemeClient client = new BadSchemeClient();
+        setupWithProvidedContentsClient(client);
+
+        final String path1 = "/from.html";
+        final String path2 = BAD_SCHEME + "to.html";
+        final String fromUrl = mWebServer.setRedirect(path1, path2);
+        final String toUrl = mWebServer.setResponse(
+                path2, CommonResources.ABOUT_HTML, CommonResources.getTextHtmlHeaders(true));
+        mActivityTestRule.loadUrlAsync(mAwContents, fromUrl);
+        client.waitForLatch();
+        // Wait for an arbitrary amount of time to ensure onReceivedError is never called.
+        Thread.sleep(WAIT_TIMEOUT_MS / 3);
     }
 
     private void verifyShouldOverrideUrlLoadingInPopup(String popupPath) throws Throwable {

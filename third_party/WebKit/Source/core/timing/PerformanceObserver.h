@@ -5,10 +5,10 @@
 #ifndef PerformanceObserver_h
 #define PerformanceObserver_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/timing/PerformanceEntry.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Vector.h"
@@ -41,6 +41,7 @@ class CORE_EXPORT PerformanceObserver final
 
   void observe(const PerformanceObserverInit&, ExceptionState&);
   void disconnect();
+  PerformanceEntryVector takeRecords();
   void EnqueuePerformanceEntry(PerformanceEntry&);
   PerformanceEntryTypeMask FilterOptions() const { return filter_options_; }
 

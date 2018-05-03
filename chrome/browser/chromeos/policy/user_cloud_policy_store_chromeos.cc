@@ -10,7 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/chromeos/policy/cached_policy_key_loader_chromeos.h"
@@ -45,7 +44,7 @@ UserCloudPolicyStoreChromeOS::UserCloudPolicyStoreChromeOS(
       session_manager_client_(session_manager_client),
       account_id_(account_id),
       is_active_directory_(is_active_directory),
-      cached_policy_key_loader_(base::MakeUnique<CachedPolicyKeyLoaderChromeOS>(
+      cached_policy_key_loader_(std::make_unique<CachedPolicyKeyLoaderChromeOS>(
           cryptohome_client,
           background_task_runner,
           account_id,
@@ -72,8 +71,8 @@ void UserCloudPolicyStoreChromeOS::Load() {
   weak_factory_.InvalidateWeakPtrs();
   session_manager_client_->RetrievePolicyForUser(
       cryptohome::Identification(account_id_),
-      base::Bind(&UserCloudPolicyStoreChromeOS::OnPolicyRetrieved,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&UserCloudPolicyStoreChromeOS::OnPolicyRetrieved,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void UserCloudPolicyStoreChromeOS::LoadImmediately() {
@@ -90,7 +89,7 @@ void UserCloudPolicyStoreChromeOS::LoadImmediately() {
       session_manager_client_->BlockingRetrievePolicyForUser(
           cryptohome::Identification(account_id_), &policy_blob);
 
-  if (response_type == RetrievePolicyResponseType::SESSION_DOES_NOT_EXIST) {
+  if (response_type == RetrievePolicyResponseType::GET_SERVICE_FAIL) {
     LOG(ERROR)
         << "Session manager claims that session doesn't exist; signing out";
     base::debug::DumpWithoutCrashing();
@@ -194,13 +193,13 @@ void UserCloudPolicyStoreChromeOS::OnPolicyStored(bool success) {
 }
 
 void UserCloudPolicyStoreChromeOS::OnPolicyRetrieved(
-    const std::string& policy_blob,
-    RetrievePolicyResponseType response_type) {
+    RetrievePolicyResponseType response_type,
+    const std::string& policy_blob) {
   // Disallow the sign in when the Chrome OS user session has not started, which
   // should always happen before the profile construction. An attempt to read
   // the policy outside the session will always fail and return an empty policy
   // blob.
-  if (response_type == RetrievePolicyResponseType::SESSION_DOES_NOT_EXIST) {
+  if (response_type == RetrievePolicyResponseType::GET_SERVICE_FAIL) {
     LOG(ERROR)
         << "Session manager claims that session doesn't exist; signing out";
     base::debug::DumpWithoutCrashing();

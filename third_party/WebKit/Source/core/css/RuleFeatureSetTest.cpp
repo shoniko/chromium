@@ -4,9 +4,9 @@
 
 #include "core/css/RuleFeatureSet.h"
 
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/CSSSelectorList.h"
 #include "core/css/RuleSet.h"
-#include "core/css/StylePropertySet.h"
 #include "core/css/StyleRule.h"
 #include "core/css/invalidation/InvalidationSet.h"
 #include "core/css/parser/CSSParser.h"
@@ -21,7 +21,7 @@ namespace blink {
 
 class RuleFeatureSetTest : public ::testing::Test {
  public:
-  RuleFeatureSetTest() {}
+  RuleFeatureSetTest() = default;
 
   void SetUp() {
     document_ = HTMLDocument::CreateForTest();
@@ -35,11 +35,12 @@ class RuleFeatureSetTest : public ::testing::Test {
   RuleFeatureSet::SelectorPreMatch CollectFeatures(
       const String& selector_text) {
     CSSSelectorList selector_list = CSSParser::ParseSelector(
-        StrictCSSParserContext(), nullptr, selector_text);
+        StrictCSSParserContext(SecureContextMode::kInsecureContext), nullptr,
+        selector_text);
 
-    StyleRule* style_rule =
-        StyleRule::Create(std::move(selector_list),
-                          MutableStylePropertySet::Create(kHTMLStandardMode));
+    StyleRule* style_rule = StyleRule::Create(
+        std::move(selector_list),
+        MutableCSSPropertyValueSet::Create(kHTMLStandardMode));
     RuleData rule_data(style_rule, 0, 0, kRuleHasNoSpecialState);
     return rule_feature_set_.CollectFeaturesFromRuleData(rule_data);
   }
@@ -147,15 +148,29 @@ class RuleFeatureSetTest : public ::testing::Test {
     EXPECT_TRUE(classes.Contains(class_name));
   }
 
-  void ExpectSiblingInvalidation(unsigned max_direct_adjacent_selectors,
-                                 const AtomicString& sibling_name,
-                                 InvalidationSetVector& invalidation_sets) {
+  void ExpectSiblingClassInvalidation(
+      unsigned max_direct_adjacent_selectors,
+      const AtomicString& sibling_name,
+      InvalidationSetVector& invalidation_sets) {
     EXPECT_EQ(1u, invalidation_sets.size());
     const SiblingInvalidationSet& sibling_invalidation_set =
         ToSiblingInvalidationSet(*invalidation_sets[0]);
     HashSet<AtomicString> classes = ClassSet(sibling_invalidation_set);
     EXPECT_EQ(1u, classes.size());
     EXPECT_TRUE(classes.Contains(sibling_name));
+    EXPECT_EQ(max_direct_adjacent_selectors,
+              sibling_invalidation_set.MaxDirectAdjacentSelectors());
+  }
+
+  void ExpectSiblingIdInvalidation(unsigned max_direct_adjacent_selectors,
+                                   const AtomicString& sibling_name,
+                                   InvalidationSetVector& invalidation_sets) {
+    EXPECT_EQ(1u, invalidation_sets.size());
+    const SiblingInvalidationSet& sibling_invalidation_set =
+        ToSiblingInvalidationSet(*invalidation_sets[0]);
+    HashSet<AtomicString> ids = IdSet(*invalidation_sets[0]);
+    EXPECT_EQ(1u, ids.size());
+    EXPECT_TRUE(ids.Contains(sibling_name));
     EXPECT_EQ(max_direct_adjacent_selectors,
               sibling_invalidation_set.MaxDirectAdjacentSelectors());
   }
@@ -259,7 +274,7 @@ TEST_F(RuleFeatureSetTest, interleavedDescendantSibling2) {
   InvalidationLists invalidation_lists;
   CollectInvalidationSetsForClass(invalidation_lists, "o");
   ExpectNoInvalidation(invalidation_lists.descendants);
-  ExpectSiblingInvalidation(1, "p", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(1, "p", invalidation_lists.siblings);
 }
 
 TEST_F(RuleFeatureSetTest, interleavedDescendantSibling3) {
@@ -453,7 +468,7 @@ TEST_F(RuleFeatureSetTest, universalSiblingInvalidationDirectAdjacent) {
   InvalidationLists invalidation_lists;
   CollectUniversalSiblingInvalidationSet(invalidation_lists);
 
-  ExpectSiblingInvalidation(1, "a", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(1, "a", invalidation_lists.siblings);
   ExpectSelfInvalidation(invalidation_lists.siblings);
 }
 
@@ -463,7 +478,7 @@ TEST_F(RuleFeatureSetTest, universalSiblingInvalidationMultipleDirectAdjacent) {
   InvalidationLists invalidation_lists;
   CollectUniversalSiblingInvalidationSet(invalidation_lists);
 
-  ExpectSiblingInvalidation(2, "b", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(2, "b", invalidation_lists.siblings);
   ExpectSelfInvalidation(invalidation_lists.siblings);
 }
 
@@ -484,7 +499,7 @@ TEST_F(RuleFeatureSetTest, universalSiblingInvalidationIndirectAdjacent) {
   InvalidationLists invalidation_lists;
   CollectUniversalSiblingInvalidationSet(invalidation_lists);
 
-  ExpectSiblingInvalidation(UINT_MAX, "a", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(UINT_MAX, "a", invalidation_lists.siblings);
   ExpectSelfInvalidation(invalidation_lists.siblings);
 }
 
@@ -495,7 +510,7 @@ TEST_F(RuleFeatureSetTest,
   InvalidationLists invalidation_lists;
   CollectUniversalSiblingInvalidationSet(invalidation_lists);
 
-  ExpectSiblingInvalidation(UINT_MAX, "b", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(UINT_MAX, "b", invalidation_lists.siblings);
   ExpectSelfInvalidation(invalidation_lists.siblings);
 }
 
@@ -518,7 +533,7 @@ TEST_F(RuleFeatureSetTest, universalSiblingInvalidationNot) {
   InvalidationLists invalidation_lists;
   CollectUniversalSiblingInvalidationSet(invalidation_lists);
 
-  ExpectSiblingInvalidation(1, "b", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(1, "b", invalidation_lists.siblings);
   ExpectSelfInvalidation(invalidation_lists.siblings);
 }
 
@@ -539,7 +554,18 @@ TEST_F(RuleFeatureSetTest, universalSiblingInvalidationAny) {
   InvalidationLists invalidation_lists;
   CollectUniversalSiblingInvalidationSet(invalidation_lists);
 
-  ExpectSiblingInvalidation(1, "b", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(1, "b", invalidation_lists.siblings);
+  ExpectSelfInvalidation(invalidation_lists.siblings);
+}
+
+TEST_F(RuleFeatureSetTest, universalSiblingIdInvalidationAny) {
+  EXPECT_EQ(RuleFeatureSet::kSelectorMayMatch,
+            CollectFeatures(":-webkit-any(.a) + #b"));
+
+  InvalidationLists invalidation_lists;
+  CollectUniversalSiblingInvalidationSet(invalidation_lists);
+
+  ExpectSiblingIdInvalidation(1, "b", invalidation_lists.siblings);
   ExpectSelfInvalidation(invalidation_lists.siblings);
 }
 
@@ -559,7 +585,7 @@ TEST_F(RuleFeatureSetTest, universalSiblingInvalidationType) {
   InvalidationLists invalidation_lists;
   CollectUniversalSiblingInvalidationSet(invalidation_lists);
 
-  ExpectSiblingInvalidation(1, "a", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(1, "a", invalidation_lists.siblings);
   ExpectSelfInvalidation(invalidation_lists.siblings);
 }
 
@@ -578,7 +604,7 @@ TEST_F(RuleFeatureSetTest, universalSiblingInvalidationLink) {
   InvalidationLists invalidation_lists;
   CollectUniversalSiblingInvalidationSet(invalidation_lists);
 
-  ExpectSiblingInvalidation(1, "a", invalidation_lists.siblings);
+  ExpectSiblingClassInvalidation(1, "a", invalidation_lists.siblings);
   ExpectSelfInvalidation(invalidation_lists.siblings);
 }
 

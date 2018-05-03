@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
+#include "base/scoped_observer.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/sessions/session_ios.h"
 #import "ios/chrome/browser/sessions/session_service_ios.h"
@@ -31,54 +31,12 @@
 
 namespace {
 
-// BrowserListSessionServiceWebStateObserver observes a WebState and invokes
-// |closure| when a new navigation item is committed.
-class BrowserListSessionServiceWebStateObserver : public web::WebStateObserver {
- public:
-  explicit BrowserListSessionServiceWebStateObserver(
-      const base::RepeatingClosure& closure);
-  ~BrowserListSessionServiceWebStateObserver() override;
-
-  // Changes the observed WebState to |web_state|.
-  void ObserveWebState(web::WebState* web_state);
-
-  // web::WebStateObserver implementation.
-  void NavigationItemCommitted(
-      web::WebState* web_state,
-      const web::LoadCommittedDetails& load_details) override;
-
- private:
-  base::RepeatingClosure closure_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserListSessionServiceWebStateObserver);
-};
-
-BrowserListSessionServiceWebStateObserver::
-    BrowserListSessionServiceWebStateObserver(
-        const base::RepeatingClosure& closure)
-    : WebStateObserver(), closure_(closure) {
-  DCHECK(!closure_.is_null());
-}
-
-BrowserListSessionServiceWebStateObserver::
-    ~BrowserListSessionServiceWebStateObserver() = default;
-
-void BrowserListSessionServiceWebStateObserver::ObserveWebState(
-    web::WebState* web_state) {
-  WebStateObserver::Observe(web_state);
-}
-
-void BrowserListSessionServiceWebStateObserver::NavigationItemCommitted(
-    web::WebState* web_state,
-    const web::LoadCommittedDetails& load_details) {
-  closure_.Run();
-}
-
 // BrowserListSessionServiceWebStateListObserver observes a WebStateList and
 // invokes |closure| when the active WebState changes or a navigation item is
 // committed in the active WebState.
 class BrowserListSessionServiceWebStateListObserver
-    : public WebStateListObserver {
+    : public WebStateListObserver,
+      public web::WebStateObserver {
  public:
   BrowserListSessionServiceWebStateListObserver(
       WebStateList* web_state_list,
@@ -90,12 +48,18 @@ class BrowserListSessionServiceWebStateListObserver
                            web::WebState* old_web_state,
                            web::WebState* new_web_state,
                            int active_index,
-                           bool user_action) override;
+                           int reason) override;
+
+  // web::WebStateObserver implementation.
+  void NavigationItemCommitted(
+      web::WebState* web_state,
+      const web::LoadCommittedDetails& load_details) override;
+  void WebStateDestroyed(web::WebState* web_state) override;
 
  private:
   WebStateList* web_state_list_;
   base::RepeatingClosure closure_;
-  BrowserListSessionServiceWebStateObserver observer_;
+  ScopedObserver<web::WebState, web::WebStateObserver> scoped_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserListSessionServiceWebStateListObserver);
 };
@@ -104,19 +68,20 @@ BrowserListSessionServiceWebStateListObserver::
     BrowserListSessionServiceWebStateListObserver(
         WebStateList* web_state_list,
         const base::RepeatingClosure& closure)
-    : web_state_list_(web_state_list), closure_(closure), observer_(closure) {
+    : web_state_list_(web_state_list),
+      closure_(closure),
+      scoped_observer_(this) {
   DCHECK(!closure_.is_null());
   web_state_list_->AddObserver(this);
   if (web_state_list_->active_index() != WebStateList::kInvalidIndex) {
-    WebStateActivatedAt(web_state_list_, nullptr,
-                        web_state_list_->GetActiveWebState(),
-                        web_state_list_->active_index(), false);
+    scoped_observer_.Add(web_state_list_->GetActiveWebState());
   }
 }
 
 BrowserListSessionServiceWebStateListObserver::
     ~BrowserListSessionServiceWebStateListObserver() {
   web_state_list_->RemoveObserver(this);
+  scoped_observer_.RemoveAll();
 }
 
 void BrowserListSessionServiceWebStateListObserver::WebStateActivatedAt(
@@ -124,10 +89,25 @@ void BrowserListSessionServiceWebStateListObserver::WebStateActivatedAt(
     web::WebState* old_web_state,
     web::WebState* new_web_state,
     int active_index,
-    bool user_action) {
-  if (old_web_state)
+    int reason) {
+  if (old_web_state) {
+    scoped_observer_.Remove(old_web_state);
     closure_.Run();
-  observer_.ObserveWebState(new_web_state);
+  }
+  if (new_web_state) {
+    scoped_observer_.Add(new_web_state);
+  }
+}
+
+void BrowserListSessionServiceWebStateListObserver::NavigationItemCommitted(
+    web::WebState* web_state,
+    const web::LoadCommittedDetails& load_details) {
+  closure_.Run();
+}
+
+void BrowserListSessionServiceWebStateListObserver::WebStateDestroyed(
+    web::WebState* web_state) {
+  NOTREACHED();
 }
 
 // BrowserListSessionServiceBrowserListObserver observes a BrowserList and
@@ -176,7 +156,7 @@ void BrowserListSessionServiceBrowserListObserver::OnBrowserCreated(
   DCHECK_EQ(browser_list, browser_list_);
   DCHECK(observers_.find(browser) == observers_.end());
   observers_.insert(std::make_pair(
-      browser, base::MakeUnique<BrowserListSessionServiceWebStateListObserver>(
+      browser, std::make_unique<BrowserListSessionServiceWebStateListObserver>(
                    &browser->web_state_list(), closure_)));
 }
 
@@ -207,7 +187,7 @@ BrowserListSessionServiceImpl::BrowserListSessionServiceImpl(
   DCHECK(create_web_state_);
   // It is safe to use base::Unretained as the closure is indirectly owned by
   // the BrowserListSessionServiceImpl instance and will be deleted before it.
-  observer_ = base::MakeUnique<BrowserListSessionServiceBrowserListObserver>(
+  observer_ = std::make_unique<BrowserListSessionServiceBrowserListObserver>(
       browser_list,
       base::BindRepeating(&BrowserListSessionServiceImpl::ScheduleSaveSession,
                           base::Unretained(this), false));

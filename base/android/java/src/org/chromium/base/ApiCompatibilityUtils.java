@@ -21,6 +21,7 @@ import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.VectorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
@@ -40,6 +41,7 @@ import android.view.textclassifier.TextClassifier;
 import android.widget.TextView;
 
 import java.io.File;
+import java.io.UnsupportedEncodingException;
 
 /**
  * Utility class to use new APIs that were added after ICS (API level 14).
@@ -63,6 +65,18 @@ public class ApiCompatibilityUtils {
      */
     public static int compareBoolean(boolean lhs, boolean rhs) {
         return lhs == rhs ? 0 : lhs ? 1 : -1;
+    }
+
+    /**
+     * {@link String#getBytes()} but specifying UTF-8 as the encoding and capturing the resulting
+     * UnsupportedEncodingException.
+     */
+    public static byte[] getBytesUtf8(String str) {
+        try {
+            return str.getBytes("UTF-8");
+        } catch (UnsupportedEncodingException e) {
+            throw new IllegalStateException("UTF-8 encoding not available.", e);
+        }
     }
 
     /**
@@ -434,7 +448,7 @@ public class ApiCompatibilityUtils {
         // removing or shrinking the SurfaceFlinger overlay required for our views.
         // This benefits battery usage on L and M.  However, this no longer provides a battery
         // benefit as of N and starts to cause flicker bugs on O, so don't bother on O and up.
-        if (!BuildInfo.isAtLeastO() && statusBarColor == Color.BLACK
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O && statusBarColor == Color.BLACK
                 && window.getNavigationBarColor() == Color.BLACK) {
             window.clearFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         } else {
@@ -445,6 +459,8 @@ public class ApiCompatibilityUtils {
 
     /**
      * @see android.content.res.Resources#getDrawable(int id).
+     * TODO(ltian): use {@link AppCompatResources} to parse drawable to prevent fail on
+     * {@link VectorDrawable}. (http://crbug.com/792129)
      */
     @SuppressWarnings("deprecation")
     public static Drawable getDrawable(Resources res, int id) throws NotFoundException {

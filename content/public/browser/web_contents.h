@@ -28,7 +28,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/stop_find_action.h"
-#include "third_party/WebKit/public/web/WebSandboxFlags.h"
+#include "third_party/WebKit/common/sandbox_flags.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_tree_update.h"
 #include "ui/base/window_open_disposition.h"
@@ -66,7 +66,6 @@ namespace content {
 class BrowserContext;
 class BrowserPluginGuestDelegate;
 class InterstitialPage;
-class PageState;
 class RenderFrameHost;
 class RenderViewHost;
 class RenderWidgetHost;
@@ -272,10 +271,10 @@ class WebContents : public PageNavigator,
   // Calls |on_frame| for each frame in the currently active view.
   // Note: The RenderFrameHost parameter is not guaranteed to have a live
   // RenderFrame counterpart in the renderer process. Callbacks should check
-  // IsRenderFrameLive, as sending IPC messages to it in this case will fail
+  // IsRenderFrameLive(), as sending IPC messages to it in this case will fail
   // silently.
   virtual void ForEachFrame(
-      const base::Callback<void(RenderFrameHost*)>& on_frame) = 0;
+      const base::RepeatingCallback<void(RenderFrameHost*)>& on_frame) = 0;
 
   // Returns a vector of all RenderFrameHosts in the currently active view in
   // breadth-first traversal order.
@@ -354,10 +353,6 @@ class WebContents : public PageNavigator,
   // Returns the SiteInstance associated with the current page.
   virtual SiteInstance* GetSiteInstance() const = 0;
 
-  // Returns the SiteInstance for the pending navigation, if any.  Otherwise
-  // returns the current SiteInstance.
-  virtual SiteInstance* GetPendingSiteInstance() const = 0;
-
   // Returns whether this WebContents is loading a resource.
   virtual bool IsLoading() const = 0;
 
@@ -393,7 +388,7 @@ class WebContents : public PageNavigator,
   // returned by GetPreferredSize() until all captures have ended.
   virtual void IncrementCapturerCount(const gfx::Size& capture_size) = 0;
   virtual void DecrementCapturerCount() = 0;
-  virtual int GetCapturerCount() const = 0;
+  virtual bool IsBeingCaptured() const = 0;
 
   // Indicates/Sets whether all audio output from this WebContents is muted.
   virtual bool IsAudioMuted() const = 0;
@@ -428,9 +423,6 @@ class WebContents : public PageNavigator,
   // was created or shown with WasShown()).
   virtual base::TimeTicks GetLastActiveTime() const = 0;
   virtual void SetLastActiveTime(base::TimeTicks last_active_time) = 0;
-
-  // Get the last time that the WebContents was made hidden.
-  virtual base::TimeTicks GetLastHiddenTime() const = 0;
 
   // Invoked when the WebContents becomes shown/hidden. A hidden WebContents
   // isn't painted on the screen.
@@ -643,12 +635,6 @@ class WebContents : public PageNavigator,
   virtual void SetClosedByUserGesture(bool value) = 0;
   virtual bool GetClosedByUserGesture() const = 0;
 
-  // Opens view-source tab for this contents.
-  virtual void ViewSource() = 0;
-
-  virtual void ViewFrameSource(const GURL& url,
-                               const PageState& page_state) = 0;
-
   // Gets the minimum/maximum zoom percent.
   virtual int GetMinimumZoomPercent() const = 0;
   virtual int GetMaximumZoomPercent() const = 0;
@@ -744,6 +730,10 @@ class WebContents : public PageNavigator,
 
   // Returns true if audio has recently been audible from the WebContents.
   virtual bool WasRecentlyAudible() = 0;
+
+  // Returns true if audio has been audible from the WebContents since the last
+  // navigation.
+  virtual bool WasEverAudible() = 0;
 
   // The callback invoked when the renderer responds to a request for the main
   // frame document's manifest. The url will be empty if the document specifies

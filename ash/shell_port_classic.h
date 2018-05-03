@@ -14,7 +14,6 @@
 
 namespace ash {
 
-class AcceleratorControllerDelegateClassic;
 class PointerWatcherAdapterClassic;
 
 // Implementation of ShellPort for classic ash/aura. See ash/README.md for more
@@ -25,10 +24,6 @@ class ASH_EXPORT ShellPortClassic : public ShellPort {
   ~ShellPortClassic() override;
 
   static ShellPortClassic* Get();
-
-  AcceleratorControllerDelegateClassic* accelerator_controller_delegate() {
-    return accelerator_controller_delegate_.get();
-  }
 
   // ShellPort:
   void Shutdown() override;
@@ -52,16 +47,12 @@ class ASH_EXPORT ShellPortClassic : public ShellPort {
       override;
   std::unique_ptr<WorkspaceEventHandler> CreateWorkspaceEventHandler(
       aura::Window* workspace_window) override;
-  std::unique_ptr<ImmersiveFullscreenController>
-  CreateImmersiveFullscreenController() override;
   std::unique_ptr<KeyboardUI> CreateKeyboardUI() override;
   void AddPointerWatcher(views::PointerWatcher* watcher,
                          views::PointerWatcherEventTypes events) override;
   void RemovePointerWatcher(views::PointerWatcher* watcher) override;
   bool IsTouchDown() override;
   void ToggleIgnoreExternalKeyboard() override;
-  void SetLaserPointerEnabled(bool enabled) override;
-  void SetPartialMagnifierEnabled(bool enabled) override;
   void CreatePointerWatcherAdapter() override;
   std::unique_ptr<AshWindowTreeHost> CreateAshWindowTreeHost(
       const AshWindowTreeHostInitParams& init_params) override;
@@ -72,12 +63,11 @@ class ASH_EXPORT ShellPortClassic : public ShellPort {
   std::unique_ptr<display::NativeDisplayDelegate> CreateNativeDisplayDelegate()
       override;
   std::unique_ptr<AcceleratorController> CreateAcceleratorController() override;
+  void AddVideoDetectorObserver(
+      viz::mojom::VideoDetectorObserverPtr observer) override;
 
  private:
   std::unique_ptr<PointerWatcherAdapterClassic> pointer_watcher_adapter_;
-
-  std::unique_ptr<AcceleratorControllerDelegateClassic>
-      accelerator_controller_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellPortClassic);
 };

@@ -10,16 +10,17 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "content/child/thread_safe_sender.h"
-#include "content/common/service_worker/service_worker_types.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/renderer/service_worker/service_worker_dispatcher.h"
 #include "content/renderer/service_worker/service_worker_handle_reference.h"
 #include "content/renderer/service_worker/service_worker_provider_context.h"
 #include "content/renderer/service_worker/web_service_worker_impl.h"
 #include "content/renderer/service_worker/web_service_worker_registration_impl.h"
+#include "third_party/WebKit/common/message_port/message_port_channel.h"
+#include "third_party/WebKit/common/service_worker/service_worker_provider_type.mojom.h"
+#include "third_party/WebKit/common/service_worker/service_worker_registration.mojom.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerProviderClient.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
 
 using blink::WebURL;
 
@@ -37,52 +38,44 @@ WebServiceWorkerProviderImpl::WebServiceWorkerProviderImpl(
     ServiceWorkerProviderContext* context)
     : thread_safe_sender_(thread_safe_sender),
       context_(context),
+      provider_client_(nullptr),
       weak_factory_(this) {
   DCHECK(context_);
   switch (context_->provider_type()) {
-    case SERVICE_WORKER_PROVIDER_FOR_WINDOW:
+    case blink::mojom::ServiceWorkerProviderType::kForWindow:
       DCHECK(context_->container_host());
       context_->SetWebServiceWorkerProvider(weak_factory_.GetWeakPtr());
       break;
-    case SERVICE_WORKER_PROVIDER_FOR_CONTROLLER:
+    case blink::mojom::ServiceWorkerProviderType::kForServiceWorker:
       // Do nothing.
       break;
-    case SERVICE_WORKER_PROVIDER_FOR_WORKER:
-    case SERVICE_WORKER_PROVIDER_FOR_SHARED_WORKER:
-    case SERVICE_WORKER_PROVIDER_UNKNOWN:
+    case blink::mojom::ServiceWorkerProviderType::kForSharedWorker:
+    case blink::mojom::ServiceWorkerProviderType::kUnknown:
       NOTREACHED() << "Unimplemented type: " << context_->provider_type();
       break;
   }
 }
 
-WebServiceWorkerProviderImpl::~WebServiceWorkerProviderImpl() {
-  // Make sure the provider client is removed.
-  RemoveProviderClient();
-}
+WebServiceWorkerProviderImpl::~WebServiceWorkerProviderImpl() = default;
 
 void WebServiceWorkerProviderImpl::SetClient(
     blink::WebServiceWorkerProviderClient* client) {
-  if (!client) {
-    RemoveProviderClient();
+  provider_client_ = client;
+  if (!provider_client_)
     return;
-  }
 
-  // TODO(kinuko): Here we could also register the current thread ID
-  // on the provider context so that multiple WebServiceWorkerProviderImpl
-  // (e.g. on document and on dedicated workers) can properly share
-  // the single provider context across threads. (http://crbug.com/366538
-  // for more context)
-  GetDispatcher()->AddProviderClient(context_->provider_id(), client);
-
-  if (!context_->controller())
+  std::unique_ptr<ServiceWorkerHandleReference> controller =
+      context_->TakeController();
+  if (!controller)
     return;
-  SetController(context_->controller()->info(), context_->used_features(),
+  SetController(std::move(controller), context_->used_features(),
                 false /* notify_controllerchange */);
 }
 
 void WebServiceWorkerProviderImpl::RegisterServiceWorker(
     const WebURL& web_pattern,
     const WebURL& web_script_url,
+    blink::mojom::ServiceWorkerUpdateViaCache update_via_cache,
     std::unique_ptr<WebServiceWorkerRegistrationCallbacks> callbacks) {
   DCHECK(callbacks);
 
@@ -110,7 +103,8 @@ void WebServiceWorkerProviderImpl::RegisterServiceWorker(
   TRACE_EVENT_ASYNC_BEGIN2(
       "ServiceWorker", "WebServiceWorkerProviderImpl::RegisterServiceWorker",
       this, "Scope", pattern.spec(), "Script URL", script_url.spec());
-  auto options = blink::mojom::ServiceWorkerRegistrationOptions::New(pattern);
+  auto options = blink::mojom::ServiceWorkerRegistrationOptions::New(
+      pattern, update_via_cache);
   context_->container_host()->Register(
       script_url, std::move(options),
       base::BindOnce(&WebServiceWorkerProviderImpl::OnRegistered,
@@ -196,37 +190,45 @@ bool WebServiceWorkerProviderImpl::ValidateScopeAndScriptURL(
 }
 
 void WebServiceWorkerProviderImpl::SetController(
-    const blink::mojom::ServiceWorkerObjectInfo& info,
-    const std::set<uint32_t>& features,
+    std::unique_ptr<ServiceWorkerHandleReference> controller,
+    const std::set<blink::mojom::WebFeature>& features,
     bool should_notify_controller_change) {
-  blink::WebServiceWorkerProviderClient* provider_client =
-      GetDispatcher()->GetProviderClient(context_->provider_id());
-  // The document may have been destroyed so that |provider_client| is null.
-  if (!provider_client)
+  if (!provider_client_)
     return;
 
-  scoped_refptr<WebServiceWorkerImpl> controller =
-      GetDispatcher()->GetOrCreateServiceWorker(
-          ServiceWorkerHandleReference::Create(info,
-                                               thread_safe_sender_.get()));
+  for (blink::mojom::WebFeature feature : features)
+    provider_client_->CountFeature(feature);
+  provider_client_->SetController(
+      WebServiceWorkerImpl::CreateHandle(
+          GetDispatcher()->GetOrCreateServiceWorker(std::move(controller))),
+      should_notify_controller_change);
+}
 
-  for (uint32_t feature : features)
-    provider_client->CountFeature(feature);
-  provider_client->SetController(WebServiceWorkerImpl::CreateHandle(controller),
-                                 should_notify_controller_change);
+void WebServiceWorkerProviderImpl::PostMessageToClient(
+    std::unique_ptr<ServiceWorkerHandleReference> source_handle,
+    const base::string16& message,
+    std::vector<mojo::ScopedMessagePipeHandle> message_pipes) {
+  if (!provider_client_)
+    return;
+
+  scoped_refptr<WebServiceWorkerImpl> source_worker =
+      GetDispatcher()->GetOrCreateServiceWorker(std::move(source_handle));
+  auto message_ports =
+      blink::MessagePortChannel::CreateFromHandles(std::move(message_pipes));
+  provider_client_->DispatchMessageEvent(
+      WebServiceWorkerImpl::CreateHandle(std::move(source_worker)),
+      blink::WebString::FromUTF16(message), std::move(message_ports));
+}
+
+void WebServiceWorkerProviderImpl::CountFeature(
+    blink::mojom::WebFeature feature) {
+  if (!provider_client_)
+    return;
+  provider_client_->CountFeature(feature);
 }
 
 int WebServiceWorkerProviderImpl::provider_id() const {
   return context_->provider_id();
-}
-
-void WebServiceWorkerProviderImpl::RemoveProviderClient() {
-  // Remove the provider client, but only if the dispatcher is still there.
-  // (For cleanup path we don't need to bother creating a new dispatcher)
-  ServiceWorkerDispatcher* dispatcher =
-      ServiceWorkerDispatcher::GetThreadSpecificInstance();
-  if (dispatcher)
-    dispatcher->RemoveProviderClient(context_->provider_id());
 }
 
 ServiceWorkerDispatcher* WebServiceWorkerProviderImpl::GetDispatcher() {
@@ -237,8 +239,7 @@ void WebServiceWorkerProviderImpl::OnRegistered(
     std::unique_ptr<WebServiceWorkerRegistrationCallbacks> callbacks,
     blink::mojom::ServiceWorkerErrorType error,
     const base::Optional<std::string>& error_msg,
-    blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration,
-    const base::Optional<ServiceWorkerVersionAttributes>& attributes) {
+    blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration) {
   TRACE_EVENT_ASYNC_END2(
       "ServiceWorker", "WebServiceWorkerProviderImpl::RegisterServiceWorker",
       this, "Error", ServiceWorkerUtils::ErrorTypeToString(error), "Message",
@@ -246,7 +247,6 @@ void WebServiceWorkerProviderImpl::OnRegistered(
   if (error != blink::mojom::ServiceWorkerErrorType::kNone) {
     DCHECK(error_msg);
     DCHECK(!registration);
-    DCHECK(!attributes);
     callbacks->OnError(blink::WebServiceWorkerError(
         error, blink::WebString::FromASCII(*error_msg)));
     return;
@@ -254,20 +254,18 @@ void WebServiceWorkerProviderImpl::OnRegistered(
 
   DCHECK(!error_msg);
   DCHECK(registration);
-  DCHECK(attributes);
-  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationHandleId,
-            registration->handle_id);
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            registration->registration_id);
   callbacks->OnSuccess(WebServiceWorkerRegistrationImpl::CreateHandle(
-      GetDispatcher()->GetOrCreateRegistrationForServiceWorkerClient(
-          std::move(registration), *attributes)));
+      context_->GetOrCreateRegistrationForServiceWorkerClient(
+          std::move(registration))));
 }
 
 void WebServiceWorkerProviderImpl::OnDidGetRegistration(
     std::unique_ptr<WebServiceWorkerGetRegistrationCallbacks> callbacks,
     blink::mojom::ServiceWorkerErrorType error,
     const base::Optional<std::string>& error_msg,
-    blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration,
-    const base::Optional<ServiceWorkerVersionAttributes>& attributes) {
+    blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration) {
   TRACE_EVENT_ASYNC_END2("ServiceWorker",
                          "WebServiceWorkerProviderImpl::GetRegistration", this,
                          "Error", ServiceWorkerUtils::ErrorTypeToString(error),
@@ -275,23 +273,24 @@ void WebServiceWorkerProviderImpl::OnDidGetRegistration(
   if (error != blink::mojom::ServiceWorkerErrorType::kNone) {
     DCHECK(error_msg);
     DCHECK(!registration);
-    DCHECK(!attributes);
     callbacks->OnError(blink::WebServiceWorkerError(
         error, blink::WebString::FromASCII(*error_msg)));
     return;
   }
 
   DCHECK(!error_msg);
-  DCHECK(registration);
-  DCHECK(attributes);
-  scoped_refptr<WebServiceWorkerRegistrationImpl> impl;
-  // The handle id is invalid if no corresponding registration has been found
-  // or the found one is uninstalling.
-  if (registration->handle_id !=
-      blink::mojom::kInvalidServiceWorkerRegistrationHandleId) {
-    impl = GetDispatcher()->GetOrCreateRegistrationForServiceWorkerClient(
-        std::move(registration), *attributes);
+  // |registration| is nullptr if there is no registration at the scope or it's
+  // uninstalling.
+  if (!registration) {
+    callbacks->OnSuccess(nullptr);
+    return;
   }
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            registration->registration_id);
+  scoped_refptr<WebServiceWorkerRegistrationImpl> impl =
+      context_->GetOrCreateRegistrationForServiceWorkerClient(
+          std::move(registration));
+  DCHECK(impl);
   callbacks->OnSuccess(
       WebServiceWorkerRegistrationImpl::CreateHandle(std::move(impl)));
 }
@@ -302,8 +301,7 @@ void WebServiceWorkerProviderImpl::OnDidGetRegistrations(
     const base::Optional<std::string>& error_msg,
     base::Optional<
         std::vector<blink::mojom::ServiceWorkerRegistrationObjectInfoPtr>>
-        infos,
-    const base::Optional<std::vector<ServiceWorkerVersionAttributes>>& attrs) {
+        infos) {
   TRACE_EVENT_ASYNC_END2("ServiceWorker",
                          "WebServiceWorkerProviderImpl::GetRegistrations", this,
                          "Error", ServiceWorkerUtils::ErrorTypeToString(error),
@@ -311,7 +309,6 @@ void WebServiceWorkerProviderImpl::OnDidGetRegistrations(
   if (error != blink::mojom::ServiceWorkerErrorType::kNone) {
     DCHECK(error_msg);
     DCHECK(!infos);
-    DCHECK(!attrs);
     callbacks->OnError(blink::WebServiceWorkerError(
         error, blink::WebString::FromASCII(*error_msg)));
     return;
@@ -319,30 +316,28 @@ void WebServiceWorkerProviderImpl::OnDidGetRegistrations(
 
   DCHECK(!error_msg);
   DCHECK(infos);
-  DCHECK(attrs);
   using WebServiceWorkerRegistrationHandles =
       WebServiceWorkerProvider::WebServiceWorkerRegistrationHandles;
   std::unique_ptr<WebServiceWorkerRegistrationHandles> registrations =
-      base::MakeUnique<WebServiceWorkerRegistrationHandles>(infos->size());
+      std::make_unique<WebServiceWorkerRegistrationHandles>(infos->size());
   for (size_t i = 0; i < infos->size(); ++i) {
-    DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationHandleId,
-              (*infos)[i]->handle_id);
+    DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+              (*infos)[i]->registration_id);
     (*registrations)[i] = WebServiceWorkerRegistrationImpl::CreateHandle(
-        GetDispatcher()->GetOrCreateRegistrationForServiceWorkerClient(
-            std::move((*infos)[i]), (*attrs)[i]));
+        context_->GetOrCreateRegistrationForServiceWorkerClient(
+            std::move((*infos)[i])));
   }
   callbacks->OnSuccess(std::move(registrations));
 }
 
 void WebServiceWorkerProviderImpl::OnDidGetRegistrationForReady(
     std::unique_ptr<WebServiceWorkerGetRegistrationForReadyCallbacks> callbacks,
-    blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration,
-    const base::Optional<ServiceWorkerVersionAttributes>& attributes) {
+    blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration) {
   TRACE_EVENT_ASYNC_END0(
       "ServiceWorker", "WebServiceWorkerProviderImpl::GetRegistrationForReady",
       this);
   // TODO(leonhsl): Currently the only reason that we allow nullable
-  // |registration| and |attributes| is: impl of the mojo method
+  // |registration| is: impl of the mojo method
   // GetRegistrationForReady() needs to respond some non-sense params even if it
   // has found that the request is a bad message and has called
   // mojo::ReportBadMessage(), this is forced by Mojo, please see
@@ -351,12 +346,11 @@ void WebServiceWorkerProviderImpl::OnDidGetRegistrationForReady(
   // https://groups.google.com/a/chromium.org/forum/#!topic/chromium-mojo/NNsogKNurlA
   // settled.
   CHECK(registration);
-  CHECK(attributes);
-  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationHandleId,
-            registration->handle_id);
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId,
+            registration->registration_id);
   callbacks->OnSuccess(WebServiceWorkerRegistrationImpl::CreateHandle(
-      GetDispatcher()->GetOrCreateRegistrationForServiceWorkerClient(
-          std::move(registration), *attributes)));
+      context_->GetOrCreateRegistrationForServiceWorkerClient(
+          std::move(registration))));
 }
 
 }  // namespace content

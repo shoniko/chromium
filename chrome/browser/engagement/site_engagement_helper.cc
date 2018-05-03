@@ -16,7 +16,7 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/associated_interface_provider.h"
+#include "third_party/WebKit/common/associated_interfaces/associated_interface_provider.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -60,7 +60,7 @@ SiteEngagementService::Helper::~Helper() {
 void SiteEngagementService::Helper::OnEngagementLevelChanged(
     const GURL& url,
     blink::mojom::EngagementLevel level) {
-  web_contents()->ForEachFrame(base::Bind(
+  web_contents()->ForEachFrame(base::BindRepeating(
       &SiteEngagementService::Helper::SendEngagementLevelToFramesMatchingOrigin,
       base::Unretained(this), url::Origin::Create(url), level));
 }
@@ -135,17 +135,17 @@ void SiteEngagementService::Helper::InputTracker::DidGetUserInteraction(
   // compiler verifying that all cases are covered).
   switch (type) {
     case blink::WebInputEvent::kRawKeyDown:
-      helper()->RecordUserInput(SiteEngagementMetrics::ENGAGEMENT_KEYPRESS);
+      helper()->RecordUserInput(SiteEngagementService::ENGAGEMENT_KEYPRESS);
       break;
     case blink::WebInputEvent::kMouseDown:
-      helper()->RecordUserInput(SiteEngagementMetrics::ENGAGEMENT_MOUSE);
+      helper()->RecordUserInput(SiteEngagementService::ENGAGEMENT_MOUSE);
       break;
     case blink::WebInputEvent::kTouchStart:
       helper()->RecordUserInput(
-          SiteEngagementMetrics::ENGAGEMENT_TOUCH_GESTURE);
+          SiteEngagementService::ENGAGEMENT_TOUCH_GESTURE);
       break;
     case blink::WebInputEvent::kGestureScrollBegin:
-      helper()->RecordUserInput(SiteEngagementMetrics::ENGAGEMENT_SCROLL);
+      helper()->RecordUserInput(SiteEngagementService::ENGAGEMENT_SCROLL);
       break;
     case blink::WebInputEvent::kUndefined:
       // Explicitly ignore browser-initiated navigation input.
@@ -172,6 +172,19 @@ void SiteEngagementService::Helper::MediaTracker::TrackingStarted() {
   Pause();
 }
 
+void SiteEngagementService::Helper::MediaTracker::DidFinishNavigation(
+    content::NavigationHandle* handle) {
+  // Ignore subframe navigation to avoid clearing main frame active media
+  // players when they navigate.
+  if (!handle->HasCommitted() || !handle->IsInMainFrame() ||
+      handle->IsSameDocument()) {
+    return;
+  }
+
+  // Media stops playing on navigation, so clear our state.
+  active_media_players_.clear();
+}
+
 void SiteEngagementService::Helper::MediaTracker::MediaStartedPlaying(
     const MediaPlayerInfo& media_info,
     const MediaPlayerId& id) {
@@ -183,7 +196,8 @@ void SiteEngagementService::Helper::MediaTracker::MediaStartedPlaying(
 
 void SiteEngagementService::Helper::MediaTracker::MediaStoppedPlaying(
     const MediaPlayerInfo& media_info,
-    const MediaPlayerId& id) {
+    const MediaPlayerId& id,
+    WebContentsObserver::MediaStoppedReason reason) {
   active_media_players_.erase(std::remove(active_media_players_.begin(),
                                           active_media_players_.end(), id),
                               active_media_players_.end());
@@ -207,7 +221,7 @@ SiteEngagementService::Helper::Helper(content::WebContents* web_contents)
 }
 
 void SiteEngagementService::Helper::RecordUserInput(
-    SiteEngagementMetrics::EngagementType type) {
+    SiteEngagementService::EngagementType type) {
   TRACE_EVENT0("SiteEngagement", "RecordUserInput");
   content::WebContents* contents = web_contents();
   if (contents)

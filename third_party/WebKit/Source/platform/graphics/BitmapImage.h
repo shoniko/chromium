@@ -29,6 +29,7 @@
 #define BitmapImage_h
 
 #include <memory>
+#include "base/memory/weak_ptr.h"
 #include "platform/Timer.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/Color.h"
@@ -43,6 +44,10 @@
 #include "platform/wtf/Time.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
+namespace base {
+class TickClock;
+}
+
 namespace blink {
 
 class PLATFORM_EXPORT BitmapImage final : public Image {
@@ -53,9 +58,9 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   friend class GraphicsContext;
 
  public:
-  static RefPtr<BitmapImage> Create(ImageObserver* observer = 0,
-                                    bool is_multipart = false) {
-    return WTF::AdoptRef(new BitmapImage(observer, is_multipart));
+  static scoped_refptr<BitmapImage> Create(ImageObserver* observer = nullptr,
+                                           bool is_multipart = false) {
+    return base::AdoptRef(new BitmapImage(observer, is_multipart));
   }
 
   ~BitmapImage() override;
@@ -69,7 +74,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   bool GetHotSpot(IntPoint&) const override;
   String FilenameExtension() const override;
 
-  SizeAvailability SetData(RefPtr<SharedBuffer> data,
+  SizeAvailability SetData(scoped_refptr<SharedBuffer> data,
                            bool all_data_received) override;
   SizeAvailability DataChanged(bool all_data_received) override;
 
@@ -81,9 +86,9 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
 
   void SetAnimationPolicy(ImageAnimationPolicy) override;
   ImageAnimationPolicy AnimationPolicy() override { return animation_policy_; }
-  void AdvanceTime(double delta_time_in_seconds) override;
+  void AdvanceTime(TimeDelta) override;
 
-  RefPtr<Image> ImageForDefaultFrame() override;
+  scoped_refptr<Image> ImageForDefaultFrame() override;
 
   bool CurrentFrameKnownToBeOpaque(MetadataMode = kUseCurrentMetadata) override;
   bool CurrentFrameIsComplete() override;
@@ -100,13 +105,15 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   void SetDecoderForTesting(std::unique_ptr<DeferredImageDecoder> decoder) {
     decoder_ = std::move(decoder);
   }
-  void SetTaskRunnerForTesting(RefPtr<WebTaskRunner> task_runner) {
+  void SetTaskRunnerForTesting(scoped_refptr<WebTaskRunner> task_runner) {
     task_runner_ = task_runner;
   }
 
   Optional<size_t> last_num_frames_skipped_for_testing() const {
     return last_num_frames_skipped_;
   }
+
+  void SetTickClockForTesting(base::TickClock* clock) { clock_ = clock; }
 
  protected:
   bool IsSizeAvailable() override;
@@ -150,7 +157,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   // some room in the image cache.
   void DestroyDecodedData() override;
 
-  RefPtr<SharedBuffer> Data() override;
+  scoped_refptr<SharedBuffer> Data() override;
 
   // Notifies observers that the memory footprint has changed.
   void NotifyMemoryChanged();
@@ -167,7 +174,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   // Starts the animation by scheduling a task to advance to the next desired
   // frame, if possible, and catching up any frames if the time to display them
   // is in the past.
-  Optional<size_t> StartAnimationInternal(const double time);
+  Optional<size_t> StartAnimationInternal(TimeTicks);
   void StopAnimation();
   void AdvanceAnimation(TimerBase*);
 
@@ -216,20 +223,22 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
                           // incapable of animation.
   int repetitions_complete_;  // How many repetitions we've finished.
 
-  double desired_frame_start_time_;  // The system time at which we hope to see
-                                     // the next call to startAnimation().
+  TimeTicks desired_frame_start_time_;  // The system time at which we hope to
+                                        // see the next call to
+                                        // startAnimation().
 
   size_t frame_count_;
 
   PaintImage::AnimationSequenceId reset_animation_sequence_id_ = 0;
 
-  RefPtr<WebTaskRunner> task_runner_;
+  base::TickClock* clock_;
+  scoped_refptr<WebTaskRunner> task_runner_;
 
   // Value used in UMA tracking for the number of animation frames skipped
   // during catch-up.
   Optional<size_t> last_num_frames_skipped_ = 0u;
 
-  WTF::WeakPtrFactory<BitmapImage> weak_factory_;
+  base::WeakPtrFactory<BitmapImage> weak_factory_;
 };
 
 DEFINE_IMAGE_TYPE_CASTS(BitmapImage);

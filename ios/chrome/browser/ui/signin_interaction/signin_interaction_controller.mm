@@ -8,7 +8,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/browser/signin_pref_names.h"
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/signin/authentication_service.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
@@ -16,7 +16,6 @@
 #import "ios/chrome/browser/signin/signin_util.h"
 #import "ios/chrome/browser/ui/authentication/authentication_ui_util.h"
 #import "ios/chrome/browser/ui/authentication/chrome_signin_view_controller.h"
-#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/signin_interaction/signin_interaction_presenting.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
@@ -219,8 +218,8 @@ using signin_ui::CompletionCallback;
 - (void)dismissPresentedViewControllersAnimated:(BOOL)animated
                                      completion:(ProceduralBlock)completion {
   if (self.presenter.isPresenting) {
-    [self.presenter dismissViewControllerAnimated:animated
-                                       completion:completion];
+    [self.presenter dismissAllViewControllersAnimated:animated
+                                           completion:completion];
   } else if (completion) {
     completion();
   }
@@ -370,6 +369,11 @@ using signin_ui::CompletionCallback;
     [self dismissPresentedViewControllersAnimated:YES completion:nil];
   }
 
+  if (showAccountsSettings) {
+    [self.presenter showAccountsSettings];
+  }
+
+  // Cleaning up and calling the |completionCallback_| should be done last.
   identityInteractionManager_ = nil;
   signinViewController_ = nil;
   // Ensure self is not destroyed in the callbacks.
@@ -379,9 +383,6 @@ using signin_ui::CompletionCallback;
     completionCallback_ = nil;
   }
   strongSelf = nil;
-  if (showAccountsSettings) {
-    [self.dispatcher showAccountsSettings];
-  }
 }
 
 @end

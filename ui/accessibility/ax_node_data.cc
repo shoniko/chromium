@@ -16,9 +16,6 @@
 #include "ui/accessibility/ax_text_utils.h"
 #include "ui/gfx/transform.h"
 
-using base::DoubleToString;
-using base::IntToString;
-
 namespace ui {
 
 namespace {
@@ -57,17 +54,7 @@ std::string IntVectorToString(const std::vector<int>& items) {
   for (size_t i = 0; i < items.size(); ++i) {
     if (i > 0)
       str += ",";
-    str += IntToString(items[i]);
-  }
-  return str;
-}
-
-std::string StringVectorToString(const std::vector<std::string>& items) {
-  std::string str;
-  for (size_t i = 0; i < items.size(); ++i) {
-    if (i > 0)
-      str += ",";
-    str += items[i];
+    str += base::NumberToString(items[i]);
   }
   return str;
 }
@@ -111,6 +98,8 @@ bool IsNodeIdIntAttribute(AXIntAttribute attr) {
     case AX_ATTR_TABLE_HEADER_ID:
     case AX_ATTR_TABLE_COLUMN_HEADER_ID:
     case AX_ATTR_TABLE_ROW_HEADER_ID:
+    case AX_ATTR_NEXT_FOCUS_ID:
+    case AX_ATTR_PREVIOUS_FOCUS_ID:
       return true;
 
     // Note: all of the attributes are included here explicitly,
@@ -197,15 +186,8 @@ bool IsNodeIdIntListAttribute(AXIntListAttribute attr) {
   return false;
 }
 
-AXNodeData::AXNodeData()
-    : id(-1),
-      role(AX_ROLE_UNKNOWN),
-      state(AX_STATE_NONE),
-      actions(AX_ACTION_NONE),
-      offset_container_id(-1) {}
-
-AXNodeData::~AXNodeData() {
-}
+AXNodeData::AXNodeData() = default;
+AXNodeData::~AXNodeData() = default;
 
 AXNodeData::AXNodeData(const AXNodeData& other) {
   id = other.id;
@@ -549,25 +531,26 @@ void AXNodeData::AddAction(AXAction action_enum) {
 std::string AXNodeData::ToString() const {
   std::string result;
 
-  result += "id=" + IntToString(id);
+  result += "id=" + base::NumberToString(id);
   result += " ";
   result += ui::ToString(role);
 
   result += StateBitfieldToString(state);
 
-  result += " (" + IntToString(location.x()) + ", " +
-                   IntToString(location.y()) + ")-(" +
-                   IntToString(location.width()) + ", " +
-                   IntToString(location.height()) + ")";
+  result += " (" + base::NumberToString(location.x()) + ", " +
+            base::NumberToString(location.y()) + ")-(" +
+            base::NumberToString(location.width()) + ", " +
+            base::NumberToString(location.height()) + ")";
 
   if (offset_container_id != -1)
-    result += " offset_container_id=" + IntToString(offset_container_id);
+    result +=
+        " offset_container_id=" + base::NumberToString(offset_container_id);
 
   if (transform && !transform->IsIdentity())
     result += " transform=" + transform->ToString();
 
   for (size_t i = 0; i < int_attributes.size(); ++i) {
-    std::string value = IntToString(int_attributes[i].second);
+    std::string value = base::NumberToString(int_attributes[i].second);
     switch (int_attributes[i].first) {
       case AX_ATTR_DEFAULT_ACTION_VERB:
         result +=
@@ -813,6 +796,12 @@ std::string AXNodeData::ToString() const {
             break;
         }
         break;
+      case AX_ATTR_NEXT_FOCUS_ID:
+        result += " next_focus_id=" + value;
+        break;
+      case AX_ATTR_PREVIOUS_FOCUS_ID:
+        result += " previous_focus_id=" + value;
+        break;
       case AX_INT_ATTRIBUTE_NONE:
         break;
     }
@@ -833,6 +822,9 @@ std::string AXNodeData::ToString() const {
       case AX_ATTR_CHROME_CHANNEL:
         result += " chrome_channel=" + value;
         break;
+      case AX_ATTR_CLASS_NAME:
+        result += " class_name=" + value;
+        break;
       case AX_ATTR_DESCRIPTION:
         result += " description=" + value;
         break;
@@ -847,7 +839,8 @@ std::string AXNodeData::ToString() const {
         break;
       case AX_ATTR_IMAGE_DATA_URL:
         result += " image_data_url=(" +
-            IntToString(static_cast<int>(value.size())) + " bytes)";
+                  base::NumberToString(static_cast<int>(value.size())) +
+                  " bytes)";
         break;
       case AX_ATTR_INNER_HTML:
         result += " inner_html=" + value;
@@ -894,7 +887,7 @@ std::string AXNodeData::ToString() const {
   }
 
   for (size_t i = 0; i < float_attributes.size(); ++i) {
-    std::string value = DoubleToString(float_attributes[i].second);
+    std::string value = base::NumberToString(float_attributes[i].second);
     switch (float_attributes[i].first) {
       case AX_ATTR_VALUE_FOR_RANGE:
         result += " value_for_range=" + value;
@@ -904,6 +897,9 @@ std::string AXNodeData::ToString() const {
         break;
       case AX_ATTR_MIN_VALUE_FOR_RANGE:
         result += " min_value=" + value;
+        break;
+      case AX_ATTR_STEP_VALUE_FOR_RANGE:
+        result += " step_value=" + value;
         break;
       case AX_ATTR_FONT_SIZE:
         result += " font_size=" + value;
@@ -942,6 +938,12 @@ std::string AXNodeData::ToString() const {
         break;
       case AX_ATTR_SCROLLABLE:
         result += " scrollable=" + value;
+        break;
+      case AX_ATTR_CLICKABLE:
+        result += " clickable=" + value;
+        break;
+      case AX_ATTR_CLIPS_CHILDREN:
+        result += " clips_children=" + value;
         break;
       case AX_BOOL_ATTRIBUTE_NONE:
         break;
@@ -1038,7 +1040,7 @@ std::string AXNodeData::ToString() const {
     switch (stringlist_attributes[i].first) {
       case AX_ATTR_CUSTOM_ACTION_DESCRIPTIONS:
         result +=
-            " custom_action_descriptions: " + StringVectorToString(values);
+            " custom_action_descriptions: " + base::JoinString(values, ",");
         break;
       case AX_STRING_LIST_ATTRIBUTE_NONE:
         break;

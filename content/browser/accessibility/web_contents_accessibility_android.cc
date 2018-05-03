@@ -186,9 +186,9 @@ enum {
 
 using SearchKeyToPredicateMap =
     base::hash_map<base::string16, AccessibilityMatchPredicate>;
-base::LazyInstance<SearchKeyToPredicateMap>::DestructorAtExit
+base::LazyInstance<SearchKeyToPredicateMap>::Leaky
     g_search_key_to_predicate_map = LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<base::string16>::DestructorAtExit g_all_search_keys =
+base::LazyInstance<base::string16>::Leaky g_all_search_keys =
     LAZY_INSTANCE_INITIALIZER;
 
 bool SectionPredicate(BrowserAccessibility* start, BrowserAccessibility* node) {
@@ -325,7 +325,12 @@ WebContentsAccessibilityAndroid::Connector::Connector(
 }
 
 WebContentsAccessibilityAndroid::Connector::~Connector() {
-  accessibility_->UpdateEnabledState(false);
+  // Remove accessibility from the BrowserAccessibilityManager or it may
+  // continue to reference this object which is being destroyed.
+  auto* manager = static_cast<BrowserAccessibilityManagerAndroid*>(
+      accessibility_->web_contents_->GetRootBrowserAccessibilityManager());
+  if (manager)
+    manager->set_web_contents_accessibility(nullptr);
 }
 
 void WebContentsAccessibilityAndroid::Connector::UpdateRenderProcessConnection(
@@ -369,46 +374,27 @@ jboolean WebContentsAccessibilityAndroid::IsEnabled(
 
 void WebContentsAccessibilityAndroid::Enable(JNIEnv* env,
                                              const JavaParamRef<jobject>& obj) {
-  UpdateEnabledState(true);
-}
-
-void WebContentsAccessibilityAndroid::UpdateEnabledState(bool enabled) {
   BrowserAccessibilityStateImpl* accessibility_state =
       BrowserAccessibilityStateImpl::GetInstance();
   auto* manager = static_cast<BrowserAccessibilityManagerAndroid*>(
       web_contents_->GetRootBrowserAccessibilityManager());
 
-  if (enabled) {
-    // First check if we already have a BrowserAccessibilityManager that
-    // that needs to be connected to this instance. This can happen if
-    // BAM creation precedes render view updates for the associated
-    // web contents.
-    if (manager) {
-      set_root_manager(manager);
-      manager->set_web_contents_accessibility(this);
-      return;
-    }
-
-    // Otherwise, enable accessibility globally unless it was
-    // explicitly disallowed by a command-line flag, then enable it for
-    // this WebContents if that succeeded.
-    accessibility_state->OnScreenReaderDetected();
-    if (accessibility_state->IsAccessibleBrowser())
-      web_contents_->AddAccessibilityMode(ui::kAXModeComplete);
-  } else {
-    // Remove accessibility from the BrowserAccessibilityManager or it may
-    // continue to reference this object which is no longer active (and may be
-    // about to be destroyed).
-    if (manager)
-      manager->set_web_contents_accessibility(nullptr);
-    // Note that disabling part is not useful at this moment since the mode will
-    // be enabled again almost immediately for the renderer process that just
-    // got swapped in. This boolean enable/disable logic will be expanded
-    // to allow for more granular accessibility. See https://crbug.com/428494.
-    accessibility_state->ResetAccessibilityMode();
-    web_contents_->SetAccessibilityMode(
-        accessibility_state->accessibility_mode());
+  // First check if we already have a BrowserAccessibilityManager that
+  // that needs to be connected to this instance. This can happen if
+  // BAM creation precedes render view updates for the associated
+  // web contents.
+  if (manager) {
+    set_root_manager(manager);
+    manager->set_web_contents_accessibility(this);
+    return;
   }
+
+  // Otherwise, enable accessibility globally unless it was
+  // explicitly disallowed by a command-line flag, then enable it for
+  // this WebContents if that succeeded.
+  accessibility_state->OnScreenReaderDetected();
+  if (accessibility_state->IsAccessibleBrowser())
+    web_contents_->AddAccessibilityMode(ui::kAXModeComplete);
 }
 
 bool WebContentsAccessibilityAndroid::ShouldRespectDisplayedPasswordText() {
@@ -866,7 +852,8 @@ void WebContentsAccessibilityAndroid::SetSelection(
     jint unique_id,
     jint start,
     jint end) {
-  using AXPlatformPositionInstance = AXPlatformPosition::AXPositionInstance;
+  using AXPlatformPositionInstance =
+      BrowserAccessibilityPosition::AXPositionInstance;
   using AXPlatformRange = ui::AXRange<AXPlatformPositionInstance::element_type>;
 
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
@@ -906,8 +893,7 @@ jboolean WebContentsAccessibilityAndroid::AdjustSlider(
   value += (increment ? delta : -delta);
   value = std::max(std::min(value, max), min);
   if (value != original_value) {
-    node->manager()->SetValue(*node,
-                              base::UTF8ToUTF16(base::DoubleToString(value)));
+    node->manager()->SetValue(*node, base::NumberToString16(value));
     return true;
   }
   return false;
@@ -949,6 +935,9 @@ jint WebContentsAccessibilityAndroid::FindElementType(
                                : OneShotAccessibilityTreeSearch::BACKWARDS);
   tree_search.SetResultLimit(1);
   tree_search.SetImmediateDescendantsOnly(false);
+  // SetCanWrapToLastElement needs to be set as true after talkback pushes its
+  // corresponding change for b/29103330.
+  tree_search.SetCanWrapToLastElement(false);
   tree_search.SetVisibleOnly(false);
   tree_search.AddPredicate(predicate);
 
@@ -1274,9 +1263,10 @@ void WebContentsAccessibilityAndroid::CollectStats() {
   CAPABILITY_TYPE_HISTOGRAM(capabilities_mask, CAN_PERFORM_GESTURES);
 }
 
-jlong Init(JNIEnv* env,
-           const JavaParamRef<jobject>& obj,
-           const JavaParamRef<jobject>& jweb_contents) {
+jlong JNI_WebContentsAccessibility_Init(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& jweb_contents) {
   WebContents* web_contents = WebContents::FromJavaWebContents(jweb_contents);
   DCHECK(web_contents);
 

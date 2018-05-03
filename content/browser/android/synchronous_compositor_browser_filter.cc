@@ -14,7 +14,6 @@
 #include "base/stl_util.h"
 #include "content/browser/android/synchronous_compositor_host.h"
 #include "content/browser/bad_message.h"
-#include "content/common/android/sync_compositor_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "ui/android/window_android.h"
@@ -84,7 +83,7 @@ bool SynchronousCompositorBrowserFilter::ReceiveFrame(
       future_map_.erase(itr);
   }
 
-  auto frame_ptr = base::MakeUnique<SynchronousCompositor::Frame>();
+  auto frame_ptr = std::make_unique<SynchronousCompositor::Frame>();
   frame_ptr->layer_tree_frame_sink_id = std::get<0>(param);
   base::Optional<viz::CompositorFrame>& compositor_frame = std::get<1>(param);
   if (compositor_frame) {

@@ -39,7 +39,7 @@ using namespace HTMLNames;
 AXTableColumn::AXTableColumn(AXObjectCacheImpl& ax_object_cache)
     : AXMockObject(ax_object_cache) {}
 
-AXTableColumn::~AXTableColumn() {}
+AXTableColumn::~AXTableColumn() = default;
 
 AXTableColumn* AXTableColumn::Create(AXObjectCacheImpl& ax_object_cache) {
   return new AXTableColumn(ax_object_cache);
@@ -87,7 +87,7 @@ void AXTableColumn::HeaderObjectsForColumn(AXObjectVector& headers) {
       if (!layout_cell)
         continue;
 
-      AXObject* cell = AxObjectCache().GetOrCreate(layout_cell->GetNode());
+      AXObject* cell = AXObjectCache().GetOrCreate(layout_cell->GetNode());
       if (!cell || !cell->IsTableCell() || headers.Contains(cell))
         continue;
 

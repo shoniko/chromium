@@ -80,7 +80,20 @@ void RenderAccessibilityImpl::SnapshotAccessibilityTree(
   ScopedFreezeBlinkAXTreeSource freeze(&tree_source);
   BlinkAXTreeSerializer serializer(&tree_source);
   serializer.set_max_node_count(kMaxSnapshotNodeCount);
-  serializer.SerializeChanges(context.Root(), response);
+
+  if (serializer.SerializeChanges(context.Root(), response))
+    return;
+
+  // It's possible for the page to fail to serialize the first time due to
+  // aria-owns rearranging the page while it's being scanned. Try a second
+  // time.
+  *response = AXContentTreeUpdate();
+  if (serializer.SerializeChanges(context.Root(), response))
+    return;
+
+  // It failed again. Clear the response object because it might have errors.
+  *response = AXContentTreeUpdate();
+  LOG(WARNING) << "Unable to serialize accessibility tree.";
 }
 
 RenderAccessibilityImpl::RenderAccessibilityImpl(RenderFrameImpl* render_frame,
@@ -231,8 +244,9 @@ void RenderAccessibilityImpl::DisableAccessibility() {
   settings->SetAccessibilityEnabled(false);
 }
 
-void RenderAccessibilityImpl::HandleAXEvent(
-    const blink::WebAXObject& obj, ui::AXEvent event) {
+void RenderAccessibilityImpl::HandleAXEvent(const blink::WebAXObject& obj,
+                                            ui::AXEvent event,
+                                            int action_request_id) {
   const WebDocument& document = GetMainDocument();
   if (document.IsNull())
     return;
@@ -271,17 +285,32 @@ void RenderAccessibilityImpl::HandleAXEvent(
     }
   }
 
+  // If a select tag is opened or closed, all the children must be updated
+  // because their visibility may have changed.
+  if (obj.Role() == blink::kWebAXRoleMenuListPopup &&
+      event == ui::AX_EVENT_CHILDREN_CHANGED) {
+    WebAXObject popup_like_object = obj.ParentObject();
+    if (!popup_like_object.IsDetached()) {
+      serializer_.DeleteClientSubtree(popup_like_object);
+      HandleAXEvent(popup_like_object, ui::AX_EVENT_CHILDREN_CHANGED);
+    }
+  }
+
   // Add the accessibility object to our cache and ensure it's valid.
   AccessibilityHostMsg_EventParams acc_event;
   acc_event.id = obj.AxID();
   acc_event.event_type = event;
 
-  if (blink::WebUserGestureIndicator::IsProcessingUserGesture())
+  if (blink::WebUserGestureIndicator::IsProcessingUserGesture(
+          render_frame_->GetWebFrame())) {
     acc_event.event_from = ui::AX_EVENT_FROM_USER;
-  else if (during_action_)
+  } else if (during_action_) {
     acc_event.event_from = ui::AX_EVENT_FROM_ACTION;
-  else
+  } else {
     acc_event.event_from = ui::AX_EVENT_FROM_PAGE;
+  }
+
+  acc_event.action_request_id = action_request_id;
 
   // Discard duplicate accessibility events.
   for (uint32_t i = 0; i < pending_events_.size(); ++i) {
@@ -359,7 +388,7 @@ void RenderAccessibilityImpl::OnPluginRootNodeUpdated() {
 }
 
 WebDocument RenderAccessibilityImpl::GetMainDocument() {
-  if (render_frame_ && render_frame_->GetWebFrame())
+  if (render_frame_->GetWebFrame())
     return render_frame_->GetWebFrame()->GetDocument();
   return WebDocument();
 }
@@ -417,6 +446,7 @@ void RenderAccessibilityImpl::SendPendingAccessibilityEvents() {
     event_msg.event_type = event.event_type;
     event_msg.id = event.id;
     event_msg.event_from = event.event_from;
+    event_msg.action_request_id = event.action_request_id;
     if (!serializer_.SerializeChanges(obj, &event_msg.update)) {
       VLOG(1) << "Failed to serialize one accessibility event.";
       continue;
@@ -429,9 +459,9 @@ void RenderAccessibilityImpl::SendPendingAccessibilityEvents() {
 
     // For each node in the update, set the location in our map from
     // ids to locations.
-    for (size_t i = 0; i < event_msg.update.nodes.size(); ++i) {
-      ui::AXNodeData& src = event_msg.update.nodes[i];
-      ui::AXRelativeBounds& dst = locations_[event_msg.update.nodes[i].id];
+    for (size_t j = 0; j < event_msg.update.nodes.size(); ++j) {
+      ui::AXNodeData& src = event_msg.update.nodes[j];
+      ui::AXRelativeBounds& dst = locations_[event_msg.update.nodes[j].id];
       dst.offset_container_id = src.offset_container_id;
       dst.bounds = src.location;
       dst.transform.reset(nullptr);
@@ -540,7 +570,8 @@ void RenderAccessibilityImpl::OnPerformAction(
       break;
     case ui::AX_ACTION_HIT_TEST:
       DCHECK(data.hit_test_event_to_fire != ui::AX_EVENT_NONE);
-      OnHitTest(data.target_point, data.hit_test_event_to_fire);
+      OnHitTest(data.target_point, data.hit_test_event_to_fire,
+                data.request_id);
       break;
     case ui::AX_ACTION_INCREMENT:
       target.Increment();
@@ -607,7 +638,8 @@ void RenderAccessibilityImpl::OnFatalError() {
 }
 
 void RenderAccessibilityImpl::OnHitTest(const gfx::Point& point,
-                                        ui::AXEvent event_to_fire) {
+                                        ui::AXEvent event_to_fire,
+                                        int action_request_id) {
   const WebDocument& document = GetMainDocument();
   if (document.IsNull())
     return;
@@ -629,12 +661,16 @@ void RenderAccessibilityImpl::OnHitTest(const gfx::Point& point,
       data.HasContentIntAttribute(
           AX_CONTENT_ATTR_CHILD_BROWSER_PLUGIN_INSTANCE_ID)) {
     Send(new AccessibilityHostMsg_ChildFrameHitTestResult(
-        routing_id(), point, obj.AxID(), event_to_fire));
+        routing_id(), action_request_id, point,
+        data.GetContentIntAttribute(AX_CONTENT_ATTR_CHILD_ROUTING_ID),
+        data.GetContentIntAttribute(
+            AX_CONTENT_ATTR_CHILD_BROWSER_PLUGIN_INSTANCE_ID),
+        event_to_fire));
     return;
   }
 
   // Otherwise, send an event on the node that was hit.
-  HandleAXEvent(obj, event_to_fire);
+  HandleAXEvent(obj, event_to_fire, action_request_id);
 }
 
 void RenderAccessibilityImpl::OnLoadInlineTextBoxes(
@@ -710,8 +746,8 @@ void RenderAccessibilityImpl::AddPluginTreeToUpdate(
       size_t old_count = update->nodes.size();
       size_t new_count = plugin_update.nodes.size();
       update->nodes.resize(old_count + new_count);
-      for (size_t i = 0; i < new_count; ++i)
-        update->nodes[old_count + i] = plugin_update.nodes[i];
+      for (size_t j = 0; j < new_count; ++j)
+        update->nodes[old_count + j] = plugin_update.nodes[j];
       break;
     }
   }

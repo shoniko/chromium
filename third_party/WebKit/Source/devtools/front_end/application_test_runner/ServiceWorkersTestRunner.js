@@ -43,7 +43,8 @@ ApplicationTestRunner.waitForServiceWorker = function(callback) {
 ApplicationTestRunner.dumpServiceWorkersView = function() {
   var swView = UI.panels.resources.visibleView;
 
-  return swView._reportView._sectionList.childTextNodes()
+  return swView._currentWorkersView._sectionList.childTextNodes()
+      .concat(swView._otherWorkersView._sectionList.childTextNodes())
       .map(function(node) {
         return node.textContent.replace(/Received.*/, 'Received').replace(/#\d+/, '#N');
       })
@@ -61,13 +62,18 @@ ApplicationTestRunner.makeFetchInServiceWorker = function(scope, url, requestIni
   TestRunner.callFunctionInPageAsync('makeFetchInServiceWorker', [scope, url, requestInitializer]).then(callback);
 };
 
-TestRunner.initAsync(`
+TestRunner.deprecatedInitAsync(`
   var registrations = {};
 
   function registerServiceWorker(script, scope) {
     return navigator.serviceWorker.register(script, {
       scope: scope
-    }).then(reg => registrations[scope] = reg);
+    })
+    .then(reg => registrations[scope] = reg)
+    .catch(err => {
+      return Promise.reject(new Error('Service Worker registration error: ' +
+                                      err.toString()));
+    });
   }
 
   function waitForActivated(scope) {

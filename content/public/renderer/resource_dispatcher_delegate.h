@@ -29,6 +29,8 @@ class CONTENT_EXPORT ResourceDispatcherDelegate {
       ResourceType resource_type,
       int error_code) = 0;
 
+  // Note that |url|, |referrer| and |method| are the final values (e.g. after
+  // any redirects).
   virtual std::unique_ptr<RequestPeer> OnReceivedResponse(
       std::unique_ptr<RequestPeer> current_peer,
       const std::string& mime_type,

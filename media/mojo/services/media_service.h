@@ -5,16 +5,12 @@
 #ifndef MEDIA_MOJO_SERVICES_MEDIA_SERVICE_H_
 #define MEDIA_MOJO_SERVICES_MEDIA_SERVICE_H_
 
-#include <stdint.h>
-
 #include <memory>
 
-#include "base/callback.h"
-#include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "media/base/media_log.h"
 #include "media/mojo/interfaces/interface_factory.mojom.h"
+#include "media/mojo/interfaces/media_service.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "mojo/public/cpp/bindings/strong_binding_set.h"
@@ -22,13 +18,6 @@
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_context_ref.h"
-#include "url/gurl.h"
-
-#if defined(OS_MACOSX)
-#include "media/mojo/interfaces/media_service_mac.mojom.h"
-#else
-#include "media/mojo/interfaces/media_service.mojom.h"
-#endif  // defined(OS_MACOSX)
 
 namespace media {
 
@@ -50,27 +39,24 @@ class MEDIA_MOJO_EXPORT MediaService : public service_manager::Service,
 
   void Create(mojom::MediaServiceRequest request);
 
-  // mojom::MediaService implementation.
-#if defined(OS_MACOSX)
-  void LoadCdm(const base::FilePath& cdm_path,
-               mojom::SeatbeltExtensionTokenProviderPtr token_provider) final;
-#else
-  void LoadCdm(const base::FilePath& cdm_path) final;
-#endif  // defined(OS_MACOSX)
-
   void CreateInterfaceFactory(
       mojom::InterfaceFactoryRequest request,
       service_manager::mojom::InterfaceProviderPtr host_interfaces) final;
 
+  MediaLog media_log_;
+  std::unique_ptr<service_manager::ServiceContextRefFactory> ref_factory_;
+
   // Note: Since each instance runs on a different thread, do not share a common
   // MojoMediaClient with other instances to avoid threading issues. Hence using
   // a unique_ptr here.
+  //
+  // Note: Since |*ref_factory_| is passed to |mojo_media_client_|,
+  // |mojo_media_client_| must be destructed before |ref_factory_|.
   std::unique_ptr<MojoMediaClient> mojo_media_client_;
 
+  // Note: Since |&media_log_| is passed to bindings, the bindings must be
+  // destructed first.
   mojo::StrongBindingSet<mojom::InterfaceFactory> interface_factory_bindings_;
-
-  MediaLog media_log_;
-  std::unique_ptr<service_manager::ServiceContextRefFactory> ref_factory_;
 
   service_manager::BinderRegistry registry_;
   mojo::BindingSet<mojom::MediaService> bindings_;

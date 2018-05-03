@@ -18,7 +18,7 @@
 #include "components/viz/service/display_embedder/compositor_overlay_candidate_validator.h"
 #include "content/browser/compositor/browser_compositor_output_surface.h"
 #include "content/browser/compositor/reflector_texture.h"
-#include "content/browser/compositor/test/no_transport_image_transport_factory.h"
+#include "content/browser/compositor/test/test_image_transport_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
@@ -118,6 +118,10 @@ class TestOutputSurface : public BrowserCompositorOutputSurface {
   void SetSurfaceSuspendedForRecycle(bool suspended) override {}
 #endif
 
+#if BUILDFLAG(ENABLE_VULKAN)
+  gpu::VulkanSurface* GetVulkanSurface() override { return nullptr; }
+#endif
+
  private:
   std::unique_ptr<ReflectorTexture> reflector_texture_;
 };
@@ -134,16 +138,17 @@ class ReflectorImplTest : public testing::Test {
     ui::ContextFactory* context_factory = nullptr;
     ui::ContextFactoryPrivate* context_factory_private = nullptr;
 
-    message_loop_ = base::MakeUnique<base::MessageLoop>();
+    message_loop_ = std::make_unique<base::MessageLoop>();
     ui::InitializeContextFactoryForTests(enable_pixel_output, &context_factory,
                                          &context_factory_private);
     ImageTransportFactory::SetFactory(
-        std::make_unique<NoTransportImageTransportFactory>());
+        std::make_unique<TestImageTransportFactory>());
     task_runner_ = message_loop_->task_runner();
     compositor_task_runner_ = new FakeTaskRunner();
-    begin_frame_source_.reset(new viz::DelayBasedBeginFrameSource(
-        base::MakeUnique<viz::DelayBasedTimeSource>(
-            compositor_task_runner_.get())));
+    begin_frame_source_ = std::make_unique<viz::DelayBasedBeginFrameSource>(
+        std::make_unique<viz::DelayBasedTimeSource>(
+            compositor_task_runner_.get()),
+        viz::BeginFrameSource::kNotRestartableId);
     compositor_.reset(new ui::Compositor(
         context_factory_private->AllocateFrameSinkId(), context_factory,
         context_factory_private, compositor_task_runner_.get(),
@@ -154,7 +159,7 @@ class ReflectorImplTest : public testing::Test {
     auto context_provider = cc::TestContextProvider::Create();
     context_provider->BindToCurrentThread();
     output_surface_ =
-        base::MakeUnique<TestOutputSurface>(std::move(context_provider));
+        std::make_unique<TestOutputSurface>(std::move(context_provider));
 
     root_layer_.reset(new ui::Layer(ui::LAYER_SOLID_COLOR));
     compositor_->SetRootLayer(root_layer_.get());
@@ -166,7 +171,7 @@ class ReflectorImplTest : public testing::Test {
   }
 
   void SetUpReflector() {
-    reflector_ = base::MakeUnique<ReflectorImpl>(compositor_.get(),
+    reflector_ = std::make_unique<ReflectorImpl>(compositor_.get(),
                                                  mirroring_layer_.get());
     reflector_->OnSourceSurfaceReady(output_surface_.get());
   }
@@ -174,9 +179,9 @@ class ReflectorImplTest : public testing::Test {
   void TearDown() override {
     if (reflector_)
       reflector_->RemoveMirroringLayer(mirroring_layer_.get());
-    viz::TextureMailbox mailbox;
+    viz::TransferableResource resource;
     std::unique_ptr<viz::SingleReleaseCallback> release;
-    if (mirroring_layer_->PrepareTextureMailbox(&mailbox, &release)) {
+    if (mirroring_layer_->PrepareTransferableResource(&resource, &release)) {
       release->Run(gpu::SyncToken(), false);
     }
     compositor_.reset();

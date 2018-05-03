@@ -14,6 +14,10 @@ import subprocess
 import sys
 
 
+# If this test starts failing, please set TEST_IS_ENABLED to "False" and file a
+# bug to get this reenabled, and cc the people listed in
+# //tools/traffic_annotation/OWNERS.
+TEST_IS_ENABLED = sys.platform != 'win32'
 
 
 class NetworkTrafficAnnotationChecker():
@@ -44,7 +48,7 @@ class NetworkTrafficAnnotationChecker():
       'darwin': 'mac',
       'win32': 'win32',
     }[sys.platform]
-    path = os.path.join(self.this_dir, 'bin', platform,
+    path = os.path.join(self.this_dir, '..', 'bin', platform,
                         'traffic_annotation_auditor')
     if sys.platform == 'win32':
       path += '.exe'
@@ -88,18 +92,11 @@ class NetworkTrafficAnnotationChecker():
           use 0 for unlimited.
 
     Returns:
-      warnings: list of str List of all issued warnings.
-      errors: list of str List of all issued errors.
+      int Exit code of the network traffic annotation auditor.
     """
 
-    # If for some reason the network traffic annotations become incompatible
-    # with the current version of clang, and this test starts failing,
-    # please set test_is_enabled to "False" and file a bug to get this
-    # reenabled, and cc the people listed in //tools/traffic_annotation/OWNERS.
-    # TODO(rhalavati): Actually enable the check.
-    test_is_enabled = False
-    if not test_is_enabled:
-      return [], []
+    if not TEST_IS_ENABLED:
+      return 0
 
     if not self.build_path:
       return [self.COULD_NOT_RUN_MESSAGE], []
@@ -110,11 +107,12 @@ class NetworkTrafficAnnotationChecker():
               file_path)]
 
       if not file_paths:
-        return [], []
+        return 0
     else:
       file_paths = []
 
-    args = [self.auditor_path, "-build-path=" + self.build_path] + file_paths
+    args = [self.auditor_path, "--test-only", "--limit=%i" % limit,
+            "--build-path=" + self.build_path, "--error-resilient"] + file_paths
 
     if sys.platform.startswith("win"):
       args.insert(0, sys.executable)
@@ -123,25 +121,43 @@ class NetworkTrafficAnnotationChecker():
                                stderr=subprocess.PIPE)
     stdout_text, stderr_text = command.communicate()
 
-    errors = []
-    warnings = []
+    if stderr_text:
+      print("Could not run network traffic annotation presubmit check. "
+            "Returned error from traffic_annotation_auditor is: %s"
+            % stderr_text)
+      print("Exit code is: %i" % command.returncode)
+      return 1
+    if stdout_text:
+      print(stdout_text)
+    return command.returncode
+
+
+  def GetModifiedFiles(self):
+    """Gets the list of modified files from git. Returns None if any error
+    happens."""
+
+    # List of files is extracted the same way as the following test recipe:
+    # https://cs.chromium.org/chromium/tools/depot_tools/recipes/recipe_modules/
+    # tryserver/api.py?l=66
+    args = ["git.bat"] if sys.platform == "win32" else ["git"]
+    args += ["diff", "--cached", "--name-only"]
+
+    original_path = os.getcwd()
+
+    # Change directory to src (two levels upper than build path).
+    os.chdir(os.path.join(self.build_path, "..", ".."))
+    command = subprocess.Popen(args, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+    stdout_text, stderr_text = command.communicate()
 
     if stderr_text:
-      warnings.append(
-        "Could not run network traffic annotation presubmit check. Returned "
-        "error from traffic_annotation_auditor: %s" % stderr_text)
+      print("Could not run '%s' to get the list of changed files "
+            "beacuse: %s" % (" ".join(args), stderr_text))
+      os.chdir(original_path)
+      return None
 
-    for line in stdout_text.splitlines():
-      if line.startswith('Error: '):
-        errors.append(line[7:])
-      elif line.startswith('Warning: '):
-        warnings.append(line[9:])
-    if limit:
-      if len(errors) > limit:
-        errors = errors[:limit]
-      if len(warnings) + len(errors) > limit:
-        warnings = warnings[:limit-len(errors)]
-    return warnings, errors
+    os.chdir(original_path)
+    return stdout_text.splitlines()
 
 
 def main():
@@ -156,17 +172,24 @@ def main():
       '--limit', default=5,
       help='Limit for the maximum number of returned errors and warnings. '
            'Default value is 5, use 0 for unlimited.')
+  parser.add_argument(
+      '--complete', action='store_true',
+      help='Run the test on the complete repository. Otherwise only the '
+           'modified files are tested.')
+
   args = parser.parse_args()
 
   checker = NetworkTrafficAnnotationChecker(args.build_path)
+  if args.complete:
+    file_paths = None
+  else:
+    file_paths = checker.GetModifiedFiles()
+    if file_paths is None:
+      return -1
+    if len(file_paths) == 0:
+      return 0
 
-  warnings, errors = checker.CheckFiles(limit=args.limit)
-  if warnings:
-    print("Warnings:\n\t%s" % "\n\t".join(warnings))
-  if errors:
-    print("Errors:\n\t%s" % "\n\t".join(errors))
-
-  return 0
+  return checker.CheckFiles(file_paths=file_paths, limit=args.limit)
 
 
 if '__main__' == __name__:

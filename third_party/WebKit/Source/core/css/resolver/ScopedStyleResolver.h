@@ -29,6 +29,7 @@
 #ifndef ScopedStyleResolver_h
 #define ScopedStyleResolver_h
 
+#include "base/macros.h"
 #include "core/css/ActiveStyleSheets.h"
 #include "core/css/ElementRuleCollector.h"
 #include "core/css/RuleSet.h"
@@ -45,7 +46,6 @@ class StyleSheetContents;
 // of stylesheets.
 class ScopedStyleResolver final
     : public GarbageCollectedFinalized<ScopedStyleResolver> {
-  WTF_MAKE_NONCOPYABLE(ScopedStyleResolver);
 
  public:
   static ScopedStyleResolver* Create(TreeScope& scope) {
@@ -83,6 +83,7 @@ class ScopedStyleResolver final
   static ContainerNode& InvalidationRootForTreeScope(const TreeScope&);
   CORE_EXPORT static bool HaveSameStyles(const ScopedStyleResolver*,
                                          const ScopedStyleResolver*);
+  void V0ShadowAddedOnV1Document();
 
   void Trace(blink::Visitor*);
 
@@ -133,6 +134,7 @@ class ScopedStyleResolver final
   bool has_deep_or_shadow_selector_ = false;
   bool has_unresolved_keyframes_rule_ = false;
   bool needs_append_all_sheets_ = false;
+  DISALLOW_COPY_AND_ASSIGN(ScopedStyleResolver);
 };
 
 }  // namespace blink

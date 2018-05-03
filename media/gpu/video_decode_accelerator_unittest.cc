@@ -36,7 +36,6 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/md5.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
@@ -61,6 +60,7 @@
 #include "media/base/test_data_util.h"
 #include "media/gpu/fake_video_decode_accelerator.h"
 #include "media/gpu/features.h"
+#include "media/gpu/format_utils.h"
 #include "media/gpu/gpu_video_decode_accelerator_factory.h"
 #include "media/gpu/rendering_helper.h"
 #include "media/gpu/video_accelerator_unittest_helpers.h"
@@ -74,7 +74,7 @@
 #include "media/gpu/dxva_video_decode_accelerator_win.h"
 #endif  // defined(OS_WIN)
 #if BUILDFLAG(USE_VAAPI)
-#include "media/gpu/vaapi_wrapper.h"
+#include "media/gpu/vaapi/vaapi_wrapper.h"
 #endif  // BUILDFLAG(USE_VAAPI)
 
 #if defined(OS_CHROMEOS)
@@ -339,23 +339,6 @@ scoped_refptr<TextureRef> TextureRef::Create(
     const base::Closure& no_longer_needed_cb) {
   return base::WrapRefCounted(new TextureRef(texture_id, no_longer_needed_cb));
 }
-
-#if defined(OS_CHROMEOS)
-gfx::BufferFormat VideoPixelFormatToGfxBufferFormat(
-    VideoPixelFormat pixel_format) {
-  switch (pixel_format) {
-    case VideoPixelFormat::PIXEL_FORMAT_ARGB:
-      return gfx::BufferFormat::BGRA_8888;
-    case VideoPixelFormat::PIXEL_FORMAT_XRGB:
-      return gfx::BufferFormat::BGRX_8888;
-    case VideoPixelFormat::PIXEL_FORMAT_NV12:
-      return gfx::BufferFormat::YUV_420_BIPLANAR;
-    default:
-      LOG_ASSERT(false) << "Unknown VideoPixelFormat";
-      return gfx::BufferFormat::BGRX_8888;
-  }
-}
-#endif
 
 // static
 scoped_refptr<TextureRef> TextureRef::CreatePreallocated(
@@ -728,7 +711,7 @@ void GLRenderingVDAClient::ProvidePictureBuffers(
       const gfx::GpuMemoryBufferHandle& handle =
           texture_it->second->ExportGpuMemoryBufferHandle();
       LOG_ASSERT(!handle.is_null()) << "Failed producing GMB handle";
-      decoder_->ImportBufferForPicture(buffer.id(), handle);
+      decoder_->ImportBufferForPicture(buffer.id(), pixel_format, handle);
     }
   }
 }
@@ -745,7 +728,8 @@ void GLRenderingVDAClient::PictureReady(const Picture& picture) {
     return;
 
   gfx::Rect visible_rect = picture.visible_rect();
-  EXPECT_TRUE(visible_rect.IsEmpty() || visible_rect == gfx::Rect(frame_size_));
+  if (!visible_rect.IsEmpty())
+    EXPECT_EQ(gfx::Rect(frame_size_), visible_rect);
 
   base::TimeTicks now = base::TimeTicks::Now();
 
@@ -1217,7 +1201,7 @@ void VideoDecodeAcceleratorTest::ParseAndReadTestVideoData(
     LOG_ASSERT(fields.size() >= 1U) << entries[index];
     LOG_ASSERT(fields.size() <= 8U) << entries[index];
     std::unique_ptr<TestVideoFile> video_file =
-        base::MakeUnique<TestVideoFile>(fields[0]);
+        std::make_unique<TestVideoFile>(fields[0]);
     if (!fields[1].empty())
       LOG_ASSERT(base::StringToInt(fields[1], &video_file->width));
     if (!fields[2].empty())
@@ -1398,7 +1382,7 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
     TestVideoFile* video_file =
         test_video_files_[index % test_video_files_.size()].get();
     std::unique_ptr<ClientStateNotification<ClientState>> note =
-        base::MakeUnique<ClientStateNotification<ClientState>>();
+        std::make_unique<ClientStateNotification<ClientState>>();
     notes_[index] = std::move(note);
 
     int delay_after_frame_num = std::numeric_limits<int>::max();
@@ -1408,7 +1392,7 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
     }
 
     std::unique_ptr<GLRenderingVDAClient> client =
-        base::MakeUnique<GLRenderingVDAClient>(
+        std::make_unique<GLRenderingVDAClient>(
             index, &rendering_helper_, notes_[index].get(),
             video_file->data_str, num_in_flight_decodes, num_play_throughs,
             video_file->reset_after_frame_num, delete_decoder_state,
@@ -1752,8 +1736,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 // Measure the median of the decode time when VDA::Decode is called 30 times per
 // second.
 TEST_F(VideoDecodeAcceleratorTest, TestDecodeTimeMedian) {
-  notes_.push_back(base::MakeUnique<ClientStateNotification<ClientState>>());
-  clients_.push_back(base::MakeUnique<GLRenderingVDAClient>(
+  notes_.push_back(std::make_unique<ClientStateNotification<ClientState>>());
+  clients_.push_back(std::make_unique<GLRenderingVDAClient>(
       0, &rendering_helper_, notes_[0].get(), test_video_files_[0]->data_str, 1,
       1, test_video_files_[0]->reset_after_frame_num, CS_RESET,
       test_video_files_[0]->width, test_video_files_[0]->height,
@@ -1780,8 +1764,8 @@ TEST_F(VideoDecodeAcceleratorTest, TestDecodeTimeMedian) {
 // is not considered as a failure because the input may be unsupported or
 // corrupted videos.
 TEST_F(VideoDecodeAcceleratorTest, NoCrash) {
-  notes_.push_back(base::MakeUnique<ClientStateNotification<ClientState>>());
-  clients_.push_back(base::MakeUnique<GLRenderingVDAClient>(
+  notes_.push_back(std::make_unique<ClientStateNotification<ClientState>>());
+  clients_.push_back(std::make_unique<GLRenderingVDAClient>(
       0, &rendering_helper_, notes_[0].get(), test_video_files_[0]->data_str, 1,
       1, test_video_files_[0]->reset_after_frame_num, CS_RESET,
       test_video_files_[0]->width, test_video_files_[0]->height,

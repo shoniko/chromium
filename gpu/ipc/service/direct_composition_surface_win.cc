@@ -9,8 +9,10 @@
 #include <dxgi1_6.h>
 
 #include "base/containers/circular_deque.h"
+#include "base/debug/alias.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/trace_event/trace_event.h"
@@ -111,6 +113,13 @@ bool HardwareSupportsOverlays() {
     return false;
   }
 
+  Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device;
+  if (FAILED(d3d11_device.CopyTo(video_device.GetAddressOf()))) {
+    DLOG(ERROR) << "Failing to create overlay swapchain because couldn't "
+                   "retrieve video device from D3D11 device.";
+    return false;
+  }
+
   Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
   d3d11_device.CopyTo(dxgi_device.GetAddressOf());
   Microsoft::WRL::ComPtr<IDXGIAdapter> dxgi_adapter;
@@ -130,8 +139,8 @@ bool HardwareSupportsOverlays() {
                                             d3d11_device.Get(), &flags)))
       continue;
 
-    UMA_HISTOGRAM_SPARSE_SLOWLY("GPU.DirectComposition.OverlaySupportFlags",
-                                flags);
+    base::UmaHistogramSparse("GPU.DirectComposition.OverlaySupportFlags",
+                             flags);
 
     // Some new Intel drivers only claim to support unscaled overlays, but
     // scaled overlays still work. Even when scaled overlays aren't actually
@@ -303,16 +312,21 @@ class DCLayerTree::SwapChainPresenter {
 };
 
 bool DCLayerTree::Initialize(HWND window) {
-  d3d11_device_.CopyTo(video_device_.GetAddressOf());
+  HRESULT hr = d3d11_device_.CopyTo(video_device_.GetAddressOf());
+  if (FAILED(hr))
+    return false;
+
   Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
   d3d11_device_->GetImmediateContext(context.GetAddressOf());
-  context.CopyTo(video_context_.GetAddressOf());
+  hr = context.CopyTo(video_context_.GetAddressOf());
+  if (FAILED(hr))
+    return false;
 
   Microsoft::WRL::ComPtr<IDCompositionDesktopDevice> desktop_device;
   dcomp_device_.CopyTo(desktop_device.GetAddressOf());
 
-  HRESULT hr = desktop_device->CreateTargetForHwnd(
-      window, TRUE, dcomp_target_.GetAddressOf());
+  hr = desktop_device->CreateTargetForHwnd(window, TRUE,
+                                           dcomp_target_.GetAddressOf());
   if (FAILED(hr))
     return false;
 
@@ -369,10 +383,12 @@ DCLayerTree::SwapChainPresenter::SwapChainPresenter(
     DCLayerTree* surface,
     Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device)
     : surface_(surface), d3d11_device_(d3d11_device) {
-  d3d11_device_.CopyTo(video_device_.GetAddressOf());
+  HRESULT hr = d3d11_device_.CopyTo(video_device_.GetAddressOf());
+  CHECK(SUCCEEDED(hr));
   Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
   d3d11_device_->GetImmediateContext(context.GetAddressOf());
-  context.CopyTo(video_context_.GetAddressOf());
+  hr = context.CopyTo(video_context_.GetAddressOf());
+  CHECK(SUCCEEDED(hr));
   HMODULE dcomp = ::GetModuleHandleA("dcomp.dll");
   CHECK(dcomp);
   create_surface_handle_function_ =
@@ -587,8 +603,8 @@ void DCLayerTree::SwapChainPresenter::PresentToSwapChain(
 
   // TODO(jbauman): Use correct colorspace.
   gfx::ColorSpace src_color_space = gfx::ColorSpace::CreateREC709();
-  if (params.image[0]->color_space().IsValid()) {
-    src_color_space = params.image[0]->color_space();
+  if (image_dxgi && image_dxgi->color_space().IsValid()) {
+    src_color_space = image_dxgi->color_space();
   }
   Microsoft::WRL::ComPtr<ID3D11VideoContext1> context1;
   if (SUCCEEDED(video_context_.CopyTo(context1.GetAddressOf()))) {
@@ -749,8 +765,8 @@ void DCLayerTree::SwapChainPresenter::PresentToSwapChain(
   if (SUCCEEDED(swap_chain_.CopyTo(swap_chain_media.GetAddressOf()))) {
     DXGI_FRAME_STATISTICS_MEDIA stats = {};
     if (SUCCEEDED(swap_chain_media->GetFrameStatisticsMedia(&stats))) {
-      UMA_HISTOGRAM_SPARSE_SLOWLY("GPU.DirectComposition.CompositionMode",
-                                  stats.CompositionMode);
+      base::UmaHistogramSparse("GPU.DirectComposition.CompositionMode",
+                               stats.CompositionMode);
       presentation_history_.AddSample(stats.CompositionMode);
     }
   }
@@ -802,8 +818,11 @@ void DCLayerTree::SwapChainPresenter::ReallocateSwapChain(bool yuy2) {
       DXGI_SWAP_CHAIN_FLAG_YUV_VIDEO | DXGI_SWAP_CHAIN_FLAG_FULLSCREEN_VIDEO;
 
   HANDLE handle;
-  create_surface_handle_function_(COMPOSITIONOBJECT_ALL_ACCESS, nullptr,
-                                  &handle);
+  HRESULT hr = create_surface_handle_function_(COMPOSITIONOBJECT_ALL_ACCESS,
+                                               nullptr, &handle);
+  // TODO(crbug/792806): Remove Alias and CHECK after issue is fixed.
+  base::debug::Alias(&hr);
+  CHECK(SUCCEEDED(hr));
   swap_chain_handle_.Set(handle);
 
   if (is_yuy2_swapchain_ != yuy2) {
@@ -817,7 +836,6 @@ void DCLayerTree::SwapChainPresenter::ReallocateSwapChain(bool yuy2) {
   is_yuy2_swapchain_ = false;
   // The composition surface handle isn't actually used, but
   // CreateSwapChainForComposition can't create YUY2 swapchains.
-  HRESULT hr = E_FAIL;
   if (yuy2) {
     hr = media_factory->CreateSwapChainForCompositionSurfaceHandle(
         d3d11_device_.Get(), swap_chain_handle_.Get(), &desc, nullptr,
@@ -1131,8 +1149,8 @@ bool DirectCompositionSurfaceWin::IsHDRSupported() {
         continue;
       }
 
-      UMA_HISTOGRAM_SPARSE_SLOWLY("GPU.Output.ColorSpace", desc.ColorSpace);
-      UMA_HISTOGRAM_SPARSE_SLOWLY("GPU.Output.MaxLuminance", desc.MaxLuminance);
+      base::UmaHistogramSparse("GPU.Output.ColorSpace", desc.ColorSpace);
+      base::UmaHistogramSparse("GPU.Output.MaxLuminance", desc.MaxLuminance);
 
       if (desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
         hdr_monitor_found = true;
@@ -1231,28 +1249,28 @@ bool DirectCompositionSurfaceWin::Resize(const gfx::Size& size,
   size_ = size;
   is_hdr_ = is_hdr;
   has_alpha_ = has_alpha;
-  ui::ScopedReleaseCurrent release_current(this);
   return RecreateRootSurface();
 }
 
-gfx::SwapResult DirectCompositionSurfaceWin::SwapBuffers() {
-  {
-    ui::ScopedReleaseCurrent release_current(this);
-    root_surface_->SwapBuffers();
-
-    layer_tree_->CommitAndClearPendingOverlays();
-  }
+gfx::SwapResult DirectCompositionSurfaceWin::SwapBuffers(
+    const PresentationCallback& callback) {
+  ui::ScopedReleaseCurrent release_current;
+  root_surface_->SwapBuffers(callback);
+  layer_tree_->CommitAndClearPendingOverlays();
   child_window_.ClearInvalidContents();
-  return gfx::SwapResult::SWAP_ACK;
+  return release_current.Restore() ? gfx::SwapResult::SWAP_ACK
+                                   : gfx::SwapResult::SWAP_FAILED;
 }
 
-gfx::SwapResult DirectCompositionSurfaceWin::PostSubBuffer(int x,
-                                                           int y,
-                                                           int width,
-                                                           int height) {
+gfx::SwapResult DirectCompositionSurfaceWin::PostSubBuffer(
+    int x,
+    int y,
+    int width,
+    int height,
+    const PresentationCallback& callback) {
   // The arguments are ignored because SetDrawRectangle specified the area to
   // be swapped.
-  return SwapBuffers();
+  return SwapBuffers(callback);
 }
 
 gfx::VSyncProvider* DirectCompositionSurfaceWin::GetVSyncProvider() {
@@ -1267,11 +1285,9 @@ bool DirectCompositionSurfaceWin::ScheduleDCLayer(
 bool DirectCompositionSurfaceWin::SetEnableDCLayers(bool enable) {
   if (enable_dc_layers_ == enable)
     return true;
-  ui::ScopedReleaseCurrent release_current(this);
   enable_dc_layers_ = enable;
   return RecreateRootSurface();
 }
-
 
 bool DirectCompositionSurfaceWin::FlipsVertically() const {
   return true;

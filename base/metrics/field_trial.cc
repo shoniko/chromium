@@ -199,7 +199,7 @@ void AddFeatureAndFieldTrialFlags(const char* enable_features_switch,
     cmd_line->AppendSwitchASCII(disable_features_switch, disabled_features);
 
   std::string field_trial_states;
-  FieldTrialList::AllStatesToString(&field_trial_states);
+  FieldTrialList::AllStatesToString(&field_trial_states, false);
   if (!field_trial_states.empty()) {
     cmd_line->AppendSwitchASCII(switches::kForceFieldTrials,
                                 field_trial_states);
@@ -229,7 +229,20 @@ bool DeserializeGUIDFromStringPieces(base::StringPiece first,
   *guid = base::UnguessableToken::Deserialize(high, low);
   return true;
 }
-#endif
+
+// Extract a read-only SharedMemoryHandle from an existing |shared_memory|
+// handle. Note that on Android, this also makes the whole region read-only.
+SharedMemoryHandle GetSharedMemoryReadOnlyHandle(SharedMemory* shared_memory) {
+  SharedMemoryHandle result = shared_memory->GetReadOnlyHandle();
+#if defined(OS_ANDROID)
+  // On Android, turn the region read-only. This prevents any future
+  // writable mapping attempts, but the original one in |shm| survives
+  // and is still usable in the current process.
+  result.SetRegionReadOnly();
+#endif  // OS_ANDROID
+  return result;
+}
+#endif  // !OS_NACL
 
 }  // namespace
 
@@ -243,14 +256,13 @@ int FieldTrialList::kNoExpirationYear = 0;
 //------------------------------------------------------------------------------
 // FieldTrial methods and members.
 
-FieldTrial::EntropyProvider::~EntropyProvider() {
-}
+FieldTrial::EntropyProvider::~EntropyProvider() = default;
 
-FieldTrial::State::State() {}
+FieldTrial::State::State() = default;
 
 FieldTrial::State::State(const State& other) = default;
 
-FieldTrial::State::~State() {}
+FieldTrial::State::~State() = default;
 
 bool FieldTrial::FieldTrialEntry::GetTrialAndGroupName(
     StringPiece* trial_name,
@@ -413,7 +425,7 @@ FieldTrial::FieldTrial(const std::string& trial_name,
       << "Trial " << trial_name << " is missing a default group name.";
 }
 
-FieldTrial::~FieldTrial() {}
+FieldTrial::~FieldTrial() = default;
 
 void FieldTrial::SetTrialRegistered() {
   DCHECK_EQ(kNotFinalized, group_);
@@ -457,18 +469,9 @@ bool FieldTrial::GetActiveGroup(ActiveGroup* active_group) const {
   return true;
 }
 
-bool FieldTrial::GetState(State* field_trial_state) {
-  if (!enable_field_trial_)
-    return false;
-  FinalizeGroupChoice();
-  field_trial_state->trial_name = &trial_name_;
-  field_trial_state->group_name = &group_name_;
-  field_trial_state->activated = group_reported_;
-  return true;
-}
-
-bool FieldTrial::GetStateWhileLocked(State* field_trial_state) {
-  if (!enable_field_trial_)
+bool FieldTrial::GetStateWhileLocked(State* field_trial_state,
+                                     bool include_expired) {
+  if (!include_expired && !enable_field_trial_)
     return false;
   FinalizeGroupChoiceImpl(true);
   field_trial_state->trial_name = &trial_name_;
@@ -481,19 +484,18 @@ bool FieldTrial::GetStateWhileLocked(State* field_trial_state) {
 // FieldTrialList methods and members.
 
 // static
-FieldTrialList* FieldTrialList::global_ = NULL;
+FieldTrialList* FieldTrialList::global_ = nullptr;
 
 // static
 bool FieldTrialList::used_without_global_ = false;
 
-FieldTrialList::Observer::~Observer() {
-}
+FieldTrialList::Observer::~Observer() = default;
 
 FieldTrialList::FieldTrialList(
     std::unique_ptr<const FieldTrial::EntropyProvider> entropy_provider)
     : entropy_provider_(std::move(entropy_provider)),
       observer_list_(new ObserverListThreadSafe<FieldTrialList::Observer>(
-          ObserverListBase<FieldTrialList::Observer>::NOTIFY_EXISTING_ONLY)) {
+          ObserverListPolicy::EXISTING_ONLY)) {
   DCHECK(!global_);
   DCHECK(!used_without_global_);
   global_ = this;
@@ -512,7 +514,7 @@ FieldTrialList::~FieldTrialList() {
     registered_.erase(it->first);
   }
   DCHECK_EQ(this, global_);
-  global_ = NULL;
+  global_ = nullptr;
 }
 
 // static
@@ -527,7 +529,7 @@ FieldTrial* FieldTrialList::FactoryGetFieldTrial(
     int* default_group_number) {
   return FactoryGetFieldTrialWithRandomizationSeed(
       trial_name, total_probability, default_group_name, year, month,
-      day_of_month, randomization_type, 0, default_group_number, NULL);
+      day_of_month, randomization_type, 0, default_group_number, nullptr);
 }
 
 // static
@@ -599,7 +601,7 @@ FieldTrial* FieldTrialList::FactoryGetFieldTrialWithRandomizationSeed(
 // static
 FieldTrial* FieldTrialList::Find(const std::string& trial_name) {
   if (!global_)
-    return NULL;
+    return nullptr;
   AutoLock auto_lock(global_->lock_);
   return global_->PreLockedFind(trial_name);
 }
@@ -622,7 +624,7 @@ std::string FieldTrialList::FindFullName(const std::string& trial_name) {
 
 // static
 bool FieldTrialList::TrialExists(const std::string& trial_name) {
-  return Find(trial_name) != NULL;
+  return Find(trial_name) != nullptr;
 }
 
 // static
@@ -650,14 +652,15 @@ void FieldTrialList::StatesToString(std::string* output) {
 }
 
 // static
-void FieldTrialList::AllStatesToString(std::string* output) {
+void FieldTrialList::AllStatesToString(std::string* output,
+                                       bool include_expired) {
   if (!global_)
     return;
   AutoLock auto_lock(global_->lock_);
 
   for (const auto& registered : global_->registered_) {
     FieldTrial::State trial;
-    if (!registered.second->GetStateWhileLocked(&trial))
+    if (!registered.second->GetStateWhileLocked(&trial, include_expired))
       continue;
     DCHECK_EQ(std::string::npos,
               trial.trial_name->find(kPersistentStringSeparator));
@@ -895,14 +898,14 @@ FieldTrial* FieldTrialList::CreateFieldTrial(
   DCHECK_GE(name.size(), 0u);
   DCHECK_GE(group_name.size(), 0u);
   if (name.empty() || group_name.empty() || !global_)
-    return NULL;
+    return nullptr;
 
   FieldTrial* field_trial = FieldTrialList::Find(name);
   if (field_trial) {
     // In single process mode, or when we force them from the command line,
     // we may have already created the field trial.
     if (field_trial->group_name_internal() != group_name)
-      return NULL;
+      return nullptr;
     return field_trial;
   }
   const int kTotalProbability = 100;
@@ -1316,10 +1319,8 @@ void FieldTrialList::InstantiateFieldTrialAllocatorIfNeeded() {
       global_->field_trial_allocator_.get());
 
 #if !defined(OS_NACL)
-  // Set |readonly_allocator_handle_| so we can pass it to be inherited and
-  // via the command line.
-  global_->readonly_allocator_handle_ =
-      global_->field_trial_allocator_->shared_memory()->GetReadOnlyHandle();
+  global_->readonly_allocator_handle_ = GetSharedMemoryReadOnlyHandle(
+      global_->field_trial_allocator_->shared_memory());
 #endif
 }
 
@@ -1337,7 +1338,7 @@ void FieldTrialList::AddToAllocatorWhileLocked(
     return;
 
   FieldTrial::State trial_state;
-  if (!field_trial->GetStateWhileLocked(&trial_state))
+  if (!field_trial->GetStateWhileLocked(&trial_state, false))
     return;
 
   // Or if we've already added it. We must check after GetState since it can
@@ -1401,7 +1402,7 @@ const FieldTrial::EntropyProvider*
     FieldTrialList::GetEntropyProviderForOneTimeRandomization() {
   if (!global_) {
     used_without_global_ = true;
-    return NULL;
+    return nullptr;
   }
 
   return global_->entropy_provider_.get();
@@ -1410,7 +1411,7 @@ const FieldTrial::EntropyProvider*
 FieldTrial* FieldTrialList::PreLockedFind(const std::string& name) {
   RegistrationMap::iterator it = registered_.find(name);
   if (registered_.end() == it)
-    return NULL;
+    return nullptr;
   return it->second;
 }
 

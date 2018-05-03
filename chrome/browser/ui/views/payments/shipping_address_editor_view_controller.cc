@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
@@ -152,7 +151,7 @@ bool ShippingAddressEditorViewController::ValidateModelAndSave() {
 std::unique_ptr<ValidationDelegate>
 ShippingAddressEditorViewController::CreateValidationDelegate(
     const EditorField& field) {
-  return base::MakeUnique<
+  return std::make_unique<
       ShippingAddressEditorViewController::ShippingAddressValidationDelegate>(
       this, field);
 }
@@ -163,7 +162,7 @@ ShippingAddressEditorViewController::GetComboboxModelForType(
   switch (type) {
     case autofill::ADDRESS_HOME_COUNTRY: {
       std::unique_ptr<autofill::CountryComboboxModel> model =
-          base::MakeUnique<autofill::CountryComboboxModel>();
+          std::make_unique<autofill::CountryComboboxModel>();
       model->SetCountries(*state()->GetPersonalDataManager(),
                           base::Callback<bool(const std::string&)>(),
                           state()->GetApplicationLocale());
@@ -173,7 +172,7 @@ ShippingAddressEditorViewController::GetComboboxModelForType(
     }
     case autofill::ADDRESS_HOME_STATE: {
       std::unique_ptr<autofill::RegionComboboxModel> model =
-          base::MakeUnique<autofill::RegionComboboxModel>();
+          std::make_unique<autofill::RegionComboboxModel>();
       region_model_ = model.get();
       if (chosen_country_index_ < countries_.size()) {
         model->LoadRegionData(countries_[chosen_country_index_].first,
@@ -317,7 +316,7 @@ bool ShippingAddressEditorViewController::ShippingAddressValidationDelegate::
   if (!value.empty()) {
     if (field_.type == autofill::PHONE_HOME_WHOLE_NUMBER &&
         controller_->chosen_country_index_ < controller_->countries_.size() &&
-        !autofill::IsValidPhoneNumber(
+        !autofill::IsPossiblePhoneNumber(
             value, controller_->countries_[controller_->chosen_country_index_]
                        .first)) {
       if (error_message) {
@@ -480,16 +479,9 @@ void ShippingAddressEditorViewController::UpdateEditorFields() {
 void ShippingAddressEditorViewController::OnDataChanged(bool synchronous) {
   SaveFieldsToProfile(&temporary_profile_, /*ignore_errors*/ true);
 
-  // This function is called after rules are successfully loaded. Because of
-  // this, normalization is guaranteed to be synchronous. If they're not loaded,
-  // something went wrong with the network call and normalization can't happen
-  // (there's no data to go in the region combobox anyways).
-  std::string country_code = countries_[chosen_country_index_].first;
-  if (state()->GetAddressNormalizer()->AreRulesLoadedForRegion(country_code)) {
-    bool success = state()->GetAddressNormalizer()->NormalizeAddressSync(
-        &temporary_profile_, country_code);
-    DCHECK(success);
-  }
+  // Normalization is guaranteed to be synchronous and rules should have been
+  // loaded already.
+  state()->GetAddressNormalizer()->NormalizeAddressSync(&temporary_profile_);
 
   UpdateEditorFields();
   if (synchronous) {

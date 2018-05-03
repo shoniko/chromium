@@ -8,6 +8,7 @@ import static org.chromium.android_webview.test.AwActivityTestRule.WAIT_TIMEOUT_
 
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
+import android.util.Base64;
 import android.util.Pair;
 
 import org.json.JSONArray;
@@ -22,7 +23,6 @@ import org.junit.runner.RunWith;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JSUtils;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.test.util.HistoryUtils;
@@ -79,8 +79,9 @@ public class LoadUrlTest {
     @Feature({"AndroidWebView"})
     public void testDataUrlBase64() throws Throwable {
         final String expectedTitle = "dataUrlTestBase64";
-        final String data = "PGh0bWw+PGhlYWQ+PHRpdGxlPmRhdGFVcmxUZXN0QmFzZTY0PC90aXRsZT48"
-                + "L2hlYWQ+PC9odG1sPg==";
+        final String unencodedData =
+                "<html><head><title>" + expectedTitle + "</title></head><body>foo</body></html>";
+        final String data = Base64.encodeToString(unencodedData.getBytes(), Base64.NO_PADDING);
 
         final TestAwContentsClient contentsClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =
@@ -89,6 +90,31 @@ public class LoadUrlTest {
         mActivityTestRule.loadDataSync(
                 awContents, contentsClient.getOnPageFinishedHelper(), data, "text/html", true);
         Assert.assertEquals(expectedTitle, mActivityTestRule.getTitleOnUiThread(awContents));
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testDataUrlBase64WithTrickyCharacters() throws Throwable {
+        // We want all of these characters to be treated literally (e.g. "%3f" should be "%3f")
+        final String expectedTextContent =
+                "This text\nhas tricky characters: %3f!#$&'()*+,\\/:;=?@[]";
+        final String unencodedData =
+                "<html><body><pre>" + expectedTextContent + "</pre></body></html>";
+        final String data = Base64.encodeToString(unencodedData.getBytes(), Base64.NO_PADDING);
+
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        mActivityTestRule.enableJavaScriptOnUiThread(awContents);
+        mActivityTestRule.loadDataSync(
+                awContents, contentsClient.getOnPageFinishedHelper(), data, "text/html", true);
+        String textContent =
+                mActivityTestRule.getJavaScriptResultBodyTextContent(awContents, contentsClient);
+        // The JavaScript result escapes special characters - we need to unescape them.
+        textContent = textContent.replace("\\n", "\n").replace("\\\\", "\\");
+        Assert.assertEquals(expectedTextContent, textContent);
     }
 
     @Test
@@ -249,7 +275,6 @@ public class LoadUrlTest {
     }
 
     @Test
-    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testRedirectAndReloadWithExtraHeaders() throws Throwable {
@@ -284,7 +309,6 @@ public class LoadUrlTest {
     }
 
     @Test
-    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testRendererNavigationAndGoBackWithExtraHeaders() throws Throwable {

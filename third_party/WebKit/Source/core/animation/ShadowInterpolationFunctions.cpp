@@ -28,11 +28,11 @@ enum ShadowComponentIndex : unsigned {
 
 class ShadowNonInterpolableValue : public NonInterpolableValue {
  public:
-  ~ShadowNonInterpolableValue() final {}
+  ~ShadowNonInterpolableValue() final = default;
 
   static scoped_refptr<ShadowNonInterpolableValue> Create(
       ShadowStyle shadow_style) {
-    return WTF::AdoptRef(new ShadowNonInterpolableValue(shadow_style));
+    return base::AdoptRef(new ShadowNonInterpolableValue(shadow_style));
   }
 
   ShadowStyle Style() const { return style_; }

@@ -4,7 +4,8 @@
 
 #include "storage/browser/test/mock_blob_url_request_context.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/threading/thread_task_runner_handle.h"
 #include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_storage_context.h"
@@ -13,13 +14,12 @@
 
 namespace content {
 
-MockBlobURLRequestContext::MockBlobURLRequestContext(
-    storage::FileSystemContext* file_system_context)
+MockBlobURLRequestContext::MockBlobURLRequestContext()
     : blob_storage_context_(new storage::BlobStorageContext) {
   // Job factory owns the protocol handler.
   job_factory_.SetProtocolHandler(
-      "blob", base::MakeUnique<storage::BlobProtocolHandler>(
-                  blob_storage_context_.get(), file_system_context));
+      "blob", std::make_unique<storage::BlobProtocolHandler>(
+                  blob_storage_context_.get()));
   set_job_factory(&job_factory_);
 }
 
@@ -38,7 +38,7 @@ ScopedTextBlob::ScopedTextBlob(const MockBlobURLRequestContext& request_context,
   handle_ = context_->AddFinishedBlob(&blob_builder);
 }
 
-ScopedTextBlob::~ScopedTextBlob() {}
+ScopedTextBlob::~ScopedTextBlob() = default;
 
 std::unique_ptr<storage::BlobDataHandle> ScopedTextBlob::GetBlobDataHandle() {
   return context_->GetBlobDataFromUUID(blob_id_);

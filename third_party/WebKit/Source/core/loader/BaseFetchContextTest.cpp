@@ -31,6 +31,7 @@
 #include "core/loader/BaseFetchContext.h"
 
 #include "core/testing/NullExecutionContext.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -41,7 +42,7 @@ class MockBaseFetchContext final : public BaseFetchContext {
  public:
   explicit MockBaseFetchContext(ExecutionContext* execution_context)
       : execution_context_(execution_context) {}
-  ~MockBaseFetchContext() override {}
+  ~MockBaseFetchContext() override = default;
 
   // BaseFetchContext overrides:
   KURL GetSiteForCookies() const override { return KURL(); }
@@ -60,7 +61,7 @@ class MockBaseFetchContext final : public BaseFetchContext {
   void CountDeprecation(WebFeature) const override {}
   bool ShouldBlockFetchByMixedContentCheck(
       WebURLRequest::RequestContext,
-      WebURLRequest::FrameType,
+      network::mojom::RequestContextFrameType,
       ResourceRequest::RedirectStatus,
       const KURL&,
       SecurityViolationReportingPolicy) const override {
@@ -78,13 +79,13 @@ class MockBaseFetchContext final : public BaseFetchContext {
   }
   const KURL& Url() const override { return execution_context_->Url(); }
 
-  SecurityOrigin* GetSecurityOrigin() const override {
+  const SecurityOrigin* GetSecurityOrigin() const override {
     return execution_context_->GetSecurityOrigin();
   }
   const SecurityOrigin* GetParentSecurityOrigin() const override {
     return nullptr;
   }
-  Optional<WebAddressSpace> GetAddressSpace() const override {
+  Optional<mojom::IPAddressSpace> GetAddressSpace() const override {
     return WTF::make_optional(
         execution_context_->GetSecurityContext().AddressSpace());
   }
@@ -120,7 +121,7 @@ class BaseFetchContextTest : public ::testing::Test {
 };
 
 TEST_F(BaseFetchContextTest, SetIsExternalRequestForPublicContext) {
-  EXPECT_EQ(kWebAddressSpacePublic,
+  EXPECT_EQ(mojom::IPAddressSpace::kPublic,
             execution_context_->GetSecurityContext().AddressSpace());
 
   struct TestCase {
@@ -171,8 +172,8 @@ TEST_F(BaseFetchContextTest, SetIsExternalRequestForPublicContext) {
 
 TEST_F(BaseFetchContextTest, SetIsExternalRequestForPrivateContext) {
   execution_context_->GetSecurityContext().SetAddressSpace(
-      kWebAddressSpacePrivate);
-  EXPECT_EQ(kWebAddressSpacePrivate,
+      mojom::IPAddressSpace::kPrivate);
+  EXPECT_EQ(mojom::IPAddressSpace::kPrivate,
             execution_context_->GetSecurityContext().AddressSpace());
 
   struct TestCase {
@@ -223,8 +224,8 @@ TEST_F(BaseFetchContextTest, SetIsExternalRequestForPrivateContext) {
 
 TEST_F(BaseFetchContextTest, SetIsExternalRequestForLocalContext) {
   execution_context_->GetSecurityContext().SetAddressSpace(
-      kWebAddressSpaceLocal);
-  EXPECT_EQ(kWebAddressSpaceLocal,
+      mojom::IPAddressSpace::kLocal);
+  EXPECT_EQ(mojom::IPAddressSpace::kLocal,
             execution_context_->GetSecurityContext().AddressSpace());
 
   struct TestCase {
@@ -286,7 +287,7 @@ TEST_F(BaseFetchContextTest, CanRequest) {
   ResourceRequest resource_request(url);
   resource_request.SetRequestContext(WebURLRequest::kRequestContextScript);
   resource_request.SetFetchCredentialsMode(
-      WebURLRequest::kFetchCredentialsModeOmit);
+      network::mojom::FetchCredentialsMode::kOmit);
 
   ResourceLoaderOptions options;
 
@@ -384,6 +385,59 @@ TEST_F(BaseFetchContextTest, CanRequestWhenDetached) {
                 Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
                 FetchParameters::kNoOriginRestriction,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+}
+
+// Test that User Agent CSS can only load images with data urls.
+TEST_F(BaseFetchContextTest, UACSSTest) {
+  KURL test_url("https://example.com");
+  KURL data_url("data:image/png;base64,test");
+
+  ResourceRequest resource_request(test_url);
+  ResourceLoaderOptions options;
+  options.initiator_info.name = FetchInitiatorTypeNames::uacss;
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kOther,
+            fetch_context_->CanRequest(
+                Resource::kScript, resource_request, test_url, options,
+                SecurityViolationReportingPolicy::kReport,
+                FetchParameters::kUseDefaultOriginRestrictionForType,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kOther,
+            fetch_context_->CanRequest(
+                Resource::kImage, resource_request, test_url, options,
+                SecurityViolationReportingPolicy::kReport,
+                FetchParameters::kUseDefaultOriginRestrictionForType,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+            fetch_context_->CanRequest(
+                Resource::kImage, resource_request, data_url, options,
+                SecurityViolationReportingPolicy::kReport,
+                FetchParameters::kUseDefaultOriginRestrictionForType,
+                ResourceRequest::RedirectStatus::kFollowedRedirect));
+}
+
+// Test that User Agent CSS can bypass CSP to load embedded images.
+TEST_F(BaseFetchContextTest, UACSSTest_BypassCSP) {
+  ContentSecurityPolicy* policy =
+      execution_context_->GetContentSecurityPolicy();
+  policy->DidReceiveHeader("default-src 'self'",
+                           kContentSecurityPolicyHeaderTypeEnforce,
+                           kContentSecurityPolicyHeaderSourceHTTP);
+
+  KURL data_url("data:image/png;base64,test");
+
+  ResourceRequest resource_request(data_url);
+  ResourceLoaderOptions options;
+  options.initiator_info.name = FetchInitiatorTypeNames::uacss;
+
+  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+            fetch_context_->CanRequest(
+                Resource::kImage, resource_request, data_url, options,
+                SecurityViolationReportingPolicy::kReport,
+                FetchParameters::kUseDefaultOriginRestrictionForType,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
 }
 

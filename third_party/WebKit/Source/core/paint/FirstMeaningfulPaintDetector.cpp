@@ -5,13 +5,13 @@
 #include "core/paint/FirstMeaningfulPaintDetector.h"
 
 #include "core/css/FontFaceSetDocument.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/paint/PaintTiming.h"
 #include "core/probe/CoreProbes.h"
+#include "platform/CrossThreadFunctional.h"
 #include "platform/Histogram.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
-#include "platform/wtf/Functional.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebLayerTreeView.h"
 
 namespace blink {
@@ -34,11 +34,11 @@ FirstMeaningfulPaintDetector::FirstMeaningfulPaintDetector(
     Document& document)
     : paint_timing_(paint_timing),
       network0_quiet_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &document),
+          document.GetTaskRunner(TaskType::kUnspecedTimer),
           this,
           &FirstMeaningfulPaintDetector::Network0QuietTimerFired),
       network2_quiet_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &document),
+          document.GetTaskRunner(TaskType::kUnspecedTimer),
           this,
           &FirstMeaningfulPaintDetector::Network2QuietTimerFired) {}
 
@@ -94,7 +94,7 @@ void FirstMeaningfulPaintDetector::NotifyPaint() {
   // Skip document background-only paints.
   if (paint_timing_->FirstPaintRendered() == 0.0)
     return;
-  provisional_first_meaningful_paint_ = MonotonicallyIncreasingTime();
+  provisional_first_meaningful_paint_ = CurrentTimeTicksInSeconds();
   next_paint_is_meaningful_ = false;
 
   if (network2_quiet_reached_)
@@ -135,13 +135,12 @@ void FirstMeaningfulPaintDetector::SetNetworkQuietTimers(
     // 2-quiet window continues; the timer shouldn't be restarted.
     if (active_connections == 2 || !network2_quiet_timer_.IsActive()) {
       network2_quiet_timer_.StartOneShot(kNetwork2QuietWindowSeconds,
-                                         BLINK_FROM_HERE);
+                                         FROM_HERE);
     }
   }
   if (!network0_quiet_reached_ && active_connections == 0) {
     // This restarts 0-quiet timer if it's already running.
-    network0_quiet_timer_.StartOneShot(kNetwork0QuietWindowSeconds,
-                                       BLINK_FROM_HERE);
+    network0_quiet_timer_.StartOneShot(kNetwork0QuietWindowSeconds, FROM_HERE);
   }
 }
 
@@ -209,7 +208,7 @@ void FirstMeaningfulPaintDetector::ReportHistograms() {
     kHadNetworkQuietEnumMax
   };
   DEFINE_STATIC_LOCAL(EnumerationHistogram, had_network_quiet_histogram,
-                      ("PageLoad.Experimental.Renderer."
+                      ("PageLoad.Internal.Renderer."
                        "FirstMeaningfulPaintDetector.HadNetworkQuiet",
                        kHadNetworkQuietEnumMax));
 
@@ -222,7 +221,7 @@ void FirstMeaningfulPaintDetector::ReportHistograms() {
   };
   DEFINE_STATIC_LOCAL(
       EnumerationHistogram, first_meaningful_paint_ordering_histogram,
-      ("PageLoad.Experimental.Renderer.FirstMeaningfulPaintDetector."
+      ("PageLoad.Internal.Renderer.FirstMeaningfulPaintDetector."
        "FirstMeaningfulPaintOrdering",
        kFMPOrderingEnumMax));
 
@@ -247,8 +246,8 @@ void FirstMeaningfulPaintDetector::ReportHistograms() {
 void FirstMeaningfulPaintDetector::RegisterNotifySwapTime(PaintEvent event) {
   ++outstanding_swap_promise_count_;
   paint_timing_->RegisterNotifySwapTime(
-      event, WTF::Bind(&FirstMeaningfulPaintDetector::ReportSwapTime,
-                       WrapCrossThreadWeakPersistent(this), event));
+      event, CrossThreadBind(&FirstMeaningfulPaintDetector::ReportSwapTime,
+                             WrapCrossThreadWeakPersistent(this), event));
 }
 
 void FirstMeaningfulPaintDetector::ReportSwapTime(

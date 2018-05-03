@@ -4,19 +4,21 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/values_test_util.h"
 #include "chrome/browser/extensions/test_extension_environment.h"
 #include "chrome/test/base/testing_profile.h"
 #include "device/base/mock_device_client.h"
-#include "device/hid/public/interfaces/hid.mojom.h"
 #include "device/usb/mock_usb_device.h"
 #include "device/usb/mock_usb_service.h"
 #include "extensions/browser/api/device_permissions_manager.h"
 #include "extensions/browser/api/hid/hid_device_manager.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/common/extension.h"
+#include "services/device/public/interfaces/hid.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -42,7 +44,7 @@ class FakeHidDeviceManager : public HidDeviceManager {
 
 std::unique_ptr<KeyedService> CreateHidDeviceManager(
     content::BrowserContext* context) {
-  return base::MakeUnique<FakeHidDeviceManager>(context);
+  return std::make_unique<FakeHidDeviceManager>(context);
 }
 
 }  // namespace

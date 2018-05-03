@@ -14,7 +14,7 @@
 #include "build/build_config.h"
 #include "content/child/child_process.h"
 #include "content/common/content_constants_internal.h"
-#include "content/renderer/media/audio_ipc_factory.h"
+#include "content/renderer/media/audio_output_ipc_factory.h"
 #include "content/renderer/pepper/audio_helper.h"
 #include "content/renderer/pepper/pepper_audio_output_host.h"
 #include "content/renderer/pepper/pepper_media_device_manager.h"
@@ -54,7 +54,7 @@ PepperPlatformAudioOutputDev* PepperPlatformAudioOutputDev::Create(
     audio_output->AddRef();
     return audio_output.get();
   }
-  return NULL;
+  return nullptr;
 }
 
 void PepperPlatformAudioOutputDev::RequestDeviceAuthorization() {
@@ -103,7 +103,7 @@ bool PepperPlatformAudioOutputDev::SetVolume(double volume) {
 void PepperPlatformAudioOutputDev::ShutDown() {
   // Called on the main thread to stop all audio callbacks. We must only change
   // the client on the main thread, and the delegates from the I/O thread.
-  client_ = NULL;
+  client_ = nullptr;
   io_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&PepperPlatformAudioOutputDev::ShutDownOnIOThread, this));
@@ -233,7 +233,7 @@ PepperPlatformAudioOutputDev::PepperPlatformAudioOutputDev(
     const std::string& device_id,
     const GURL& document_url,
     base::TimeDelta authorization_timeout)
-    : client_(NULL),
+    : client_(nullptr),
       main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       io_task_runner_(ChildProcess::current()->io_task_runner()),
       render_frame_id_(render_frame_id),
@@ -260,7 +260,7 @@ bool PepperPlatformAudioOutputDev::Initialize(int sample_rate,
 
   client_ = client;
 
-  ipc_ = AudioIPCFactory::get()->CreateAudioOutputIPC(render_frame_id_);
+  ipc_ = AudioOutputIPCFactory::get()->CreateAudioOutputIPC(render_frame_id_);
   CHECK(ipc_);
 
   params_.Reset(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,

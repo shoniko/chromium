@@ -75,7 +75,7 @@ class DragController;
 class FocusManager;
 class FocusTraversable;
 class LayoutManager;
-class NativeViewAccessibility;
+class ViewAccessibility;
 class ScrollView;
 class ViewObserver;
 class Widget;
@@ -510,10 +510,27 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Gets/Sets the Layout Manager used by this view to size and place its
   // children.
+  //
   // The LayoutManager is owned by the View and is deleted when the view is
-  // deleted, or when a new LayoutManager is installed.
+  // deleted, or when a new LayoutManager is installed. Call
+  // SetLayoutManager(nullptr) to clear it.
+  //
+  // SetLayoutManager returns a bare pointer version of the input parameter
+  // (now owned by the view). If code needs to use the layout manager after
+  // being assigned, use this pattern:
+  //
+  //   views::BoxLayout* box_layout = SetLayoutManager(
+  //       std::make_unique<views::BoxLayout>(...));
+  //   box_layout->Foo();
   LayoutManager* GetLayoutManager() const;
-  void SetLayoutManager(LayoutManager* layout);
+  template <typename LayoutManager>
+  LayoutManager* SetLayoutManager(
+      std::unique_ptr<LayoutManager> layout_manager) {
+    LayoutManager* lm = layout_manager.get();
+    SetLayoutManagerImpl(std::move(layout_manager));
+    return lm;
+  }
+  void SetLayoutManager(std::nullptr_t);
 
   // Attributes ----------------------------------------------------------------
 
@@ -1076,6 +1093,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Accessibility -------------------------------------------------------------
 
+  // Get the object managing the accessibility interface for this View.
+  ViewAccessibility& GetViewAccessibility();
+
   // Modifies |node_data| to reflect the current accessible state of this view.
   virtual void GetAccessibleNodeData(ui::AXNodeData* node_data) {}
 
@@ -1098,6 +1118,10 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   void NotifyAccessibilityEvent(ui::AXEvent event_type,
                                 bool send_native_event);
 
+  // Views may override this function to know when an accessibility
+  // event is fired. This will be called by NotifyAccessibilityEvent.
+  virtual void OnAccessibilityEvent(ui::AXEvent event_type);
+
   // Scrolling -----------------------------------------------------------------
   // TODO(beng): Figure out if this can live somewhere other than View, i.e.
   //             closer to ScrollView.
@@ -1107,6 +1131,10 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // adjusting the coordinates). It is up to views that only show a portion of
   // the child view, such as Viewport, to override appropriately.
   virtual void ScrollRectToVisible(const gfx::Rect& rect);
+
+  // Scrolls the view's bounds or some subset thereof to be visible. By default
+  // this function calls ScrollRectToVisible(GetLocalBounds()).
+  virtual void ScrollViewToVisible();
 
   // The following methods are used by ScrollView to determine the amount
   // to scroll relative to the visible bounds of the view. For example, a
@@ -1287,7 +1315,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Overridden from ui::LayerDelegate:
   void OnPaintLayer(const ui::PaintContext& context) override;
-  void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override;
   void OnDeviceScaleFactorChanged(float old_device_scale_factor,
                                   float new_device_scale_factor) override;
 
@@ -1504,6 +1531,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // this views location and possibly size are changed.
   void AddDescendantToNotify(View* view);
   void RemoveDescendantToNotify(View* view);
+
+  // Non-templatized backend for SetLayoutManager().
+  void SetLayoutManagerImpl(std::unique_ptr<LayoutManager> layout);
 
   // Transformations -----------------------------------------------------------
 
@@ -1801,8 +1831,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Accessibility -------------------------------------------------------------
 
-  // The accessibility element used to represent this View.
-  std::unique_ptr<NativeViewAccessibility> native_view_accessibility_;
+  // Manages the accessibility interface for this View.
+  std::unique_ptr<ViewAccessibility> view_accessibility_;
 
   // Observers -------------------------------------------------------------
 

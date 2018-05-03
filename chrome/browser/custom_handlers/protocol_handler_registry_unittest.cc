@@ -39,7 +39,6 @@ namespace {
 void AssertInterceptedIO(
     const GURL& url,
     net::URLRequestJobFactory* interceptor) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   net::URLRequestContext context;
   std::unique_ptr<net::URLRequest> request(context.CreateRequest(
       url, net::DEFAULT_PRIORITY, nullptr, TRAFFIC_ANNOTATION_FOR_TESTS));
@@ -52,7 +51,6 @@ void AssertInterceptedIO(
 void AssertIntercepted(
     const GURL& url,
     net::URLRequestJobFactory* interceptor) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::BindOnce(AssertInterceptedIO, url, base::Unretained(interceptor)));
@@ -98,7 +96,6 @@ void AssertWillHandleIO(
     const std::string& scheme,
     bool expected,
     ProtocolHandlerRegistry::JobInterceptorFactory* interceptor) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   interceptor->Chain(std::unique_ptr<net::URLRequestJobFactory>(
       new FakeURLRequestJobFactory()));
   ASSERT_EQ(expected, interceptor->IsHandledProtocol(scheme));
@@ -109,7 +106,6 @@ void AssertWillHandle(
     const std::string& scheme,
     bool expected,
     ProtocolHandlerRegistry::JobInterceptorFactory* interceptor) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::BindOnce(AssertWillHandleIO, scheme, expected,
                                          base::Unretained(interceptor)));
@@ -994,4 +990,17 @@ TEST_F(ProtocolHandlerRegistryTest, TestPrefPolicyOverlapIgnore) {
   // p2u1 installed by user and policy, so it is removed from pref alone.
   ASSERT_EQ(InPrefIgnoredHandlerCount(), 1);
   ASSERT_EQ(InMemoryIgnoredHandlerCount(), 4);
+}
+
+TEST_F(ProtocolHandlerRegistryTest, TestMultiplePlaceholders) {
+  ProtocolHandler ph =
+      CreateProtocolHandler("test", GURL("http://example.com/%s/url=%s"));
+  registry()->OnAcceptRegisterProtocolHandler(ph);
+
+  GURL translated_url = ph.TranslateUrl(GURL("test:duplicated_placeholders"));
+
+  // When URL contains multiple placeholders, only the first placeholder should
+  // be changed to the given URL.
+  ASSERT_EQ(translated_url,
+            GURL("http://example.com/test%3Aduplicated_placeholders/url=%s"));
 }

@@ -8,7 +8,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
@@ -41,7 +40,7 @@ IpcDesktopEnvironment::IpcDesktopEnvironment(
       client_session_control, desktop_session_connector, options);
 }
 
-IpcDesktopEnvironment::~IpcDesktopEnvironment() {}
+IpcDesktopEnvironment::~IpcDesktopEnvironment() = default;
 
 std::unique_ptr<AudioCapturer> IpcDesktopEnvironment::CreateAudioCapturer() {
   return desktop_session_proxy_->CreateAudioCapturer();
@@ -93,14 +92,14 @@ IpcDesktopEnvironmentFactory::IpcDesktopEnvironmentFactory(
       daemon_channel_(daemon_channel),
       connector_factory_(this) {}
 
-IpcDesktopEnvironmentFactory::~IpcDesktopEnvironmentFactory() {}
+IpcDesktopEnvironmentFactory::~IpcDesktopEnvironmentFactory() = default;
 
 std::unique_ptr<DesktopEnvironment> IpcDesktopEnvironmentFactory::Create(
     base::WeakPtr<ClientSessionControl> client_session_control,
     const DesktopEnvironmentOptions& options) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return base::MakeUnique<IpcDesktopEnvironment>(
+  return std::make_unique<IpcDesktopEnvironment>(
       audio_task_runner_, caller_task_runner_, io_task_runner_,
       client_session_control, connector_factory_.GetWeakPtr(), options);
 }

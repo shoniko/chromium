@@ -6,18 +6,8 @@
 #define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_COMMON_H_
 
 #include "base/feature_list.h"
+#include "chrome/browser/notifications/notification_handler.h"
 #include "url/gurl.h"
-
-namespace features {
-
-// TODO(miguelg) We can probably get rid of this altogether.
-extern const base::Feature kAllowFullscreenWebNotificationsFeature;
-
-}  // namespace features
-
-namespace content {
-class BrowserContext;
-}  // namespace content
 
 class GURL;
 class Profile;
@@ -25,24 +15,15 @@ class Profile;
 // Shared functionality for both in page and persistent notification
 class NotificationCommon {
  public:
-  // Things as user can do to a notification.
+  // Things as user can do to a notification. Keep in sync with the
+  // NotificationOperation enumeration in notification_response_builder_mac.h.
   // TODO(peter): Prefix these options with OPERATION_.
   enum Operation {
     CLICK = 0,
     CLOSE = 1,
-    SETTINGS = 2,
+    DISABLE_PERMISSION = 2,
+    SETTINGS = 3,
     OPERATION_MAX = SETTINGS
-  };
-
-  // Possible kinds of notifications
-  // TODO(peter): Prefix these options with TYPE_.
-  enum Type {
-    PERSISTENT = 0,
-    NON_PERSISTENT = 1,
-    EXTENSION = 2,
-    PRODUCT_EOL = 3,
-    DOWNLOAD = 4,
-    TYPE_MAX = DOWNLOAD,
   };
 
   // A struct that contains extra data about a notification specific to one of
@@ -50,18 +31,11 @@ class NotificationCommon {
   struct Metadata {
     virtual ~Metadata();
 
-    Type type;
+    NotificationHandler::Type type;
   };
 
   // Open the Notification settings screen when clicking the right button.
-  // TODO(miguelg) have it take a Profile instead once NotificationObjectProxy
-  // is updated.
-  static void OpenNotificationSettings(
-      content::BrowserContext* browser_context);
-
-  // Whether a web notification should be displayed when chrome is in full
-  // screen mode.
-  static bool ShouldDisplayOnFullScreen(Profile* profile, const GURL& origin);
+  static void OpenNotificationSettings(Profile* profile, const GURL& origin);
 };
 
 // Metadata for PERSISTENT notifications.

@@ -5,9 +5,9 @@
 #include "core/paint/HTMLCanvasPainter.h"
 
 #include "core/frame/LocalFrameView.h"
-#include "core/html/HTMLCanvasElement.h"
 #include "core/html/canvas/CanvasContextCreationAttributes.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "core/paint/PaintControllerPaintTest.h"
 #include "core/paint/StubChromeClientForSPv2.h"
 #include "platform/graphics/Canvas2DLayerBridge.h"
@@ -32,16 +32,19 @@ class HTMLCanvasPainterTestForSPv2 : public PaintControllerPaintTest {
 
  protected:
   void SetUp() override {
-    SharedGpuContext::SetContextProviderFactoryForTesting([this] {
-      gl_.SetIsContextLost(false);
-      return std::unique_ptr<WebGraphicsContext3DProvider>(
-          new FakeWebGraphicsContext3DProvider(&gl_));
-    });
+    auto factory = [](FakeGLES2Interface* gl, bool* gpu_compositing_disabled)
+        -> std::unique_ptr<WebGraphicsContext3DProvider> {
+      *gpu_compositing_disabled = false;
+      gl->SetIsContextLost(false);
+      return std::make_unique<FakeWebGraphicsContext3DProvider>(gl);
+    };
+    SharedGpuContext::SetContextProviderFactoryForTesting(
+        WTF::BindRepeating(factory, WTF::Unretained(&gl_)));
     PaintControllerPaintTest::SetUp();
   }
 
   void TearDown() override {
-    SharedGpuContext::SetContextProviderFactoryForTesting(nullptr);
+    SharedGpuContext::ResetForTesting();
     PaintControllerPaintTest::TearDown();
   }
 
@@ -87,14 +90,15 @@ TEST_P(HTMLCanvasPainterTestForSPv2, Canvas2DLayerAppearsInLayerTree) {
   attributes.setAlpha(true);
   CanvasRenderingContext* context =
       element->GetCanvasRenderingContext("2d", attributes);
-  std::unique_ptr<Canvas2DLayerBridge> bridge =
-      MakeCanvas2DLayerBridge(IntSize(300, 200));
-  element->CreateImageBufferUsingSurfaceForTesting(std::move(bridge));
+  IntSize size(300, 200);
+  std::unique_ptr<Canvas2DLayerBridge> bridge = MakeCanvas2DLayerBridge(size);
+  element->CreateImageBufferUsingSurfaceForTesting(std::move(bridge), size);
   ASSERT_EQ(context, element->RenderingContext());
   ASSERT_TRUE(context->IsComposited());
   ASSERT_TRUE(element->IsAccelerated());
 
   // Force the page to paint.
+  element->FinalizeFrame();
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   // Fetch the layer associated with the <canvas>, and check that it was

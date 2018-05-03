@@ -5,9 +5,12 @@
 #include "components/omnibox/browser/history_url_provider.h"
 
 #include <algorithm>
+#include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
@@ -69,7 +72,11 @@ bool CompareHistoryMatch(const history::HistoryMatch& a,
     return a.url_info.visit_count() > b.url_info.visit_count();
 
   // URLs that have been visited more recently are better.
-  return a.url_info.last_visit() > b.url_info.last_visit();
+  if (a.url_info.last_visit() != b.url_info.last_visit())
+    return a.url_info.last_visit() > b.url_info.last_visit();
+
+  // Use alphabetical order on the url spec as a tie-breaker.
+  return a.url_info.url().spec() > b.url_info.url().spec();
 }
 
 // Sorts and dedups the given list of matches.
@@ -486,10 +493,10 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
       fixed_up_input, fixed_up_input.canonicalized_url(), trim_http));
   what_you_typed_match.relevance = CalculateRelevance(WHAT_YOU_TYPED, 0);
 
-  // Add the WYT match as a fallback in case we can't get the history service or
-  // URL DB; otherwise, we'll replace this match lower down.  Don't do this for
-  // queries, though -- while we can sometimes mark up a match for them, it's
-  // not what the user wants, and just adds noise.
+  // Add the what-you-typed match as a fallback in case we can't get the history
+  // service or URL DB; otherwise, we'll replace this match lower down.  Don't
+  // do this for queries, though -- while we can sometimes mark up a match for
+  // them, it's not what the user wants, and just adds noise.
   if (fixed_up_input.type() != metrics::OmniboxInputType::QUERY)
     matches_.push_back(what_you_typed_match);
 
@@ -797,7 +804,8 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
     //     what-you-typed match to be added in this case.  See comments in
     //     PromoteMatchesIfNecessary().
     //   * Otherwise, we should have some sort of QUERY or UNKNOWN input that
-    //     the SearchProvider will provide a defaultable WYT match for.
+    //     the SearchProvider will provide a defaultable what-you-typed match
+    //     for.
     params->promote_type = HistoryURLProviderParams::FRONT_HISTORY_MATCH;
   } else {
     // Failed to promote any URLs.  Use the What You Typed match, if we have it.
@@ -891,6 +899,8 @@ void HistoryURLProvider::QueryComplete(
       }
       matches_.push_back(HistoryMatchToACMatch(*params, i, relevance));
     }
+    if (base::FeatureList::IsEnabled(omnibox::kOmniboxTabSwitchSuggestions))
+      ConvertOpenTabMatches();
   }
 
   done_ = true;
@@ -1217,7 +1227,8 @@ AutocompleteMatch HistoryURLProvider::HistoryMatchToACMatch(
       history_match.input_location + params.input.text().length()};
 
   const auto format_types = AutocompleteMatch::GetFormatTypes(
-      !params.trim_http || history_match.match_in_scheme,
+      params.input.parts().scheme.len > 0 || !params.trim_http ||
+          history_match.match_in_scheme,
       history_match.match_in_subdomain, history_match.match_after_host);
   match.contents = url_formatter::FormatUrlWithOffsets(
       info.url(), format_types, net::UnescapeRule::SPACES, nullptr, nullptr,

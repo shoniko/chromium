@@ -80,6 +80,10 @@ static void SetRuntimeFeatureDefaultsForPlatform() {
 #if !defined(OS_MACOSX)
   WebRuntimeFeatures::EnableNotificationContentImage(true);
 #endif
+
+#if defined(OS_ANDROID)
+  WebRuntimeFeatures::EnableDoubleTapToJumpOnVideo(true);
+#endif
 }
 
 void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
@@ -116,6 +120,9 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   WebRuntimeFeatures::EnableWebAssemblyStreaming(
       base::FeatureList::IsEnabled(features::kWebAssemblyStreaming));
 
+  WebRuntimeFeatures::EnableSharedArrayBuffer(
+      base::FeatureList::IsEnabled(features::kSharedArrayBuffer));
+
   if (command_line.HasSwitch(switches::kDisableSharedWorkers))
     WebRuntimeFeatures::EnableSharedWorker(false);
 
@@ -130,15 +137,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 
   if (!command_line.HasSwitch(switches::kDisableAcceleratedJpegDecoding))
     WebRuntimeFeatures::EnableDecodeToYUV(true);
-
-  if (command_line.HasSwitch(switches::kEnableDisplayList2dCanvas))
-    WebRuntimeFeatures::EnableDisplayList2dCanvas(true);
-
-  if (command_line.HasSwitch(switches::kDisableDisplayList2dCanvas))
-    WebRuntimeFeatures::EnableDisplayList2dCanvas(false);
-
-  if (command_line.HasSwitch(switches::kForceDisplayList2dCanvas))
-    WebRuntimeFeatures::ForceDisplayList2dCanvas(true);
 
   if (command_line.HasSwitch(switches::kEnableWebGLDraftExtensions))
     WebRuntimeFeatures::EnableWebGLDraftExtensions(true);
@@ -214,8 +212,8 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableWebVR))
     WebRuntimeFeatures::EnableWebVR(true);
 
-  WebRuntimeFeatures::EnableWebVRExperimentalRendering(
-      base::FeatureList::IsEnabled(features::kWebVRExperimentalRendering));
+  WebRuntimeFeatures::EnableWebXR(
+      base::FeatureList::IsEnabled(features::kWebXr));
 
   if (command_line.HasSwitch(switches::kDisablePresentationAPI))
     WebRuntimeFeatures::EnablePresentationAPI(false);
@@ -229,6 +227,9 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 
   WebRuntimeFeatures::EnableUserActivationV2(
       base::FeatureList::IsEnabled(features::kUserActivationV2));
+
+  if (base::FeatureList::IsEnabled(features::kScrollAnchorSerialization))
+    WebRuntimeFeatures::EnableScrollAnchorSerialization(true);
 
   if (command_line.HasSwitch(switches::kEnableSlimmingPaintV175))
     WebRuntimeFeatures::EnableFeatureFromString("SlimmingPaintV175", true);
@@ -285,13 +286,15 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   WebRuntimeFeatures::EnablePaymentRequest(
       base::FeatureList::IsEnabled(features::kWebPayments));
 
+  if (base::FeatureList::IsEnabled(features::kServiceWorkerPaymentApps))
+    WebRuntimeFeatures::EnablePaymentApp(true);
+
   WebRuntimeFeatures::EnableServiceWorkerScriptStreaming(
       base::FeatureList::IsEnabled(features::kServiceWorkerScriptStreaming));
 
-  WebRuntimeFeatures::EnableOffMainThreadFetch(
-      base::FeatureList::IsEnabled(features::kOffMainThreadFetch));
-
-  WebRuntimeFeatures::EnableMojoBlobs(features::IsMojoBlobsEnabled());
+  WebRuntimeFeatures::EnableServiceWorkerScriptFullCodeCache(
+      base::FeatureList::IsEnabled(
+          features::kServiceWorkerScriptFullCodeCache));
 
   WebRuntimeFeatures::EnableNetworkService(
       base::FeatureList::IsEnabled(features::kNetworkService));
@@ -315,9 +318,8 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
       WebRuntimeFeatures::EnableGenericSensorExtraClasses(true);
   }
 
-  if (base::FeatureList::IsEnabled(features::kLoadingWithMojo) ||
-      base::FeatureList::IsEnabled(features::kNetworkService))
-    WebRuntimeFeatures::EnableLoadingWithMojo(true);
+  if (base::FeatureList::IsEnabled(features::kNotificationsWithMojo))
+    WebRuntimeFeatures::EnableNotificationsWithMojo(true);
 
   if (base::FeatureList::IsEnabled(features::kOutOfBlinkCORS))
     WebRuntimeFeatures::EnableOutOfBlinkCORS(true);
@@ -351,9 +353,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (!base::FeatureList::IsEnabled(features::kWebAuth) &&
       !enableExperimentalWebPlatformFeatures)
     WebRuntimeFeatures::EnableWebAuth(false);
-
-  WebRuntimeFeatures::EnableModuleScripts(
-      base::FeatureList::IsEnabled(features::kModuleScripts));
 
   WebRuntimeFeatures::EnableClientPlaceholdersForServerLoFi(
       base::GetFieldTrialParamValue("PreviewsClientLoFi",
@@ -409,6 +408,21 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 
   if (base::FeatureList::IsEnabled(features::kV8ContextSnapshot))
     WebRuntimeFeatures::EnableV8ContextSnapshot(true);
+
+  if (base::FeatureList::IsEnabled(features::kStopInBackground))
+    WebRuntimeFeatures::EnableStopInBackground(true);
+
+  if (base::FeatureList::IsEnabled(features::kStopLoadingInBackground))
+    WebRuntimeFeatures::EnableStopLoadingInBackground(true);
+
+  WebRuntimeFeatures::EnablePWAFullCodeCache(
+      base::FeatureList::IsEnabled(features::kPWAFullCodeCache));
+
+  WebRuntimeFeatures::EnableRequireCSSExtensionForFile(
+      base::FeatureList::IsEnabled(features::kRequireCSSExtensionForFile));
+
+  WebRuntimeFeatures::EnablePictureInPicture(
+      base::FeatureList::IsEnabled(media::kPictureInPicture));
 };
 
 }  // namespace content

@@ -5,8 +5,8 @@
 #include "media/capture/video/chromeos/stream_buffer_manager.h"
 
 #include <sync/sync.h>
+#include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "media/capture/video/chromeos/camera_buffer_factory.h"
 #include "media/capture/video/chromeos/camera_device_context.h"
 #include "media/capture/video/chromeos/camera_metadata_utils.h"
@@ -40,7 +40,9 @@ StreamBufferManager::~StreamBufferManager() {
   DCHECK(ipc_task_runner_->BelongsToCurrentThread());
   if (stream_context_) {
     for (const auto& buf : stream_context_->buffers) {
-      buf->Unmap();
+      if (buf) {
+        buf->Unmap();
+      }
     }
   }
 }
@@ -66,7 +68,7 @@ void StreamBufferManager::SetUpStreamAndBuffers(
   }
 
   partial_result_count_ = partial_result_count;
-  stream_context_ = base::MakeUnique<StreamContext>();
+  stream_context_ = std::make_unique<StreamContext>();
   stream_context_->capture_format = capture_format;
   stream_context_->stream = std::move(stream);
 
@@ -496,13 +498,13 @@ void StreamBufferManager::SubmitCaptureResult(uint32_t frame_number) {
   RegisterBuffer();
 }
 
-StreamBufferManager::StreamContext::StreamContext() {}
+StreamBufferManager::StreamContext::StreamContext() = default;
 
-StreamBufferManager::StreamContext::~StreamContext() {}
+StreamBufferManager::StreamContext::~StreamContext() = default;
 
 StreamBufferManager::CaptureResult::CaptureResult()
     : metadata(arc::mojom::CameraMetadata::New()) {}
 
-StreamBufferManager::CaptureResult::~CaptureResult() {}
+StreamBufferManager::CaptureResult::~CaptureResult() = default;
 
 }  // namespace media

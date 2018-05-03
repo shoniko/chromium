@@ -54,8 +54,8 @@
 #include "platform/SharedBuffer.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/scheduler/child/web_scheduler.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
 #include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
 
@@ -88,7 +88,7 @@ void MaybeLogScheduledNavigationClobber(ScheduledNavigationType type,
                       ("Navigation.Scheduled.MaybeCausedAbort",
                        ScheduledNavigationType::kScheduledLastEntry * 2));
 
-  int value = UserGestureIndicator::ProcessingUserGesture()
+  int value = Frame::HasTransientUserActivation(frame)
                   ? type + kScheduledLastEntry
                   : type;
   scheduled_navigation_clobber_histogram.Count(value);
@@ -101,7 +101,7 @@ void MaybeLogScheduledNavigationClobber(ScheduledNavigationType type,
                                 ->GetTiming()
                                 .NavigationStart();
   if (navigation_start) {
-    scheduled_clobber_abort_time_histogram.Count(MonotonicallyIncreasingTime() -
+    scheduled_clobber_abort_time_histogram.Count(CurrentTimeTicksInSeconds() -
                                                  navigation_start);
   }
 }
@@ -265,8 +265,14 @@ class ScheduledReload final : public ScheduledNavigation {
 
  private:
   explicit ScheduledReload(LocalFrame* frame)
-      : ScheduledNavigation(Reason::kReload, 0.0, nullptr, true, true),
-        frame_(frame) {}
+      : ScheduledNavigation(Reason::kReload,
+                            0.0,
+                            nullptr /*origin_document */,
+                            true,
+                            true),
+        frame_(frame) {
+    DCHECK(frame->GetDocument());
+  }
 
   Member<LocalFrame> frame_;
 };
@@ -417,7 +423,7 @@ bool NavigationScheduler::MustReplaceCurrentItem(LocalFrame* target_frame) {
   // create a new back/forward item. See https://webkit.org/b/42861 for the
   // original motivation for this.
   if (!target_frame->GetDocument()->LoadEventFinished() &&
-      !UserGestureIndicator::ProcessingUserGesture())
+      !Frame::HasTransientUserActivation(target_frame))
     return true;
 
   // Navigation of a subframe during loading of an ancestor frame does not
@@ -536,13 +542,11 @@ void NavigationScheduler::StartTimer() {
 
   // wrapWeakPersistent(this) is safe because a posted task is canceled when the
   // task handle is destroyed on the dtor of this NavigationScheduler.
-  navigate_task_handle_ = frame_->FrameScheduler()
-                              ->GetTaskRunner(TaskType::kUnspecedLoading)
-                              ->PostDelayedCancellableTask(
-                                  BLINK_FROM_HERE,
-                                  WTF::Bind(&NavigationScheduler::NavigateTask,
-                                            WrapWeakPersistent(this)),
-                                  TimeDelta::FromSecondsD(redirect_->Delay()));
+  navigate_task_handle_ = PostDelayedCancellableTask(
+      *frame_->FrameScheduler()->GetTaskRunner(TaskType::kUnspecedLoading),
+      FROM_HERE,
+      WTF::Bind(&NavigationScheduler::NavigateTask, WrapWeakPersistent(this)),
+      TimeDelta::FromSecondsD(redirect_->Delay()));
 
   probe::frameScheduledNavigation(frame_, redirect_.Get());
 }

@@ -45,13 +45,7 @@
 #pragma mark - PaymentItemsDisplayViewControllerDataSource
 
 - (BOOL)canPay {
-  return self.paymentRequest->selected_payment_method() != nullptr &&
-         (self.paymentRequest->selected_shipping_option() != nullptr ||
-          ![self requestShipping]) &&
-         (self.paymentRequest->selected_shipping_profile() != nullptr ||
-          ![self requestShipping]) &&
-         (self.paymentRequest->selected_contact_profile() != nullptr ||
-          ![self requestContactInfo]);
+  return self.paymentRequest->IsAbleToPay();
 }
 
 - (CollectionViewItem*)totalItem {
@@ -66,7 +60,7 @@
       base::UTF8ToUTF16(currencyFormatter->formatted_currency_code()),
       currencyFormatter->Format(
           _paymentRequest->GetTotal(_paymentRequest->selected_payment_method())
-              .amount.value)));
+              .amount->value)));
   return totalItem;
 }
 
@@ -83,23 +77,11 @@
     payments::CurrencyFormatter* currencyFormatter =
         _paymentRequest->GetOrCreateCurrencyFormatter();
     item.price = base::SysUTF16ToNSString(
-        currencyFormatter->Format(paymentItem.amount.value));
+        currencyFormatter->Format(paymentItem.amount->value));
 
     [lineItems addObject:item];
   }
   return lineItems;
-}
-
-#pragma mark - Helper methods
-
-- (BOOL)requestShipping {
-  return self.paymentRequest->request_shipping();
-}
-
-- (BOOL)requestContactInfo {
-  return self.paymentRequest->request_payer_name() ||
-         self.paymentRequest->request_payer_email() ||
-         self.paymentRequest->request_payer_phone();
 }
 
 @end

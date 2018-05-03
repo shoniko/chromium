@@ -4,6 +4,8 @@
 
 #include "modules/webaudio/BaseAudioContext.h"
 
+#include <memory>
+
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "build/build_config.h"
 #include "core/dom/Document.h"
@@ -21,7 +23,6 @@
 #include "modules/webaudio/AudioWorkletThread.h"
 #include "platform/testing/HistogramTester.h"
 #include "platform/testing/TestingPlatformSupport.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebAudioDevice.h"
 #include "public/platform/WebAudioLatencyHint.h"
@@ -80,12 +81,12 @@ class BaseAudioContextTestPlatform : public TestingPlatformSupport {
       WebAudioDevice::RenderCallback*,
       const WebString& device_id,
       const WebSecurityOrigin&) override {
-    return WTF::MakeUnique<MockWebAudioDeviceForBaseAudioContext>(
+    return std::make_unique<MockWebAudioDeviceForBaseAudioContext>(
         AudioHardwareSampleRate(), AudioHardwareBufferSize());
   }
 
   std::unique_ptr<WebThread> CreateThread(const char* name) override {
-    // return WTF::WrapUnique(old_platform_->CurrentThread());
+    // return base::WrapUnique(old_platform_->CurrentThread());
     return old_platform_->CreateThread(name);
   }
 
@@ -115,7 +116,7 @@ class BaseAudioContextAutoplayTest
     GetDocument().GetSettings()->SetAutoplayPolicy(GetParam());
     ChildDocument().GetSettings()->SetAutoplayPolicy(GetParam());
 
-    histogram_tester_ = WTF::MakeUnique<HistogramTester>();
+    histogram_tester_ = std::make_unique<HistogramTester>();
     AudioWorkletThread::CreateSharedBackingThreadForTest();
   }
 

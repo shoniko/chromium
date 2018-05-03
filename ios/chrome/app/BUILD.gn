@@ -7,6 +7,12 @@ import("//build/config/mac/base_rules.gni")
 import("//build/mac/tweak_info_plist.gni")
 import("//ios/build/chrome_build.gni")
 import("//ios/public/provider/chrome/browser/build_config.gni")
+import("//services/service_manager/public/service_manifest.gni")
+
+service_manifest("chrome_browser_manifest_overlay") {
+  source = "//ios/chrome/browser/chrome_browser_manifest_overlay.json"
+  packaged_services = [ "//services/identity:manifest" ]
+}
 
 source_set("app") {
   configs += [ "//build/config/compiler:enable_arc" ]
@@ -148,7 +154,6 @@ source_set("app_internal") {
     "//ios/chrome/app/startup:startup_basic",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser",
-    "//ios/chrome/browser:browser_internal",
     "//ios/chrome/browser/bookmarks",
     "//ios/chrome/browser/browser_state",
     "//ios/chrome/browser/browser_state:browser_state_impl",
@@ -157,6 +162,7 @@ source_set("app_internal") {
     "//ios/chrome/browser/content_settings",
     "//ios/chrome/browser/crash_report",
     "//ios/chrome/browser/crash_report:crash_report_internal",
+    "//ios/chrome/browser/download",
     "//ios/chrome/browser/favicon",
     "//ios/chrome/browser/feature_engagement",
     "//ios/chrome/browser/first_run",
@@ -184,22 +190,29 @@ source_set("app_internal") {
     "//ios/chrome/browser/ui:ui_internal",
     "//ios/chrome/browser/ui/authentication",
     "//ios/chrome/browser/ui/commands",
-    "//ios/chrome/browser/ui/downloads",
+    "//ios/chrome/browser/ui/download",
     "//ios/chrome/browser/ui/first_run",
+    "//ios/chrome/browser/ui/fullscreen",
+    "//ios/chrome/browser/ui/fullscreen:legacy_fullscreen",
     "//ios/chrome/browser/ui/history",
     "//ios/chrome/browser/ui/main",
+    "//ios/chrome/browser/ui/main:feature_flags",
     "//ios/chrome/browser/ui/promos",
     "//ios/chrome/browser/ui/settings",
     "//ios/chrome/browser/ui/signin_interaction",
     "//ios/chrome/browser/ui/stack_view",
     "//ios/chrome/browser/ui/tab_switcher",
     "//ios/chrome/browser/ui/tabs",
+    "//ios/chrome/browser/ui/toolbar/clean:toolbar_ui",
+    "//ios/chrome/browser/ui/toolbar/public",
     "//ios/chrome/browser/ui/util",
     "//ios/chrome/browser/ui/webui:webui_internal",
     "//ios/chrome/browser/upgrade",
     "//ios/chrome/browser/variations:ios_chrome_ui_string_overrider_factory",
     "//ios/chrome/browser/voice",
+    "//ios/chrome/browser/web:tab_id_tab_helper",
     "//ios/chrome/browser/web:web_internal",
+    "//ios/chrome/browser/web_state_list",
     "//ios/chrome/common",
     "//ios/chrome/common/app_group",
     "//ios/chrome/common/app_group:main_app",
@@ -241,7 +254,6 @@ source_set("main") {
     "//base",
     "//components/crash/core/common",
     "//ios/chrome/app/startup:startup_basic",
-    "//ios/chrome/browser:browser_internal",
     "//ios/chrome/browser/crash_report",
     "//ios/chrome/common",
     "//ios/testing/perf:startup",

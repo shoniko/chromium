@@ -34,6 +34,7 @@
 <translation id="145015347812617860"><ph name="COUNT" /> elementi</translation>
 <translation id="1491277525950327607">Tocca due volte per attivare/disattivare l'impostazione</translation>
 <translation id="152234381334907219">Mai salvate</translation>
+<translation id="1532451416480227577">Mostra indirizzi e carte di credito di Google Pay</translation>
 <translation id="1540800554400757039">Indirizzo 1</translation>
 <translation id="1545749641540134597">Leggi il codice QR</translation>
 <translation id="1580783302095112590">Messaggio inviato.</translation>
@@ -67,7 +68,6 @@ Ad esempio, alcuni siti web potrebbero rispondere alla richiesta visualizzando a
 <translation id="2116625576999540962"><ph name="NUMBER_OF_SELECTED_BOOKMARKS" /> elementi spostati</translation>
 <translation id="213900355088104901">Per navigare in privato, apri una scheda di navigazione in incognito</translation>
 <translation id="2149973817440762519">Modifica Preferito</translation>
-<translation id="2154710561487035718">Copia URL</translation>
 <translation id="2230173723195178503">Pagina web caricata</translation>
 <translation id="2256128224215992540">Suggerimenti di ricerche e siti</translation>
 <translation id="2267753748892043616">Aggiungi account</translation>
@@ -79,6 +79,7 @@ Ad esempio, alcuni siti web potrebbero rispondere alla richiesta visualizzando a
 <translation id="2381405137052800939">Opzioni di base</translation>
 <translation id="2386793615875593361">Una selezionata</translation>
 <translation id="2435457462613246316">Mostra password</translation>
+<translation id="2523363575747517183">Questo sito web sta cercando ripetutamente di aprire un'altra applicazione.</translation>
 <translation id="2529021024822217800">Apri tutto</translation>
 <translation id="2572712655377361602">Una norma relativa ai dispositivi ha impedito l'accesso alle tue foto</translation>
 <translation id="2584132361465095047">Aggiungi account…</translation>
@@ -96,6 +97,7 @@ Ad esempio, alcuni siti web potrebbero rispondere alla richiesta visualizzando a
 <translation id="2718352093833049315">Solo su Wi-Fi</translation>
 <translation id="2747003861858887689">Campo precedente</translation>
 <translation id="2780046210906776326">Nessun account email</translation>
+<translation id="2781692009645368755">Google Pay</translation>
 <translation id="2800683595868705743">Chiudi selettore di schede</translation>
 <translation id="283291358677939992">Trova nella pagina...</translation>
 <translation id="2834956026595107950"><ph name="TITLE" />, <ph name="STATE" />, <ph name="URL" /></translation>
@@ -130,7 +132,6 @@ Ad esempio, alcuni siti web potrebbero rispondere alla richiesta visualizzando a
 <translation id="3329904751041170572">Connessione al server non riuscita.</translation>
 <translation id="3335947283844343239">Riapri scheda chiusa</translation>
 <translation id="3393920035788932672">Popup consentiti</translation>
-<translation id="3414292259312108062">Chrome archivierà questa password nelle <ph name="BEGIN_LINK" />password Google salvate<ph name="END_LINK" /> per inserirla automaticamente, in modo da non doverla imparare a memoria.</translation>
 <translation id="3445288400492335833"><ph name="MINUTES" /> min</translation>
 <translation id="3448016392200048164">Visualizzazione divisa</translation>
 <translation id="3474624961160222204">Continua come <ph name="NAME" /></translation>
@@ -145,19 +146,14 @@ Ad esempio, alcuni siti web potrebbero rispondere alla richiesta visualizzando a
 <translation id="3567664240939803299">Vuoi che Google Smart Lock salvi la password di questo sito?</translation>
 <translation id="3588820906588687999">Apri immagine in un'altra scheda</translation>
 <translation id="3603009562372709545">Copia URL link</translation>
-<translation id="360480449234699036">Scopri gli argomenti dei siti web senza lasciare la pagina. La funzione Tocca per cercare consente di inviare una parola e il relativo contesto alla Ricerca Google; vengono restituiti risultati di ricerca, immagini, definizioni e altri dettagli.
-
-Per modificare il termine di ricerca, premi a lungo per selezionarlo. Per perfezionare la ricerca, fai scorrere completamente il riquadro verso l'alto e tocca la casella di ricerca.</translation>
 <translation id="3607167657931203000">Dati della Compilazione automatica</translation>
 <translation id="3628119975092896051">Il tuo elenco di lettura è disponibile offline. Per aggiungere una pagina all'elenco di lettura, tocca <ph name="SHARE_OPENING_ICON" />.</translation>
 <translation id="3638472932233958418">Precarica pagine web</translation>
 <translation id="3691593122358196899">Preferito aggiunto in: <ph name="FOLDER_TITLE" /></translation>
-<translation id="3738139272394829648">Tocca per cercare</translation>
 <translation id="3771033907050503522">Schede di navigazione in incognito</translation>
 <translation id="3779810277399252432">Nessuna connessione a Internet.</translation>
 <translation id="3783017676699494206">Salva immagine</translation>
 <translation id="385051799172605136">Indietro</translation>
-<translation id="3857761338463387655">Crea email con:</translation>
 <translation id="3897092660631435901">Menu</translation>
 <translation id="3928666092801078803">Unisci i miei dati</translation>
 <translation id="3950820424414687140">Accedi</translation>
@@ -185,6 +181,7 @@ Per modificare il termine di ricerca, premi a lungo per selezionarlo. Per perfez
 <translation id="4378154925671717803">Telefono</translation>
 <translation id="441868831736628555">Informativa sulla privacy</translation>
 <translation id="4460091562821778167">Chiedi sempre quale app usare</translation>
+<translation id="4496373720959965247">Aggiungi schede e spostati tra le pagine</translation>
 <translation id="4508750114462689118">Chiudi promo accesso</translation>
 <translation id="4526249700380860531">Controlla e gestisci le password salvate all'indirizzo <ph name="BEGIN_LINK" />passwords.google.com<ph name="END_LINK" /></translation>
 <translation id="4536418791685807335">Prova ad accedere nuovamente.</translation>
@@ -223,12 +220,12 @@ I tuoi dati vengono criptati con la tua passphrase di sincronizzazione. Inserisc
 <translation id="5300589172476337783">Mostra</translation>
 <translation id="5317780077021120954">Salva</translation>
 <translation id="5327248766486351172">Nome</translation>
+<translation id="533632423981297619">Le tue password saranno visibili a chiunque abbia accesso al file esportato. Non condividere il file con nessuno.</translation>
 <translation id="5388358297987318779">Apri immagine</translation>
 <translation id="5409365236829784218">Non ci sono applicazioni installate in grado di aprire questo file.</translation>
 <translation id="5433691172869980887">Nome utente copiato</translation>
 <translation id="54401264925851789">Info sicurezza pagina</translation>
 <translation id="5525269841082836315">Crea passphrase</translation>
-<translation id="5531274207066050939">Google Payments</translation>
 <translation id="5548760955356983418">Handoff ti consente di iniziare a consultare un sito web su questo dispositivo per poi continuare facilmente sul Mac. Il sito web attualmente aperto verrà visualizzato nel Dock sul Mac.
 
 La funzione Handoff deve anche essere attivata nella sezione Generali di Impostazioni e sui dispositivi deve essere in uso lo stesso account iCloud.</translation>
@@ -244,6 +241,7 @@ La funzione Handoff deve anche essere attivata nella sezione Generali di Imposta
 <translation id="5771816112378578655">Configurazione in corso...</translation>
 <translation id="5816228676161003208">In questo modo puoi eseguire ricerche più veloci con la voce.</translation>
 <translation id="5846482154967366008">Motore di ricerca</translation>
+<translation id="5854790677617711513">Oltre 30 giorni fa</translation>
 <translation id="5857090052475505287">Nuova cartella</translation>
 <translation id="5857770089550859117">Per avviare la sincronizzazione è obbligatoria la passphrase.</translation>
 <translation id="5860033963881614850">Off</translation>
@@ -252,7 +250,6 @@ La funzione Handoff deve anche essere attivata nella sezione Generali di Imposta
 <translation id="5911030830365207728">Google Traduttore</translation>
 <translation id="5916664084637901428">On</translation>
 <translation id="5948291296578561264">In questo modo puoi salvare le foto nella raccolta di foto.</translation>
-<translation id="5953603475187800576">Mostra indirizzi e carte di credito di Google Payments</translation>
 <translation id="5955891643922670672">È visualizzata la versione offline</translation>
 <translation id="5964480694698977962">Crea nuova scheda in incognito.</translation>
 <translation id="5965679971710331625">Hai eseguito l'accesso</translation>
@@ -268,7 +265,6 @@ La funzione Handoff deve anche essere attivata nella sezione Generali di Imposta
 <translation id="6122191549521593678">Online</translation>
 <translation id="6127379762771434464">Elemento rimosso</translation>
 <translation id="6136914049981179737">Secondi fa</translation>
-<translation id="6149061208933997199">Utilizza password</translation>
 <translation id="6158823227857319455">Nuova scheda</translation>
 <translation id="616831107264507309">Leggi dopo</translation>
 <translation id="6184086493125982861">Mostra schede</translation>
@@ -278,7 +274,6 @@ La funzione Handoff deve anche essere attivata nella sezione Generali di Imposta
 <translation id="6254066287920239840">Apri i link all'interno dell'app invece che nel browser.</translation>
 <translation id="6255097610484507482">Modifica carta di credito</translation>
 <translation id="6308436439357671616">In questo modo puoi scattare e caricare foto.</translation>
-<translation id="6314335155547195432">Genera password</translation>
 <translation id="6324528485781869530">Cambia account di sincronizzazione</translation>
 <translation id="6324669097367352121">Impostazioni accesso</translation>
 <translation id="6337234675334993532">Crittografia</translation>
@@ -296,7 +291,6 @@ I tuoi dati sono stati criptati con la tua passphrase di sincronizzazione in dat
 <translation id="6418346271604475326">Preparazione del PDF</translation>
 <translation id="6445051938772793705">Paese</translation>
 <translation id="6445981559479772097">Messaggio inviato.</translation>
-<translation id="6456425917241817154">Password generata da Chrome</translation>
 <translation id="6464071786529933911">Apri in nuova scheda in incognito</translation>
 <translation id="6482629121755362506"><ph name="NUMBER_OF_SELECTED_BOOKMARKS" /> elementi eliminati</translation>
 <translation id="6541915733953096570">Ultima ora</translation>
@@ -312,7 +306,6 @@ I tuoi dati sono stati criptati con la tua passphrase di sincronizzazione in dat
 <translation id="6797885426782475225">Ricerca vocale</translation>
 <translation id="6807889908376551050">Mostra tutte...</translation>
 <translation id="681368974849482173">Elemento creato</translation>
-<translation id="6871663519944855400">Apri in modalità di navigazione in incognito</translation>
 <translation id="6896758677409633944">Copia</translation>
 <translation id="6903907808598579934">Attiva la sincronizzazione</translation>
 <translation id="6945221475159498467">Seleziona</translation>
@@ -320,6 +313,7 @@ I tuoi dati sono stati criptati con la tua passphrase di sincronizzazione in dat
 <translation id="7004499039102548441">Schede recenti</translation>
 <translation id="7006788746334555276">Impostazioni contenuti</translation>
 <translation id="7031882061095297553">Sincronizza con</translation>
+<translation id="7053983685419859001">Blocca</translation>
 <translation id="7062545763355031412">Accetta e cambia account</translation>
 <translation id="7108338896283013870">Nascondi</translation>
 <translation id="7133798577887235672">Nome e cognome</translation>
@@ -340,26 +334,24 @@ I tuoi dati sono stati criptati con la tua passphrase di sincronizzazione in dat
 <translation id="7456847797759667638">Apri percorso...</translation>
 <translation id="7464701184726199289">Questa operazione comporta la cancellazione dei dati sincronizzati da tutti i dispositivi. Le impostazioni del sito salvate non verranno eliminate e potrebbero rispecchiare le tue abitudini di navigazione. <ph name="BEGIN_LINK" />Ulteriori informazioni<ph name="END_LINK" /></translation>
 <translation id="7472734401283673885">Nome dell'azienda</translation>
-<translation id="7473891865547856676">No grazie</translation>
 <translation id="7481312909269577407">Avanti</translation>
 <translation id="750493650310597496">0 selezionati</translation>
 <translation id="7514365320538308">Scarica</translation>
 <translation id="7537586195939242955">Spiacenti, il tuo pass non può essere installato in Passbook in questo momento.</translation>
 <translation id="7561196759112975576">Sempre</translation>
-<translation id="7588950540487816470">Physical Web</translation>
 <translation id="7603852183842204213">Popup bloccati (<ph name="NUMBER_OF_BLOCKED_POPUPS" />)</translation>
 <translation id="7605594153474022051">La sincronizzazione non funziona</translation>
 <translation id="7638584964844754484">Passphrase sbagliata</translation>
 <translation id="7649070708921625228">Guida</translation>
 <translation id="7658239707568436148">Annulla</translation>
 <translation id="7671141431838911305">INSTALLA</translation>
-<translation id="7677825787905683892">Scegli l'app email predefinita</translation>
 <translation id="7765158879357617694">Sposta</translation>
 <translation id="7769602470925380267">Accetta ed esci</translation>
 <translation id="7772032839648071052">Conferma passphrase</translation>
 <translation id="780301667611848630">No grazie</translation>
 <translation id="7859704718976024901">Cronologia di navigazione</translation>
 <translation id="7938254975914653459">FaceTime</translation>
+<translation id="7939128259257418052">Esporta password...</translation>
 <translation id="7947953824732555851">Accetta e accedi</translation>
 <translation id="7961015016161918242">Mai</translation>
 <translation id="7971521879845308059">Blocca popup</translation>
@@ -370,7 +362,6 @@ I tuoi dati sono stati criptati con la tua passphrase di sincronizzazione in dat
 <translation id="806745655614357130">Mantieni separati i miei dati</translation>
 <translation id="8076014560081431679">Le impostazioni del sito salvate non verranno eliminate e potrebbero rispecchiare le tue abitudini di navigazione. <ph name="BEGIN_LINK" />Ulteriori informazioni<ph name="END_LINK" /></translation>
 <translation id="8080028325999236607">Chiudi tutte le schede</translation>
-<translation id="8137558756159375272">La funzione Tocca per cercare invia la parola selezionata e la pagina corrente come contesto alla Ricerca Google. Puoi disattivare la funzione nelle <ph name="BEGIN_LINK" />Impostazioni<ph name="END_LINK" />.</translation>
 <translation id="8205564605687841303">Annulla</translation>
 <translation id="8225985093977202398">Immagini e file memorizzati nella cache</translation>
 <translation id="8261506727792406068">Elimina</translation>
@@ -383,6 +374,7 @@ I tuoi dati sono stati criptati con la tua passphrase di sincronizzazione in dat
 <translation id="8458397775385147834">1 elemento eliminato</translation>
 <translation id="8487700953926739672">Disponibile offline</translation>
 <translation id="8503813439785031346">Nome utente</translation>
+<translation id="850600235656508448">Apri in modalità di navigazione in incognito</translation>
 <translation id="8517375800490286174">Licenze open source</translation>
 <translation id="8524799873541103884">Schede <ph name="INCOGNITO" /> dalla <ph name="FIRST_VISIBLE_TAB" /> alla <ph name="LAST_VISIBLE_TAB" /> di <ph name="NUMBER_OF_OPEN_TABS" /></translation>
 <translation id="8532105204136943229">Anno di scadenza</translation>
@@ -417,8 +409,6 @@ I tuoi dati sono stati criptati con la tua passphrase di sincronizzazione in dat
 <translation id="9083392325882095631">1 elemento</translation>
 <translation id="9100610230175265781">Passphrase obbligatoria</translation>
 <translation id="9148126808321036104">Esegui di nuovo l'accesso</translation>
-<translation id="914898748153555155">Puoi cambiare questa preferenza in qualsiasi momento nelle impostazioni Chrome</translation>
-<translation id="91549621916703028">Crea più schede per tutte le tue attività</translation>
 <translation id="9157836665414082580">Elimina finestre di dialogo</translation>
 <translation id="9188680907066685419">Esci dall'account gestito</translation>
 <translation id="9203116392574189331">Handoff</translation>
@@ -429,4 +419,5 @@ I tuoi dati sono stati criptati con la tua passphrase di sincronizzazione in dat
 <translation id="976982866697960176">Gestisci dati sincronizzati…</translation>
 <translation id="988141524645182168">Altri dispositivi</translation>
 <translation id="989988560359834682">Modifica indirizzo</translation>
+<translation id="994757059139821576">Suggerimenti di articoli</translation>
 </translationbundle>

@@ -58,14 +58,14 @@ class ListInterpolationFunctions {
 
 class NonInterpolableList : public NonInterpolableValue {
  public:
-  ~NonInterpolableList() final {}
+  ~NonInterpolableList() final = default;
 
   static scoped_refptr<NonInterpolableList> Create() {
-    return WTF::AdoptRef(new NonInterpolableList());
+    return base::AdoptRef(new NonInterpolableList());
   }
   static scoped_refptr<NonInterpolableList> Create(
       Vector<scoped_refptr<NonInterpolableValue>>&& list) {
-    return WTF::AdoptRef(new NonInterpolableList(std::move(list)));
+    return base::AdoptRef(new NonInterpolableList(std::move(list)));
   }
 
   size_t length() const { return list_.size(); }
@@ -80,7 +80,7 @@ class NonInterpolableList : public NonInterpolableValue {
   DECLARE_NON_INTERPOLABLE_VALUE_TYPE();
 
  private:
-  NonInterpolableList() {}
+  NonInterpolableList() = default;
   NonInterpolableList(Vector<scoped_refptr<NonInterpolableValue>>&& list)
       : list_(list) {}
 

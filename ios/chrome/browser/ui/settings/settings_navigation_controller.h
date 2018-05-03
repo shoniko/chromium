@@ -30,10 +30,6 @@ class ChromeBrowserState;
 @protocol SettingsNavigationControllerDelegate<NSObject>
 
 // Informs the delegate that the settings navigation controller should be
-// closed and a new incognito window should be opened.
-- (void)closeSettingsAndOpenNewIncognitoTab;
-
-// Informs the delegate that the settings navigation controller should be
 // closed.
 - (void)closeSettings;
 
@@ -45,7 +41,8 @@ class ChromeBrowserState;
 
 // Controller to modify user settings.
 @interface SettingsNavigationController
-    : UINavigationController<ApplicationSettingsCommands>
+    : UINavigationController<ApplicationSettingsCommands,
+                             SettingsControllerProtocol>
 
 // Whether sync changes should be committed when the settings are being
 // dismissed. Defaults to YES.
@@ -141,10 +138,6 @@ initWithRootViewController:(UIViewController*)rootViewController
 
 // Returns the current main browser state.
 - (ios::ChromeBrowserState*)mainBrowserState;
-
-// Notifies this |SettingsNavigationController| that it will be dismissed such
-// that it has a possibility to do necessary clean up.
-- (void)settingsWillBeDismissed;
 
 // Closes this |SettingsNavigationController| by asking its delegate.
 - (void)closeSettings;

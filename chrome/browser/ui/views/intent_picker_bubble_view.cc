@@ -25,6 +25,7 @@
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/scroll_view.h"
+#include "ui/views/controls/separator.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -37,8 +38,10 @@ namespace {
 constexpr size_t kMaxAppResults = arc::ArcNavigationThrottle::kMaxAppResults;
 // Main components sizes
 constexpr int kTitlePadding = 16;
-constexpr int kRowHeight = 40;
+constexpr int kRowHeight = 32;
 constexpr int kMaxWidth = 320;
+constexpr gfx::Insets kSeparatorPadding(16, 0, 16, 0);
+constexpr SkColor kSeparatorColor = SkColorSetARGB(0x1F, 0x0, 0x0, 0x0);
 
 // UI position wrt the Top Container
 constexpr int kTopContainerMerge = 3;
@@ -48,6 +51,13 @@ constexpr char kInvalidPackageName[] = "";
 bool IsKeyboardCodeArrow(ui::KeyboardCode key_code) {
   return key_code == ui::VKEY_UP || key_code == ui::VKEY_DOWN ||
          key_code == ui::VKEY_RIGHT || key_code == ui::VKEY_LEFT;
+}
+
+views::Separator* CreateHorizontalSeparator() {
+  views::Separator* separator = new views::Separator;
+  separator->SetColor(kSeparatorColor);
+  separator->SetBorder(views::CreateEmptyBorder(kSeparatorPadding));
+  return separator;
 }
 
 }  // namespace
@@ -69,10 +79,10 @@ class IntentPickerLabelButton : public views::LabelButton {
     SetInkDropMode(InkDropMode::ON);
     if (!icon->IsEmpty())
       SetImage(views::ImageButton::STATE_NORMAL, *icon->ToImageSkia());
-    SetBorder(views::CreateEmptyBorder(10, 16, 10, 0));
+    SetBorder(views::CreateEmptyBorder(8, 16, 8, 0));
   }
 
-  SkColor GetInkDropBaseColor() const override { return SK_ColorBLACK; }
+  SkColor GetInkDropBaseColor() const override { return SK_ColorGRAY; }
 
   void MarkAsUnselected(const ui::Event* event) {
     AnimateInkDrop(views::InkDropState::HIDDEN,
@@ -102,6 +112,7 @@ views::Widget* IntentPickerBubbleView::ShowBubble(
     views::View* anchor_view,
     content::WebContents* web_contents,
     const std::vector<AppInfo>& app_info,
+    bool disable_stay_in_chrome,
     const IntentPickerResponse& intent_picker_cb) {
   if (intent_picker_bubble_) {
     views::Widget* widget =
@@ -116,8 +127,8 @@ views::Widget* IntentPickerBubbleView::ShowBubble(
     return nullptr;
   }
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
-  intent_picker_bubble_ =
-      new IntentPickerBubbleView(app_info, intent_picker_cb, web_contents);
+  intent_picker_bubble_ = new IntentPickerBubbleView(
+      app_info, intent_picker_cb, web_contents, disable_stay_in_chrome);
   intent_picker_bubble_->set_margins(gfx::Insets());
 
   if (anchor_view) {
@@ -149,10 +160,11 @@ views::Widget* IntentPickerBubbleView::ShowBubble(
 std::unique_ptr<IntentPickerBubbleView>
 IntentPickerBubbleView::CreateBubbleView(
     const std::vector<AppInfo>& app_info,
+    bool disable_stay_in_chrome,
     const IntentPickerResponse& intent_picker_cb,
     content::WebContents* web_contents) {
-  std::unique_ptr<IntentPickerBubbleView> bubble(
-      new IntentPickerBubbleView(app_info, intent_picker_cb, web_contents));
+  std::unique_ptr<IntentPickerBubbleView> bubble(new IntentPickerBubbleView(
+      app_info, intent_picker_cb, web_contents, disable_stay_in_chrome));
   bubble->Init();
   return bubble;
 }
@@ -199,13 +211,13 @@ bool IntentPickerBubbleView::ShouldShowCloseButton() const {
 }
 
 void IntentPickerBubbleView::Init() {
-  views::GridLayout* layout = views::GridLayout::CreateAndInstall(this);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   // Creates a view to hold the views for each app.
   views::View* scrollable_view = new views::View();
-  views::BoxLayout* scrollable_layout =
-      new views::BoxLayout(views::BoxLayout::kVertical);
-  scrollable_view->SetLayoutManager(scrollable_layout);
+  scrollable_view->SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
 
   size_t i = 0;
   size_t to_erase = app_info_.size();
@@ -220,6 +232,7 @@ void IntentPickerBubbleView::Init() {
     app_button->set_tag(i);
     scrollable_view->AddChildViewAt(app_button, i++);
   }
+
   // We should delete at most one entry, this is the case when Chrome is listed
   // as a candidate to handle a given URL.
   if (to_erase != app_info_.size())
@@ -246,6 +259,8 @@ void IntentPickerBubbleView::Init() {
 
   layout->StartRowWithPadding(0, kColumnSetId, 0, kTitlePadding);
   layout->AddView(scroll_view_);
+  layout->StartRow(0, kColumnSetId, 0);
+  layout->AddView(CreateHorizontalSeparator());
 
   // This second ColumnSet has a padding column in order to manipulate the
   // Checkbox positioning freely.
@@ -256,16 +271,23 @@ void IntentPickerBubbleView::Init() {
                        views::GridLayout::FIXED, kMaxWidth - 2 * kTitlePadding,
                        0);
 
-  layout->StartRowWithPadding(0, kColumnSetIdPadded, 0, kTitlePadding / 2);
+  layout->StartRowWithPadding(0, kColumnSetIdPadded, 0, 0);
   remember_selection_checkbox_ = new views::Checkbox(l10n_util::GetStringUTF16(
       IDS_INTENT_PICKER_BUBBLE_VIEW_REMEMBER_SELECTION));
   layout->AddView(remember_selection_checkbox_);
 
-  layout->AddPaddingRow(0, kTitlePadding / 2);
+  layout->AddPaddingRow(0, kTitlePadding);
 }
 
 base::string16 IntentPickerBubbleView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_INTENT_PICKER_BUBBLE_VIEW_OPEN_WITH);
+}
+
+bool IntentPickerBubbleView::IsDialogButtonEnabled(
+    ui::DialogButton button) const {
+  if (disable_stay_in_chrome_ && button == ui::DIALOG_BUTTON_CANCEL)
+    return false;
+  return true;
 }
 
 base::string16 IntentPickerBubbleView::GetDialogButtonLabel(
@@ -279,13 +301,18 @@ base::string16 IntentPickerBubbleView::GetDialogButtonLabel(
 IntentPickerBubbleView::IntentPickerBubbleView(
     const std::vector<AppInfo>& app_info,
     IntentPickerResponse intent_picker_cb,
-    content::WebContents* web_contents)
-    : LocationBarBubbleDelegateView(nullptr /* anchor_view */, web_contents),
+    content::WebContents* web_contents,
+    bool disable_stay_in_chrome)
+    : LocationBarBubbleDelegateView(nullptr /* anchor_view */,
+                                    gfx::Point(),
+                                    web_contents),
+      content::WebContentsObserver(web_contents),
       intent_picker_cb_(intent_picker_cb),
       selected_app_tag_(0),
       scroll_view_(nullptr),
       app_info_(app_info),
-      remember_selection_checkbox_(nullptr) {
+      remember_selection_checkbox_(nullptr),
+      disable_stay_in_chrome_(disable_stay_in_chrome) {
   chrome::RecordDialogCreation(chrome::DialogIdentifier::INTENT_PICKER);
 }
 
@@ -408,13 +435,4 @@ void IntentPickerBubbleView::PressButtonForTesting(size_t index,
   views::Button* button =
       static_cast<views::Button*>(GetIntentPickerLabelButtonAt(index));
   ButtonPressed(button, event);
-}
-
-size_t IntentPickerBubbleView::GetScrollViewSizeForTesting() const {
-  return GetScrollViewSize();
-}
-
-std::string IntentPickerBubbleView::GetPackageNameForTesting(
-    size_t index) const {
-  return app_info_[index].package_name;
 }

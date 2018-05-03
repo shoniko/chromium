@@ -72,7 +72,7 @@ class TrayUpdate::UpdateView : public ActionableView {
   explicit UpdateView(TrayUpdate* owner)
       : ActionableView(owner, TrayPopupInkDropStyle::FILL_BOUNDS),
         update_label_(nullptr) {
-    SetLayoutManager(new views::FillLayout);
+    SetLayoutManager(std::make_unique<views::FillLayout>());
 
     ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
     TriView* tri_view = TrayPopupUtils::CreateDefaultRowView();
@@ -86,6 +86,7 @@ class TrayUpdate::UpdateView : public ActionableView {
     base::string16 label_text;
     update_label_ = TrayPopupUtils::CreateDefaultLabel();
     update_label_->set_id(VIEW_ID_TRAY_UPDATE_MENU_LABEL);
+    update_label_->SetMultiLine(true);
     if (owner->factory_reset_required_) {
       label_text = bundle.GetLocalizedString(
           IDS_ASH_STATUS_TRAY_RESTART_AND_POWERWASH_TO_UPDATE);
@@ -114,7 +115,7 @@ class TrayUpdate::UpdateView : public ActionableView {
     SetInkDropMode(InkDropHostView::InkDropMode::ON);
   }
 
-  ~UpdateView() override {}
+  ~UpdateView() override = default;
 
   views::Label* update_label_;
 
@@ -141,7 +142,7 @@ class TrayUpdate::UpdateView : public ActionableView {
 TrayUpdate::TrayUpdate(SystemTray* system_tray)
     : TrayImageItem(system_tray, kSystemTrayUpdateIcon, UMA_UPDATE) {}
 
-TrayUpdate::~TrayUpdate() {}
+TrayUpdate::~TrayUpdate() = default;
 
 bool TrayUpdate::GetInitialVisibility() {
   // If chrome tells ash there is an update available before this item's system

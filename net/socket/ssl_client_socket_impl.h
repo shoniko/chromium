@@ -32,6 +32,7 @@
 #include "net/ssl/openssl_ssl_util.h"
 #include "net/ssl/ssl_client_cert_type.h"
 #include "net/ssl/ssl_config_service.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "third_party/boringssl/src/include/openssl/base.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 
@@ -50,7 +51,6 @@ namespace net {
 
 class CertVerifier;
 class CTVerifier;
-class SocketBIOAdapter;
 class SSLCertRequestInfo;
 class SSLInfo;
 
@@ -117,6 +117,7 @@ class SSLClientSocketImpl : public SSLClientSocket,
   void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
   void DumpMemoryStats(SocketMemoryStats* stats) const override;
+  void ApplySocketTag(const SocketTag& tag) override;
 
   // Dumps memory allocation stats. |pmd| is the browser process memory dump.
   static void DumpSSLClientSessionMemoryStats(
@@ -131,7 +132,8 @@ class SSLClientSocketImpl : public SSLClientSocket,
                   const CompletionCallback& callback) override;
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback) override;
+            const CompletionCallback& callback,
+            const NetworkTrafficAnnotationTag& traffic_annotation) override;
   int SetReceiveBufferSize(int32_t size) override;
   int SetSendBufferSize(int32_t size) override;
 
@@ -200,12 +202,12 @@ class SSLClientSocketImpl : public SSLClientSocket,
   bool IsRenegotiationAllowed() const;
 
   // Callbacks for operations with the private key.
-  ssl_private_key_result_t PrivateKeySignDigestCallback(uint8_t* out,
-                                                        size_t* out_len,
-                                                        size_t max_out,
-                                                        const EVP_MD* md,
-                                                        const uint8_t* in,
-                                                        size_t in_len);
+  ssl_private_key_result_t PrivateKeySignCallback(uint8_t* out,
+                                                  size_t* out_len,
+                                                  size_t max_out,
+                                                  uint16_t algorithm,
+                                                  const uint8_t* in,
+                                                  size_t in_len);
   ssl_private_key_result_t PrivateKeyCompleteCallback(uint8_t* out,
                                                       size_t* out_len,
                                                       size_t max_out);
@@ -349,6 +351,10 @@ class SSLClientSocketImpl : public SSLClientSocket,
 
   // True if PKP is bypassed due to a local trust anchor.
   bool pkp_bypassed_;
+
+  // True if there was a certificate error which should be treated as fatal,
+  // and false otherwise.
+  bool is_fatal_cert_error_;
 
   SSLErrorDetails connect_error_details_;
 

@@ -1,5 +1,6 @@
 <!doctype html>
-<html dir="$i18n{textdirection}" lang="$i18n{language}" class="loading">
+<html dir="$i18n{textdirection}" lang="$i18n{language}"
+    class="loading $i18n{loadTimeClasses}">
 <head>
   <meta charset="utf8">
   <title>$i18n{title}</title>
@@ -18,6 +19,11 @@
       border-top: 56px solid rgb(51, 103, 214);
     }
 
+    /* Note: .in-dev-mode is applied by i18n{loadTimeClasses}. */
+    .loading.in-dev-mode {
+      border-top-width: 96px;
+    }
+
     html,
     body {
       height: 100%;
@@ -30,9 +36,8 @@
 </head>
 <body>
   <extensions-manager></extensions-manager>
+  <link rel="stylesheet" href="chrome://resources/css/md_colors.css">
   <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
   <link rel="import" href="manager.html">
-  <link rel="import" href="service.html">
-  <script src="extensions.js"></script>
 </body>
 </html>

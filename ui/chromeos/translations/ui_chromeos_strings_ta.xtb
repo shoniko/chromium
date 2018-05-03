@@ -115,6 +115,7 @@
 <translation id="4694604912444486114">குரங்கு</translation>
 <translation id="4711094779914110278">டர்கிஷ்</translation>
 <translation id="4725511304875193254">கோர்கி</translation>
+<translation id="4737050008115666127">லேண்டிங்</translation>
 <translation id="4747271164117300400">மாஸிடோனியன்</translation>
 <translation id="4749157430980974800">ஜார்ஜியன் விசைப்பலகை</translation>
 <translation id="4755240240651974342">ஃபின்னிஷ் விசைப்பலகை</translation>
@@ -148,6 +149,7 @@
 <translation id="5465122519792752163">நேபாள விசைப்பலகை (இன்ஸ்கிரிப்ட்)</translation>
 <translation id="5469868506864199649">இத்தாலியன்</translation>
 <translation id="5500122897333236901">ஐஸ்லாண்டிக்</translation>
+<translation id="5508696409934741614">புள்ளிகள்</translation>
 <translation id="5533555070048896610">ஒலிபெயர்ப்பு (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">யு.எஸ். டிவாரக்</translation>
 <translation id="5640179856859982418">ஸ்விஸ் விசைப்பலகை</translation>
@@ -161,6 +163,7 @@
 <translation id="5892290200158927959">ஃபிரஞ்சு பீபோ விசைப்பலகை</translation>
 <translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">லத்தீன் அமெரிக்கன் விசைப்பலகை</translation>
+<translation id="6012987430370760224">மராத்தி விசைப்பலகை (ஒலிப்புமுறை)</translation>
 <translation id="60357267506638014">செக் க்வெர்டி</translation>
 <translation id="6054173164583630569">ஃபிரெஞ்ச் விசைப்பலகை</translation>
 <translation id="6111770213269631447">ஒலிபெயர்ப்பு (namaskar → নমস্কার)</translation>
@@ -199,6 +202,7 @@
 <translation id="7222624196722476520">பல்கேரியன் ஒலிப்புமுறை விசைப்பலகை</translation>
 <translation id="7348749398828259943">யுஎஸ் ஒர்க்மேன் இன்டர்நேஷனல் விசைப்பலகை</translation>
 <translation id="7389722738210761877">தாய் விசைப்பலகை (TIS 820-2531)</translation>
+<translation id="7396038720194014279">இந்தி விசைப்பலகை (ஒலிப்புமுறை)</translation>
 <translation id="7417453074306512035">எத்தியோபிக் விசைப்பலகை</translation>
 <translation id="7419631653042041064">கேட்டலன் விசைப்பலகை</translation>
 <translation id="7434823369735508263">யுகே துவோராக் விசைப்பலகை</translation>
@@ -206,12 +210,14 @@
 <translation id="7474889694310679759">கனேடியன் ஆங்கில விசைப்பலகை</translation>
 <translation id="751507702149411736">பெலாரஷ்யன்</translation>
 <translation id="7547811415869834682">டச்சு</translation>
+<translation id="7603724359189955920">கட்டங்கள்</translation>
 <translation id="770015031906360009">கிரேக்கம்</translation>
 <translation id="7706319470528945664">போர்ச்சுகீஸ் விசைப்பலகை</translation>
 <translation id="7774365994322694683">பறவை</translation>
 <translation id="7825423931463735974">தமிழ் விசைப்பலகை (Tamil99)</translation>
 <translation id="7853966320808728790">ஃபிரஞ்ச் பீபோ</translation>
 <translation id="7896906914454843592">விரிவாக்கப்பட்ட யுஎஸ் விசைப்பலகை</translation>
+<translation id="7898607018410277265">குஜராத்தி விசைப்பலகை (புதிய ஒலிப்புமுறை)</translation>
 <translation id="7917972308273378936">லிதுவேனியன் விசைப்பலகை</translation>
 <translation id="7943385054491506837">யு.எஸ். கோல்மேக்</translation>
 <translation id="7969525169268594403">ஸ்லோவேனியன்</translation>
@@ -235,6 +241,7 @@
 <translation id="8432745813735585631">யுஎஸ் கோல்மேக் விசைப்பலகை</translation>
 <translation id="8437209419043462667">யு.எஸ்.</translation>
 <translation id="8467473010914675605">கொரிய உள்ளீட்டு முறை</translation>
+<translation id="8477649328507734757">சுழல்</translation>
 <translation id="8521441079177373948">யு.கே.</translation>
 <translation id="8551494947769799688">லத்வியன்</translation>
 <translation id="8561206103590473338">யானை</translation>
@@ -253,4 +260,5 @@
 <translation id="913758436357682283">மியான்மர் மியான்சன் விசைப்பலகை</translation>
 <translation id="9153744823707037316">வரிசை உள்ளீட்டு முறை</translation>
 <translation id="9206487995878691001">கான்ஜி உள்ளீட்டு முறை</translation>
+<translation id="9219908252191632183">லூனார்</translation>
 </translationbundle>

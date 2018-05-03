@@ -9,6 +9,7 @@
 #include <iterator>
 #include <memory>
 
+#include "base/bind.h"
 #include "cc/test/test_context_provider.h"
 #include "cc/test/test_gles2_interface.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
@@ -61,8 +62,9 @@ class GLRendererCopierTest : public testing::Test {
     auto context_provider = cc::TestContextProvider::Create(
         std::make_unique<CopierTestGLES2Interface>());
     context_provider->BindToCurrentThread();
-    copier_ = std::make_unique<GLRendererCopier>(std::move(context_provider),
-                                                 nullptr);
+    copier_ = std::make_unique<GLRendererCopier>(
+        std::move(context_provider), nullptr,
+        base::BindRepeating([](const gfx::Rect& rect) { return rect; }));
   }
 
   void TearDown() override { copier_.reset(); }
@@ -77,16 +79,18 @@ class GLRendererCopierTest : public testing::Test {
   // These simply forward method calls to GLRendererCopier.
   GLuint TakeCachedObjectOrCreate(const base::UnguessableToken& source,
                                   int which) {
-    return copier_->TakeCachedObjectOrCreate(source, which);
+    GLuint result = 0;
+    copier_->TakeCachedObjectsOrCreate(source, which, 1, &result);
+    return result;
   }
   void CacheObjectOrDelete(const base::UnguessableToken& source,
                            int which,
-                           int name) {
-    copier_->CacheObjectOrDelete(source, which, name);
+                           GLuint name) {
+    copier_->CacheObjectsOrDelete(source, which, 1, &name);
   }
   std::unique_ptr<GLHelper::ScalerInterface> TakeCachedScalerOrCreate(
       const CopyOutputRequest& request) {
-    return copier_->TakeCachedScalerOrCreate(request);
+    return copier_->TakeCachedScalerOrCreate(request, true);
   }
   void CacheScalerOrDelete(const base::UnguessableToken& source,
                            std::unique_ptr<GLHelper::ScalerInterface> scaler) {

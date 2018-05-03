@@ -34,7 +34,7 @@
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "components/viz/common/resources/resource_settings.h"
-#include "components/viz/common/surfaces/local_surface_id_allocator.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -70,11 +70,9 @@ Compositor::Compositor(const viz::FrameSinkId& frame_sink_id,
       external_begin_frames_enabled_(external_begin_frames_enabled),
       force_software_compositor_(force_software_compositor),
       layer_animator_collection_(this),
-      scheduled_timeout_(base::TimeTicks()),
-      allow_locks_to_extend_timeout_(false),
       is_pixel_canvas_(enable_pixel_canvas),
-      weak_ptr_factory_(this),
-      lock_timeout_weak_ptr_factory_(this) {
+      lock_manager_(task_runner, this),
+      context_creation_weak_ptr_factory_(this) {
   if (context_factory_private) {
     auto* host_frame_sink_manager =
         context_factory_private_->GetHostFrameSinkManager();
@@ -182,8 +180,11 @@ Compositor::Compositor(const viz::FrameSinkId& frame_sink_id,
   settings.disallow_non_exact_resource_reuse =
       command_line->HasSwitch(switches::kDisallowNonExactResourceReuse);
 
-  settings.wait_for_all_pipeline_stages_before_draw =
-      command_line->HasSwitch(cc::switches::kRunAllCompositorStagesBeforeDraw);
+  if (command_line->HasSwitch(
+          cc::switches::kRunAllCompositorStagesBeforeDraw)) {
+    settings.wait_for_all_pipeline_stages_before_draw = true;
+    settings.enable_latency_recovery = false;
+  }
 
   base::TimeTicks before_create = base::TimeTicks::Now();
 
@@ -284,6 +285,8 @@ void Compositor::SetLayerTreeFrameSink(
     context_factory_private_->SetDisplayVisible(this, host_->IsVisible());
     context_factory_private_->SetDisplayColorSpace(this, blending_color_space_,
                                                    output_color_space_);
+    context_factory_private_->SetDisplayColorMatrix(this,
+                                                    display_color_matrix_);
   }
 }
 
@@ -309,6 +312,12 @@ void Compositor::SetRootLayer(Layer* root_layer) {
 
 cc::AnimationTimeline* Compositor::GetAnimationTimeline() const {
   return animation_timeline_.get();
+}
+
+void Compositor::SetDisplayColorMatrix(const SkMatrix44& matrix) {
+  display_color_matrix_ = matrix;
+  if (context_factory_private_)
+    context_factory_private_->SetDisplayColorMatrix(this, matrix);
 }
 
 void Compositor::ScheduleFullRedraw() {
@@ -359,9 +368,21 @@ void Compositor::SetScaleAndSize(float scale,
 }
 
 void Compositor::SetDisplayColorSpace(const gfx::ColorSpace& color_space) {
+  if (output_color_space_ == color_space)
+    return;
   output_color_space_ = color_space;
   blending_color_space_ = output_color_space_.GetBlendingColorSpace();
-  host_->SetRasterColorSpace(output_color_space_.GetRasterColorSpace());
+  // Do all ui::Compositor rasterization to sRGB because UI resources will not
+  // have their color conversion results cached, and will suffer repeated
+  // image color conversions.
+  // https://crbug.com/769677
+  host_->SetRasterColorSpace(gfx::ColorSpace::CreateSRGB());
+  // Always force the ui::Compositor to re-draw all layers, because damage
+  // tracking bugs result in black flashes.
+  // https://crbug.com/804430
+  // TODO(ccameron): Remove this when the above bug is fixed.
+  host_->SetNeedsDisplayOnAllLayers();
+
   // Color space is reset when the output surface is lost, so this must also be
   // updated then.
   // TODO(fsamuel): Get rid of this.
@@ -434,14 +455,17 @@ void Compositor::SetAcceleratedWidget(gfx::AcceleratedWidget widget) {
   DCHECK(!widget_valid_);
   widget_ = widget;
   widget_valid_ = true;
-  if (layer_tree_frame_sink_requested_)
-    context_factory_->CreateLayerTreeFrameSink(weak_ptr_factory_.GetWeakPtr());
+  if (layer_tree_frame_sink_requested_) {
+    context_factory_->CreateLayerTreeFrameSink(
+        context_creation_weak_ptr_factory_.GetWeakPtr());
+  }
 }
 
 gfx::AcceleratedWidget Compositor::ReleaseAcceleratedWidget() {
   DCHECK(!IsVisible());
   host_->ReleaseLayerTreeFrameSink();
   context_factory_->RemoveCompositor(this);
+  context_creation_weak_ptr_factory_.InvalidateWeakPtrs();
   widget_valid_ = false;
   gfx::AcceleratedWidget widget = widget_;
   widget_ = gfx::kNullAcceleratedWidget;
@@ -533,8 +557,8 @@ static void SendDamagedRectsRecursive(ui::Layer* layer) {
     SendDamagedRectsRecursive(child);
 }
 
-void Compositor::UpdateLayerTreeHost() {
-  if (!root_layer())
+void Compositor::UpdateLayerTreeHost(VisualStateUpdate requested_update) {
+  if (!root_layer() || requested_update == VisualStateUpdate::kPrePaint)
     return;
   SendDamagedRectsRecursive(root_layer());
 }
@@ -542,8 +566,10 @@ void Compositor::UpdateLayerTreeHost() {
 void Compositor::RequestNewLayerTreeFrameSink() {
   DCHECK(!layer_tree_frame_sink_requested_);
   layer_tree_frame_sink_requested_ = true;
-  if (widget_valid_)
-    context_factory_->CreateLayerTreeFrameSink(weak_ptr_factory_.GetWeakPtr());
+  if (widget_valid_) {
+    context_factory_->CreateLayerTreeFrameSink(
+        context_creation_weak_ptr_factory_.GetWeakPtr());
+  }
 }
 
 void Compositor::DidFailToInitializeLayerTreeFrameSink() {
@@ -577,6 +603,11 @@ void Compositor::OnFirstSurfaceActivation(
   // surface should be set here.
 }
 
+void Compositor::OnFrameTokenChanged(uint32_t frame_token) {
+  // TODO(yiyix, fsamuel): Implement frame token propagation for Compositor.
+  NOTREACHED();
+}
+
 void Compositor::SetOutputIsSecure(bool output_is_secure) {
   if (context_factory_private_)
     context_factory_private_->SetOutputIsSecure(this, output_is_secure);
@@ -591,66 +622,15 @@ void Compositor::SetLayerTreeDebugState(
   host_->SetDebugState(debug_state);
 }
 
-std::unique_ptr<CompositorLock> Compositor::GetCompositorLock(
-    CompositorLockClient* client,
-    base::TimeDelta timeout) {
-  // This uses the main WeakPtrFactory to break the connection from the lock to
-  // the Compositor when the Compositor is destroyed.
-  auto lock =
-      std::make_unique<CompositorLock>(client, weak_ptr_factory_.GetWeakPtr());
-  bool was_empty = active_locks_.empty();
-  active_locks_.push_back(lock.get());
-
-  bool should_extend_timeout = false;
-  if ((was_empty || allow_locks_to_extend_timeout_) && !timeout.is_zero()) {
-    const base::TimeTicks time_to_timeout = base::TimeTicks::Now() + timeout;
-    // For the first lock, scheduled_timeout.is_null is true,
-    // |time_to_timeout| will always larger than |scheduled_timeout_|. And it
-    // is ok to invalidate the weakptr of |lock_timeout_weak_ptr_factory_|.
-    if (time_to_timeout > scheduled_timeout_) {
-      scheduled_timeout_ = time_to_timeout;
-      should_extend_timeout = true;
-      lock_timeout_weak_ptr_factory_.InvalidateWeakPtrs();
-    }
-  }
-
-  if (was_empty) {
-    host_->SetDeferCommits(true);
-    for (auto& observer : observer_list_)
-      observer.OnCompositingLockStateChanged(this);
-  }
-
-  if (should_extend_timeout) {
-    // The timeout task uses an independent WeakPtrFactory that is invalidated
-    // when all locks are ended to prevent the timeout from leaking into
-    // another lock that should have its own timeout.
-    task_runner_->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&Compositor::TimeoutLocks,
-                   lock_timeout_weak_ptr_factory_.GetWeakPtr()),
-        timeout);
-  }
-  return lock;
+void Compositor::OnCompositorLockStateChanged(bool locked) {
+  host_->SetDeferCommits(locked);
+  for (auto& observer : observer_list_)
+    observer.OnCompositingLockStateChanged(this);
 }
 
-void Compositor::RemoveCompositorLock(CompositorLock* lock) {
-  base::Erase(active_locks_, lock);
-  if (active_locks_.empty()) {
-    host_->SetDeferCommits(false);
-    for (auto& observer : observer_list_)
-      observer.OnCompositingLockStateChanged(this);
-    lock_timeout_weak_ptr_factory_.InvalidateWeakPtrs();
-    scheduled_timeout_ = base::TimeTicks();
-  }
-}
-
-void Compositor::TimeoutLocks() {
-  // Make a copy, we're going to cause |active_locks_| to become
-  // empty.
-  std::vector<CompositorLock*> locks = active_locks_;
-  for (auto* lock : locks)
-    lock->TimeoutLock();
-  DCHECK(active_locks_.empty());
+void Compositor::RequestPresentationTimeForNextFrame(
+    PresentationTimeCallback callback) {
+  host_->RequestPresentationTimeForNextFrame(std::move(callback));
 }
 
 }  // namespace ui

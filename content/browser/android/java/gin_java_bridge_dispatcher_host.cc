@@ -52,10 +52,10 @@ void GinJavaBridgeDispatcherHost::InstallFilterAndRegisterAllRoutingIds() {
   }
 
   auto filter = GinJavaBridgeMessageFilter::FromHost(this, true);
-  // ForEachFrame is synchronous.
+  // Unretained() is safe because ForEachFrame() is synchronous.
   web_contents()->ForEachFrame(
-      base::Bind(&GinJavaBridgeMessageFilter::AddRoutingIdForHost, filter,
-                 base::Unretained(this)));
+      base::BindRepeating(&GinJavaBridgeMessageFilter::AddRoutingIdForHost,
+                          filter, base::Unretained(this)));
 }
 
 void GinJavaBridgeDispatcherHost::RenderFrameCreated(
@@ -325,13 +325,13 @@ void GinJavaBridgeDispatcherHost::OnInvokeMethod(
   DCHECK(routing_id != MSG_ROUTING_NONE);
   scoped_refptr<GinJavaBoundObject> object = FindObject(object_id);
   if (!object.get()) {
-    wrapped_result->Append(base::MakeUnique<base::Value>());
+    wrapped_result->Append(std::make_unique<base::Value>());
     *error_code = kGinJavaBridgeUnknownObjectId;
     return;
   }
   scoped_refptr<GinJavaMethodInvocationHelper> result =
       new GinJavaMethodInvocationHelper(
-          base::MakeUnique<GinJavaBoundObjectDelegate>(object), method_name,
+          std::make_unique<GinJavaBoundObjectDelegate>(object), method_name,
           arguments);
   result->Init(this);
   result->Invoke();
@@ -354,7 +354,7 @@ void GinJavaBridgeDispatcherHost::OnInvokeMethod(
     wrapped_result->Append(
         GinJavaBridgeValue::CreateObjectIDValue(returned_object_id));
   } else {
-    wrapped_result->Append(base::MakeUnique<base::Value>());
+    wrapped_result->Append(std::make_unique<base::Value>());
   }
 }
 

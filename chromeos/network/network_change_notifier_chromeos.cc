@@ -33,11 +33,9 @@ class NetworkChangeNotifierChromeos::DnsConfigService
   virtual void OnNetworkChange();
 };
 
-NetworkChangeNotifierChromeos::DnsConfigService::DnsConfigService() {
-}
+NetworkChangeNotifierChromeos::DnsConfigService::DnsConfigService() = default;
 
-NetworkChangeNotifierChromeos::DnsConfigService::~DnsConfigService() {
-}
+NetworkChangeNotifierChromeos::DnsConfigService::~DnsConfigService() = default;
 
 bool NetworkChangeNotifierChromeos::DnsConfigService::StartWatching() {
   // DNS config changes are handled and notified by the network state handlers.
@@ -54,7 +52,7 @@ NetworkChangeNotifierChromeos::NetworkChangeNotifierChromeos()
     : NetworkChangeNotifier(NetworkChangeCalculatorParamsChromeos()),
       connection_type_(CONNECTION_NONE),
       max_bandwidth_mbps_(
-          NetworkChangeNotifier::GetMaxBandwidthForConnectionSubtype(
+          NetworkChangeNotifier::GetMaxBandwidthMbpsForConnectionSubtype(
               SUBTYPE_NONE)),
       task_runner_(base::ThreadTaskRunnerHandle::Get()),
       weak_ptr_factory_(this) {
@@ -62,8 +60,7 @@ NetworkChangeNotifierChromeos::NetworkChangeNotifierChromeos()
                               weak_ptr_factory_.GetWeakPtr());
 }
 
-NetworkChangeNotifierChromeos::~NetworkChangeNotifierChromeos() {
-}
+NetworkChangeNotifierChromeos::~NetworkChangeNotifierChromeos() = default;
 
 void NetworkChangeNotifierChromeos::Initialize() {
   DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
@@ -158,7 +155,8 @@ void NetworkChangeNotifierChromeos::UpdateState(
       *connection_type_changed = true;
       *max_bandwidth_changed = true;
       connection_type_ = CONNECTION_NONE;
-      max_bandwidth_mbps_ = GetMaxBandwidthForConnectionSubtype(SUBTYPE_NONE);
+      max_bandwidth_mbps_ =
+          GetMaxBandwidthMbpsForConnectionSubtype(SUBTYPE_NONE);
       service_path_.clear();
       ip_address_.clear();
       dns_servers_.clear();
@@ -220,7 +218,7 @@ void NetworkChangeNotifierChromeos::UpdateState(
   dns_servers_ = new_dns_servers;
   double old_max_bandwidth = max_bandwidth_mbps_;
   max_bandwidth_mbps_ =
-      GetMaxBandwidthForConnectionSubtype(GetConnectionSubtype(
+      GetMaxBandwidthMbpsForConnectionSubtype(GetConnectionSubtype(
           default_network->type(), default_network->network_technology()));
   if (max_bandwidth_mbps_ != old_max_bandwidth)
     *max_bandwidth_changed = true;

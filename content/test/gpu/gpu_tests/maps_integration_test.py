@@ -14,8 +14,8 @@ from gpu_tests import color_profile_manager
 
 from py_utils import cloud_storage
 
-wpr_path = os.path.join(path_util.GetChromiumSrcDir(),
-                        'tools', 'perf', 'page_sets', 'data')
+maps_perf_test_path = os.path.join(
+  path_util.GetChromiumSrcDir(), 'tools', 'perf', 'page_sets', 'maps_perf_test')
 
 data_path = os.path.join(path_util.GetChromiumSrcDir(),
                          'content', 'test', 'gpu', 'gpu_tests')
@@ -39,14 +39,18 @@ class MapsIntegrationTest(
 
   @classmethod
   def SetUpProcess(cls):
-    color_profile_manager.ForceUntilExitSRGB()
+    options = cls.GetParsedCommandLineOptions()
+    color_profile_manager.ForceUntilExitSRGB(
+      options.dont_restore_color_profile_after_test)
     super(MapsIntegrationTest, cls).SetUpProcess()
     browser_args = [
         '--force-color-profile=srgb',
-        '--enable-features=ColorCorrectRendering']
+        '--ensure-forced-color-profile']
     cls.CustomizeBrowserArgs(browser_args)
-    cls.StartWPRServer(os.path.join(wpr_path, 'maps_005.wprgo'),
-                       cloud_storage.PUBLIC_BUCKET)
+    cloud_storage.GetIfChanged(
+      os.path.join(maps_perf_test_path, 'load_dataset'),
+      cloud_storage.PUBLIC_BUCKET)
+    cls.SetStaticServerDirs([maps_perf_test_path])
     cls.StartBrowser()
 
   @classmethod
@@ -58,7 +62,7 @@ class MapsIntegrationTest(
   def GenerateGpuTests(cls, options):
     cls.SetParsedCommandLineOptions(options)
     yield('Maps_maps',
-          'http://map-test/performance.html',
+          'file://performance.html',
           ('maps_pixel_expectations.json'))
 
   def _ReadPixelExpectations(self, expectations_file):
@@ -90,8 +94,9 @@ class MapsIntegrationTest(
     pixel_expectations_file = args[0]
     action_runner = tab.action_runner
     action_runner.Navigate(url)
-    action_runner.WaitForJavaScriptCondition(
-        'window.testDone', timeout=320)
+    action_runner.WaitForJavaScriptCondition('window.startTest != undefined')
+    action_runner.EvaluateJavaScript('window.startTest()')
+    action_runner.WaitForJavaScriptCondition('window.testDone', timeout=320)
 
     # TODO(kbr): This should not be necessary, but it's not clear if the test
     # is failing on the bots in its absence. Remove once we can verify that

@@ -16,7 +16,7 @@
 #include "base/strings/string_split.h"
 #include "build/build_config.h"
 #include "content/browser/accessibility/accessibility_flags.h"
-#include "content/browser/accessibility/ax_platform_position.h"
+#include "content/browser/accessibility/browser_accessibility_position.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/public/web/WebAXEnums.h"
 #include "ui/accessibility/ax_node.h"
@@ -153,8 +153,9 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   // Returns the bounds of this object in coordinates relative to the
   // page (specifically, the top-left corner of the topmost web contents).
   // Optionally updates |offscreen| to be true if the element is offscreen
-  // within its page.
-  gfx::Rect GetPageBoundsRect(bool* offscreen = nullptr) const;
+  // within its page. Clips bounds by default unless |clip_bounds| is false.
+  gfx::Rect GetPageBoundsRect(bool* offscreen = nullptr,
+                              bool clip_bounds = true) const;
 
   // Returns the bounds of the given range in coordinates relative to the
   // top-left corner of the overall web area. Only valid when the
@@ -169,9 +170,11 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   // absolute bounds, either in page coordinates (when |frameOnly| is
   // false), or in frame coordinates (when |frameOnly| is true).
   // Updates optional |offscreen| to be true if the node is offscreen.
+  // If |clip_bounds| is set to false, will return unclipped bounds.
   virtual gfx::Rect RelativeToAbsoluteBounds(gfx::RectF bounds,
                                              bool frame_only,
-                                             bool* offscreen = nullptr) const;
+                                             bool* offscreen = nullptr,
+                                             bool clip_bounds = true) const;
 
   // This is to handle the cases such as ARIA textbox, where the value should
   // be calculated from the object's inner text.
@@ -308,10 +311,8 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   bool IsWebAreaForPresentationalIframe() const;
 
   virtual bool IsClickable() const;
-  bool IsNativeTextControl() const;
-  bool IsSimpleTextControl() const;
-  // Indicates if this object is at the root of a rich edit text control.
-  bool IsRichTextControl() const;
+  bool IsPlainTextField() const;
+  bool IsRichTextField() const;
 
   // Return true if the accessible name was explicitly set to "" by the author
   bool HasExplicitlyEmptyName() const;
@@ -321,7 +322,7 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   std::string ComputeAccessibleNameFromDescendants() const;
 
   // Creates a text position rooted at this object.
-  AXPlatformPosition::AXPositionInstance CreatePositionAt(
+  BrowserAccessibilityPosition::AXPositionInstance CreatePositionAt(
       int offset,
       ui::AXTextAffinity affinity = ui::AX_TEXT_AFFINITY_DOWNSTREAM) const;
 
@@ -346,10 +347,16 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   bool AccessibilityPerformAction(const ui::AXActionData& data) override;
   bool ShouldIgnoreHoveredStateForTesting() override;
   bool IsOffscreen() const override;
+  std::set<int32_t> GetReverseRelations(ui::AXIntAttribute attr,
+                                        int32_t dst_id) override;
+  std::set<int32_t> GetReverseRelations(ui::AXIntListAttribute attr,
+                                        int32_t dst_id) override;
 
  protected:
-  using AXPlatformPositionInstance = AXPlatformPosition::AXPositionInstance;
-  using AXPlatformRange = ui::AXRange<AXPlatformPositionInstance::element_type>;
+  using BrowserAccessibilityPositionInstance =
+      BrowserAccessibilityPosition::AXPositionInstance;
+  using AXPlatformRange =
+      ui::AXRange<BrowserAccessibilityPositionInstance::element_type>;
 
   BrowserAccessibility();
 
@@ -359,8 +366,11 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   // The underlying node.
   ui::AXNode* node_;
 
-  // A unique ID, since node IDs are frame-local.
-  int32_t unique_id_;
+  // Protected so that it can't be called directly on a BrowserAccessibility
+  // where it could be confused with an id that comes from the node data,
+  // which is only unique to the Blink process.
+  // Does need to be called by subclasses such as BrowserAccessibilityAndroid.
+  const ui::AXUniqueId& GetUniqueId() const override;
 
  private:
   // |GetInnerText| recursively includes all the text from descendants such as
@@ -368,6 +378,9 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   // special character in the place of every embedded object instead of its
   // text, depending on the platform.
   base::string16 GetInnerText() const;
+
+  // A unique ID, since node IDs are frame-local.
+  ui::AXUniqueId unique_id_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibility);
 };

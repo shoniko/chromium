@@ -5,6 +5,8 @@
 package org.chromium.chrome.browser.widget;
 
 import android.graphics.Bitmap;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.test.filters.MediumTest;
 
 import org.junit.After;
@@ -22,7 +24,6 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.widget.ThumbnailProvider.ThumbnailRequest;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 
@@ -30,10 +31,7 @@ import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
  * Instrumentation test for {@link ThumbnailProviderImpl}.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ThumbnailProviderImplTest {
     private static final String TEST_DIRECTORY = "chrome/test/data/android/thumbnail_provider/";
     @Rule
@@ -186,13 +184,17 @@ public class ThumbnailProviderImplTest {
         }
 
         @Override
-        public String getFilePath() {
+        public @Nullable String getFilePath() {
             return mTestFilePath;
         }
 
         @Override
-        public void onThumbnailRetrieved(String filePath, Bitmap thumbnail) {
-            Assert.assertEquals(mTestFilePath, filePath);
+        public @Nullable String getContentId() {
+            return "contentId"; // None-null value for ThumbnailProviderImpl to work
+        }
+
+        @Override
+        public void onThumbnailRetrieved(@NonNull String contentId, @Nullable Bitmap thumbnail) {
             mRetrievedThumbnail = thumbnail;
             mThumbnailRetrievedCallbackHelper.notifyCalled();
         }

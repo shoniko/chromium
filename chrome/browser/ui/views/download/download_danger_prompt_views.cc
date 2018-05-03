@@ -46,6 +46,7 @@ class DownloadDangerPromptViews : public DownloadDangerPrompt,
   DownloadDangerPromptViews(content::DownloadItem* item,
                             bool show_context,
                             const OnDone& done);
+  ~DownloadDangerPromptViews() override;
 
   // DownloadDangerPrompt:
   void InvokeActionForTesting(Action action) override;
@@ -91,15 +92,14 @@ DownloadDangerPromptViews::DownloadDangerPromptViews(
       show_context_(show_context),
       done_(done),
       contents_view_(NULL) {
-  DCHECK(!done_.is_null());
   download_->AddObserver(this);
 
   contents_view_ = new views::View;
 
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
-  views::GridLayout* layout =
-      views::GridLayout::CreateAndInstall(contents_view_);
+  views::GridLayout* layout = contents_view_->SetLayoutManager(
+      std::make_unique<views::GridLayout>(contents_view_));
 
   views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
@@ -124,6 +124,11 @@ DownloadDangerPromptViews::DownloadDangerPromptViews(
       item->GetBrowserContext()));
   chrome::RecordDialogCreation(
       chrome::DialogIdentifier::DOWNLOAD_DANGER_PROMPT);
+}
+
+DownloadDangerPromptViews::~DownloadDangerPromptViews() {
+  if (download_)
+    download_->RemoveObserver(this);
 }
 
 // DownloadDangerPrompt methods:

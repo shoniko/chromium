@@ -15,6 +15,7 @@
   * TODO(crbug.com/647084): Enable checkTypes error for this file.
   * @suppress {checkTypes}
   */
+goog.provide('__crWeb.autofill');
 
 /**
   * @typedef {{
@@ -566,7 +567,7 @@ __gCrWeb.autofill['extractForms'] = function(requiredFields) {
  */
 __gCrWeb.autofill['fillActiveFormField'] = function(data) {
   var activeElement = document.activeElement;
-  if (data['name'] !== __gCrWeb['common'].nameForAutofill(activeElement)) {
+  if (data['name'] !== __gCrWeb['common'].getFieldIdentifier(activeElement)) {
     return;
   }
   __gCrWeb.autofill.lastAutoFilledElement = activeElement;
@@ -596,21 +597,30 @@ __gCrWeb.autofill['fillForm'] = function(data, forceFillFieldName) {
     __gCrWeb.autofill.styleInjected = true;
   }
 
-  // Remove Autofill styling when control element is edited.
+  // Remove Autofill styling when control element is edited by the user.
   var controlElementInputListener = function(evt) {
-    evt.target.removeAttribute('chrome-autofilled');
-    evt.target.isAutofilled = false;
-    evt.target.removeEventListener('input', controlElementInputListener);
+    if (evt.isTrusted) {
+      evt.target.removeAttribute('chrome-autofilled');
+      evt.target.isAutofilled = false;
+      evt.target.removeEventListener('input', controlElementInputListener);
+    }
   };
 
   var form = __gCrWeb.common.getFormElementFromIdentifier(data.formName);
-  var controlElements = __gCrWeb.common.getFormControlElements(form);
+  var controlElements = [];
+  if (form) {
+    controlElements = __gCrWeb.common.getFormControlElements(form);
+  } else {
+    var fieldsets = [];
+    controlElements =
+        getUnownedAutofillableFormFieldElements_(document.all, fieldsets);
+  }
   for (var i = 0; i < controlElements.length; ++i) {
     var element = controlElements[i];
     if (!__gCrWeb.autofill.isAutofillableElement(element)) {
       continue;
     }
-    var fieldName = __gCrWeb['common'].nameForAutofill(element);
+    var fieldName = __gCrWeb['common'].getFieldIdentifier(element);
 
     // Skip non-empty fields unless this is the forceFillFieldName or it's a
     // 'select-one' element. 'select-one' elements are always autofilled even
@@ -627,14 +637,9 @@ __gCrWeb.autofill['fillForm'] = function(data, forceFillFieldName) {
       continue;
 
     if (__gCrWeb.autofill.isTextInput(element) ||
-        __gCrWeb.autofill.isTextAreaElement(element)) {
+        __gCrWeb.autofill.isTextAreaElement(element) ||
+        __gCrWeb.autofill.isSelectElement(element)) {
       __gCrWeb.common.setInputElementValue(value, element, true);
-    } else if (__gCrWeb.autofill.isSelectElement(element)) {
-      if (element.value !== value) {
-        element.value = value;
-        __gCrWeb.common.createAndDispatchHTMLEvent(element, 'change', true,
-            false);
-      }
     }
     // TODO(bondd): Handle __gCrWeb.autofill.isCheckableElement(element) ==
     // true. |is_checked| is not currently passed in by the caller.
@@ -644,18 +649,20 @@ __gCrWeb.autofill['fillForm'] = function(data, forceFillFieldName) {
     element.addEventListener('input', controlElementInputListener);
   }
 
-  // Remove Autofill styling when form receives 'reset' event.
-  // Individual control elements may be left with 'input' event listeners but
-  // they are harmless.
-  var formResetListener = function(evt) {
-    var controlElements = __gCrWeb.common.getFormControlElements(evt.target);
-    for (var i = 0; i < controlElements.length; ++i) {
-      controlElements[i].removeAttribute('chrome-autofilled');
-      controlElements[i].isAutofilled = false;
-    }
-    evt.target.removeEventListener('reset', formResetListener);
-  };
-  form.addEventListener('reset', formResetListener);
+  if (form) {
+    // Remove Autofill styling when form receives 'reset' event.
+    // Individual control elements may be left with 'input' event listeners but
+    // they are harmless.
+    var formResetListener = function(evt) {
+      var controlElements = __gCrWeb.common.getFormControlElements(evt.target);
+      for (var i = 0; i < controlElements.length; ++i) {
+        controlElements[i].removeAttribute('chrome-autofilled');
+        controlElements[i].isAutofilled = false;
+      }
+      evt.target.removeEventListener('reset', formResetListener);
+    };
+    form.addEventListener('reset', formResetListener);
+  }
 };
 
 /**
@@ -670,7 +677,15 @@ __gCrWeb.autofill['fillForm'] = function(data, forceFillFieldName) {
  */
 __gCrWeb.autofill['clearAutofilledFields'] = function(formName) {
   var form = __gCrWeb.common.getFormElementFromIdentifier(formName);
-  var controlElements = __gCrWeb.common.getFormControlElements(form);
+  var controlElements = [];
+  if (form) {
+    controlElements = __gCrWeb.common.getFormControlElements(form);
+  } else {
+    var fieldsets = [];
+    controlElements =
+        getUnownedAutofillableFormFieldElements_(document.all, fieldsets);
+  }
+
   for (var i = 0; i < controlElements.length; ++i) {
     var element = controlElements[i];
     if (!element.isAutofilled || element.disabled)
@@ -682,11 +697,8 @@ __gCrWeb.autofill['clearAutofilledFields'] = function(formName) {
     } else if (__gCrWeb.autofill.isSelectElement(element)) {
       // Reset to the first index.
       // TODO(bondd): Store initial values and reset to the correct one here.
-      if (element.selectedIndex != 0) {
-        element.selectedIndex = 0;
-        __gCrWeb.common.createAndDispatchHTMLEvent(element, 'change', true,
-            false);
-      }
+      __gCrWeb.common.setInputElementValue(element.options[0].value,
+          element, true);
     } else if (__gCrWeb.autofill.isCheckableElement(element)) {
       // TODO(bondd): Handle checkable elements. They aren't properly supported
       // by iOS Autofill yet.
@@ -714,10 +726,6 @@ __gCrWeb.autofill['clearAutofilledFields'] = function(formName) {
  * This version still takes the minimumRequiredFields parameters. Whereas the
  * C++ version does not.
  *
- * This version recursively scans its child frames. The C++ version does not
- * because it has been converted to do only a single frame for Out Of Process
- * Iframes.
- *
  * @param {number} minimumRequiredFields The minimum number of fields a form
  *     should contain for autofill.
  * @return {Array<AutofillFormData>} The extracted forms.
@@ -727,31 +735,8 @@ __gCrWeb.autofill.extractNewForms = function(minimumRequiredFields) {
   // Protect against custom implementation of Array.toJSON in host pages.
   /** @suppress {checkTypes} */(function() { forms.toJSON = null; })();
 
-  extractFormsAndFormElements_(window, minimumRequiredFields, forms);
-  return forms;
-}
-
-/**
- * A helper function to implement extractNewForms().
- *
- * @param {HTMLFrameElement|Window} frame A window or a frame containing forms
- *     from which the data will be extracted.
- * @param {number} minimumRequiredFields The minimum number of fields a form
- *     should contain for autofill.
- * @param {Array<AutofillFormData>} forms Array to store the data for the forms
- *     found in the frame.
- */
-function extractFormsAndFormElements_(frame, minimumRequiredFields, forms) {
-  if (!frame) {
-    return;
-  }
-  var doc = frame.document;
-  if (!doc) {
-    return;
-  }
-
   /** @type {HTMLCollection} */
-  var webForms = doc.forms;
+  var webForms = document.forms;
 
   var extractMask = __gCrWeb.autofill.EXTRACT_MASK_VALUE |
       __gCrWeb.autofill.EXTRACT_MASK_OPTIONS;
@@ -769,7 +754,7 @@ function extractFormsAndFormElements_(frame, minimumRequiredFields, forms) {
 
     var form = new __gCrWeb['common'].JSONSafeObject;
     if (!__gCrWeb.autofill.webFormElementToFormData(
-        frame, formElement, null, extractMask, form, null /* field */)) {
+        window, formElement, null, extractMask, form, null /* field */)) {
       continue;
     }
 
@@ -786,13 +771,13 @@ function extractFormsAndFormElements_(frame, minimumRequiredFields, forms) {
   // Look for more parseable fields outside of forms.
   var fieldsets = [];
   var unownedControlElements =
-      getUnownedAutofillableFormFieldElements_(doc.all, fieldsets);
+      getUnownedAutofillableFormFieldElements_(document.all, fieldsets);
   var numEditableUnownedElements =
       scanFormControlElements_(unownedControlElements);
   if (numEditableUnownedElements > 0) {
     var unownedForm = new __gCrWeb['common'].JSONSafeObject;
     var hasUnownedForm = unownedFormElementsAndFieldSetsToFormData_(
-        frame, fieldsets, unownedControlElements, extractMask, unownedForm);
+        window, fieldsets, unownedControlElements, extractMask, unownedForm);
     if (hasUnownedForm) {
       numFieldsSeen += unownedForm['fields'].length;
       if (numFieldsSeen <= __gCrWeb.autofill.MAX_PARSEABLE_FIELDS) {
@@ -804,19 +789,7 @@ function extractFormsAndFormElements_(frame, minimumRequiredFields, forms) {
       }
     }
   }
-
-  // Recursively invoke for all iframes.
-  var frames = doc.getElementsByTagName("iframe");
-  for (var i = 0; i < frames.length; i++) {
-    // Check frame origin using only information available to the current frame
-    // (i.e. frames[i].src) to avoid triggering a SecurityError. Skip frames
-    // from different origin since we can't access the DOM elements to autofill.
-    if (!frames[i].src ||
-        __gCrWeb.common.isSameOrigin(frame.location.href, frames[i].src)) {
-      extractFormsAndFormElements_(
-        frames[i].contentWindow, minimumRequiredFields, forms);
-    }
-  }
+  return forms;
 };
 
 /**
@@ -966,22 +939,9 @@ function unownedFormElementsAndFieldSetsToFormData_(
     }
   }
 
-  // Since it's not a checkout flow, only add fields that have a non-"off"
-  // autocomplete attribute to the formless autofill.
-  var controlElementsWithAutocomplete = [];
-  for (var index = 0; index < controlElements.length; index++) {
-    if (controlElements[index].hasAttribute('autocomplete') &&
-        controlElements[index].getAttribute('autocomplete') !== 'off') {
-      controlElementsWithAutocomplete += controlElements[index];
-    }
-  }
-
-  if (controlElementsWithAutocomplete.length == 0) {
-    return false;
-  }
   return formOrFieldsetsToFormData_(
       null /* formElement*/, null /* formControlElement */, fieldsets,
-      controlElementsWithAutocomplete, extractMask, form, null /* field */);
+      controlElements, extractMask, form, null /* field */);
 }
 
 /**
@@ -1613,6 +1573,33 @@ __gCrWeb.autofill.isTraversableContainerElement = function(node) {
 
 /**
  * Helper for |InferLabelForElement()| that infers a label, if possible, from
+ * an enclosing label.
+ * e.g. <label>Some Text<span><input ...></span></label>
+ *
+ * It is based on the logic in
+ *    string16 InferLabelFromEnclosingLabel(
+ *        const WebFormControlElement& element)
+ * in chromium/src/components/autofill/content/renderer/form_autofill_util.cc.
+ *
+ * @param {FormControlElement} element An element to examine.
+ * @return {string} The label of element.
+ */
+__gCrWeb.autofill.inferLabelFromEnclosingLabel = function(element) {
+  if (!element) {
+    return '';
+  }
+  var node = element.parentNode;
+  while (node && !__gCrWeb.autofill.hasTagName(node, 'label')) {
+    node = node.parentNode;
+  }
+  if (node) {
+    return __gCrWeb.autofill.findChildText(node);
+  }
+  return '';
+}
+
+/**
+ * Helper for |InferLabelForElement()| that infers a label, if possible, from
  * a surrounding div table,
  * e.g. <div>Some Text<span><input ...></span></div>
  * e.g. <div>Some Text</div><div><input ...></div>
@@ -1798,7 +1785,9 @@ __gCrWeb.autofill.inferLabelForElement = function(element) {
     }
 
     seenTagNames[tagName] = true;
-    if (tagName === "DIV") {
+    if (tagName === "LABEL") {
+      inferredLabel = __gCrWeb.autofill.inferLabelFromEnclosingLabel(element);
+    } else if (tagName === "DIV") {
       inferredLabel = __gCrWeb.autofill.inferLabelFromDivTable(element);
     } else if (tagName === "TD") {
       inferredLabel = __gCrWeb.autofill.inferLabelFromTableColumn(element);
@@ -1893,16 +1882,11 @@ __gCrWeb.autofill.fillFormField = function(data, field) {
 
     __gCrWeb.common.setInputElementValue(sanitizedValue, field, true);
     field.isAutofilled = true;
-  } else if (__gCrWeb.autofill.isSelectElement(field)) {
-    if (field.value !== data['value']) {
-      field.value = data['value'];
-      __gCrWeb.common.createAndDispatchHTMLEvent(field, 'change', true, false);
+    } else if (__gCrWeb.autofill.isSelectElement(field)) {
+      __gCrWeb.common.setInputElementValue(data['value'], field, true);
+    } else if (__gCrWeb.autofill.isCheckableElement(field)) {
+      __gCrWeb.common.setInputElementValue(data['is_checked'], field, true);
     }
-  } else {
-    if (__gCrWeb.autofill.isCheckableElement(field)) {
-      __gCrWeb.common.setInputElementChecked(data['is_checked'], field, true);
-    }
-  }
 };
 
 /**
@@ -2103,7 +2087,7 @@ __gCrWeb.autofill.webFormControlElementToFormField = function(
   // The label is not officially part of a form control element; however, the
   // labels for all form control elements are scraped from the DOM and set in
   // form data.
-  field['name'] = __gCrWeb['common'].nameForAutofill(element);
+  field['name'] = __gCrWeb['common'].getFieldIdentifier(element);
   field['form_control_type'] = element.type;
   var autocomplete_attribute = element.getAttribute('autocomplete');
   if (autocomplete_attribute) {
@@ -2199,7 +2183,7 @@ __gCrWeb.autofill['fillPredictionData'] = function(data) {
       if (!__gCrWeb.autofill.isAutofillableElement(element)) {
         continue;
       }
-      var elementName = __gCrWeb['common'].nameForAutofill(element);
+      var elementName = __gCrWeb['common'].getFieldIdentifier(element);
       var value = formData[elementName];
       if (value) {
         element.placeholder = value;

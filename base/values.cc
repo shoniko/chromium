@@ -17,6 +17,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/memory_usage_estimator.h"
 
 namespace base {
 
@@ -322,6 +323,7 @@ Value* Value::FindPath(span<const StringPiece> path) {
 }
 
 const Value* Value::FindPath(std::initializer_list<StringPiece> path) const {
+  DCHECK_GE(path.size(), 2u) << "Use FindKey() for a path of length 1.";
   return FindPath(make_span(path.begin(), path.size()));
 }
 
@@ -347,18 +349,20 @@ Value* Value::FindPathOfType(span<const StringPiece> path, Type type) {
 
 const Value* Value::FindPathOfType(std::initializer_list<StringPiece> path,
                                    Type type) const {
+  DCHECK_GE(path.size(), 2u) << "Use FindKeyOfType() for a path of length 1.";
   return FindPathOfType(make_span(path.begin(), path.size()), type);
 }
 
 const Value* Value::FindPathOfType(span<const StringPiece> path,
                                    Type type) const {
   const Value* result = FindPath(path);
-  if (!result || !result->IsType(type))
+  if (!result || result->type() != type)
     return nullptr;
   return result;
 }
 
 Value* Value::SetPath(std::initializer_list<StringPiece> path, Value value) {
+  DCHECK_GE(path.size(), 2u) << "Use SetKey() for a path of length 1.";
   return SetPath(make_span(path.begin(), path.size()), std::move(value));
 }
 
@@ -393,6 +397,7 @@ Value* Value::SetPath(span<const StringPiece> path, Value value) {
 }
 
 bool Value::RemovePath(std::initializer_list<StringPiece> path) {
+  DCHECK_GE(path.size(), 2u) << "Use RemoveKey() for a path of length 1.";
   return RemovePath(make_span(path.begin(), path.size()));
 }
 
@@ -617,6 +622,21 @@ bool Value::Equals(const Value* other) const {
   return *this == *other;
 }
 
+size_t Value::EstimateMemoryUsage() const {
+  switch (type_) {
+    case Type::STRING:
+      return base::trace_event::EstimateMemoryUsage(string_value_);
+    case Type::BINARY:
+      return base::trace_event::EstimateMemoryUsage(binary_value_);
+    case Type::DICTIONARY:
+      return base::trace_event::EstimateMemoryUsage(dict_);
+    case Type::LIST:
+      return base::trace_event::EstimateMemoryUsage(list_);
+    default:
+      return 0;
+  }
+}
+
 void Value::InternalMoveConstructFrom(Value&& that) {
   type_ = that.type_;
 
@@ -705,24 +725,25 @@ Value* DictionaryValue::Set(StringPiece path, std::unique_ptr<Value> in_value) {
   DCHECK(in_value);
 
   StringPiece current_path(path);
-  DictionaryValue* current_dictionary = this;
+  Value* current_dictionary = this;
   for (size_t delimiter_position = current_path.find('.');
        delimiter_position != StringPiece::npos;
        delimiter_position = current_path.find('.')) {
     // Assume that we're indexing into a dictionary.
     StringPiece key = current_path.substr(0, delimiter_position);
-    DictionaryValue* child_dictionary = nullptr;
-    if (!current_dictionary->GetDictionary(key, &child_dictionary)) {
-      child_dictionary = current_dictionary->SetDictionaryWithoutPathExpansion(
-          key, std::make_unique<DictionaryValue>());
+    Value* child_dictionary =
+        current_dictionary->FindKeyOfType(key, Type::DICTIONARY);
+    if (!child_dictionary) {
+      child_dictionary =
+          current_dictionary->SetKey(key, Value(Type::DICTIONARY));
     }
 
     current_dictionary = child_dictionary;
     current_path = current_path.substr(delimiter_position + 1);
   }
 
-  return current_dictionary->SetWithoutPathExpansion(current_path,
-                                                     std::move(in_value));
+  return static_cast<DictionaryValue*>(current_dictionary)
+      ->SetWithoutPathExpansion(current_path, std::move(in_value));
 }
 
 Value* DictionaryValue::SetBoolean(StringPiece path, bool in_value) {
@@ -769,20 +790,6 @@ Value* DictionaryValue::SetWithoutPathExpansion(
   return result.first->second.get();
 }
 
-DictionaryValue* DictionaryValue::SetDictionaryWithoutPathExpansion(
-    StringPiece path,
-    std::unique_ptr<DictionaryValue> in_value) {
-  return static_cast<DictionaryValue*>(
-      SetWithoutPathExpansion(path, std::move(in_value)));
-}
-
-ListValue* DictionaryValue::SetListWithoutPathExpansion(
-    StringPiece path,
-    std::unique_ptr<ListValue> in_value) {
-  return static_cast<ListValue*>(
-      SetWithoutPathExpansion(path, std::move(in_value)));
-}
-
 bool DictionaryValue::Get(StringPiece path,
                           const Value** out_value) const {
   DCHECK(IsStringUTF8(path));
@@ -791,7 +798,7 @@ bool DictionaryValue::Get(StringPiece path,
   for (size_t delimiter_position = current_path.find('.');
        delimiter_position != std::string::npos;
        delimiter_position = current_path.find('.')) {
-    const DictionaryValue* child_dictionary = NULL;
+    const DictionaryValue* child_dictionary = nullptr;
     if (!current_dictionary->GetDictionaryWithoutPathExpansion(
             current_path.substr(0, delimiter_position), &child_dictionary)) {
       return false;
@@ -870,7 +877,7 @@ bool DictionaryValue::GetBinary(StringPiece path,
                                 const Value** out_value) const {
   const Value* value;
   bool result = Get(path, &value);
-  if (!result || !value->IsType(Type::BINARY))
+  if (!result || !value->is_blob())
     return false;
 
   if (out_value)
@@ -888,7 +895,7 @@ bool DictionaryValue::GetDictionary(StringPiece path,
                                     const DictionaryValue** out_value) const {
   const Value* value;
   bool result = Get(path, &value);
-  if (!result || !value->IsType(Type::DICTIONARY))
+  if (!result || !value->is_dict())
     return false;
 
   if (out_value)
@@ -908,7 +915,7 @@ bool DictionaryValue::GetList(StringPiece path,
                               const ListValue** out_value) const {
   const Value* value;
   bool result = Get(path, &value);
-  if (!result || !value->IsType(Type::LIST))
+  if (!result || !value->is_list())
     return false;
 
   if (out_value)
@@ -993,7 +1000,7 @@ bool DictionaryValue::GetDictionaryWithoutPathExpansion(
     const DictionaryValue** out_value) const {
   const Value* value;
   bool result = GetWithoutPathExpansion(key, &value);
-  if (!result || !value->IsType(Type::DICTIONARY))
+  if (!result || !value->is_dict())
     return false;
 
   if (out_value)
@@ -1017,7 +1024,7 @@ bool DictionaryValue::GetListWithoutPathExpansion(
     const ListValue** out_value) const {
   const Value* value;
   bool result = GetWithoutPathExpansion(key, &value);
-  if (!result || !value->IsType(Type::LIST))
+  if (!result || !value->is_list())
     return false;
 
   if (out_value)
@@ -1074,13 +1081,13 @@ bool DictionaryValue::RemovePath(StringPiece path,
     return RemoveWithoutPathExpansion(path, out_value);
 
   StringPiece subdict_path = path.substr(0, delimiter_position);
-  DictionaryValue* subdict = NULL;
+  DictionaryValue* subdict = nullptr;
   if (!GetDictionary(subdict_path, &subdict))
     return false;
   result = subdict->RemovePath(path.substr(delimiter_position + 1),
                                out_value);
   if (result && subdict->empty())
-    RemoveWithoutPathExpansion(subdict_path, NULL);
+    RemoveWithoutPathExpansion(subdict_path, nullptr);
 
   return result;
 }
@@ -1099,7 +1106,7 @@ void DictionaryValue::MergeDictionary(const DictionaryValue* dictionary) {
   for (DictionaryValue::Iterator it(*dictionary); !it.IsAtEnd(); it.Advance()) {
     const Value* merge_value = &it.value();
     // Check whether we have to merge dictionaries.
-    if (merge_value->IsType(Value::Type::DICTIONARY)) {
+    if (merge_value->is_dict()) {
       DictionaryValue* sub_dict;
       if (GetDictionaryWithoutPathExpansion(it.key(), &sub_dict)) {
         sub_dict->MergeDictionary(
@@ -1122,7 +1129,7 @@ DictionaryValue::Iterator::Iterator(const DictionaryValue& target)
 
 DictionaryValue::Iterator::Iterator(const Iterator& other) = default;
 
-DictionaryValue::Iterator::~Iterator() {}
+DictionaryValue::Iterator::~Iterator() = default;
 
 DictionaryValue* DictionaryValue::DeepCopy() const {
   return new DictionaryValue(dict_);
@@ -1224,28 +1231,11 @@ bool ListValue::GetString(size_t index, string16* out_value) const {
   return value->GetAsString(out_value);
 }
 
-bool ListValue::GetBinary(size_t index, const Value** out_value) const {
-  const Value* value;
-  bool result = Get(index, &value);
-  if (!result || !value->IsType(Type::BINARY))
-    return false;
-
-  if (out_value)
-    *out_value = value;
-
-  return true;
-}
-
-bool ListValue::GetBinary(size_t index, Value** out_value) {
-  return static_cast<const ListValue&>(*this).GetBinary(
-      index, const_cast<const Value**>(out_value));
-}
-
 bool ListValue::GetDictionary(size_t index,
                               const DictionaryValue** out_value) const {
   const Value* value;
   bool result = Get(index, &value);
-  if (!result || !value->IsType(Type::DICTIONARY))
+  if (!result || !value->is_dict())
     return false;
 
   if (out_value)
@@ -1263,7 +1253,7 @@ bool ListValue::GetDictionary(size_t index, DictionaryValue** out_value) {
 bool ListValue::GetList(size_t index, const ListValue** out_value) const {
   const Value* value;
   bool result = Get(index, &value);
-  if (!result || !value->IsType(Type::LIST))
+  if (!result || !value->is_list())
     return false;
 
   if (out_value)
@@ -1381,11 +1371,9 @@ std::unique_ptr<ListValue> ListValue::CreateDeepCopy() const {
   return std::make_unique<ListValue>(list_);
 }
 
-ValueSerializer::~ValueSerializer() {
-}
+ValueSerializer::~ValueSerializer() = default;
 
-ValueDeserializer::~ValueDeserializer() {
-}
+ValueDeserializer::~ValueDeserializer() = default;
 
 std::ostream& operator<<(std::ostream& out, const Value& value) {
   std::string json;

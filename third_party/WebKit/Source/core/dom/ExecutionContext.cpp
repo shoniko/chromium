@@ -29,8 +29,7 @@
 
 #include "bindings/core/v8/SourceLocation.h"
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "core/dom/SuspendableObject.h"
-#include "core/dom/TaskRunnerHelper.h"
+#include "core/dom/PausableObject.h"
 #include "core/dom/events/EventTarget.h"
 #include "core/events/ErrorEvent.h"
 #include "core/frame/UseCounter.h"
@@ -42,18 +41,19 @@
 #include "platform/loader/fetch/MemoryCache.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "platform/wtf/PtrUtil.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
 ExecutionContext::ExecutionContext()
     : circular_sequential_id_(0),
       in_dispatch_error_event_(false),
-      is_context_suspended_(false),
+      is_context_paused_(false),
       is_context_destroyed_(false),
       window_interaction_tokens_(0),
       referrer_policy_(kReferrerPolicyDefault) {}
 
-ExecutionContext::~ExecutionContext() {}
+ExecutionContext::~ExecutionContext() = default;
 
 // static
 ExecutionContext* ExecutionContext::From(const ScriptState* script_state) {
@@ -73,16 +73,16 @@ ExecutionContext* ExecutionContext::ForRelevantRealm(
   return ToExecutionContext(info.Holder()->CreationContext());
 }
 
-void ExecutionContext::SuspendSuspendableObjects() {
-  DCHECK(!is_context_suspended_);
-  NotifySuspendingSuspendableObjects();
-  is_context_suspended_ = true;
+void ExecutionContext::PausePausableObjects() {
+  DCHECK(!is_context_paused_);
+  NotifySuspendingPausableObjects();
+  is_context_paused_ = true;
 }
 
-void ExecutionContext::ResumeSuspendableObjects() {
-  DCHECK(is_context_suspended_);
-  is_context_suspended_ = false;
-  NotifyResumingSuspendableObjects();
+void ExecutionContext::UnpausePausableObjects() {
+  DCHECK(is_context_paused_);
+  is_context_paused_ = false;
+  NotifyResumingPausableObjects();
 }
 
 void ExecutionContext::NotifyContextDestroyed() {
@@ -90,24 +90,23 @@ void ExecutionContext::NotifyContextDestroyed() {
   ContextLifecycleNotifier::NotifyContextDestroyed();
 }
 
-void ExecutionContext::SuspendScheduledTasks() {
-  SuspendSuspendableObjects();
-  TasksWereSuspended();
+void ExecutionContext::PauseScheduledTasks() {
+  PausePausableObjects();
+  TasksWerePaused();
 }
 
-void ExecutionContext::ResumeScheduledTasks() {
-  ResumeSuspendableObjects();
-  TasksWereResumed();
+void ExecutionContext::UnpauseScheduledTasks() {
+  UnpausePausableObjects();
+  TasksWereUnpaused();
 }
 
-void ExecutionContext::SuspendSuspendableObjectIfNeeded(
-    SuspendableObject* object) {
+void ExecutionContext::PausePausableObjectIfNeeded(PausableObject* object) {
 #if DCHECK_IS_ON()
   DCHECK(Contains(object));
 #endif
-  // Ensure all SuspendableObjects are suspended also newly created ones.
-  if (is_context_suspended_)
-    object->Suspend();
+  // Ensure all PausableObjects are paused also newly created ones.
+  if (is_context_paused_)
+    object->Pause();
 }
 
 bool ExecutionContext::ShouldSanitizeScriptError(
@@ -171,8 +170,12 @@ PublicURLManager& ExecutionContext::GetPublicURLManager() {
   return *public_url_manager_;
 }
 
-SecurityOrigin* ExecutionContext::GetSecurityOrigin() {
+const SecurityOrigin* ExecutionContext::GetSecurityOrigin() {
   return GetSecurityContext().GetSecurityOrigin();
+}
+
+SecurityOrigin* ExecutionContext::GetMutableSecurityOrigin() {
+  return GetSecurityContext().GetMutableSecurityOrigin();
 }
 
 ContentSecurityPolicy* ExecutionContext::GetContentSecurityPolicy() {
@@ -241,15 +244,6 @@ void ExecutionContext::SetReferrerPolicy(ReferrerPolicy referrer_policy) {
 
 void ExecutionContext::RemoveURLFromMemoryCache(const KURL& url) {
   GetMemoryCache()->RemoveURLFromCache(url);
-}
-
-scoped_refptr<WebTaskRunner> ExecutionContext::GetTaskRunner(TaskType type) {
-  if (IsDocument())
-    return ToDocument(this)->GetTaskRunner(type);
-  if (IsWorkerOrWorkletGlobalScope())
-    return ToWorkerOrWorkletGlobalScope(this)->GetTaskRunner(type);
-  // This should only happen for a NullExecutionContext in a unit test.
-  return Platform::Current()->CurrentThread()->GetWebTaskRunner();
 }
 
 void ExecutionContext::Trace(blink::Visitor* visitor) {

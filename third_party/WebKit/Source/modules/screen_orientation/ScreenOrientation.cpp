@@ -4,6 +4,8 @@
 
 #include "modules/screen_orientation/ScreenOrientation.h"
 
+#include <memory>
+
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
@@ -115,7 +117,7 @@ ScreenOrientation* ScreenOrientation::Create(LocalFrame* frame) {
 ScreenOrientation::ScreenOrientation(LocalFrame* frame)
     : ContextClient(frame), type_(kWebScreenOrientationUndefined), angle_(0) {}
 
-ScreenOrientation::~ScreenOrientation() {}
+ScreenOrientation::~ScreenOrientation() = default;
 
 const WTF::AtomicString& ScreenOrientation::InterfaceName() const {
   return EventTargetNames::ScreenOrientation;
@@ -168,7 +170,7 @@ ScriptPromise ScreenOrientation::lock(ScriptState* state,
   }
 
   Controller()->lock(StringToOrientationLock(lock_string),
-                     WTF::MakeUnique<LockOrientationCallback>(resolver));
+                     std::make_unique<LockOrientationCallback>(resolver));
   return promise;
 }
 

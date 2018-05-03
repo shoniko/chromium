@@ -40,7 +40,6 @@
 #include "core/html_names.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/style/ComputedStyle.h"
-#include "platform/wtf/Vector.h"
 #include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
@@ -55,11 +54,11 @@ HTMLOptionElement::HTMLOptionElement(Document& document)
 // HTMLOptionElement.h, when including HTMLOptionElement.h,
 // msvc tries to expand the destructor and causes
 // a compile error because of lack of ComputedStyle definition.
-HTMLOptionElement::~HTMLOptionElement() {}
+HTMLOptionElement::~HTMLOptionElement() = default;
 
 HTMLOptionElement* HTMLOptionElement::Create(Document& document) {
   HTMLOptionElement* option = new HTMLOptionElement(document);
-  option->EnsureUserAgentShadowRoot();
+  option->EnsureUserAgentShadowRootV1();
   return option;
 }
 
@@ -71,7 +70,7 @@ HTMLOptionElement* HTMLOptionElement::CreateForJSConstructor(
     bool selected,
     ExceptionState& exception_state) {
   HTMLOptionElement* element = new HTMLOptionElement(document);
-  element->EnsureUserAgentShadowRoot();
+  element->EnsureUserAgentShadowRootV1();
   if (!data.IsEmpty()) {
     element->AppendChild(Text::Create(document, data), exception_state);
     if (exception_state.HadException())
@@ -89,12 +88,10 @@ HTMLOptionElement* HTMLOptionElement::CreateForJSConstructor(
 
 void HTMLOptionElement::AttachLayoutTree(AttachContext& context) {
   AttachContext option_context(context);
-  scoped_refptr<ComputedStyle> resolved_style;
-  if (!context.resolved_style && ParentComputedStyle()) {
+  if (!GetNonAttachedStyle() && ParentComputedStyle()) {
     if (HTMLSelectElement* select = OwnerSelectElement())
       select->UpdateListOnLayoutObject();
-    resolved_style = OriginalStyleForLayoutObject();
-    option_context.resolved_style = resolved_style.get();
+    SetNonAttachedStyle(OriginalStyleForLayoutObject());
   }
   HTMLElement::AttachLayoutTree(option_context);
 }
@@ -115,7 +112,7 @@ bool HTMLOptionElement::MatchesEnabledPseudoClass() const {
 }
 
 String HTMLOptionElement::DisplayLabel() const {
-  Document& document = this->GetDocument();
+  Document& document = GetDocument();
   String text;
 
   // WinIE does not use the label attribute, so as a quirk, we ignore it.
@@ -139,8 +136,7 @@ String HTMLOptionElement::text() const {
       .SimplifyWhiteSpace(IsHTMLSpace<UChar>);
 }
 
-void HTMLOptionElement::setText(const String& text,
-                                ExceptionState& exception_state) {
+void HTMLOptionElement::setText(const String& text) {
   // Changing the text causes a recalc of a select's items, which will reset the
   // selected index to the first item if the select is single selection with a
   // menu list.  We attempt to preserve the selected item.
@@ -148,12 +144,7 @@ void HTMLOptionElement::setText(const String& text,
   bool select_is_menu_list = select && select->UsesMenuList();
   int old_selected_index = select_is_menu_list ? select->selectedIndex() : -1;
 
-  if (HasOneTextChild()) {
-    ToText(firstChild())->setData(text);
-  } else {
-    RemoveChildren();
-    AppendChild(Text::Create(GetDocument(), text), exception_state);
-  }
+  setTextContent(text);
 
   if (select_is_menu_list && select->selectedIndex() != old_selected_index)
     select->setSelectedIndex(old_selected_index);

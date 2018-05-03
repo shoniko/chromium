@@ -442,6 +442,7 @@ public class AwTestContainerView extends FrameLayout {
     }
 
     private class NativeDrawGLFunctorFactory implements AwContents.NativeDrawGLFunctorFactory {
+        @Override
         public NativeDrawGLFunctor createFunctor(long context) {
             return new NativeDrawGLFunctor(context);
         }
@@ -546,11 +547,6 @@ public class AwTestContainerView extends FrameLayout {
         @Override
         public void onScrollChanged(int l, int t, int oldl, int oldt) {
             AwTestContainerView.super.onScrollChanged(l, t, oldl, oldt);
-        }
-
-        @Override
-        public boolean awakenScrollBars() {
-            return AwTestContainerView.super.awakenScrollBars();
         }
 
         @Override

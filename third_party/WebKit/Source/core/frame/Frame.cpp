@@ -30,6 +30,8 @@
 
 #include "core/frame/Frame.h"
 
+#include <memory>
+
 #include "bindings/core/v8/WindowProxyManager.h"
 #include "core/dom/DocumentType.h"
 #include "core/dom/UserGestureIndicator.h"
@@ -40,7 +42,6 @@
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutEmbeddedContent.h"
-#include "core/layout/api/LayoutEmbeddedContentItem.h"
 #include "core/loader/EmptyClients.h"
 #include "core/loader/NavigationScheduler.h"
 #include "core/page/FocusController.h"
@@ -157,10 +158,6 @@ LayoutEmbeddedContent* Frame::OwnerLayoutObject() const {
   return DeprecatedLocalOwner()->GetLayoutEmbeddedContent();
 }
 
-LayoutEmbeddedContentItem Frame::OwnerLayoutItem() const {
-  return LayoutEmbeddedContentItem(OwnerLayoutObject());
-}
-
 Settings* Frame::GetSettings() const {
   if (GetPage())
     return &GetPage()->GetSettings();
@@ -180,6 +177,9 @@ void Frame::DidChangeVisibilityState() {
     child_frames[i]->DidChangeVisibilityState();
 }
 
+// TODO(mustaq): Should be merged with NotifyUserActivation() below but
+// not sure why this one doesn't update frame clients.  Could be related to
+// crbug.com/775930 .
 void Frame::UpdateUserActivationInFrameTree() {
   user_activation_state_.Activate();
   if (Frame* parent = Tree().Parent())
@@ -194,13 +194,25 @@ void Frame::NotifyUserActivation() {
     ToLocalFrame(this)->Client()->SetHasReceivedUserGesture(had_gesture);
 }
 
+bool Frame::ConsumeTransientUserActivation() {
+  for (Frame* parent = Tree().Parent(); parent;
+       parent = parent->Tree().Parent()) {
+    parent->user_activation_state_.ConsumeIfActive();
+  }
+  for (Frame* child = Tree().FirstChild(); child;
+       child = child->Tree().TraverseNext(this)) {
+    child->user_activation_state_.ConsumeIfActive();
+  }
+  return user_activation_state_.ConsumeIfActive();
+}
+
 // static
 std::unique_ptr<UserGestureIndicator> Frame::NotifyUserActivation(
     Frame* frame,
     UserGestureToken::Status status) {
   if (frame)
     frame->NotifyUserActivation();
-  return WTF::MakeUnique<UserGestureIndicator>(status);
+  return std::make_unique<UserGestureIndicator>(status);
 }
 
 // static
@@ -218,11 +230,7 @@ bool Frame::HasTransientUserActivation(Frame* frame, bool checkIfMainThread) {
 bool Frame::ConsumeTransientUserActivation(Frame* frame,
                                            bool checkIfMainThread) {
   if (RuntimeEnabledFeatures::UserActivationV2Enabled()) {
-    // TODO(mustaq): During our first phase of experiments, we will see if
-    // consumption of user activation is really necessary or not.  If it turns
-    // out to be unavoidable, we will replace the following call with
-    // |ConsumeTransientUserActivation()|.
-    return frame ? frame->HasTransientUserActivation() : false;
+    return frame ? frame->ConsumeTransientUserActivation() : false;
   }
 
   return checkIfMainThread
@@ -230,8 +238,8 @@ bool Frame::ConsumeTransientUserActivation(Frame* frame,
              : UserGestureIndicator::ConsumeUserGesture();
 }
 
-bool Frame::IsFeatureEnabled(WebFeaturePolicyFeature feature) const {
-  WebFeaturePolicy* feature_policy = GetSecurityContext()->GetFeaturePolicy();
+bool Frame::IsFeatureEnabled(FeaturePolicyFeature feature) const {
+  FeaturePolicy* feature_policy = GetSecurityContext()->GetFeaturePolicy();
   // The policy should always be initialized before checking it to ensure we
   // properly inherit the parent policy.
   DCHECK(feature_policy);
@@ -262,7 +270,8 @@ Frame::Frame(FrameClient* client,
       owner_(owner),
       client_(client),
       window_proxy_manager_(window_proxy_manager),
-      is_loading_(false) {
+      is_loading_(false),
+      devtools_frame_token_(client->GetDevToolsFrameToken()) {
   InstanceCounters::IncrementCounter(InstanceCounters::kFrameCounter);
 
   if (owner_)

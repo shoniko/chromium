@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
@@ -20,7 +21,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/variations/variations_params_manager.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/common/url_schemes.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/notification_service.h"
@@ -393,7 +393,7 @@ void RenderFrameDeletedObserver::WaitUntilDeleted() {
 WebContentsDestroyedWatcher::WebContentsDestroyedWatcher(
     WebContents* web_contents)
     : WebContentsObserver(web_contents) {
-  EXPECT_TRUE(web_contents != NULL);
+  EXPECT_TRUE(web_contents != nullptr);
 }
 
 WebContentsDestroyedWatcher::~WebContentsDestroyedWatcher() {
@@ -405,6 +405,14 @@ void WebContentsDestroyedWatcher::Wait() {
 
 void WebContentsDestroyedWatcher::WebContentsDestroyed() {
   run_loop_.Quit();
+}
+
+GURL EffectiveURLContentBrowserClient::GetEffectiveURL(
+    BrowserContext* browser_context,
+    const GURL& url) {
+  if (url == url_to_modify_)
+    return url_to_return_;
+  return url;
 }
 
 }  // namespace content

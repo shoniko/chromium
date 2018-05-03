@@ -16,17 +16,13 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.permissions.PermissionTestRule.PermissionUpdateWaiter;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 /**
  * Test suite for quota permissions requests.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @RetryOnFailure
 public class QuotaTest {
     @Rule
@@ -36,14 +32,14 @@ public class QuotaTest {
 
     public QuotaTest() {}
 
-    private void testQuotaPermissionsPlumbing(String script, int numUpdates, boolean withGesture,
-            boolean isDialog, boolean hasSwitch, boolean toggleSwitch) throws Exception {
+    private void testQuotaPermissionsPlumbing(
+            String script, int numUpdates, boolean withGesture, boolean isDialog) throws Exception {
         Tab tab = mPermissionRule.getActivity().getActivityTab();
         PermissionUpdateWaiter updateWaiter =
                 new PermissionUpdateWaiter("Count: ", mPermissionRule.getActivity());
         tab.addObserver(updateWaiter);
-        mPermissionRule.runAllowTest(updateWaiter, TEST_FILE, script, numUpdates, withGesture,
-                isDialog, hasSwitch, toggleSwitch);
+        mPermissionRule.runAllowTest(
+                updateWaiter, TEST_FILE, script, numUpdates, withGesture, isDialog);
         tab.removeObserver(updateWaiter);
     }
 
@@ -56,6 +52,6 @@ public class QuotaTest {
     @Feature({"QuotaPermissions"})
     @CommandLineFlags.Add("disable-features=" + PermissionTestRule.MODAL_FLAG)
     public void testQuotaShowsInfobar() throws Exception {
-        testQuotaPermissionsPlumbing("initiate_requestQuota(1024)", 1, false, false, false, false);
+        testQuotaPermissionsPlumbing("initiate_requestQuota(1024)", 1, false, false);
     }
 }

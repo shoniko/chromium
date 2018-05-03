@@ -23,7 +23,7 @@
 #include "content/renderer/media/webrtc/peer_connection_dependency_factory.h"
 #include "media/base/limits.h"
 #include "third_party/webrtc/api/videosourceproxy.h"
-#include "third_party/webrtc/api/videotracksource.h"
+#include "third_party/webrtc/pc/videotracksource.h"
 
 namespace content {
 
@@ -213,8 +213,8 @@ void MediaStreamVideoWebRtcSink::WebRtcVideoSourceAdapter::
   // thread, it should be released on the render thread.
   base::AutoLock auto_lock(capture_adapter_stop_lock_);
   // |video_source| owns |capture_adapter_|.
-  capture_adapter_ = NULL;
-  video_source_ = NULL;
+  capture_adapter_ = nullptr;
+  video_source_ = nullptr;
 }
 
 void MediaStreamVideoWebRtcSink::WebRtcVideoSourceAdapter::SetContentHint(

@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/macros.h"
 #include "chrome/installer/zucchini/buffer_view.h"
 #include "chrome/installer/zucchini/image_utils.h"
 
@@ -87,6 +88,17 @@ class ReferenceGroup {
 // - Correct target for some references.
 class Disassembler {
  public:
+  // Attempts to parse |image| and create an architecture-specifc Disassembler,
+  // as determined by DIS, which is inherited from Disassembler. Returns an
+  // instance of DIS if successful, and null otherwise.
+  template <class DIS>
+  static std::unique_ptr<DIS> Make(ConstBufferView image) {
+    auto disasm = std::make_unique<DIS>();
+    if (!disasm->Parse(image))
+      return nullptr;
+    return disasm;
+  }
+
   virtual ~Disassembler();
 
   // Returns the type of executable handled by the Disassembler.
@@ -112,6 +124,8 @@ class Disassembler {
   // Raw image data. After Parse(), a Disassembler should shrink this to contain
   // only the portion containing the executable file it recognizes.
   ConstBufferView image_;
+
+  DISALLOW_COPY_AND_ASSIGN(Disassembler);
 };
 
 }  // namespace zucchini

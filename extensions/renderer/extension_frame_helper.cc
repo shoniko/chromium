@@ -4,6 +4,8 @@
 
 #include "extensions/renderer/extension_frame_helper.h"
 
+#include <set>
+
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/timer/elapsed_timer.h"
@@ -92,6 +94,15 @@ enum class PortType {
   NATIVE_APP,
 };
 
+// Returns an extension hosted in the |render_frame| (or nullptr if the frame
+// doesn't host an extension).
+const Extension* GetExtensionFromFrame(content::RenderFrame* render_frame) {
+  DCHECK(render_frame);
+  ScriptContext* context =
+      ScriptContextSet::GetMainWorldContextForFrame(render_frame);
+  return context ? context->effective_extension() : nullptr;
+}
+
 }  // namespace
 
 ExtensionFrameHelper::ExtensionFrameHelper(content::RenderFrame* render_frame,
@@ -131,6 +142,39 @@ std::vector<content::RenderFrame*> ExtensionFrameHelper::GetExtensionFrames(
 }
 
 // static
+v8::Local<v8::Array> ExtensionFrameHelper::GetV8MainFrames(
+    v8::Local<v8::Context> context,
+    const std::string& extension_id,
+    int browser_window_id,
+    int tab_id,
+    ViewType view_type) {
+  std::vector<content::RenderFrame*> render_frames =
+      GetExtensionFrames(extension_id, browser_window_id, tab_id, view_type);
+  v8::Local<v8::Array> v8_frames = v8::Array::New(context->GetIsolate());
+
+  int v8_index = 0;
+  for (content::RenderFrame* frame : render_frames) {
+    if (!frame->IsMainFrame())
+      continue;
+
+    blink::WebLocalFrame* web_frame = frame->GetWebFrame();
+    if (!blink::WebFrame::ScriptCanAccess(web_frame))
+      continue;
+
+    v8::Local<v8::Context> frame_context = web_frame->MainWorldScriptContext();
+    if (!frame_context.IsEmpty()) {
+      v8::Local<v8::Value> window = frame_context->Global();
+      CHECK(!window.IsEmpty());
+      v8::Maybe<bool> maybe =
+          v8_frames->CreateDataProperty(context, v8_index++, window);
+      CHECK(maybe.IsJust() && maybe.FromJust());
+    }
+  }
+
+  return v8_frames;
+}
+
+// static
 content::RenderFrame* ExtensionFrameHelper::GetBackgroundPageFrame(
     const std::string& extension_id) {
   for (const ExtensionFrameHelper* helper : g_frame_helpers.Get()) {
@@ -143,6 +187,32 @@ content::RenderFrame* ExtensionFrameHelper::GetBackgroundPageFrame(
         return helper->render_frame();
     }
   }
+  return nullptr;
+}
+
+// static
+content::RenderFrame* ExtensionFrameHelper::FindFrame(
+    content::RenderFrame* relative_to_frame,
+    const std::string& name) {
+  // Only pierce browsing instance boundaries if |relative_to_frame| is an
+  // extension.
+  const Extension* extension = GetExtensionFromFrame(relative_to_frame);
+  if (!extension)
+    return nullptr;
+
+  for (const ExtensionFrameHelper* helper : g_frame_helpers.Get()) {
+    // Only pierce browsing instance boundaries if the target frame is from the
+    // same extension (but not when another extension shares the same renderer
+    // process because of reuse trigerred by process limit).
+    // TODO(lukasza): https://crbug.com/764487: Investigate if we can further
+    // restrict scenarios that allow piercing of browsing instance boundaries.
+    if (extension != GetExtensionFromFrame(helper->render_frame()))
+      continue;
+
+    if (helper->render_frame()->GetWebFrame()->AssignedName().Utf8() == name)
+      return helper->render_frame();
+  }
+
   return nullptr;
 }
 
@@ -337,8 +407,11 @@ void ExtensionFrameHelper::OnSetFrameName(const std::string& name) {
   render_frame()->GetWebFrame()->SetName(blink::WebString::FromUTF8(name));
 }
 
-void ExtensionFrameHelper::OnAppWindowClosed() {
+void ExtensionFrameHelper::OnAppWindowClosed(bool send_onclosed) {
   DCHECK(render_frame()->IsMainFrame());
+
+  if (!send_onclosed)
+    return;
 
   v8::HandleScope scope(v8::Isolate::GetCurrent());
   v8::Local<v8::Context> v8_context =

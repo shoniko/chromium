@@ -17,6 +17,8 @@
 #include "base/memory/singleton.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/rand_util.h"
+#include "base/run_loop.h"
+#include "base/sequence_checker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -39,8 +41,8 @@
 #include "content/app/strings/grit/content_strings.h"
 #include "content/child/child_thread_impl.h"
 #include "content/child/content_child_helpers.h"
-#include "content/child/feature_policy/feature_policy_platform.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.mojom.h"
 #include "net/base/net_errors.h"
@@ -178,12 +180,18 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_FORM_INPUT_ALT;
     case WebLocalizedString::kMissingPluginText:
       return IDS_PLUGIN_INITIALIZATION_ERROR;
-    case WebLocalizedString::kMediaRemotingDisableText:
-      return IDS_MEDIA_REMOTING_DISABLE_TEXT;
     case WebLocalizedString::kMediaRemotingCastText:
       return IDS_MEDIA_REMOTING_CAST_TEXT;
     case WebLocalizedString::kMediaRemotingCastToUnknownDeviceText:
       return IDS_MEDIA_REMOTING_CAST_TO_UNKNOWN_DEVICE_TEXT;
+    case WebLocalizedString::kMediaRemotingStopByErrorText:
+      return IDS_MEDIA_REMOTING_STOP_BY_ERROR_TEXT;
+    case WebLocalizedString::kMediaRemotingStopByPlaybackQualityText:
+      return IDS_MEDIA_REMOTING_STOP_BY_PLAYBACK_QUALITY_TEXT;
+    case WebLocalizedString::kMediaRemotingStopNoText:
+      return -1;  // This string name is used only to indicate an empty string.
+    case WebLocalizedString::kMediaRemotingStopText:
+      return IDS_MEDIA_REMOTING_STOP_TEXT;
     case WebLocalizedString::kMultipleFileUploadText:
       return IDS_FORM_FILE_MULTIPLE_UPLOAD;
     case WebLocalizedString::kOtherColorLabel:
@@ -196,14 +204,14 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_FORM_OTHER_WEEK_LABEL;
     case WebLocalizedString::kOverflowMenuCaptions:
       return IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS;
+    case WebLocalizedString::kOverflowMenuCaptionsSubmenuTitle:
+      return IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS_SUBMENU_TITLE;
     case WebLocalizedString::kOverflowMenuCast:
       return IDS_MEDIA_OVERFLOW_MENU_CAST;
     case WebLocalizedString::kOverflowMenuEnterFullscreen:
       return IDS_MEDIA_OVERFLOW_MENU_ENTER_FULLSCREEN;
     case WebLocalizedString::kOverflowMenuExitFullscreen:
       return IDS_MEDIA_OVERFLOW_MENU_EXIT_FULLSCREEN;
-    case WebLocalizedString::kOverflowMenuStopCast:
-      return IDS_MEDIA_OVERFLOW_MENU_STOP_CAST;
     case WebLocalizedString::kOverflowMenuMute:
       return IDS_MEDIA_OVERFLOW_MENU_MUTE;
     case WebLocalizedString::kOverflowMenuUnmute:
@@ -214,6 +222,8 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_MEDIA_OVERFLOW_MENU_PAUSE;
     case WebLocalizedString::kOverflowMenuDownload:
       return IDS_MEDIA_OVERFLOW_MENU_DOWNLOAD;
+    case WebLocalizedString::kOverflowMenuPictureInPicture:
+      return IDS_MEDIA_OVERFLOW_MENU_PICTURE_IN_PICTURE;
     case WebLocalizedString::kPlaceholderForDayOfMonthField:
       return IDS_FORM_PLACEHOLDER_FOR_DAY_OF_MONTH_FIELD;
     case WebLocalizedString::kPlaceholderForMonthField:
@@ -296,6 +306,16 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_MEDIA_TRACKS_NO_LABEL;
     case WebLocalizedString::kTextTracksOff:
       return IDS_MEDIA_TRACKS_OFF;
+    case WebLocalizedString::kUnitsKibibytes:
+      return IDS_UNITS_KIBIBYTES;
+    case WebLocalizedString::kUnitsMebibytes:
+      return IDS_UNITS_MEBIBYTES;
+    case WebLocalizedString::kUnitsGibibytes:
+      return IDS_UNITS_GIBIBYTES;
+    case WebLocalizedString::kUnitsTebibytes:
+      return IDS_UNITS_TEBIBYTES;
+    case WebLocalizedString::kUnitsPebibytes:
+      return IDS_UNITS_PEBIBYTES;
     // This "default:" line exists to avoid compile warnings about enum
     // coverage when we add a new symbol to WebLocalizedString.h in WebKit.
     // After a planned WebKit patch is landed, we need to add a case statement
@@ -311,19 +331,20 @@ static int ToMessageID(WebLocalizedString::Name name) {
 BlinkPlatformImpl::BlinkPlatformImpl()
     : BlinkPlatformImpl(base::ThreadTaskRunnerHandle::IsSet()
                             ? base::ThreadTaskRunnerHandle::Get()
-                            : nullptr) {
-}
+                            : nullptr,
+                        nullptr) {}
 
 BlinkPlatformImpl::BlinkPlatformImpl(
-    scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner)
-    : main_thread_task_runner_(main_thread_task_runner) {
-}
+    scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner)
+    : main_thread_task_runner_(std::move(main_thread_task_runner)),
+      io_thread_task_runner_(std::move(io_thread_task_runner)) {}
 
 void BlinkPlatformImpl::WaitUntilWebThreadTLSUpdate(
     blink::scheduler::WebThreadBase* thread) {
   base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                             base::WaitableEvent::InitialState::NOT_SIGNALED);
-  thread->GetTaskRunner()->PostTask(
+  thread->GetSingleThreadTaskRunner()->PostTask(
       FROM_HERE,
       base::BindOnce(&BlinkPlatformImpl::UpdateWebThreadTLS,
                      base::Unretained(this), base::Unretained(thread),
@@ -518,6 +539,36 @@ const DataResource kDataResources[] = {
     {"placeholderIcon", IDR_PLACEHOLDER_ICON, ui::SCALE_FACTOR_100P, false},
 };
 
+class NestedMessageLoopRunnerImpl
+    : public blink::Platform::NestedMessageLoopRunner {
+ public:
+  NestedMessageLoopRunnerImpl() = default;
+
+  ~NestedMessageLoopRunnerImpl() override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  }
+
+  void Run() override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    base::RunLoop* const previous_run_loop = run_loop_;
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
+    run_loop_ = &run_loop;
+    run_loop.Run();
+    run_loop_ = previous_run_loop;
+  }
+
+  void QuitNow() override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    DCHECK(run_loop_);
+    run_loop_->Quit();
+  }
+
+ private:
+  base::RunLoop* run_loop_ = nullptr;
+
+  SEQUENCE_CHECKER(sequence_checker_);
+};
+
 }  // namespace
 
 WebData BlinkPlatformImpl::GetDataResource(const char* name) {
@@ -571,8 +622,22 @@ WebString BlinkPlatformImpl::QueryLocalizedString(WebLocalizedString::Name name,
   int message_id = ToMessageID(name);
   if (message_id < 0)
     return WebString();
-  return WebString::FromUTF16(base::ReplaceStringPlaceholders(
-      GetContentClient()->GetLocalizedString(message_id), value.Utf16(), NULL));
+
+  base::string16 format_string =
+      GetContentClient()->GetLocalizedString(message_id);
+
+  // If the ContentClient returned an empty string, e.g. because it's using the
+  // default implementation of ContentClient::GetLocalizedString, return an
+  // empty string instead of crashing with a failed DCHECK in
+  // base::ReplaceStringPlaceholders below. This is useful for tests that don't
+  // specialize a full ContentClient, since this way they can behave as though
+  // there isn't a defined |message_id| for the |name| instead of crashing
+  // outright.
+  if (format_string.empty())
+    return WebString();
+
+  return WebString::FromUTF16(
+      base::ReplaceStringPlaceholders(format_string, value.Utf16(), nullptr));
 }
 
 WebString BlinkPlatformImpl::QueryLocalizedString(WebLocalizedString::Name name,
@@ -586,7 +651,11 @@ WebString BlinkPlatformImpl::QueryLocalizedString(WebLocalizedString::Name name,
   values.push_back(value1.Utf16());
   values.push_back(value2.Utf16());
   return WebString::FromUTF16(base::ReplaceStringPlaceholders(
-      GetContentClient()->GetLocalizedString(message_id), values, NULL));
+      GetContentClient()->GetLocalizedString(message_id), values, nullptr));
+}
+
+bool BlinkPlatformImpl::IsRendererSideResourceSchedulerEnabled() const {
+  return base::FeatureList::IsEnabled(features::kRendererSideResourceScheduler);
 }
 
 std::unique_ptr<blink::WebGestureCurve>
@@ -730,24 +799,14 @@ bool BlinkPlatformImpl::IsDomKeyForModifier(int dom_key) {
       static_cast<ui::DomKey>(dom_key));
 }
 
-std::unique_ptr<blink::WebFeaturePolicy> BlinkPlatformImpl::CreateFeaturePolicy(
-    const blink::WebFeaturePolicy* parent_policy,
-    const blink::WebParsedFeaturePolicy& container_policy,
-    const blink::WebParsedFeaturePolicy& policy_header,
-    const blink::WebSecurityOrigin& origin) {
-  std::unique_ptr<FeaturePolicy> policy = FeaturePolicy::CreateFromParentPolicy(
-      static_cast<const FeaturePolicy*>(parent_policy),
-      FeaturePolicyHeaderFromWeb(container_policy), url::Origin(origin));
-  policy->SetHeaderPolicy(FeaturePolicyHeaderFromWeb(policy_header));
-  return std::move(policy);
+scoped_refptr<base::SingleThreadTaskRunner> BlinkPlatformImpl::GetIOTaskRunner()
+    const {
+  return io_thread_task_runner_;
 }
 
-std::unique_ptr<blink::WebFeaturePolicy>
-BlinkPlatformImpl::DuplicateFeaturePolicyWithOrigin(
-    const blink::WebFeaturePolicy& policy,
-    const blink::WebSecurityOrigin& new_origin) {
-  return FeaturePolicy::CreateFromPolicyWithOrigin(
-      static_cast<const FeaturePolicy&>(policy), url::Origin(new_origin));
+std::unique_ptr<blink::Platform::NestedMessageLoopRunner>
+BlinkPlatformImpl::CreateNestedMessageLoopRunner() const {
+  return std::make_unique<NestedMessageLoopRunnerImpl>();
 }
 
 }  // namespace content

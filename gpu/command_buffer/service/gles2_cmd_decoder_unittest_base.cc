@@ -134,7 +134,7 @@ GLES2DecoderTestBase::GLES2DecoderTestBase()
   memset(immediate_buffer_, 0xEE, sizeof(immediate_buffer_));
 }
 
-GLES2DecoderTestBase::~GLES2DecoderTestBase() {}
+GLES2DecoderTestBase::~GLES2DecoderTestBase() = default;
 
 void GLES2DecoderTestBase::OnConsoleMessage(int32_t id,
                                             const std::string& message) {}
@@ -428,6 +428,13 @@ void GLES2DecoderTestBase::InitDecoderWithWorkarounds(
           line_width_range, line_width_range + arraysize(line_width_range)))
       .RetiresOnSaturation();
 
+  if (group_->feature_info()->feature_flags().ext_window_rectangles) {
+    static GLint max_window_rectangles = 4;
+    EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_WINDOW_RECTANGLES_EXT, _))
+        .WillOnce(SetArgPointee<1>(max_window_rectangles))
+        .RetiresOnSaturation();
+  }
+
   SetupInitCapabilitiesExpectations(group_->feature_info()->IsES3Capable());
   SetupInitStateExpectations(group_->feature_info()->IsES3Capable());
 
@@ -479,7 +486,7 @@ void GLES2DecoderTestBase::InitDecoderWithWorkarounds(
   shared_memory_base_ = buffer->memory();
   ClearSharedMemory();
 
-  gles2::ContextCreationAttribHelper attribs;
+  ContextCreationAttribs attribs;
   attribs.alpha_size = normalized_init.request_alpha ? 8 : 0;
   attribs.depth_size = normalized_init.request_depth ? 24 : 0;
   attribs.stencil_size = normalized_init.request_stencil ? 8 : 0;
@@ -582,7 +589,7 @@ void GLES2DecoderTestBase::ResetDecoder() {
   command_buffer_service_.reset();
   ::gl::MockGLInterface::SetGLInterface(NULL);
   gl_.reset();
-  gl::init::ShutdownGL();
+  gl::init::ShutdownGL(false);
 }
 
 void GLES2DecoderTestBase::TearDown() {
@@ -783,21 +790,36 @@ void GLES2DecoderTestBase::SetBucketAsCStrings(uint32_t bucket_id,
   ClearSharedMemory();
 }
 
-void GLES2DecoderTestBase::SetupClearTextureExpectations(GLuint service_id,
-                                                         GLuint old_service_id,
-                                                         GLenum bind_target,
-                                                         GLenum target,
-                                                         GLint level,
-                                                         GLenum internal_format,
-                                                         GLenum format,
-                                                         GLenum type,
-                                                         GLint xoffset,
-                                                         GLint yoffset,
-                                                         GLsizei width,
-                                                         GLsizei height) {
+void GLES2DecoderTestBase::SetupClearTextureExpectations(
+    GLuint service_id,
+    GLuint old_service_id,
+    GLenum bind_target,
+    GLenum target,
+    GLint level,
+    GLenum format,
+    GLenum type,
+    GLint xoffset,
+    GLint yoffset,
+    GLsizei width,
+    GLsizei height,
+    GLuint bound_pixel_unpack_buffer) {
   EXPECT_CALL(*gl_, BindTexture(bind_target, service_id))
       .Times(1)
       .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ALIGNMENT, _))
+      .Times(2)
+      .RetiresOnSaturation();
+  if (bound_pixel_unpack_buffer) {
+    EXPECT_CALL(*gl_, BindBuffer(GL_PIXEL_UNPACK_BUFFER, _))
+        .Times(2)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ROW_LENGTH, _))
+        .Times(2)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_IMAGE_HEIGHT, _))
+        .Times(2)
+        .RetiresOnSaturation();
+  }
   EXPECT_CALL(*gl_, TexSubImage2D(target, level, xoffset, yoffset, width,
                                   height, format, type, _))
       .Times(1)
@@ -805,6 +827,78 @@ void GLES2DecoderTestBase::SetupClearTextureExpectations(GLuint service_id,
   EXPECT_CALL(*gl_, BindTexture(bind_target, old_service_id))
       .Times(1)
       .RetiresOnSaturation();
+#if DCHECK_IS_ON()
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+#endif
+}
+
+void GLES2DecoderTestBase::SetupClearTexture3DExpectations(
+    GLsizeiptr buffer_size,
+    GLenum target,
+    GLuint tex_service_id,
+    GLint level,
+    GLenum format,
+    GLenum type,
+    size_t tex_sub_image_3d_num_calls,
+    GLint* xoffset,
+    GLint* yoffset,
+    GLint* zoffset,
+    GLsizei* width,
+    GLsizei* height,
+    GLsizei* depth,
+    GLuint bound_pixel_unpack_buffer) {
+  InSequence seq;
+  EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ALIGNMENT, 1))
+      .Times(1)
+      .RetiresOnSaturation();
+  if (bound_pixel_unpack_buffer) {
+    EXPECT_CALL(*gl_, BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ROW_LENGTH, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  EXPECT_CALL(*gl_, GenBuffersARB(1, _)).Times(1).RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindBuffer(GL_PIXEL_UNPACK_BUFFER, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(
+      *gl_, BufferData(GL_PIXEL_UNPACK_BUFFER, buffer_size, _, GL_STATIC_DRAW))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindTexture(target, tex_service_id))
+      .Times(1)
+      .RetiresOnSaturation();
+  for (size_t ii = 0; ii < tex_sub_image_3d_num_calls; ++ii) {
+    EXPECT_CALL(*gl_, TexSubImage3DNoData(target, level, xoffset[ii],
+                                          yoffset[ii], zoffset[ii], width[ii],
+                                          height[ii], depth[ii], format, type))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  EXPECT_CALL(*gl_, DeleteBuffersARB(1, _)).Times(1).RetiresOnSaturation();
+  EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ALIGNMENT, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  if (bound_pixel_unpack_buffer) {
+    EXPECT_CALL(*gl_,
+                BindBuffer(GL_PIXEL_UNPACK_BUFFER, bound_pixel_unpack_buffer))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ROW_LENGTH, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_IMAGE_HEIGHT, _))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  EXPECT_CALL(*gl_, BindTexture(target, _)).Times(1).RetiresOnSaturation();
 }
 
 void GLES2DecoderTestBase::SetupExpectationsForFramebufferClearing(
@@ -851,6 +945,11 @@ void GLES2DecoderTestBase::SetupExpectationsForRestoreClearState(
       .Times(1)
       .RetiresOnSaturation();
   SetupExpectationsForEnableDisable(GL_SCISSOR_TEST, restore_scissor_test);
+  if (group_->feature_info()->feature_flags().ext_window_rectangles) {
+    EXPECT_CALL(*gl_, WindowRectanglesEXT(_, _, _))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
   EXPECT_CALL(*gl_, Scissor(restore_scissor_x, restore_scissor_y,
                             restore_scissor_width, restore_scissor_height))
       .Times(1)
@@ -904,6 +1003,11 @@ void GLES2DecoderTestBase::SetupExpectationsForFramebufferClearingMulti(
     SetupExpectationsForDepthMask(true);
   }
   SetupExpectationsForEnableDisable(GL_SCISSOR_TEST, false);
+  if (group_->feature_info()->feature_flags().ext_window_rectangles) {
+    EXPECT_CALL(*gl_, WindowRectanglesEXT(GL_EXCLUSIVE_EXT, 0, nullptr))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
   EXPECT_CALL(*gl_, Clear(clear_bits))
       .Times(1)
       .RetiresOnSaturation();
@@ -1134,6 +1238,11 @@ GLES2DecoderTestBase::EnableFlags::EnableFlags()
 
 void GLES2DecoderTestBase::DoBindFramebuffer(
     GLenum target, GLuint client_id, GLuint service_id) {
+  if (group_->feature_info()->feature_flags().ext_window_rectangles) {
+    EXPECT_CALL(*gl_, WindowRectanglesEXT(_, _, _))
+        .Times(::testing::AtMost(1))
+        .RetiresOnSaturation();
+  }
   EXPECT_CALL(*gl_, BindFramebufferEXT(target, service_id))
       .Times(1)
       .RetiresOnSaturation();
@@ -1191,9 +1300,8 @@ void GLES2DecoderTestBase::DoRenderbufferStorageMultisampleCHROMIUM(
       .WillOnce(Return(GL_NO_ERROR))
       .RetiresOnSaturation();
   EnsureRenderbufferBound(expect_bind);
-  EXPECT_CALL(*gl_,
-              RenderbufferStorageMultisampleEXT(
-                  target, samples, gl_format, width, height))
+  EXPECT_CALL(*gl_, RenderbufferStorageMultisample(target, samples, gl_format,
+                                                   width, height))
       .Times(1)
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, GetError())
@@ -2163,6 +2271,11 @@ void GLES2DecoderTestBase::SetupInitStateManualExpectations(bool es3_capable) {
     EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0))
         .Times(1)
         .RetiresOnSaturation();
+    if (group_->feature_info()->feature_flags().ext_window_rectangles) {
+      EXPECT_CALL(*gl_, WindowRectanglesEXT(GL_EXCLUSIVE_EXT, 0, nullptr))
+          .Times(1)
+          .RetiresOnSaturation();
+    }
   }
 }
 
@@ -2221,7 +2334,7 @@ GLES2DecoderPassthroughTestBase::GLES2DecoderPassthroughTestBase(
   context_creation_attribs_.context_type = context_type;
 }
 
-GLES2DecoderPassthroughTestBase::~GLES2DecoderPassthroughTestBase() {}
+GLES2DecoderPassthroughTestBase::~GLES2DecoderPassthroughTestBase() = default;
 
 void GLES2DecoderPassthroughTestBase::OnConsoleMessage(
     int32_t id,
@@ -2310,7 +2423,7 @@ void GLES2DecoderPassthroughTestBase::TearDown() {
   decoder_.reset();
   group_ = nullptr;
   command_buffer_service_.reset();
-  gl::init::ShutdownGL();
+  gl::init::ShutdownGL(false);
 }
 
 void GLES2DecoderPassthroughTestBase::SetBucketData(uint32_t bucket_id,

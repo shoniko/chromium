@@ -8,12 +8,12 @@
 #include <memory>
 #include <string>
 
+#include "ash/app_list/model/app_list_item_observer.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
 #include "base/timer/timer.h"
 #include "ui/app_list/app_list_export.h"
-#include "ui/app_list/app_list_item_observer.h"
 #include "ui/app_list/views/image_shadow_animator.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
@@ -28,6 +28,7 @@ class ProgressBar;
 namespace app_list {
 
 class AppListItem;
+class AppListViewDelegate;
 class AppsGridView;
 
 class APP_LIST_EXPORT AppListItemView : public views::Button,
@@ -38,7 +39,9 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
   // Internal class name.
   static const char kViewClassName[];
 
-  AppListItemView(AppsGridView* apps_grid_view, AppListItem* item);
+  AppListItemView(AppsGridView* apps_grid_view,
+                  AppListItem* item,
+                  AppListViewDelegate* delegate);
   ~AppListItemView() override;
 
   // Set the icon of this image, adding a drop shadow if |has_shadow|.
@@ -125,6 +128,9 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
   void OnTouchDragTimer(const gfx::Point& tap_down_location,
                         const gfx::Point& tap_down_root_location);
 
+  // Records the context menu user journey time.
+  void OnContextMenuClosed(const base::TimeTicks& open_time);
+
   // views::ContextMenuController overrides:
   void ShowContextMenuForView(views::View* source,
                               const gfx::Point& point,
@@ -158,6 +164,7 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
 
   AppListItem* item_weak_;  // Owned by AppListModel. Can be NULL.
 
+  AppListViewDelegate* delegate_;     // Unowned.
   AppsGridView* apps_grid_view_;      // Parent view, owns this.
   views::ImageView* icon_;            // Strongly typed child view.
   views::Label* title_;               // Strongly typed child view.
@@ -180,14 +187,14 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
   bool is_installing_ = false;
   bool is_highlighted_ = false;
 
-  const bool is_fullscreen_app_list_enabled_;
-
   base::string16 tooltip_text_;
 
   // A timer to defer showing drag UI when mouse is pressed.
   base::OneShotTimer mouse_drag_timer_;
   // A timer to defer showing drag UI when the app item is touch pressed.
   base::OneShotTimer touch_drag_timer_;
+
+  base::WeakPtrFactory<AppListItemView> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListItemView);
 };

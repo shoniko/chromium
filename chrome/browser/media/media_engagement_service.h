@@ -9,6 +9,7 @@
 #include <set>
 
 #include "base/macros.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "base/values.h"
 #include "chrome/browser/media/media_engagement_score.h"
 #include "chrome/browser/media/media_engagement_score_details.mojom.h"
@@ -89,22 +90,33 @@ class MediaEngagementService : public KeyedService,
   // Retrieves the MediaEngagementScore for |url|.
   MediaEngagementScore CreateEngagementScore(const GURL& url) const;
 
+  MediaEngagementContentsObserver* GetContentsObserverFor(
+      content::WebContents* web_contents) const;
+
+  Profile* profile() const;
+
   // The name of the histogram that scores are logged to on startup.
   static const char kHistogramScoreAtStartupName[];
 
+  // The name of the histogram that records the reduction in score when history
+  // is cleared.
+  static const char kHistogramURLsDeletedScoreReductionName[];
+
  private:
   friend class MediaEngagementBrowserTest;
-  friend class MediaEngagementServiceTest;
   friend class MediaEngagementContentsObserverTest;
-  friend MediaEngagementContentsObserver;
+  friend class MediaEngagementServiceTest;
+  friend class MediaEngagementSessionTest;
+  friend class MediaEngagementContentsObserver;
 
-  MediaEngagementService(Profile* profile, std::unique_ptr<base::Clock> clock);
+  MediaEngagementService(Profile* profile, base::Clock* clock);
 
   // Returns true if we should record engagement for this url. Currently,
   // engagement is only earned for HTTP and HTTPS.
   bool ShouldRecordEngagement(const GURL& url) const;
 
-  std::set<MediaEngagementContentsObserver*> contents_observers_;
+  base::flat_map<content::WebContents*, MediaEngagementContentsObserver*>
+      contents_observers_;
 
   Profile* profile_;
 
@@ -112,13 +124,18 @@ class MediaEngagementService : public KeyedService,
   void Clear(const GURL& url);
 
   // An internal clock for testing.
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
 
   // Records all the stored scores to a histogram.
   void RecordStoredScoresToHistogram();
 
+  std::vector<MediaEngagementScore> GetAllStoredScores() const;
+
   int GetSchemaVersion() const;
   void SetSchemaVersion(int);
+
+  // Allows us to cancel the RecordScoresToHistogram task if we are destroyed.
+  base::CancelableTaskTracker task_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaEngagementService);
 };

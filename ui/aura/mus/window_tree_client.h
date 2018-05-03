@@ -18,8 +18,9 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
-#include "components/viz/common/surfaces/local_surface_id_allocator.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/ui/public/interfaces/remote_event_dispatcher.mojom.h"
@@ -118,6 +119,12 @@ class AURA_EXPORT WindowTreeClient
   // See mojom for details on |automatically_create_display_roots|.
   void ConnectAsWindowManager(bool automatically_create_display_roots = true);
 
+  // Connects to mus such that a single WindowTreeHost is created. This blocks
+  // until the WindowTreeHost is obtained and calls
+  // WindowTreeClientDelegate::OnEmbed() with the WindowTreeHost. This entry
+  // point is mostly useful for testing and examples.
+  void ConnectViaWindowTreeHostFactory();
+
   void DisableDragDropClient() { install_drag_drop_client_ = false; }
 
   service_manager::Connector* connector() { return connector_; }
@@ -140,6 +147,7 @@ class AURA_EXPORT WindowTreeClient
   void SetImeVisibility(WindowMus* window,
                         bool visible,
                         ui::mojom::TextInputStatePtr state);
+  void SetHitTestMask(WindowMus* window, const base::Optional<gfx::Rect>& rect);
 
   // Embeds a new client in |window|. |flags| is a bitmask of the values defined
   // by kEmbedFlag*; 0 gives default behavior. |callback| is called to indicate
@@ -406,6 +414,7 @@ class AURA_EXPORT WindowTreeClient
       uint32_t event_id,
       Id window_id,
       int64_t display_id,
+      Id display_root_window_id,
       const gfx::PointF& event_location_in_screen_pixel_layout,
       std::unique_ptr<ui::Event> event,
       bool matches_pointer_watcher) override;
@@ -448,6 +457,9 @@ class AURA_EXPORT WindowTreeClient
 
   // Overridden from WindowManager:
   void OnConnect() override;
+  void WmOnAcceleratedWidgetForDisplay(
+      int64_t display,
+      gpu::SurfaceHandle surface_handle) override;
   void WmNewDisplayAdded(
       const display::Display& display,
       ui::mojom::WindowDataPtr root_data,
@@ -467,7 +479,7 @@ class AURA_EXPORT WindowTreeClient
   void WmSetCanFocus(Id window_id, bool can_focus) override;
   void WmCreateTopLevelWindow(
       uint32_t change_id,
-      ClientSpecificId requesting_client_id,
+      const viz::FrameSinkId& frame_sink_id,
       const std::unordered_map<std::string, std::vector<uint8_t>>&
           transport_properties) override;
   void WmClientJankinessChanged(ClientSpecificId client_id,
@@ -487,6 +499,7 @@ class AURA_EXPORT WindowTreeClient
   void WmDeactivateWindow(Id window_id) override;
   void WmStackAbove(uint32_t change_id, Id above_id, Id below_id) override;
   void WmStackAtTop(uint32_t change_id, uint32_t window_id) override;
+  void WmPerformWmAction(Id window_id, const std::string& action) override;
   void OnAccelerator(uint32_t ack_id,
                      uint32_t accelerator_id,
                      std::unique_ptr<ui::Event> event) override;
@@ -538,9 +551,6 @@ class AURA_EXPORT WindowTreeClient
       WindowTreeHostMus* window_tree_host,
       const gfx::Insets& client_area,
       const std::vector<gfx::Rect>& additional_client_areas) override;
-  void OnWindowTreeHostHitTestMaskWillChange(
-      WindowTreeHostMus* window_tree_host,
-      const base::Optional<gfx::Rect>& mask_rect) override;
   void OnWindowTreeHostSetOpacity(WindowTreeHostMus* window_tree_host,
                                   float opacity) override;
   void OnWindowTreeHostDeactivateWindow(
@@ -548,6 +558,8 @@ class AURA_EXPORT WindowTreeClient
   void OnWindowTreeHostStackAbove(WindowTreeHostMus* window_tree_host,
                                   Window* window) override;
   void OnWindowTreeHostStackAtTop(WindowTreeHostMus* window_tree_host) override;
+  void OnWindowTreeHostPerformWmAction(WindowTreeHostMus* window_tree_host,
+                                       const std::string& action) override;
   void OnWindowTreeHostPerformWindowMove(
       WindowTreeHostMus* window_tree_host,
       ui::mojom::MoveLoopSource mus_source,

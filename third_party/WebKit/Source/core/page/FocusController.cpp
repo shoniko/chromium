@@ -246,7 +246,7 @@ ScopedFocusNavigation::ScopedFocusNavigation(
     ContainerNode& scoping_root_node,
     const Element* current,
     FocusController::OwnerMap& owner_map)
-    : current_(const_cast<Element*>(current)) {
+    : current_(current) {
   if (HTMLSlotElement* slot = ToHTMLSlotElementOrNull(scoping_root_node)) {
     if (slot->AssignedNodes().IsEmpty()) {
       navigation_ = new FocusNavigation(scoping_root_node, *slot, owner_map);
@@ -849,7 +849,7 @@ void FocusController::FocusDocumentView(Frame* frame, bool notify_embedder) {
     Document* document = focused_frame->GetDocument();
     Element* focused_element = document ? document->FocusedElement() : nullptr;
     if (focused_element)
-      DispatchBlurEvent(*document, *focused_element);
+      document->ClearFocusedElement();
   }
 
   LocalFrame* new_focused_frame =
@@ -1136,6 +1136,10 @@ Element* FocusController::FindFocusableElement(WebFocusType type,
 
 Element* FocusController::NextFocusableElementInForm(Element* element,
                                                      WebFocusType focus_type) {
+  // TODO(ajith.v) Due to crbug.com/781026 when next/previous element is far
+  // from current element in terms of tabindex, then it's signalling CPU load.
+  // Will nvestigate further for a proper solution later.
+  static const int kFocusTraversalThreshold = 50;
   element->GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
   if (!element->IsHTMLElement())
     return nullptr;
@@ -1153,12 +1157,13 @@ Element* FocusController::NextFocusableElementInForm(Element* element,
   if (!form_owner)
     return nullptr;
 
-  Element* next_element = element;
   OwnerMap owner_map;
-  for (next_element =
-           FindFocusableElement(focus_type, *next_element, owner_map);
-       next_element; next_element = FindFocusableElement(
-                         focus_type, *next_element, owner_map)) {
+  Element* next_element = FindFocusableElement(focus_type, *element, owner_map);
+  int traversal = 0;
+  for (; next_element && traversal < kFocusTraversalThreshold;
+       next_element =
+           FindFocusableElement(focus_type, *next_element, owner_map),
+       ++traversal) {
     if (!next_element->IsHTMLElement())
       continue;
     if (ToHTMLElement(next_element)->isContentEditableForBinding() &&
@@ -1355,15 +1360,13 @@ void FocusController::FindFocusCandidateInContainer(
 
   for (; element;
        element =
-           (element->IsFrameOwnerElement() ||
-            CanScrollInDirection(element, type))
+           (IsNavigableContainer(element, type))
                ? ElementTraversal::NextSkippingChildren(*element, &container)
                : ElementTraversal::Next(*element, &container)) {
     if (element == focused_element)
       continue;
 
-    if (!element->IsKeyboardFocusable() && !element->IsFrameOwnerElement() &&
-        !CanScrollInDirection(element, type))
+    if (!element->IsKeyboardFocusable() && !IsNavigableContainer(element, type))
       continue;
 
     FocusCandidate candidate = FocusCandidate(element, type);
@@ -1401,40 +1404,37 @@ bool FocusController::AdvanceFocusDirectionallyInContainer(
     return ScrollInDirection(container, type);
   }
 
-  HTMLFrameOwnerElement* frame_element = FrameOwnerElement(focus_candidate);
-  // If we have an iframe without the src attribute, it will not have a
-  // contentFrame().  We DCHECK here to make sure that
-  // updateFocusCandidateIfNeeded() will never consider such an iframe as a
-  // candidate.
-  DCHECK(!frame_element || frame_element->ContentFrame());
-  if (frame_element && frame_element->ContentFrame()->IsLocalFrame()) {
-    if (focus_candidate.is_offscreen_after_scrolling) {
-      ScrollInDirection(&focus_candidate.visible_node->GetDocument(), type);
+  if (IsNavigableContainer(focus_candidate.visible_node, type)) {
+    HTMLFrameOwnerElement* frame_element = FrameOwnerElement(focus_candidate);
+    if (frame_element && frame_element->ContentFrame()->IsLocalFrame()) {
+      if (focus_candidate.is_offscreen_after_scrolling) {
+        ScrollInDirection(&focus_candidate.visible_node->GetDocument(), type);
+        return true;
+      }
+      // Navigate into a new frame.
+      LayoutRect rect;
+      Element* focused_element =
+          ToLocalFrame(FocusedOrMainFrame())->GetDocument()->FocusedElement();
+      if (focused_element && !HasOffscreenRect(focused_element)) {
+        rect = NodeRectInAbsoluteCoordinates(focused_element,
+                                             true /* ignore border */);
+      }
+      ToLocalFrame(frame_element->ContentFrame())
+          ->GetDocument()
+          ->UpdateStyleAndLayoutIgnorePendingStylesheets();
+      if (!AdvanceFocusDirectionallyInContainer(
+              ToLocalFrame(frame_element->ContentFrame())->GetDocument(), rect,
+              type)) {
+        // The new frame had nothing interesting, need to find another
+        // candidate.
+        return AdvanceFocusDirectionallyInContainer(
+            container,
+            NodeRectInAbsoluteCoordinates(focus_candidate.visible_node, true),
+            type);
+      }
       return true;
     }
-    // Navigate into a new frame.
-    LayoutRect rect;
-    Element* focused_element =
-        ToLocalFrame(FocusedOrMainFrame())->GetDocument()->FocusedElement();
-    if (focused_element && !HasOffscreenRect(focused_element))
-      rect = NodeRectInAbsoluteCoordinates(focused_element,
-                                           true /* ignore border */);
-    ToLocalFrame(frame_element->ContentFrame())
-        ->GetDocument()
-        ->UpdateStyleAndLayoutIgnorePendingStylesheets();
-    if (!AdvanceFocusDirectionallyInContainer(
-            ToLocalFrame(frame_element->ContentFrame())->GetDocument(), rect,
-            type)) {
-      // The new frame had nothing interesting, need to find another candidate.
-      return AdvanceFocusDirectionallyInContainer(
-          container,
-          NodeRectInAbsoluteCoordinates(focus_candidate.visible_node, true),
-          type);
-    }
-    return true;
-  }
 
-  if (CanScrollInDirection(focus_candidate.visible_node, type)) {
     if (focus_candidate.is_offscreen_after_scrolling) {
       ScrollInDirection(focus_candidate.visible_node, type);
       return true;
@@ -1448,6 +1448,7 @@ bool FocusController::AdvanceFocusDirectionallyInContainer(
     return AdvanceFocusDirectionallyInContainer(focus_candidate.visible_node,
                                                 starting_rect, type);
   }
+
   if (focus_candidate.is_offscreen_after_scrolling) {
     Node* container = focus_candidate.enclosing_scrollable_box;
     ScrollInDirection(container, type);
@@ -1482,30 +1483,29 @@ bool FocusController::AdvanceFocusDirectionally(WebFocusType type) {
   LayoutRect starting_rect;
   if (focused_element) {
     if (!HasOffscreenRect(focused_element)) {
-      container = ScrollableEnclosingBoxOrParentFrameForNodeInDirection(
-          type, focused_element);
       starting_rect = NodeRectInAbsoluteCoordinates(focused_element,
                                                     true /* ignore border */);
     } else if (auto* area = ToHTMLAreaElementOrNull(*focused_element)) {
       if (area->ImageElement()) {
-        container = ScrollableEnclosingBoxOrParentFrameForNodeInDirection(
-            type, area->ImageElement());
+        focused_element = area->ImageElement();
         starting_rect = VirtualRectForAreaElementAndDirection(*area, type);
       }
     }
+    container = ScrollableAreaOrDocumentOf(focused_element);
   }
 
   bool consumed = false;
-  do {
+  while (!consumed && container) {
     consumed =
         AdvanceFocusDirectionallyInContainer(container, starting_rect, type);
-    starting_rect =
-        NodeRectInAbsoluteCoordinates(container, true /* ignore border */);
-    container =
-        ScrollableEnclosingBoxOrParentFrameForNodeInDirection(type, container);
+    if (consumed)
+      break;
+
+    container = ScrollableAreaOrDocumentOf(container);
+
     if (container && container->IsDocumentNode())
       ToDocument(container)->UpdateStyleAndLayoutIgnorePendingStylesheets();
-  } while (!consumed && container);
+  }
 
   return consumed;
 }

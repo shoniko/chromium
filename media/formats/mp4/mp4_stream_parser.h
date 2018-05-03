@@ -17,7 +17,12 @@
 #include "media/base/media_export.h"
 #include "media/base/stream_parser.h"
 #include "media/formats/common/offset_byte_queue.h"
+#include "media/formats/mp4/parse_result.h"
 #include "media/formats/mp4/track_run_iterator.h"
+
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+#include "media/formats/mp4/aac.h"
+#endif
 
 namespace media {
 namespace mp4 {
@@ -52,7 +57,7 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
     kError
   };
 
-  bool ParseBox(bool* err);
+  ParseResult ParseBox();
   bool ParseMoov(mp4::BoxReader* reader);
   bool ParseMoof(mp4::BoxReader* reader);
 
@@ -72,10 +77,12 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
   void ChangeState(State new_state);
 
   bool EmitConfigs();
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
   bool PrepareAACBuffer(const AAC& aac_config,
                         std::vector<uint8_t>* frame_buf,
                         std::vector<SubsampleEntry>* subsamples) const;
-  bool EnqueueSample(BufferQueueMap* buffers, bool* err);
+#endif
+  ParseResult EnqueueSample(BufferQueueMap* buffers);
   bool SendAndFlushSamples(BufferQueueMap* buffers);
 
   void Reset();

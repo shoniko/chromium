@@ -88,7 +88,7 @@ class ScreenshotController::ScreenshotLayer : public ui::LayerOwner,
     layer()->SetVisible(true);
     layer()->set_delegate(this);
   }
-  ~ScreenshotLayer() override {}
+  ~ScreenshotLayer() override = default;
 
   const gfx::Rect& region() const { return region_; }
 
@@ -126,20 +126,18 @@ class ScreenshotController::ScreenshotLayer : public ui::LayerOwner,
                                   kSelectedAreaOverlayColor);
     }
 
-    DrawPseudoCursor(recorder.canvas());
+    DrawPseudoCursor(recorder.canvas(), context.device_scale_factor());
 
     if (!region_.IsEmpty())
       recorder.canvas()->FillRect(region_, SK_ColorBLACK, SkBlendMode::kClear);
   }
-
-  void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override {}
 
   void OnDeviceScaleFactorChanged(float old_device_scale_factor,
                                   float new_device_scale_factor) override {}
 
   // Mouse cursor may move sub DIP, so paint pseudo cursor instead of
   // using platform cursor so that it's aliend with the region.
-  void DrawPseudoCursor(gfx::Canvas* canvas) {
+  void DrawPseudoCursor(gfx::Canvas* canvas, float device_scale_factor) {
     // Don't draw if window selection mode.
     if (cursor_location_in_root_.IsOrigin())
       return;
@@ -154,10 +152,26 @@ class ScreenshotController::ScreenshotLayer : public ui::LayerOwner,
       pseudo_cursor_point.Offset(0, -1);
 
     cc::PaintFlags flags;
-    flags.setAntiAlias(false);
-    flags.setStrokeWidth(1);
-    flags.setColor(SK_ColorWHITE);
     flags.setBlendMode(SkBlendMode::kSrc);
+
+    // Circle fill.
+    flags.setStyle(cc::PaintFlags::kFill_Style);
+    flags.setColor(SK_ColorGRAY);
+    flags.setAntiAlias(true);
+    const int stroke_width = 1;
+    flags.setStrokeWidth(stroke_width);
+    gfx::PointF circle_center(pseudo_cursor_point);
+    // For the circle to be exactly centered in the middle of the crosshairs, we
+    // need to take into account the stroke width of the crosshair as well as
+    // the device scale factor.
+    const float center_offset =
+        stroke_width / (2.0f * device_scale_factor * device_scale_factor);
+    circle_center.Offset(center_offset, center_offset);
+    const float circle_radius = (kCursorSize / 2.0f) - 2.5f;
+    canvas->DrawCircle(circle_center, circle_radius, flags);
+
+    flags.setAntiAlias(false);
+    flags.setColor(SK_ColorWHITE);
     gfx::Vector2d width(kCursorSize / 2, 0);
     gfx::Vector2d height(0, kCursorSize / 2);
     gfx::Vector2d white_x_offset(1, -1);
@@ -165,7 +179,6 @@ class ScreenshotController::ScreenshotLayer : public ui::LayerOwner,
     // Horizontal
     canvas->DrawLine(pseudo_cursor_point - width + white_x_offset,
                      pseudo_cursor_point + width + white_x_offset, flags);
-    flags.setStrokeWidth(1);
     // Vertical
     canvas->DrawLine(pseudo_cursor_point - height + white_y_offset,
                      pseudo_cursor_point + height + white_y_offset, flags);
@@ -177,6 +190,12 @@ class ScreenshotController::ScreenshotLayer : public ui::LayerOwner,
     // Vertical
     canvas->DrawLine(pseudo_cursor_point - height, pseudo_cursor_point + height,
                      flags);
+
+    // Circle stroke.
+    flags.setColor(SK_ColorDKGRAY);
+    flags.setStyle(cc::PaintFlags::kStroke_Style);
+    flags.setAntiAlias(true);
+    canvas->DrawCircle(circle_center, circle_radius, flags);
   }
 
   bool draw_inactive_overlay_;
@@ -258,29 +277,35 @@ class ScreenshotController::ScopedCursorSetter {
   DISALLOW_COPY_AND_ASSIGN(ScopedCursorSetter);
 };
 
-ScreenshotController::ScreenshotController()
+ScreenshotController::ScreenshotController(
+    std::unique_ptr<ScreenshotDelegate> delegate)
     : mode_(NONE),
       root_window_(nullptr),
       selected_(nullptr),
-      screenshot_delegate_(nullptr) {
+      screenshot_delegate_(std::move(delegate)) {
   // Keep this here and don't move it to StartPartialScreenshotSession(), as it
   // needs to be pre-pended by MouseCursorEventFilter in Shell::Init().
   Shell::Get()->PrependPreTargetHandler(this);
 }
 
 ScreenshotController::~ScreenshotController() {
-  if (screenshot_delegate_)
+  if (in_screenshot_session_)
     CancelScreenshotSession();
   Shell::Get()->RemovePreTargetHandler(this);
 }
 
-void ScreenshotController::StartWindowScreenshotSession(
-    ScreenshotDelegate* screenshot_delegate) {
-  if (screenshot_delegate_) {
-    DCHECK_EQ(screenshot_delegate_, screenshot_delegate);
+void ScreenshotController::TakeScreenshotForAllRootWindows() {
+  DCHECK(screenshot_delegate_);
+  if (screenshot_delegate_->CanTakeScreenshot())
+    screenshot_delegate_->HandleTakeScreenshotForAllRootWindows();
+}
+
+void ScreenshotController::StartWindowScreenshotSession() {
+  DCHECK(screenshot_delegate_);
+  // Already in a screenshot session.
+  if (in_screenshot_session_)
     return;
-  }
-  screenshot_delegate_ = screenshot_delegate;
+  in_screenshot_session_ = true;
   mode_ = WINDOW;
 
   display::Screen::GetScreen()->AddObserver(this);
@@ -298,15 +323,12 @@ void ScreenshotController::StartWindowScreenshotSession(
 }
 
 void ScreenshotController::StartPartialScreenshotSession(
-    ScreenshotDelegate* screenshot_delegate,
     bool draw_overlay_immediately) {
+  DCHECK(screenshot_delegate_);
   // Already in a screenshot session.
-  if (screenshot_delegate_) {
-    DCHECK_EQ(screenshot_delegate_, screenshot_delegate);
+  if (in_screenshot_session_)
     return;
-  }
-
-  screenshot_delegate_ = screenshot_delegate;
+  in_screenshot_session_ = true;
   mode_ = PARTIAL;
   display::Screen::GetScreen()->AddObserver(this);
   for (aura::Window* root : Shell::GetAllRootWindows()) {
@@ -336,7 +358,7 @@ void ScreenshotController::CancelScreenshotSession() {
   pen_events_only_ = false;
   root_window_ = nullptr;
   SetSelectedWindow(nullptr);
-  screenshot_delegate_ = nullptr;
+  in_screenshot_session_ = false;
   display::Screen::GetScreen()->RemoveObserver(this);
   layers_.clear();
   cursor_setter_.reset();
@@ -454,7 +476,7 @@ bool ScreenshotController::ShouldProcessEvent(
 }
 
 void ScreenshotController::OnKeyEvent(ui::KeyEvent* event) {
-  if (!screenshot_delegate_)
+  if (!in_screenshot_session_)
     return;
 
   if (event->type() == ui::ET_KEY_RELEASED) {
@@ -474,7 +496,7 @@ void ScreenshotController::OnKeyEvent(ui::KeyEvent* event) {
 }
 
 void ScreenshotController::OnMouseEvent(ui::MouseEvent* event) {
-  if (!screenshot_delegate_ || !ShouldProcessEvent(event->pointer_details()))
+  if (!in_screenshot_session_ || !ShouldProcessEvent(event->pointer_details()))
     return;
   switch (mode_) {
     case NONE:
@@ -515,7 +537,7 @@ void ScreenshotController::OnMouseEvent(ui::MouseEvent* event) {
 }
 
 void ScreenshotController::OnTouchEvent(ui::TouchEvent* event) {
-  if (!screenshot_delegate_ || !ShouldProcessEvent(event->pointer_details()))
+  if (!in_screenshot_session_ || !ShouldProcessEvent(event->pointer_details()))
     return;
   switch (mode_) {
     case NONE:
@@ -556,14 +578,14 @@ void ScreenshotController::OnTouchEvent(ui::TouchEvent* event) {
 }
 
 void ScreenshotController::OnDisplayAdded(const display::Display& new_display) {
-  if (!screenshot_delegate_)
+  if (!in_screenshot_session_)
     return;
   CancelScreenshotSession();
 }
 
 void ScreenshotController::OnDisplayRemoved(
     const display::Display& old_display) {
-  if (!screenshot_delegate_)
+  if (!in_screenshot_session_)
     return;
   CancelScreenshotSession();
 }

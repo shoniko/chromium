@@ -174,6 +174,14 @@ bool SessionController::IsUserSupervised() const {
          active_user_type == user_manager::USER_TYPE_CHILD;
 }
 
+bool SessionController::IsUserLegacySupervised() const {
+  if (!IsActiveUserSessionStarted())
+    return false;
+
+  user_manager::UserType active_user_type = GetUserSession(0)->user_info->type;
+  return active_user_type == user_manager::USER_TYPE_SUPERVISED;
+}
+
 bool SessionController::IsUserChild() const {
   if (!IsActiveUserSessionStarted())
     return false;
@@ -343,7 +351,7 @@ void SessionController::PrepareForLock(PrepareForLockCallback callback) {
   // page or app to mimick the lock screen.
   wm::WindowState* active_window_state = wm::GetActiveWindowState();
   if (active_window_state && active_window_state->IsFullscreen() &&
-      active_window_state->hide_shelf_when_fullscreen()) {
+      active_window_state->GetHideShelfWhenFullscreen()) {
     const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
     active_window_state->OnWMEvent(&event);
   }

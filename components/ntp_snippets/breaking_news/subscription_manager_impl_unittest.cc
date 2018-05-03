@@ -4,6 +4,7 @@
 
 #include "components/ntp_snippets/breaking_news/subscription_manager_impl.h"
 
+#include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/test/histogram_tester.h"
 #include "build/build_config.h"
@@ -12,6 +13,7 @@
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/fake_signin_manager.h"
+#include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/test_signin_client.h"
 #include "google_apis/gaia/fake_oauth2_token_service_delegate.h"
 #include "net/base/net_errors.h"
@@ -36,7 +38,9 @@ const char kUnsubscriptionUrlSignedIn[] = "http://valid-url.test/unsubscribe";
 const char kUnsubscriptionUrlSignedOut[] =
     "http://valid-url.test/unsubscribe?key=fakeAPIkey";
 
-class SubscriptionManagerImplTest : public testing::Test {
+class SubscriptionManagerImplTest
+    : public testing::Test,
+      public OAuth2TokenService::DiagnosticsObserver {
  public:
   SubscriptionManagerImplTest()
       : request_context_getter_(
@@ -46,6 +50,14 @@ class SubscriptionManagerImplTest : public testing::Test {
   void SetUp() override {
     SubscriptionManagerImpl::RegisterProfilePrefs(
         utils_.pref_service()->registry());
+    signin::RegisterAccountConsistencyProfilePrefs(
+        utils_.pref_service()->registry());
+    signin::SetGaiaOriginIsolatedCallback(base::Bind([] { return true; }));
+    utils_.token_service()->AddDiagnosticsObserver(this);
+  }
+
+  void TearDown() override {
+    utils_.token_service()->RemoveDiagnosticsObserver(this);
   }
 
   scoped_refptr<net::URLRequestContextGetter> GetRequestContext() {
@@ -128,6 +140,10 @@ class SubscriptionManagerImplTest : public testing::Test {
                                                  base::Time::Max());
   }
 
+  void set_on_access_token_request_callback(base::OnceClosure callback) {
+    on_access_token_request_callback_ = std::move(callback);
+  }
+
  private:
   void RespondSuccessfully() {
     net::TestURLFetcher* url_fetcher = GetRunningFetcher();
@@ -146,10 +162,20 @@ class SubscriptionManagerImplTest : public testing::Test {
     url_fetcher->delegate()->OnURLFetchComplete(url_fetcher);
   }
 
+  // OAuth2TokenService::DiagnosticsObserver:
+  void OnAccessTokenRequested(
+      const std::string& account_id,
+      const std::string& consumer_id,
+      const OAuth2TokenService::ScopeSet& scopes) override {
+    if (on_access_token_request_callback_)
+      std::move(on_access_token_request_callback_).Run();
+  }
+
   base::MessageLoop message_loop_;
   test::RemoteSuggestionsTestUtils utils_;
   scoped_refptr<net::TestURLRequestContextGetter> request_context_getter_;
   net::TestURLFetcherFactory url_fetcher_factory_;
+  base::OnceClosure on_access_token_request_callback_;
 };
 
 TEST_F(SubscriptionManagerImplTest, SubscribeSuccessfully) {
@@ -174,6 +200,9 @@ TEST_F(SubscriptionManagerImplTest, SubscribeSuccessfully) {
 #if !defined(OS_CHROMEOS)
 TEST_F(SubscriptionManagerImplTest,
        ShouldSubscribeWithAuthenticationWhenAuthenticated) {
+  base::RunLoop run_loop;
+  set_on_access_token_request_callback(run_loop.QuitClosure());
+
   // Sign in.
   FakeProfileOAuth2TokenService* auth_token_service = GetOAuth2TokenService();
   SignIn();
@@ -186,6 +215,8 @@ TEST_F(SubscriptionManagerImplTest,
       /*variations_service=*/nullptr, GetSigninManager(), auth_token_service,
       /*locale=*/"", kAPIKey, GURL(kSubscriptionUrl), GURL(kUnsubscriptionUrl));
   manager.Subscribe(subscription_token);
+
+  run_loop.Run();
 
   // Make sure that subscription is pending an access token.
   ASSERT_FALSE(manager.IsSubscribed());
@@ -269,10 +300,15 @@ TEST_F(SubscriptionManagerImplTest,
   RespondToSubscriptionRequestSuccessfully(/*is_signed_in=*/false);
   ASSERT_FALSE(manager.NeedsToResubscribe());
 
+  base::RunLoop run_loop;
+  set_on_access_token_request_callback(run_loop.QuitClosure());
+
   // Sign in. This should trigger a resubscribe.
   SignIn();
   IssueRefreshToken(auth_token_service);
   ASSERT_TRUE(manager.NeedsToResubscribe());
+
+  run_loop.Run();
   ASSERT_EQ(1u, auth_token_service->GetPendingRequests().size());
   IssueAccessToken(auth_token_service);
   RespondToSubscriptionRequestSuccessfully(/*is_signed_in=*/true);
@@ -288,6 +324,9 @@ TEST_F(SubscriptionManagerImplTest,
 #if !defined(OS_CHROMEOS)
 TEST_F(SubscriptionManagerImplTest,
        ShouldResubscribeIfSignOutAfterSubscription) {
+  base::RunLoop run_loop;
+  set_on_access_token_request_callback(run_loop.QuitClosure());
+
   // Signin and subscribe.
   FakeProfileOAuth2TokenService* auth_token_service = GetOAuth2TokenService();
   SignIn();
@@ -298,6 +337,7 @@ TEST_F(SubscriptionManagerImplTest,
       /*variations_service=*/nullptr, GetSigninManager(), auth_token_service,
       /*locale=*/"", kAPIKey, GURL(kSubscriptionUrl), GURL(kUnsubscriptionUrl));
   manager.Subscribe(subscription_token);
+  run_loop.Run();
   ASSERT_EQ(1u, auth_token_service->GetPendingRequests().size());
   IssueAccessToken(auth_token_service);
   RespondToSubscriptionRequestSuccessfully(/*is_signed_in=*/true);

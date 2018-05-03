@@ -34,22 +34,20 @@
 #include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/wtf/Allocator.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace blink {
 
 class Document;
-class HTMLLinkElement;
 class HTMLMediaElement;
 class InspectedFrames;
 class InspectorDOMAgent;
 class InspectorSession;
-class LinkResource;
 class LocalFrame;
 class MediaControls;
 class Page;
 class Settings;
 class ShadowRoot;
-class WebCredentialManagerClient;
 class WebFrameClient;
 class WebLayerTreeView;
 class WebMediaPlayer;
@@ -70,11 +68,14 @@ class CORE_EXPORT CoreInitializer {
     return *instance_;
   }
 
-  virtual ~CoreInitializer() {}
+  virtual ~CoreInitializer() = default;
 
   // Should be called by clients before trying to create Frames.
   virtual void Initialize();
 
+  // Called on startup to register Mojo interfaces that for control messages,
+  // e.g. messages that are not routed to a specific frame.
+  virtual void RegisterInterfaces(service_manager::BinderRegistry&) = 0;
   // Methods defined in CoreInitializer and implemented by ModulesInitializer to
   // bypass the inverted dependency from core/ to modules/.
   // Mojo Interfaces registered with LocalFrame
@@ -94,8 +95,6 @@ class CORE_EXPORT CoreInitializer {
                                          InspectorDOMAgent*,
                                          InspectedFrames*,
                                          Page*) const = 0;
-  virtual LinkResource* CreateServiceWorkerLinkResource(
-      HTMLLinkElement*) const = 0;
 
   virtual void OnClearWindowObjectInMainWorld(Document&,
                                               const Settings&) const = 0;
@@ -110,10 +109,6 @@ class CORE_EXPORT CoreInitializer {
   virtual WebRemotePlaybackClient* CreateWebRemotePlaybackClient(
       HTMLMediaElement&) const = 0;
 
-  virtual void ProvideCredentialManagerClient(
-      Page&,
-      WebCredentialManagerClient*) const = 0;
-
   virtual void ProvideModulesToPage(Page&, WebViewClient*) const = 0;
   virtual void ForceNextWebGLContextCreationToFail() const = 0;
 
@@ -121,7 +116,7 @@ class CORE_EXPORT CoreInitializer {
 
  protected:
   // CoreInitializer is only instantiated by subclass ModulesInitializer.
-  CoreInitializer() {}
+  CoreInitializer() = default;
 
  private:
   static CoreInitializer* instance_;

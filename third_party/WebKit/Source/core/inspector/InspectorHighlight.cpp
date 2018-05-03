@@ -4,14 +4,18 @@
 
 #include "core/inspector/InspectorHighlight.h"
 
+#include "base/macros.h"
 #include "core/dom/PseudoElement.h"
 #include "core/frame/LocalFrameView.h"
+#include "core/frame/VisualViewport.h"
 #include "core/geometry/DOMRect.h"
+#include "core/layout/AdjustForAbsoluteZoom.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutGrid.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/shapes/ShapeOutsideInfo.h"
+#include "core/page/Page.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "platform/PlatformChromeClient.h"
 #include "platform/graphics/Path.h"
@@ -22,11 +26,10 @@ namespace {
 
 class PathBuilder {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(PathBuilder);
 
  public:
   PathBuilder() : path_(protocol::ListValue::create()) {}
-  virtual ~PathBuilder() {}
+  virtual ~PathBuilder() = default;
 
   std::unique_ptr<protocol::ListValue> Release() { return std::move(path_); }
 
@@ -51,6 +54,7 @@ class PathBuilder {
                                   size_t length);
 
   std::unique_ptr<protocol::ListValue> path_;
+  DISALLOW_COPY_AND_ASSIGN(PathBuilder);
 };
 
 void PathBuilder::AppendPathCommandAndPoints(const char* command,
@@ -148,11 +152,21 @@ Path QuadToPath(const FloatQuad& quad) {
   return quad_path;
 }
 
+FloatPoint ContentsPointToViewport(const LocalFrameView* view,
+                                   FloatPoint point_in_contents) {
+  LayoutPoint point_in_frame =
+      view->ContentsToFrame(LayoutPoint(point_in_contents));
+  FloatPoint point_in_root_frame =
+      FloatPoint(view->ConvertToRootFrame(point_in_frame));
+  return FloatPoint(view->GetPage()->GetVisualViewport().RootFrameToViewport(
+      point_in_root_frame));
+}
+
 void ContentsQuadToViewport(const LocalFrameView* view, FloatQuad& quad) {
-  quad.SetP1(view->ContentsToViewport(RoundedIntPoint(quad.P1())));
-  quad.SetP2(view->ContentsToViewport(RoundedIntPoint(quad.P2())));
-  quad.SetP3(view->ContentsToViewport(RoundedIntPoint(quad.P3())));
-  quad.SetP4(view->ContentsToViewport(RoundedIntPoint(quad.P4())));
+  quad.SetP1(ContentsPointToViewport(view, quad.P1()));
+  quad.SetP2(ContentsPointToViewport(view, quad.P2()));
+  quad.SetP3(ContentsPointToViewport(view, quad.P3()));
+  quad.SetP4(ContentsPointToViewport(view, quad.P4()));
 }
 
 const ShapeOutsideInfo* ShapeOutsideInfoForNode(Node* node,
@@ -306,7 +320,7 @@ InspectorHighlight::InspectorHighlight(
     element_info_ = BuildElementInfo(ToElement(node));
 }
 
-InspectorHighlight::~InspectorHighlight() {}
+InspectorHighlight::~InspectorHighlight() = default;
 
 void InspectorHighlight::AppendQuad(const FloatQuad& quad,
                                     const Color& fill_color,
@@ -448,6 +462,17 @@ bool InspectorHighlight::GetBoxModel(
   if (!BuildNodeQuads(node, &content, &padding, &border, &margin))
     return false;
 
+  AdjustForAbsoluteZoom::AdjustFloatQuad(content, *layout_object);
+  AdjustForAbsoluteZoom::AdjustFloatQuad(padding, *layout_object);
+  AdjustForAbsoluteZoom::AdjustFloatQuad(border, *layout_object);
+  AdjustForAbsoluteZoom::AdjustFloatQuad(margin, *layout_object);
+
+  float scale = 1 / view->GetPage()->GetVisualViewport().Scale();
+  content.Scale(scale, scale);
+  padding.Scale(scale, scale);
+  border.Scale(scale, scale);
+  margin.Scale(scale, scale);
+
   IntRect bounding_box =
       view->ContentsToRootFrame(layout_object->AbsoluteBoundingBoxRect());
   LayoutBoxModelObject* model_object =
@@ -460,12 +485,12 @@ bool InspectorHighlight::GetBoxModel(
           .setPadding(BuildArrayForQuad(padding))
           .setBorder(BuildArrayForQuad(border))
           .setMargin(BuildArrayForQuad(margin))
-          .setWidth(model_object ? AdjustForAbsoluteZoom(
+          .setWidth(model_object ? AdjustForAbsoluteZoom::AdjustInt(
                                        model_object->PixelSnappedOffsetWidth(
                                            model_object->OffsetParent()),
                                        model_object)
                                  : bounding_box.Width())
-          .setHeight(model_object ? AdjustForAbsoluteZoom(
+          .setHeight(model_object ? AdjustForAbsoluteZoom::AdjustInt(
                                         model_object->PixelSnappedOffsetHeight(
                                             model_object->OffsetParent()),
                                         model_object)

@@ -27,11 +27,10 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity2;
-import org.chromium.chrome.browser.multiwindow.MultiWindowUtilsTest;
+import org.chromium.chrome.browser.multiwindow.MultiWindowTestHelper;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
@@ -47,10 +46,7 @@ import java.util.concurrent.TimeoutException;
  * Tests undo and restoring of tabs in a {@link TabModel}.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class UndoTabModelTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
@@ -1572,9 +1568,10 @@ public class UndoTabModelTest {
     @MediumTest
     @MinAndroidSdkLevel(24)
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    @CommandLineFlags.Add(ChromeSwitches.DISABLE_TAB_MERGING_FOR_TESTING)
     public void testOpenRecentlyClosedTabMultiWindow() throws InterruptedException {
         final ChromeTabbedActivity2 secondActivity =
-                MultiWindowUtilsTest.createSecondChromeTabbedActivity(
+                MultiWindowTestHelper.createSecondChromeTabbedActivity(
                         mActivityTestRule.getActivity());
 
         // Wait for the second window to be fully initialized.
@@ -1652,9 +1649,10 @@ public class UndoTabModelTest {
     @MediumTest
     @MinAndroidSdkLevel(24)
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    @CommandLineFlags.Add(ChromeSwitches.DISABLE_TAB_MERGING_FOR_TESTING)
     public void testOpenRecentlyClosedTabMultiWindowFallback() throws InterruptedException {
         final ChromeTabbedActivity2 secondActivity =
-                MultiWindowUtilsTest.createSecondChromeTabbedActivity(
+                MultiWindowTestHelper.createSecondChromeTabbedActivity(
                         mActivityTestRule.getActivity());
         // Wait for the second window to be fully initialized.
         CriteriaHelper.pollUiThread(new Criteria() {

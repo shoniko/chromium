@@ -4,6 +4,8 @@
 
 #include "extensions/browser/process_manager.h"
 
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -156,7 +158,6 @@ struct ProcessManager::ExtensionRenderFrameData {
       case VIEW_TYPE_EXTENSION_DIALOG:
       case VIEW_TYPE_EXTENSION_GUEST:
       case VIEW_TYPE_EXTENSION_POPUP:
-      case VIEW_TYPE_LAUNCHER_PAGE:
       case VIEW_TYPE_PANEL:
       case VIEW_TYPE_TAB_CONTENTS:
         return true;
@@ -266,6 +267,7 @@ void ProcessManager::RegisterRenderFrameHost(
     content::WebContents* web_contents,
     content::RenderFrameHost* render_frame_host,
     const Extension* extension) {
+  DCHECK(render_frame_host->IsRenderFrameLive());
   ExtensionRenderFrameData* data = &all_extension_frames_[render_frame_host];
   data->view_type = GetViewType(web_contents);
 
@@ -610,8 +612,9 @@ void ProcessManager::Observe(int type,
     case extensions::NOTIFICATION_EXTENSION_HOST_DESTROYED: {
       ExtensionHost* host = content::Details<ExtensionHost>(details).ptr();
       if (background_hosts_.erase(host)) {
-        ClearBackgroundPageData(host->extension()->id());
-        background_page_data_[host->extension()->id()].since_suspended.reset(
+        // Note: |host->extension()| may be null at this point.
+        ClearBackgroundPageData(host->extension_id());
+        background_page_data_[host->extension_id()].since_suspended.reset(
             new base::ElapsedTimer());
       }
       break;

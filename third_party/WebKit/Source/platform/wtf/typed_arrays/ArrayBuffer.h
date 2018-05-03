@@ -27,10 +27,10 @@
 #define ArrayBuffer_h
 
 #include "base/allocator/partition_allocator/oom.h"
+#include "base/memory/scoped_refptr.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/HashSet.h"
 #include "platform/wtf/RefCounted.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/WTFExport.h"
 #include "platform/wtf/typed_arrays/ArrayBufferContents.h"
 
@@ -84,7 +84,7 @@ class WTF_EXPORT ArrayBuffer : public RefCounted<ArrayBuffer> {
   bool IsNeutered() const { return is_neutered_; }
   bool IsShared() const { return contents_.IsShared(); }
 
-  ~ArrayBuffer() {}
+  ~ArrayBuffer() = default;
 
  protected:
   inline explicit ArrayBuffer(ArrayBufferContents&);
@@ -141,14 +141,14 @@ scoped_refptr<ArrayBuffer> ArrayBuffer::Create(const void* source,
                                ArrayBufferContents::kDontInitialize);
   if (UNLIKELY(!contents.Data()))
     OOM_CRASH();
-  scoped_refptr<ArrayBuffer> buffer = WTF::AdoptRef(new ArrayBuffer(contents));
+  scoped_refptr<ArrayBuffer> buffer = base::AdoptRef(new ArrayBuffer(contents));
   memcpy(buffer->Data(), source, byte_length);
   return buffer;
 }
 
 scoped_refptr<ArrayBuffer> ArrayBuffer::Create(ArrayBufferContents& contents) {
   CHECK(contents.DataMaybeShared());
-  return WTF::AdoptRef(new ArrayBuffer(contents));
+  return base::AdoptRef(new ArrayBuffer(contents));
 }
 
 scoped_refptr<ArrayBuffer> ArrayBuffer::CreateOrNull(
@@ -173,7 +173,7 @@ scoped_refptr<ArrayBuffer> ArrayBuffer::Create(
                                ArrayBufferContents::kNotShared, policy);
   if (UNLIKELY(!contents.Data()))
     OOM_CRASH();
-  return WTF::AdoptRef(new ArrayBuffer(contents));
+  return base::AdoptRef(new ArrayBuffer(contents));
 }
 
 scoped_refptr<ArrayBuffer> ArrayBuffer::CreateOrNull(
@@ -184,7 +184,7 @@ scoped_refptr<ArrayBuffer> ArrayBuffer::CreateOrNull(
                                ArrayBufferContents::kNotShared, policy);
   if (!contents.Data())
     return nullptr;
-  return WTF::AdoptRef(new ArrayBuffer(contents));
+  return base::AdoptRef(new ArrayBuffer(contents));
 }
 
 scoped_refptr<ArrayBuffer> ArrayBuffer::CreateShared(
@@ -199,7 +199,7 @@ scoped_refptr<ArrayBuffer> ArrayBuffer::CreateShared(const void* source,
   ArrayBufferContents contents(byte_length, 1, ArrayBufferContents::kShared,
                                ArrayBufferContents::kDontInitialize);
   CHECK(contents.DataShared());
-  scoped_refptr<ArrayBuffer> buffer = WTF::AdoptRef(new ArrayBuffer(contents));
+  scoped_refptr<ArrayBuffer> buffer = base::AdoptRef(new ArrayBuffer(contents));
   memcpy(buffer->DataShared(), source, byte_length);
   return buffer;
 }
@@ -211,11 +211,11 @@ scoped_refptr<ArrayBuffer> ArrayBuffer::CreateShared(
   ArrayBufferContents contents(num_elements, element_byte_size,
                                ArrayBufferContents::kShared, policy);
   CHECK(contents.DataShared());
-  return WTF::AdoptRef(new ArrayBuffer(contents));
+  return base::AdoptRef(new ArrayBuffer(contents));
 }
 
 ArrayBuffer::ArrayBuffer(ArrayBufferContents& contents)
-    : first_view_(0), is_neutered_(false) {
+    : first_view_(nullptr), is_neutered_(false) {
   if (contents.IsShared())
     contents.ShareWith(contents_);
   else
@@ -247,7 +247,7 @@ const void* ArrayBuffer::DataMaybeShared() const {
 }
 
 unsigned ArrayBuffer::ByteLength() const {
-  return contents_.SizeInBytes();
+  return contents_.DataLength();
 }
 
 scoped_refptr<ArrayBuffer> ArrayBuffer::Slice(int begin, int end) const {

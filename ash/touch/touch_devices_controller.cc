@@ -5,6 +5,7 @@
 #include "ash/touch/touch_devices_controller.h"
 
 #include "ash/public/cpp/ash_pref_names.h"
+#include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
@@ -28,6 +29,10 @@ ui::InputDeviceControllerClient* GetInputDeviceControllerClient() {
   return Shell::Get()->shell_delegate()->GetInputDeviceControllerClient();
 }
 
+PrefService* GetActivePrefService() {
+  return Shell::Get()->session_controller()->GetActivePrefService();
+}
+
 }  // namespace
 
 // static
@@ -47,8 +52,7 @@ TouchDevicesController::~TouchDevicesController() {
 }
 
 void TouchDevicesController::ToggleTouchpad() {
-  PrefService* prefs =
-      Shell::Get()->session_controller()->GetActivePrefService();
+  PrefService* prefs = GetActivePrefService();
   if (!prefs)
     return;
   const bool touchpad_enabled = prefs->GetBoolean(prefs::kTouchpadEnabled);
@@ -60,8 +64,7 @@ bool TouchDevicesController::GetTouchscreenEnabled(
   if (source == TouchscreenEnabledSource::GLOBAL)
     return global_touchscreen_enabled_;
 
-  PrefService* prefs =
-      Shell::Get()->session_controller()->GetActivePrefService();
+  PrefService* prefs = GetActivePrefService();
   return prefs && prefs->GetBoolean(prefs::kTouchscreenEnabled);
 }
 
@@ -76,8 +79,7 @@ void TouchDevicesController::SetTouchscreenEnabled(
     return;
   }
 
-  PrefService* prefs =
-      Shell::Get()->session_controller()->GetActivePrefService();
+  PrefService* prefs = GetActivePrefService();
   if (!prefs)
     return;
   prefs->SetBoolean(prefs::kTouchscreenEnabled, enabled);

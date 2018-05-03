@@ -129,9 +129,8 @@ void DownloadUrlSBClient::IdentifyReferrerChain() {
   if (!item_)
     return;
 
-  item_->SetUserData(kDownloadReferrerChainDataKey,
-                     base::MakeUnique<ReferrerChainData>(
-                         service_->IdentifyReferrerChain(*item_)));
+  item_->SetUserData(ReferrerChainData::kDownloadReferrerChainDataKey,
+                     service_->IdentifyReferrerChain(*item_));
 }
 
 void DownloadUrlSBClient::UpdateDownloadCheckStats(SBStatsType stat_type) {

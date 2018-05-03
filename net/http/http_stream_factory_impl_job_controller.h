@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/cancelable_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/privacy_mode.h"
 #include "net/http/http_stream_factory_impl_job.h"
@@ -34,14 +35,13 @@ class HttpStreamFactoryImpl::JobController
                 JobFactory* job_factory,
                 const HttpRequestInfo& request_info,
                 bool is_preconnect,
+                bool is_websocket,
                 bool enable_ip_based_pooling,
                 bool enable_alternative_services,
                 const SSLConfig& server_ssl_config,
                 const SSLConfig& proxy_ssl_config);
 
   ~JobController() override;
-
-  bool for_websockets() override;
 
   // Used in tests only for verification purpose.
   const Job* main_job() const { return main_job_.get(); }
@@ -191,10 +191,6 @@ class HttpStreamFactoryImpl::JobController
   // Returns true if |this| has a pending alternative job that is not completed.
   bool HasPendingAltJob() const;
 
-  // TODO(xunjieli): Added to investigate crbug.com/711721. Remove when no
-  // longer needed.
-  void LogHistograms() const;
-
   // Returns the estimated memory usage in bytes.
   size_t EstimateMemoryUsage() const;
 
@@ -312,6 +308,9 @@ class HttpStreamFactoryImpl::JobController
   // given error code is simply returned.
   int ReconsiderProxyAfterError(Job* job, int error);
 
+  // Returns true if QUIC is whitelisted for |host|.
+  bool IsQuicWhitelistedForHost(const std::string& host);
+
   HttpStreamFactoryImpl* factory_;
   HttpNetworkSession* session_;
   JobFactory* job_factory_;
@@ -326,6 +325,9 @@ class HttpStreamFactoryImpl::JobController
 
   // True if this JobController is used to preconnect streams.
   const bool is_preconnect_;
+
+  // True if request is for Websocket.
+  const bool is_websocket_;
 
   // Enable pooling to a SpdySession with matching IP and certificate even if
   // the SpdySessionKey is different.
@@ -353,6 +355,8 @@ class HttpStreamFactoryImpl::JobController
   // job must not create a connection until it is resumed.
   bool main_job_is_blocked_;
 
+  // Handle for cancelling any posted delayed ResumeMainJob() task.
+  base::CancelableOnceClosure resume_main_job_callback_;
   // True if the main job was blocked and has been resumed in ResumeMainJob().
   bool main_job_is_resumed_;
 
@@ -367,7 +371,7 @@ class HttpStreamFactoryImpl::JobController
   bool can_start_alternative_proxy_job_;
 
   State next_state_;
-  ProxyService::PacRequest* pac_request_;
+  ProxyService::Request* proxy_resolve_request_;
   CompletionCallback io_callback_;
   const HttpRequestInfo request_info_;
   ProxyInfo proxy_info_;

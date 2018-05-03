@@ -15,9 +15,11 @@
 // See http://dev.chromium.org/developers/testing/threadsanitizer-tsan-v2
 // for the instructions on writing suppressions.
 char kTSanDefaultSuppressions[] =
-    // False positives in libflashplayer.so and libglib.so. Since we don't
-    // instrument them, we cannot reason about the synchronization in them.
+    // False positives in libflashplayer.so, libgio.so and libglib.so.
+    // Since we don't instrument them, we cannot reason about the
+    // synchronization in them.
     "race:libflashplayer.so\n"
+    "race:libgio*.so\n"
     "race:libglib*.so\n"
 
     // Intentional race in ToolsSanityTest.DataRace in base_unittests.
@@ -118,10 +120,6 @@ char kTSanDefaultSuppressions[] =
 
     // http://crbug.com/310851
     "race:net::ProxyResolverV8Tracing::Job::~Job\n"
-
-    // http://crbug.com/327330
-    "race:PrepareTextureMailbox\n"
-    "race:cc::LayerTreeHost::PaintLayerContents\n"
 
     // http://crbug.com/476529
     "deadlock:cc::VideoLayerImpl::WillDraw\n"
@@ -254,6 +252,12 @@ char kTSanDefaultSuppressions[] =
     // http://crbug.com/695929
     "race:base::i18n::IsRTL\n"
     "race:base::i18n::SetICUDefaultLocale\n"
+
+    // http://crbug.com/795110
+    "race:third_party/fontconfig/*\n"
+
+    // http://crbug.com/797998
+    "race:content::SandboxIPCHandler::HandleLocaltime\n"
 
     //
     "race:third_party/harfbuzz-ng/src/*\n"

@@ -25,8 +25,9 @@
 
 #include "modules/speech/testing/PlatformSpeechSynthesizerMock.h"
 
-#include "core/dom/TaskRunnerHelper.h"
+#include "core/dom/ExecutionContext.h"
 #include "platform/speech/PlatformSpeechSynthesisUtterance.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -45,15 +46,15 @@ PlatformSpeechSynthesizerMock::PlatformSpeechSynthesizerMock(
     ExecutionContext* context)
     : PlatformSpeechSynthesizer(client),
       speaking_error_occurred_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, context),
+          context->GetTaskRunner(TaskType::kInternalTest),
           this,
           &PlatformSpeechSynthesizerMock::SpeakingErrorOccurred),
       speaking_finished_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnspecedTimer, context),
+          context->GetTaskRunner(TaskType::kInternalTest),
           this,
           &PlatformSpeechSynthesizerMock::SpeakingFinished) {}
 
-PlatformSpeechSynthesizerMock::~PlatformSpeechSynthesizerMock() {}
+PlatformSpeechSynthesizerMock::~PlatformSpeechSynthesizerMock() = default;
 
 void PlatformSpeechSynthesizerMock::SpeakingErrorOccurred(TimerBase*) {
   DCHECK(current_utterance_);
@@ -114,7 +115,8 @@ void PlatformSpeechSynthesizerMock::SpeakNow() {
 
   // Give the fake speech job some time so that pause and other functions have
   // time to be called.
-  speaking_finished_timer_.StartOneShot(.1, BLINK_FROM_HERE);
+  speaking_finished_timer_.StartOneShot(TimeDelta::FromMilliseconds(100),
+                                        FROM_HERE);
 }
 
 void PlatformSpeechSynthesizerMock::Cancel() {
@@ -125,7 +127,8 @@ void PlatformSpeechSynthesizerMock::Cancel() {
   queued_utterances_.clear();
 
   speaking_finished_timer_.Stop();
-  speaking_error_occurred_timer_.StartOneShot(.1, BLINK_FROM_HERE);
+  speaking_error_occurred_timer_.StartOneShot(TimeDelta::FromMilliseconds(100),
+                                              FROM_HERE);
 }
 
 void PlatformSpeechSynthesizerMock::Pause() {

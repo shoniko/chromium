@@ -92,6 +92,9 @@ def run_command_with_output(argv, stdoutfile, env=None, cwd=None):
 
 
 def run_runtest(cmd_args, runtest_args):
+  env = os.environ.copy()
+  env['CHROME_HEADLESS'] = '1'
+
   if cmd_args.use_src_side_runtest_py:
     cmd = [
       sys.executable,
@@ -114,7 +117,7 @@ def run_runtest(cmd_args, runtest_args):
       '--slave-name', cmd_args.properties['slavename'],
       '--build-number', str(cmd_args.properties['buildnumber']),
       '--build-properties', json.dumps(cmd_args.properties),
-  ] + runtest_args)
+  ] + runtest_args, env=env)
 
 
 @contextlib.contextmanager
@@ -177,6 +180,15 @@ def parse_common_test_results(json_results, test_separator='/'):
     results[key][test] = data
 
   return results
+
+
+def extract_filter_list(filter_list):
+  """Helper for isolated script test wrappers. Parses the
+  --isolated-script-test-filter command line argument. Currently, double-colon
+  ('::') is used as the separator between test names, because a single colon may
+  be used in the names of perf benchmarks, which contain URLs.
+  """
+  return filter_list.split('::')
 
 
 def run_integration_test(script_to_run, extra_args, log_file, output):

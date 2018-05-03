@@ -12,6 +12,7 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
+#include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_scheduler/post_task.h"
@@ -35,7 +36,7 @@ namespace component_updater {
 
 // The SHA256 of the SubjectPublicKeyInfo used to sign the component.
 // The component id is: EHGIDPNDBLLACPJALKIIMKBADGJFNNMC
-const uint8_t kPublicKeySHA256[32] = {
+const uint8_t kThirdPartyModuleListPublicKeySHA256[32] = {
     0x47, 0x68, 0x3f, 0xd3, 0x1b, 0xb0, 0x2f, 0x90, 0xba, 0x88, 0xca,
     0x10, 0x36, 0x95, 0xdd, 0xc2, 0x29, 0xd1, 0x4f, 0x38, 0xf2, 0x9d,
     0x6c, 0x9c, 0x68, 0x6c, 0xa2, 0xa4, 0xa2, 0x8e, 0xa5, 0x5c};
@@ -68,6 +69,8 @@ ThirdPartyModuleListComponentInstallerPolicy::OnCustomInstall(
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
 
+void ThirdPartyModuleListComponentInstallerPolicy::OnCustomUninstall() {}
+
 // NOTE: This is always called on the main UI thread. It is called once every
 // startup to notify of an already installed component, and may be called
 // repeatedly after that every time a new component is ready.
@@ -99,7 +102,8 @@ ThirdPartyModuleListComponentInstallerPolicy::GetRelativeInstallDir() const {
 
 void ThirdPartyModuleListComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kPublicKeySHA256), std::end(kPublicKeySHA256));
+  hash->assign(std::begin(kThirdPartyModuleListPublicKeySHA256),
+               std::end(kThirdPartyModuleListPublicKeySHA256));
 }
 
 std::string ThirdPartyModuleListComponentInstallerPolicy::GetName() const {
@@ -131,13 +135,9 @@ void RegisterThirdPartyModuleListComponent(ComponentUpdateService* cus) {
   if (!database)
     return;
   ModuleListManager* manager = &database->module_list_manager();
-
-  std::unique_ptr<ComponentInstallerPolicy> policy(
-      new ThirdPartyModuleListComponentInstallerPolicy(manager));
-
-  // |cus| will take ownership of |installer| during installer->Register(cus).
-  ComponentInstaller* installer = new ComponentInstaller(std::move(policy));
-  installer->Register(cus, base::Closure());
+  auto installer = base::MakeRefCounted<ComponentInstaller>(
+      std::make_unique<ThirdPartyModuleListComponentInstallerPolicy>(manager));
+  installer->Register(cus, base::OnceClosure());
 }
 
 }  // namespace component_updater

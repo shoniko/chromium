@@ -33,6 +33,7 @@
 #include "core/css/StyleRuleImport.h"
 #include "core/css/StyleRuleKeyframe.h"
 #include "core/css/StyleRuleNamespace.h"
+#include "core/css/parser/AtRuleDescriptorValueSet.h"
 
 namespace blink {
 
@@ -205,11 +206,11 @@ CSSRule* StyleRuleBase::CreateCSSOMWrapper(CSSStyleSheet* parent_sheet,
 
 unsigned StyleRule::AverageSizeInBytes() {
   return sizeof(StyleRule) + sizeof(CSSSelector) +
-         StylePropertySet::AverageSizeInBytes();
+         CSSPropertyValueSet::AverageSizeInBytes();
 }
 
 StyleRule::StyleRule(CSSSelectorList selector_list,
-                     StylePropertySet* properties)
+                     CSSPropertyValueSet* properties)
     : StyleRuleBase(kStyle),
       should_consider_for_matching_rules_(kConsiderIfNonEmpty),
       selector_list_(std::move(selector_list)),
@@ -222,7 +223,7 @@ StyleRule::StyleRule(CSSSelectorList selector_list,
       selector_list_(std::move(selector_list)),
       lazy_property_parser_(lazy_property_parser) {}
 
-const StylePropertySet& StyleRule::Properties() const {
+const CSSPropertyValueSet& StyleRule::Properties() const {
   if (!properties_) {
     properties_ = lazy_property_parser_->ParseProperties();
     lazy_property_parser_.Clear();
@@ -236,13 +237,13 @@ StyleRule::StyleRule(const StyleRule& o)
       selector_list_(o.selector_list_.Copy()),
       properties_(o.Properties().MutableCopy()) {}
 
-StyleRule::~StyleRule() {}
+StyleRule::~StyleRule() = default;
 
-MutableStylePropertySet& StyleRule::MutableProperties() {
+MutableCSSPropertyValueSet& StyleRule::MutableProperties() {
   // Ensure properties_ is initialized.
   if (!Properties().IsMutable())
     properties_ = properties_->MutableCopy();
-  return *ToMutableStylePropertySet(properties_.Get());
+  return *ToMutableCSSPropertyValueSet(properties_.Get());
 }
 
 bool StyleRule::PropertiesHaveFailedOrCanceledSubresources() const {
@@ -270,7 +271,7 @@ void StyleRule::TraceAfterDispatch(blink::Visitor* visitor) {
 }
 
 StyleRulePage::StyleRulePage(CSSSelectorList selector_list,
-                             StylePropertySet* properties)
+                             CSSPropertyValueSet* properties)
     : StyleRuleBase(kPage),
       properties_(properties),
       selector_list_(std::move(selector_list)) {}
@@ -280,12 +281,12 @@ StyleRulePage::StyleRulePage(const StyleRulePage& page_rule)
       properties_(page_rule.properties_->MutableCopy()),
       selector_list_(page_rule.selector_list_.Copy()) {}
 
-StyleRulePage::~StyleRulePage() {}
+StyleRulePage::~StyleRulePage() = default;
 
-MutableStylePropertySet& StyleRulePage::MutableProperties() {
+MutableCSSPropertyValueSet& StyleRulePage::MutableProperties() {
   if (!properties_->IsMutable())
     properties_ = properties_->MutableCopy();
-  return *ToMutableStylePropertySet(properties_.Get());
+  return *ToMutableCSSPropertyValueSet(properties_.Get());
 }
 
 void StyleRulePage::TraceAfterDispatch(blink::Visitor* visitor) {
@@ -293,19 +294,19 @@ void StyleRulePage::TraceAfterDispatch(blink::Visitor* visitor) {
   StyleRuleBase::TraceAfterDispatch(visitor);
 }
 
-StyleRuleFontFace::StyleRuleFontFace(StylePropertySet* properties)
+StyleRuleFontFace::StyleRuleFontFace(AtRuleDescriptorValueSet* properties)
     : StyleRuleBase(kFontFace), properties_(properties) {}
 
 StyleRuleFontFace::StyleRuleFontFace(const StyleRuleFontFace& font_face_rule)
     : StyleRuleBase(font_face_rule),
       properties_(font_face_rule.properties_->MutableCopy()) {}
 
-StyleRuleFontFace::~StyleRuleFontFace() {}
+StyleRuleFontFace::~StyleRuleFontFace() = default;
 
-MutableStylePropertySet& StyleRuleFontFace::MutableProperties() {
+AtRuleDescriptorValueSet& StyleRuleFontFace::MutableProperties() {
   if (!properties_->IsMutable())
     properties_ = properties_->MutableCopy();
-  return *ToMutableStylePropertySet(properties_);
+  return *properties_;
 }
 
 void StyleRuleFontFace::TraceAfterDispatch(blink::Visitor* visitor) {
@@ -349,9 +350,8 @@ StyleRuleCondition::StyleRuleCondition(
     HeapVector<Member<StyleRuleBase>>& adopt_rules)
     : StyleRuleGroup(type, adopt_rules), condition_text_(condition_text) {}
 
-StyleRuleCondition::StyleRuleCondition(const StyleRuleCondition& condition_rule)
-    : StyleRuleGroup(condition_rule),
-      condition_text_(condition_rule.condition_text_) {}
+StyleRuleCondition::StyleRuleCondition(
+    const StyleRuleCondition& condition_rule) = default;
 
 StyleRuleMedia::StyleRuleMedia(scoped_refptr<MediaQuerySet> media,
                                HeapVector<Member<StyleRuleBase>>& adopt_rules)
@@ -378,19 +378,19 @@ StyleRuleSupports::StyleRuleSupports(const StyleRuleSupports& supports_rule)
     : StyleRuleCondition(supports_rule),
       condition_is_supported_(supports_rule.condition_is_supported_) {}
 
-StyleRuleViewport::StyleRuleViewport(StylePropertySet* properties)
+StyleRuleViewport::StyleRuleViewport(CSSPropertyValueSet* properties)
     : StyleRuleBase(kViewport), properties_(properties) {}
 
 StyleRuleViewport::StyleRuleViewport(const StyleRuleViewport& viewport_rule)
     : StyleRuleBase(viewport_rule),
       properties_(viewport_rule.properties_->MutableCopy()) {}
 
-StyleRuleViewport::~StyleRuleViewport() {}
+StyleRuleViewport::~StyleRuleViewport() = default;
 
-MutableStylePropertySet& StyleRuleViewport::MutableProperties() {
+MutableCSSPropertyValueSet& StyleRuleViewport::MutableProperties() {
   if (!properties_->IsMutable())
     properties_ = properties_->MutableCopy();
-  return *ToMutableStylePropertySet(properties_);
+  return *ToMutableCSSPropertyValueSet(properties_);
 }
 
 void StyleRuleViewport::TraceAfterDispatch(blink::Visitor* visitor) {

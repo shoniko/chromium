@@ -6,7 +6,7 @@
 
 #include "core/layout/LayoutText.h"
 #include "core/layout/LayoutTextFragment.h"
-#include "core/layout/ng/inline/ng_offset_mapping_result.h"
+#include "core/layout/ng/inline/ng_offset_mapping.h"
 
 namespace blink {
 
@@ -27,7 +27,7 @@ const Node* GetAssociatedNode(const LayoutObject* layout_object) {
     return nullptr;
   if (!layout_object->IsText() ||
       !ToLayoutText(layout_object)->IsTextFragment())
-    return layout_object->GetNode();
+    return layout_object->NonPseudoNode();
   const LayoutTextFragment* fragment = ToLayoutTextFragment(layout_object);
   return fragment->AssociatedTextNode();
 }
@@ -45,8 +45,7 @@ std::pair<NGOffsetMappingUnitType, unsigned> GetMappingUnitTypeAndEnd(
 
   unsigned end = start + 1;
   for (; end + 1 < mapping.size(); ++end) {
-    if (GetAssociatedNode(annotation[end]) !=
-        GetAssociatedNode(annotation[start]))
+    if (annotation[end] != annotation[start])
       break;
     NGOffsetMappingUnitType next_type =
         GetUnitLengthMappingType(mapping[end + 1] - mapping[end]);
@@ -70,6 +69,27 @@ NGOffsetMappingBuilder::NGOffsetMappingBuilder() {
   mapping_.push_back(0);
 }
 
+NGOffsetMappingBuilder::SourceNodeScope::SourceNodeScope(
+    NGOffsetMappingBuilder* builder,
+    const LayoutObject* node)
+    : auto_reset_(&builder->current_source_node_, node) {
+#if DCHECK_IS_ON()
+  builder_ = builder;
+  if (!node)
+    return;
+  // We allow at most one scope with non-null node at any time.
+  DCHECK(!builder->has_nonnull_node_scope_);
+  builder->has_nonnull_node_scope_ = true;
+#endif
+}
+
+NGOffsetMappingBuilder::SourceNodeScope::~SourceNodeScope() {
+#if DCHECK_IS_ON()
+  if (builder_->current_source_node_)
+    builder_->has_nonnull_node_scope_ = false;
+#endif
+}
+
 void NGOffsetMappingBuilder::AppendIdentityMapping(unsigned length) {
   DCHECK_GT(length, 0u);
   DCHECK(!mapping_.IsEmpty());
@@ -78,6 +98,8 @@ void NGOffsetMappingBuilder::AppendIdentityMapping(unsigned length) {
     mapping_.push_back(next);
   }
   annotation_.resize(annotation_.size() + length);
+  std::fill(annotation_.end() - length, annotation_.end(),
+            current_source_node_);
 }
 
 void NGOffsetMappingBuilder::AppendCollapsedMapping(unsigned length) {
@@ -87,6 +109,8 @@ void NGOffsetMappingBuilder::AppendCollapsedMapping(unsigned length) {
   for (unsigned i = 0; i < length; ++i)
     mapping_.push_back(back);
   annotation_.resize(annotation_.size() + length);
+  std::fill(annotation_.end() - length, annotation_.end(),
+            current_source_node_);
 }
 
 void NGOffsetMappingBuilder::CollapseTrailingSpace(unsigned skip_length) {
@@ -101,25 +125,6 @@ void NGOffsetMappingBuilder::CollapseTrailingSpace(unsigned skip_length) {
       ++skipped_count;
     --mapping_[i];
   }
-}
-
-void NGOffsetMappingBuilder::Annotate(const LayoutObject* layout_object) {
-  std::fill(annotation_.begin(), annotation_.end(), layout_object);
-}
-
-void NGOffsetMappingBuilder::AnnotateRange(unsigned start,
-                                           unsigned end,
-                                           const LayoutObject* layout_object) {
-  DCHECK_LE(start, end);
-  DCHECK_LE(end, annotation_.size());
-  std::fill(annotation_.begin() + start, annotation_.begin() + end,
-            layout_object);
-}
-
-void NGOffsetMappingBuilder::AnnotateSuffix(unsigned length,
-                                            const LayoutObject* layout_object) {
-  DCHECK_LE(length, annotation_.size());
-  AnnotateRange(annotation_.size() - length, annotation_.size(), layout_object);
 }
 
 void NGOffsetMappingBuilder::Concatenate(const NGOffsetMappingBuilder& other) {
@@ -139,59 +144,119 @@ void NGOffsetMappingBuilder::Composite(const NGOffsetMappingBuilder& other) {
 }
 
 void NGOffsetMappingBuilder::SetDestinationString(String string) {
-  // TODO(xiaochengh): Add the check below when we stop writing back to
-  // LayoutText for inline painting.
-  // DCHECK_EQ(mapping_.back(), string.length());
+  if (RuntimeEnabledFeatures::LayoutNGPaintFragmentsEnabled())
+    DCHECK_EQ(mapping_.back(), string.length());
   destination_string_ = string;
 }
 
-NGOffsetMappingResult NGOffsetMappingBuilder::Build() const {
-  NGOffsetMappingResult::UnitVector units;
-  NGOffsetMappingResult::RangeMap ranges;
+NGOffsetMapping NGOffsetMappingBuilder::Build() {
+  NGOffsetMapping::UnitVector units;
+  NGOffsetMapping::RangeMap ranges;
 
-  const Node* current_node = nullptr;
-  unsigned inline_start = 0;
+  // Information of current owner node
+  const Node* nonnull_owner = nullptr;
+  unsigned processed_length = 0;
   unsigned unit_range_start = 0;
   unsigned remaining_text_offset = 0;
-  for (unsigned start = 0; start + 1 < mapping_.size();) {
-    if (GetAssociatedNode(annotation_[start]) != current_node) {
-      if (current_node) {
-        ranges.insert(current_node,
-                      std::make_pair(unit_range_start, units.size()));
-      }
-      current_node = GetAssociatedNode(annotation_[start]);
-      inline_start = start;
-      unit_range_start = units.size();
-      // We get a non-zero |remaining_text_offset| only when |current_node| is a
-      // text node that has blockified ::first-letter style, and we are at the
-      // remaining text of |current_node|.
-      remaining_text_offset = GetRemainingTextOffset(annotation_[start]);
-    }
 
-    if (!current_node) {
-      // Only extra characters are not annotated.
-      DCHECK_EQ(mapping_[start] + 1, mapping_[start + 1]);
-      ++start;
+  // Information of non-atomic inlines that we are currently in
+  using NodeAndStart = std::pair<const Node*, unsigned>;
+  Vector<NodeAndStart> current_inlines;
+
+  // Sentinels
+  annotation_.push_back(nullptr);
+  boundaries_.push_back(InlineBoundary({nullptr, mapping_.size() - 1, false}));
+
+  const InlineBoundary* boundary_it = boundaries_.begin();
+  unsigned unit_start = 0;
+  while (unit_start + 1 < mapping_.size() ||
+         std::next(boundary_it) != boundaries_.end()) {
+    // Handle boundaries of non-atomic inline nodes
+    if (std::next(boundary_it) != boundaries_.end() &&
+        boundary_it->offset <= unit_start) {
+      const InlineBoundary& boundary = *boundary_it++;
+      const Node* node = GetAssociatedNode(boundary.node);
+      // Skip generated content
+      if (!node)
+        continue;
+
+      // Enter non-atomic inline
+      if (boundary.is_enter) {
+        current_inlines.push_back(NodeAndStart({node, units.size()}));
+        continue;
+      }
+
+      // Exit non-atomic inline
+      DCHECK(current_inlines.size());
+      DCHECK_EQ(node, current_inlines.back().first);
+      const unsigned node_unit_range_start = current_inlines.back().second;
+      if (units.size() > node_unit_range_start) {
+        ranges.insert(node,
+                      std::make_pair(node_unit_range_start, units.size()));
+      }
+      current_inlines.pop_back();
       continue;
     }
 
-    auto type_and_end = GetMappingUnitTypeAndEnd(mapping_, annotation_, start);
-    NGOffsetMappingUnitType type = type_and_end.first;
-    unsigned end = type_and_end.second;
-    unsigned dom_start = start - inline_start + remaining_text_offset;
-    unsigned dom_end = end - inline_start + remaining_text_offset;
-    unsigned text_content_start = mapping_[start];
-    unsigned text_content_end = mapping_[end];
-    units.emplace_back(type, *current_node, dom_start, dom_end,
-                       text_content_start, text_content_end);
+    // Create mapping units and/or unit ranges, if any
+    DCHECK_LT(unit_start, annotation_.size());
+    const Node* node = GetAssociatedNode(annotation_[unit_start]);
+    const auto type_and_end =
+        GetMappingUnitTypeAndEnd(mapping_, annotation_, unit_start);
+    unsigned unit_end = type_and_end.second;
+    // Create unit only for non-generated content.
+    if (node) {
+      if (node != nonnull_owner) {
+        nonnull_owner = node;
+        processed_length = 0;
+      }
 
-    start = end;
+      if (!unit_start ||
+          node != GetAssociatedNode(annotation_[unit_start - 1])) {
+        unit_range_start = units.size();
+        // We get a non-zero |remaining_text_offset| only when |current_node| is
+        // a text node that has blockified ::first-letter style, and we are at
+        // the remaining text of |current_node|.
+        remaining_text_offset = GetRemainingTextOffset(annotation_[unit_start]);
+      }
+
+      NGOffsetMappingUnitType type = type_and_end.first;
+      unsigned dom_start = processed_length + remaining_text_offset;
+      unsigned dom_end = unit_end - unit_start + dom_start;
+      unsigned text_content_start = mapping_[unit_start];
+      unsigned text_content_end = mapping_[unit_end];
+      units.emplace_back(type, *node, dom_start, dom_end, text_content_start,
+                         text_content_end);
+
+      processed_length += dom_end - dom_start;
+
+      if (GetAssociatedNode(annotation_[unit_end]) != node) {
+        auto iter = ranges.find(node);
+        if (iter != ranges.end()) {
+          // We are here if characters of |node| were appended inconsecutively,
+          // separated by generated characters. An example is BiDi-overridden
+          // text node with 'white-space: pre' style, where generated BiDi-
+          // control characters are inserted around '\n' characters.
+          DCHECK_EQ(iter->value.second, unit_range_start);
+          iter->value.second = units.size();
+        } else {
+          ranges.insert(node, std::make_pair(unit_range_start, units.size()));
+        }
+      }
+    }
+    unit_start = unit_end;
   }
-  if (current_node) {
-    ranges.insert(current_node, std::make_pair(unit_range_start, units.size()));
-  }
-  return NGOffsetMappingResult(std::move(units), std::move(ranges),
-                               destination_string_);
+
+  return NGOffsetMapping(std::move(units), std::move(ranges),
+                         destination_string_);
+}
+
+void NGOffsetMappingBuilder::EnterInline(const LayoutObject& node) {
+  boundaries_.push_back(InlineBoundary({&node, mapping_.size() - 1, true}));
+}
+
+void NGOffsetMappingBuilder::ExitInline(const LayoutObject& node) {
+  boundaries_.push_back(InlineBoundary({&node, mapping_.size() - 1, false}));
 }
 
 Vector<unsigned> NGOffsetMappingBuilder::DumpOffsetMappingForTesting() const {

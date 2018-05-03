@@ -5,8 +5,10 @@
 #ifndef WorkerInspectorProxy_h
 #define WorkerInspectorProxy_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/inspector/ThreadDebugger.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/HashMap.h"
@@ -31,7 +33,7 @@ class CORE_EXPORT WorkerInspectorProxy final
 
   class CORE_EXPORT PageInspector {
    public:
-    virtual ~PageInspector() {}
+    virtual ~PageInspector() = default;
     virtual void DispatchMessageFromWorker(WorkerInspectorProxy*,
                                            int session_id,
                                            const String& message) = 0;

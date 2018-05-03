@@ -9,113 +9,27 @@
 
 #include <memory>
 #include <unordered_map>
-#include <unordered_set>
 
-#include "base/atomic_sequence_num.h"
 #include "base/containers/mru_cache.h"
-#include "base/hash.h"
-#include "base/memory/discardable_memory_allocator.h"
 #include "base/memory/memory_coordinator_client.h"
 #include "base/memory/ref_counted.h"
 #include "base/numerics/safe_math.h"
-#include "base/threading/thread_checker.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "cc/cc_export.h"
 #include "cc/paint/draw_image.h"
 #include "cc/tiles/image_decode_cache.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
-#include "ui/gfx/geometry/rect.h"
+#include "cc/tiles/software_image_decode_cache_utils.h"
 
 namespace cc {
-
-// ImageDecodeCacheKey is a class that gets a cache key out of a given draw
-// image. That is, this key uniquely identifies an image in the cache. Note that
-// it's insufficient to use SkImage's unique id, since the same image can appear
-// in the cache multiple times at different scales and filter qualities.
-class CC_EXPORT ImageDecodeCacheKey {
- public:
-  static ImageDecodeCacheKey FromDrawImage(const DrawImage& image,
-                                           SkColorType color_type);
-
-  ImageDecodeCacheKey(const ImageDecodeCacheKey& other);
-
-  bool operator==(const ImageDecodeCacheKey& other) const {
-    // The frame_key always has to be the same. However, after that all original
-    // decodes are the same, so if we can use the original decode, return true.
-    // If not, then we have to compare every field.
-    return frame_key_ == other.frame_key_ &&
-           can_use_original_size_decode_ ==
-               other.can_use_original_size_decode_ &&
-           target_color_space_ == other.target_color_space_ &&
-           (can_use_original_size_decode_ ||
-            (src_rect_ == other.src_rect_ &&
-             target_size_ == other.target_size_ &&
-             filter_quality_ == other.filter_quality_));
-  }
-
-  bool operator!=(const ImageDecodeCacheKey& other) const {
-    return !(*this == other);
-  }
-
-  const PaintImage::FrameKey& frame_key() const { return frame_key_; }
-  SkFilterQuality filter_quality() const { return filter_quality_; }
-  gfx::Rect src_rect() const { return src_rect_; }
-  gfx::Size target_size() const { return target_size_; }
-  const gfx::ColorSpace& target_color_space() const {
-    return target_color_space_;
-  }
-
-  bool can_use_original_size_decode() const {
-    return can_use_original_size_decode_;
-  }
-  bool should_use_subrect() const { return should_use_subrect_; }
-  size_t get_hash() const { return hash_; }
-
-  // Helper to figure out how much memory the locked image represented by this
-  // key would take.
-  size_t locked_bytes() const {
-    // TODO(vmpstr): Handle formats other than RGBA.
-    base::CheckedNumeric<size_t> result = 4;
-    result *= target_size_.width();
-    result *= target_size_.height();
-    return result.ValueOrDefault(std::numeric_limits<size_t>::max());
-  }
-
-  std::string ToString() const;
-
- private:
-  ImageDecodeCacheKey(PaintImage::FrameKey frame_key,
-                      const gfx::Rect& src_rect,
-                      const gfx::Size& size,
-                      const gfx::ColorSpace& target_color_space,
-                      SkFilterQuality filter_quality,
-                      bool can_use_original_size_decode,
-                      bool should_use_subrect);
-
-  PaintImage::FrameKey frame_key_;
-  gfx::Rect src_rect_;
-  gfx::Size target_size_;
-  gfx::ColorSpace target_color_space_;
-  SkFilterQuality filter_quality_;
-  bool can_use_original_size_decode_;
-  bool should_use_subrect_;
-  size_t hash_;
-};
-
-// Hash function for the above ImageDecodeCacheKey.
-struct ImageDecodeCacheKeyHash {
-  size_t operator()(const ImageDecodeCacheKey& key) const {
-    return key.get_hash();
-  }
-};
 
 class CC_EXPORT SoftwareImageDecodeCache
     : public ImageDecodeCache,
       public base::trace_event::MemoryDumpProvider,
       public base::MemoryCoordinatorClient {
  public:
-  using ImageKey = ImageDecodeCacheKey;
-  using ImageKeyHash = ImageDecodeCacheKeyHash;
+  using Utils = SoftwareImageDecodeCacheUtils;
+  using CacheKey = Utils::CacheKey;
+  using CacheKeyHash = Utils::CacheKeyHash;
 
   enum class DecodeTaskType { USE_IN_RASTER_TASKS, USE_OUT_OF_RASTER_TASKS };
 
@@ -142,11 +56,11 @@ class CC_EXPORT SoftwareImageDecodeCache
 
   // Decode the given image and store it in the cache. This is only called by an
   // image decode task from a worker thread.
-  void DecodeImageInTask(const ImageKey& key,
-                         const DrawImage& image,
+  void DecodeImageInTask(const CacheKey& key,
+                         const PaintImage& paint_image,
                          DecodeTaskType task_type);
 
-  void OnImageDecodeTaskCompleted(const ImageKey& key,
+  void OnImageDecodeTaskCompleted(const CacheKey& key,
                                   DecodeTaskType task_type);
 
   // MemoryDumpProvider overrides.
@@ -156,70 +70,7 @@ class CC_EXPORT SoftwareImageDecodeCache
   size_t GetNumCacheEntriesForTesting() const { return decoded_images_.size(); }
 
  private:
-  // CacheEntry is a convenience storage for discardable memory. It can also
-  // construct an image out of SkImageInfo and stored discardable memory.
-  class CacheEntry {
-   public:
-    CacheEntry();
-    CacheEntry(const SkImageInfo& info,
-               std::unique_ptr<base::DiscardableMemory> memory,
-               const SkSize& src_rect_offset);
-    ~CacheEntry();
-
-    void MoveImageMemoryTo(CacheEntry* entry);
-
-    sk_sp<SkImage> image() const {
-      if (!memory)
-        return nullptr;
-      DCHECK(is_locked);
-      return image_;
-    }
-    const SkSize& src_rect_offset() const { return src_rect_offset_; }
-
-    bool Lock();
-    void Unlock();
-
-    // An ID which uniquely identifies this CacheEntry within the image decode
-    // cache. Used in memory tracing.
-    uint64_t tracing_id() const { return tracing_id_; }
-    // Mark this image as being used in either a draw or as a source for a
-    // scaled image. Either case represents this decode as being valuable and
-    // not wasted.
-    void mark_used() { usage_stats_.used = true; }
-    void mark_out_of_raster() { usage_stats_.first_lock_out_of_raster = true; }
-
-    // Since this is an inner class, we expose these variables publicly for
-    // simplicity.
-    // TODO(vmpstr): A good simple clean-up would be to rethink this class
-    // and its interactions to instead expose a few functions which would also
-    // facilitate easier DCHECKs.
-    int ref_count = 0;
-    bool decode_failed = false;
-    bool is_locked = false;
-    bool is_budgeted = false;
-
-    scoped_refptr<TileTask> in_raster_task;
-    scoped_refptr<TileTask> out_of_raster_task;
-
-    std::unique_ptr<base::DiscardableMemory> memory;
-
-   private:
-    struct UsageStats {
-      // We can only create a decoded image in a locked state, so the initial
-      // lock count is 1.
-      int lock_count = 1;
-      bool used = false;
-      bool last_lock_failed = false;
-      bool first_lock_wasted = false;
-      bool first_lock_out_of_raster = false;
-    };
-
-    SkImageInfo image_info_;
-    sk_sp<SkImage> image_;
-    SkSize src_rect_offset_;
-    uint64_t tracing_id_;
-    UsageStats usage_stats_;
-  };
+  using CacheEntry = Utils::CacheEntry;
 
   // MemoryBudget is a convenience class for memory bookkeeping and ensuring
   // that we don't go over the limit when pre-decoding.
@@ -240,28 +91,22 @@ class CC_EXPORT SoftwareImageDecodeCache
   };
 
   using ImageMRUCache = base::
-      HashingMRUCache<ImageKey, std::unique_ptr<CacheEntry>, ImageKeyHash>;
+      HashingMRUCache<CacheKey, std::unique_ptr<CacheEntry>, CacheKeyHash>;
 
   // Actually decode the image. Note that this function can (and should) be
   // called with no lock acquired, since it can do a lot of work. Note that it
   // can also return nullptr to indicate the decode failed.
-  std::unique_ptr<CacheEntry> DecodeImageInternal(const ImageKey& key,
+  std::unique_ptr<CacheEntry> DecodeImageInternal(const CacheKey& key,
                                                   const DrawImage& draw_image);
 
-  // Get the decoded draw image for the given key and draw_image. Note that this
-  // function has to be called with no lock acquired, since it will acquire its
-  // own locks and might call DecodeImageInternal above. Also note that this
-  // function will use the provided key, even if
-  // ImageKey::FromDrawImage(draw_image) would return a different key.
-  // Note that when used internally, we still require that
-  // DrawWithImageFinished() is called afterwards.
-  DecodedDrawImage GetDecodedImageForDrawInternal(const ImageKey& key,
-                                                  const DrawImage& draw_image);
-
-  // Helper function which dumps all images in a specific ImageMRUCache.
-  void DumpImageMemoryForCache(const ImageMRUCache& cache,
-                               const char* cache_name,
-                               base::trace_event::ProcessMemoryDump* pmd) const;
+  // Get the decoded draw image for the given key and paint_image. Note that
+  // this function has to be called with no lock acquired, since it will acquire
+  // its own locks and might call DecodeImageInternal above. Note that
+  // when used internally, we still require that DrawWithImageFinished() is
+  // called afterwards.
+  DecodedDrawImage GetDecodedImageForDrawInternal(
+      const CacheKey& key,
+      const PaintImage& paint_image);
 
   // Removes unlocked decoded images until the number of decoded images is
   // reduced within the given limit.
@@ -277,26 +122,15 @@ class CC_EXPORT SoftwareImageDecodeCache
                                            const TracingInfo& tracing_info,
                                            DecodeTaskType type);
 
-  CacheEntry* AddCacheEntry(const ImageKey& key);
+  CacheEntry* AddCacheEntry(const CacheKey& key);
 
-  void DecodeImageIfNecessary(const ImageKey& key,
-                              const DrawImage& draw_image,
+  void DecodeImageIfNecessary(const CacheKey& key,
+                              const PaintImage& paint_image,
                               CacheEntry* cache_entry);
-  void AddBudgetForImage(const ImageKey& key, CacheEntry* entry);
-  void RemoveBudgetForImage(const ImageKey& key, CacheEntry* entry);
+  void AddBudgetForImage(const CacheKey& key, CacheEntry* entry);
+  void RemoveBudgetForImage(const CacheKey& key, CacheEntry* entry);
 
-  std::unique_ptr<CacheEntry> DoDecodeImage(const ImageKey& key,
-                                            const PaintImage& image);
-  std::unique_ptr<CacheEntry> GenerateCacheEntryFromCandidate(
-      const ImageKey& key,
-      const DecodedDrawImage& candidate);
-
-  void UnrefImage(const ImageKey& key);
-
-  std::unordered_map<ImageKey, scoped_refptr<TileTask>, ImageKeyHash>
-      pending_in_raster_image_tasks_;
-  std::unordered_map<ImageKey, scoped_refptr<TileTask>, ImageKeyHash>
-      pending_out_of_raster_image_tasks_;
+  void UnrefImage(const CacheKey& key);
 
   // The members below this comment can only be accessed if the lock is held to
   // ensure that they are safe to access on multiple threads.
@@ -310,7 +144,7 @@ class CC_EXPORT SoftwareImageDecodeCache
   // A map of PaintImage::FrameKey to the ImageKeys for cached decodes of this
   // PaintImage.
   std::unordered_map<PaintImage::FrameKey,
-                     std::vector<ImageKey>,
+                     std::vector<CacheKey>,
                      PaintImage::FrameKeyHash>
       frame_key_to_image_keys_;
 
@@ -318,6 +152,9 @@ class CC_EXPORT SoftwareImageDecodeCache
 
   SkColorType color_type_;
   size_t max_items_in_cache_;
+  // Records the maximum number of items in the cache over the lifetime of the
+  // cache. This is updated anytime we are requested to reduce cache usage.
+  size_t lifetime_max_items_in_cache_ = 0u;
 };
 
 }  // namespace cc

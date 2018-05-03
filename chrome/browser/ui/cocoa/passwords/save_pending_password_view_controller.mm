@@ -47,13 +47,14 @@ NSTextField* EditableField(const base::string16& text) {
 }
 
 void FillPasswordPopup(const autofill::PasswordForm& form,
-                       bool visible,
+                       bool are_passwords_revealed,
                        NSPopUpButton* button) {
   [button removeAllItems];
   for (const base::string16& possible_password : form.all_possible_passwords) {
     base::string16 text =
-        visible ? possible_password
-                : base::string16(possible_password.length(), kBulletChar);
+        are_passwords_revealed
+            ? possible_password
+            : base::string16(possible_password.length(), kBulletChar);
     base::scoped_nsobject<NSMenuItem> newItem([[NSMenuItem alloc]
         initWithTitle:base::SysUTF16ToNSString(text)
                action:NULL
@@ -131,18 +132,22 @@ NSButton* EyeIcon(id target, SEL action) {
 - (void)onEyeClicked:(id)sender {
   if (!self.model)
     return;  // The view will be destroyed soon.
-  bool visible = [passwordViewButton_ state] == NSOnState;
+  bool are_passwords_revealed = [passwordViewButton_ state] == NSOnState;
+  if (are_passwords_revealed && !self.model->RevealPasswords())
+    return;
   const autofill::PasswordForm& form = self.model->pending_password();
   if (passwordSelectionField_) {
     NSInteger index = [passwordSelectionField_ indexOfSelectedItem];
     self.model->OnCredentialEdited(form.username_value,
                                    form.all_possible_passwords[index]);
-    FillPasswordPopup(form, visible, passwordSelectionField_.get());
+    FillPasswordPopup(form, are_passwords_revealed,
+                      passwordSelectionField_.get());
   } else {
     DCHECK(passwordStaticField_);
     base::string16 text =
-        visible ? form.password_value
-                : base::string16(form.password_value.length(), kBulletChar);
+        are_passwords_revealed
+            ? form.password_value
+            : base::string16(form.password_value.length(), kBulletChar);
     [passwordStaticField_ setStringValue:base::SysUTF16ToNSString(text)];
   }
 }
@@ -180,8 +185,7 @@ NSButton* EyeIcon(id target, SEL action) {
       [[NSView alloc] initWithFrame:NSZeroRect]);
 
   // Create the elements.
-  bool enableUsernameEditing = base::FeatureList::IsEnabled(
-      password_manager::features::kEnableUsernameCorrection);
+  bool enableUsernameEditing = self.model->enable_editing();
   const autofill::PasswordForm& form = self.model->pending_password();
   if (enableUsernameEditing)
     usernameField_.reset([EditableField(form.username_value) retain]);
@@ -189,45 +193,46 @@ NSButton* EyeIcon(id target, SEL action) {
     usernameField_.reset([Label(GetDisplayUsername(form)) retain]);
   [container addSubview:usernameField_];
 
-  bool enablePasswordEditing = base::FeatureList::IsEnabled(
-      password_manager::features::kEnablePasswordSelection);
   if (form.federation_origin.unique()) {
-    if (enablePasswordEditing) {
-      if (form.all_possible_passwords.size() > 1) {
-        passwordSelectionField_.reset(
-            [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO]);
-        FillPasswordPopup(form, false, passwordSelectionField_.get());
-        [passwordSelectionField_ sizeToFit];
+    if (form.all_possible_passwords.size() > 1) {
+      passwordSelectionField_.reset(
+          [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO]);
+      FillPasswordPopup(
+          form, self.model->are_passwords_revealed_when_bubble_is_opened(),
+          passwordSelectionField_.get());
+      [passwordSelectionField_ sizeToFit];
+    } else {  //  Only one password.
+      if (self.model->are_passwords_revealed_when_bubble_is_opened()) {
+        passwordStaticField_.reset([Label(form.password_value) retain]);
       } else {
         passwordStaticField_.reset([Label(
             base::string16(form.password_value.length(), kBulletChar)) retain]);
-        // Overwrite the height of the password field because it's higher in the
-        // editable mode.
-        [passwordStaticField_
-            setFrameSize:NSMakeSize(
-                             NSWidth([passwordStaticField_ frame]),
-                             std::max(NSHeight([passwordStaticField_ frame]),
-                                      NSHeight([EditableField(
-                                          form.password_value) frame])))];
       }
-      if (!self.model->hide_eye_icon()) {
-        passwordViewButton_.reset(
-            [EyeIcon(self, @selector(onEyeClicked:)) retain]);
-        [container addSubview:passwordViewButton_];
-      }
-    } else {
-      passwordStaticField_.reset([PasswordLabel(form.password_value) retain]);
+      // Overwrite the height of the password field because it's higher in the
+      // editable mode.
+      [passwordStaticField_
+          setFrameSize:NSMakeSize(
+                           NSWidth([passwordStaticField_ frame]),
+                           std::max(NSHeight([passwordStaticField_ frame]),
+                                    NSHeight([EditableField(form.password_value)
+                                        frame])))];
     }
+    passwordViewButton_.reset([EyeIcon(self, @selector(onEyeClicked:)) retain]);
+    if (self.model->are_passwords_revealed_when_bubble_is_opened())
+      [passwordViewButton_ setState:NSOnState];
+    else
+      [passwordViewButton_ setState:NSOffState];
+    [container addSubview:passwordViewButton_];
   } else {
     base::string16 text = l10n_util::GetStringFUTF16(
         IDS_PASSWORDS_VIA_FEDERATION,
         base::UTF8ToUTF16(form.federation_origin.host()));
     passwordStaticField_.reset([Label(text) retain]);
   }
-  NSView* textField = passwordStaticField_ ? passwordStaticField_.get()
-                                           : passwordSelectionField_.get();
-  DCHECK(textField);
-  [container addSubview:textField];
+  NSView* passwordField = passwordStaticField_ ? passwordStaticField_.get()
+                                               : passwordSelectionField_.get();
+  DCHECK(passwordField);
+  [container addSubview:passwordField];
 
   NSTextField* usernameText =
       Label(l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_USERNAME_LABEL));
@@ -243,8 +248,8 @@ NSButton* EyeIcon(id target, SEL action) {
   CGFloat firstColumnSize =
       std::max(NSWidth([usernameText frame]), NSWidth([passwordText_ frame]));
   // Bottow row.
-  CGFloat rowHeight =
-      std::max(NSHeight([textField frame]), NSHeight([passwordText_ frame]));
+  CGFloat rowHeight = std::max(NSHeight([passwordField frame]),
+                               NSHeight([passwordText_ frame]));
   CGFloat curY = (rowHeight - NSHeight([passwordText_ frame])) / 2;
   [passwordText_ setFrameOrigin:NSMakePoint(firstColumnSize -
                                                 NSWidth([passwordText_ frame]),
@@ -255,10 +260,10 @@ NSButton* EyeIcon(id target, SEL action) {
     curY = (rowHeight - NSHeight([passwordSelectionField_ frame])) / 2;
   } else {
     // Password field is top-aligned with the label because it's not editable.
-    curY = NSMaxY([passwordText_ frame]) - NSHeight([textField frame]);
+    curY = NSMaxY([passwordText_ frame]) - NSHeight([passwordField frame]);
   }
-  [textField setFrameOrigin:NSMakePoint(curX, curY)];
-  CGFloat remainingWidth = kDesiredRowWidth - NSMinX([textField frame]);
+  [passwordField setFrameOrigin:NSMakePoint(curX, curY)];
+  CGFloat remainingWidth = kDesiredRowWidth - NSMinX([passwordField frame]);
   if (passwordViewButton_) {
     // The eye icon should be right-aligned.
     curX = kDesiredRowWidth - NSWidth([passwordViewButton_ frame]);
@@ -267,8 +272,8 @@ NSButton* EyeIcon(id target, SEL action) {
     remainingWidth -=
         (NSWidth([passwordViewButton_ frame]) + kItemLabelSpacing);
   }
-  [textField
-      setFrameSize:NSMakeSize(remainingWidth, NSHeight([textField frame]))];
+  [passwordField
+      setFrameSize:NSMakeSize(remainingWidth, NSHeight([passwordField frame]))];
   // Next row.
   CGFloat rowY = rowHeight + kRelatedControlVerticalSpacing;
   rowHeight = std::max(NSHeight([usernameField_ frame]),
@@ -276,7 +281,10 @@ NSButton* EyeIcon(id target, SEL action) {
   curX = firstColumnSize - NSWidth([usernameText frame]);
   curY = (rowHeight - NSHeight([usernameText frame])) / 2 + rowY;
   [usernameText setFrameOrigin:NSMakePoint(curX, curY)];
-  curX = NSMaxX([usernameText frame]) + kItemLabelSpacing;
+  // The username field is left aligned with the password field.
+  curX = NSMinX([usernameField_
+      frameForAlignmentRect:[passwordField
+                                alignmentRectForFrame:[passwordField frame]]]);
   curY = (rowHeight - NSHeight([usernameField_ frame])) / 2 + rowY;
   [usernameField_ setFrameOrigin:NSMakePoint(curX, curY)];
   remainingWidth = kDesiredRowWidth - NSMinX([usernameField_ frame]);

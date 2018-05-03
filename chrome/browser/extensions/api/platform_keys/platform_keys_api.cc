@@ -21,6 +21,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 
 namespace extensions {
 
@@ -131,8 +132,13 @@ PlatformKeysInternalGetPublicKeyFunction::Run() {
   const std::vector<char>& cert_der = params->certificate;
   if (cert_der.empty())
     return RespondNow(Error(platform_keys::kErrorInvalidX509Cert));
+  // Allow UTF-8 inside PrintableStrings in client certificates. See
+  // crbug.com/770323 and crbug.com/788655.
+  net::X509Certificate::UnsafeCreateOptions options;
+  options.printable_string_is_utf8 = true;
   scoped_refptr<net::X509Certificate> cert_x509 =
-      net::X509Certificate::CreateFromBytes(cert_der.data(), cert_der.size());
+      net::X509Certificate::CreateFromBytesUnsafeOptions(
+          cert_der.data(), cert_der.size(), options);
   if (!cert_x509)
     return RespondNow(Error(platform_keys::kErrorInvalidX509Cert));
 
@@ -206,9 +212,13 @@ PlatformKeysInternalSelectClientCertificatesFunction::Run() {
          *params->details.client_certs) {
       if (client_cert_der.empty())
         return RespondNow(Error(platform_keys::kErrorInvalidX509Cert));
+      // Allow UTF-8 inside PrintableStrings in client certificates. See
+      // crbug.com/770323 and crbug.com/788655.
+      net::X509Certificate::UnsafeCreateOptions options;
+      options.printable_string_is_utf8 = true;
       scoped_refptr<net::X509Certificate> client_cert_x509 =
-          net::X509Certificate::CreateFromBytes(client_cert_der.data(),
-                                                client_cert_der.size());
+          net::X509Certificate::CreateFromBytesUnsafeOptions(
+              client_cert_der.data(), client_cert_der.size(), options);
       if (!client_cert_x509)
         return RespondNow(Error(platform_keys::kErrorInvalidX509Cert));
       client_certs->push_back(client_cert_x509);
@@ -264,9 +274,8 @@ void PlatformKeysInternalSelectClientCertificatesFunction::
     }
 
     api_pk::Match result_match;
-    std::string der_encoded_cert;
-    net::X509Certificate::GetDEREncoded(match->os_cert_handle(),
-                                        &der_encoded_cert);
+    base::StringPiece der_encoded_cert =
+        net::x509_util::CryptoBufferAsStringPiece(match->cert_buffer());
     result_match.certificate.assign(der_encoded_cert.begin(),
                                     der_encoded_cert.end());
 

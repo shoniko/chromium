@@ -5,6 +5,8 @@
 #include "components/omnibox/browser/autocomplete_controller.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -12,7 +14,6 @@
 #include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -245,7 +246,7 @@ AutocompleteController::AutocompleteController(
     // that would come with it.
     if (!ClipboardRecentContent::GetInstance()) {
       ClipboardRecentContent::SetInstance(
-          base::MakeUnique<ClipboardRecentContentGeneric>());
+          std::make_unique<ClipboardRecentContentGeneric>());
     }
 #endif
     // ClipboardRecentContent can be null in iOS tests.  For non-iOS, we
@@ -321,7 +322,7 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
   if (input.want_asynchronous_matches() && (input.text().length() < 6)) {
     base::TimeTicks end_time = base::TimeTicks::Now();
     std::string name =
-        "Omnibox.QueryTime2." + base::SizeTToString(input.text().length());
+        "Omnibox.QueryTime2." + base::NumberToString(input.text().length());
     base::HistogramBase* counter = base::Histogram::FactoryGet(
         name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
     counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));
@@ -505,7 +506,7 @@ void AutocompleteController::UpdateResult(
   if (!done_) {
     // This conditional needs to match the conditional in Start that invokes
     // StartExpireTimer.
-    result_.CopyOldMatches(input_, last_result, template_url_service_);
+    result_.CopyOldMatches(input_, &last_result, template_url_service_);
   }
 
   UpdateKeywordDescriptions(&result_);

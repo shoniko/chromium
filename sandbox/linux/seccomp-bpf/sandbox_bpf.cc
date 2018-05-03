@@ -15,7 +15,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/third_party/valgrind/valgrind.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/bpf_dsl/codegen.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
@@ -35,8 +34,6 @@
 namespace sandbox {
 
 namespace {
-
-bool IsRunningOnValgrind() { return RUNNING_ON_VALGRIND; }
 
 // Check if the kernel supports seccomp-filter (a.k.a. seccomp mode 2) via
 // prctl().
@@ -123,12 +120,6 @@ SandboxBPF::~SandboxBPF() {
 
 // static
 bool SandboxBPF::SupportsSeccompSandbox(SeccompLevel level) {
-  // Never pretend to support seccomp with Valgrind, as it
-  // throws the tool off.
-  if (IsRunningOnValgrind()) {
-    return false;
-  }
-
   switch (level) {
     case SeccompLevel::SINGLE_THREADED:
       return KernelSupportsSeccompBPF();

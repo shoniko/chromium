@@ -46,12 +46,12 @@ namespace {
 
 class URLRequestExtraDataContainer : public ResourceRequest::ExtraData {
  public:
-  static RefPtr<URLRequestExtraDataContainer> Create(
+  static scoped_refptr<URLRequestExtraDataContainer> Create(
       WebURLRequest::ExtraData* extra_data) {
-    return WTF::AdoptRef(new URLRequestExtraDataContainer(extra_data));
+    return base::AdoptRef(new URLRequestExtraDataContainer(extra_data));
   }
 
-  ~URLRequestExtraDataContainer() override {}
+  ~URLRequestExtraDataContainer() override = default;
 
   WebURLRequest::ExtraData* GetExtraData() const { return extra_data_.get(); }
 
@@ -68,14 +68,14 @@ class URLRequestExtraDataContainer : public ResourceRequest::ExtraData {
 // heap, which is otherwise disallowed by DISALLOW_NEW_EXCEPT_PLACEMENT_NEW
 // annotation on ResourceRequest.
 struct WebURLRequest::ResourceRequestContainer {
-  ResourceRequestContainer() {}
+  ResourceRequestContainer() = default;
   explicit ResourceRequestContainer(const ResourceRequest& r)
       : resource_request(r) {}
 
   ResourceRequest resource_request;
 };
 
-WebURLRequest::~WebURLRequest() {}
+WebURLRequest::~WebURLRequest() = default;
 
 WebURLRequest::WebURLRequest()
     : owned_resource_request_(new ResourceRequestContainer()),
@@ -190,26 +190,11 @@ void WebURLRequest::VisitHTTPHeaderFields(WebHTTPHeaderVisitor* visitor) const {
 }
 
 WebHTTPBody WebURLRequest::HttpBody() const {
-  // TODO(mkwst): This is wrong, as it means that we're producing the body
-  // before any ServiceWorker has a chance to operate, which means we're
-  // revealing data to the SW that we ought to be hiding. Baby steps.
-  // https://crbug.com/599597
-  if (resource_request_->AttachedCredential())
-    return WebHTTPBody(resource_request_->AttachedCredential());
   return WebHTTPBody(resource_request_->HttpBody());
 }
 
 void WebURLRequest::SetHTTPBody(const WebHTTPBody& http_body) {
   resource_request_->SetHTTPBody(http_body);
-}
-
-WebHTTPBody WebURLRequest::AttachedCredential() const {
-  return WebHTTPBody(resource_request_->AttachedCredential());
-}
-
-void WebURLRequest::SetAttachedCredential(
-    const WebHTTPBody& attached_credential) {
-  resource_request_->SetAttachedCredential(attached_credential);
 }
 
 bool WebURLRequest::ReportUploadProgress() const {
@@ -232,7 +217,7 @@ WebURLRequest::RequestContext WebURLRequest::GetRequestContext() const {
   return resource_request_->GetRequestContext();
 }
 
-WebURLRequest::FrameType WebURLRequest::GetFrameType() const {
+network::mojom::RequestContextFrameType WebURLRequest::GetFrameType() const {
   return resource_request_->GetFrameType();
 }
 
@@ -256,7 +241,8 @@ void WebURLRequest::SetRequestContext(RequestContext request_context) {
   resource_request_->SetRequestContext(request_context);
 }
 
-void WebURLRequest::SetFrameType(FrameType frame_type) {
+void WebURLRequest::SetFrameType(
+    network::mojom::RequestContextFrameType frame_type) {
   resource_request_->SetFrameType(frame_type);
 }
 
@@ -268,12 +254,12 @@ void WebURLRequest::SetRequestorID(int requestor_id) {
   resource_request_->SetRequestorID(requestor_id);
 }
 
-int WebURLRequest::RequestorProcessID() const {
-  return resource_request_->RequestorProcessID();
+int WebURLRequest::GetPluginChildID() const {
+  return resource_request_->GetPluginChildID();
 }
 
-void WebURLRequest::SetRequestorProcessID(int requestor_process_id) {
-  resource_request_->SetRequestorProcessID(requestor_process_id);
+void WebURLRequest::SetPluginChildID(int plugin_child_id) {
+  resource_request_->SetPluginChildID(plugin_child_id);
 }
 
 int WebURLRequest::AppCacheHostID() const {
@@ -325,30 +311,30 @@ void WebURLRequest::SetShouldResetAppCache(bool set_should_reset_app_cache) {
   resource_request_->SetShouldResetAppCache(set_should_reset_app_cache);
 }
 
-WebURLRequest::FetchRequestMode WebURLRequest::GetFetchRequestMode() const {
+network::mojom::FetchRequestMode WebURLRequest::GetFetchRequestMode() const {
   return resource_request_->GetFetchRequestMode();
 }
 
-void WebURLRequest::SetFetchRequestMode(WebURLRequest::FetchRequestMode mode) {
+void WebURLRequest::SetFetchRequestMode(network::mojom::FetchRequestMode mode) {
   return resource_request_->SetFetchRequestMode(mode);
 }
 
-WebURLRequest::FetchCredentialsMode WebURLRequest::GetFetchCredentialsMode()
+network::mojom::FetchCredentialsMode WebURLRequest::GetFetchCredentialsMode()
     const {
   return resource_request_->GetFetchCredentialsMode();
 }
 
 void WebURLRequest::SetFetchCredentialsMode(
-    WebURLRequest::FetchCredentialsMode mode) {
+    network::mojom::FetchCredentialsMode mode) {
   return resource_request_->SetFetchCredentialsMode(mode);
 }
 
-WebURLRequest::FetchRedirectMode WebURLRequest::GetFetchRedirectMode() const {
+network::mojom::FetchRedirectMode WebURLRequest::GetFetchRedirectMode() const {
   return resource_request_->GetFetchRedirectMode();
 }
 
 void WebURLRequest::SetFetchRedirectMode(
-    WebURLRequest::FetchRedirectMode redirect) {
+    network::mojom::FetchRedirectMode redirect) {
   return resource_request_->SetFetchRedirectMode(redirect);
 }
 
@@ -370,7 +356,8 @@ void WebURLRequest::SetPreviewsState(
 }
 
 WebURLRequest::ExtraData* WebURLRequest::GetExtraData() const {
-  RefPtr<ResourceRequest::ExtraData> data = resource_request_->GetExtraData();
+  scoped_refptr<ResourceRequest::ExtraData> data =
+      resource_request_->GetExtraData();
   if (!data)
     return nullptr;
   return static_cast<URLRequestExtraDataContainer*>(data.get())->GetExtraData();
@@ -416,8 +403,9 @@ bool WebURLRequest::IsExternalRequest() const {
   return resource_request_->IsExternalRequest();
 }
 
-WebURLRequest::LoadingIPCType WebURLRequest::GetLoadingIPCType() const {
-  return resource_request_->GetLoadingIPCType();
+network::mojom::CORSPreflightPolicy WebURLRequest::GetCORSPreflightPolicy()
+    const {
+  return resource_request_->CORSPreflightPolicy();
 }
 
 void WebURLRequest::SetNavigationStartTime(double navigation_start_seconds) {
@@ -438,6 +426,13 @@ void WebURLRequest::SetInputPerfMetricReportPolicy(
     WebURLRequest::InputToLoadPerfMetricReportPolicy policy) {
   resource_request_->SetInputPerfMetricReportPolicy(
       static_cast<blink::InputToLoadPerfMetricReportPolicy>(policy));
+}
+
+base::Optional<WebString> WebURLRequest::GetSuggestedFilename() const {
+  if (!resource_request_->GetSuggestedFilename().has_value())
+    return base::Optional<WebString>();
+  return static_cast<WebString>(
+      resource_request_->GetSuggestedFilename().value());
 }
 
 const ResourceRequest& WebURLRequest::ToResourceRequest() const {

@@ -37,16 +37,13 @@
 #include "storage/browser/blob/blob_data_handle.h"
 #include "storage/browser/blob/blob_reader.h"
 #include "storage/browser/fileapi/file_stream_reader.h"
-#include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
-#include "storage/common/data_element.h"
 
 namespace storage {
 
 BlobURLRequestJob::BlobURLRequestJob(net::URLRequest* request,
                                      net::NetworkDelegate* network_delegate,
-                                     BlobDataHandle* blob_handle,
-                                     FileSystemContext* file_system_context)
+                                     BlobDataHandle* blob_handle)
     : net::URLRequestJob(request, network_delegate),
       error_(false),
       byte_range_set_(false),
@@ -55,7 +52,7 @@ BlobURLRequestJob::BlobURLRequestJob(net::URLRequest* request,
                            blob_handle ? blob_handle->uuid() : "NotFound");
   if (blob_handle) {
     blob_handle_.reset(new BlobDataHandle(*blob_handle));
-    blob_reader_ = blob_handle_->CreateReader(file_system_context);
+    blob_reader_ = blob_handle_->CreateReader();
   }
 }
 
@@ -156,7 +153,7 @@ scoped_refptr<net::HttpResponseHeaders> BlobURLRequestJob::GenerateHeaders(
   if (status_code == net::HTTP_OK || status_code == net::HTTP_PARTIAL_CONTENT) {
     std::string content_length_header(net::HttpRequestHeaders::kContentLength);
     content_length_header.append(": ");
-    content_length_header.append(base::Uint64ToString(content_size));
+    content_length_header.append(base::NumberToString(content_size));
     headers->AddHeader(content_length_header);
     if (status_code == net::HTTP_PARTIAL_CONTENT) {
       DCHECK(byte_range->IsValid());

@@ -291,6 +291,16 @@ class PaymentRequest : public PaymentOptionsProvider,
   // Returns whether the current PaymentRequest can be used to make a payment.
   bool CanMakePayment() const;
 
+  // Returns YES if there's a selected payment method. If shipping is requested,
+  // there must be a selected shipping address and a shipping option, otherwise
+  // returns NO. If contact info is requeted, there must be a selected contact
+  // info, otherwise returns NO.
+  bool IsAbleToPay();
+
+  // Returns YES if either payer's name, phone number, or email address are
+  // requested and NO otherwise.
+  bool RequestContactInfo();
+
   // Invokes the appropriate payment app for the selected payment method.
   void InvokePaymentApp(id<PaymentResponseHelperConsumer> consumer);
 
@@ -371,11 +381,9 @@ class PaymentRequest : public PaymentOptionsProvider,
   // created this PaymentRequest object.
   __weak id<PaymentRequestUIDelegate> payment_request_ui_delegate_;
 
-  // The address normalizer to use for the duration of the Payment Request.
-  autofill::AddressNormalizerImpl address_normalizer_;
-
   // Used to normalize the shipping address and the contact info.
-  autofill::AddressNormalizationManager address_normalization_manager_;
+  std::unique_ptr<autofill::AddressNormalizationManager>
+      address_normalization_manager_;
 
   // The currency formatter instance for this PaymentRequest flow.
   std::unique_ptr<CurrencyFormatter> currency_formatter_;

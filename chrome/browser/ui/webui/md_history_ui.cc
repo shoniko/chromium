@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
@@ -113,7 +112,7 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
       l10n_util::GetStringFUTF16(
           IDS_HISTORY_OTHER_FORMS_OF_HISTORY,
           l10n_util::GetStringUTF16(
-              IDS_SETTINGS_CLEAR_DATA_WEB_HISTORY_URL_IN_HISTORY)));
+              IDS_SETTINGS_CLEAR_DATA_MYACTIVITY_URL_IN_HISTORY)));
 
   PrefService* prefs = profile->GetPrefs();
   bool allow_deleting_history =
@@ -201,12 +200,12 @@ MdHistoryUI::MdHistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
       CreateMdHistoryUIHTMLSource(profile, use_test_title_);
   content::WebUIDataSource::Add(profile, data_source);
 
-  web_ui->AddMessageHandler(base::MakeUnique<BrowsingHistoryHandler>());
-  web_ui->AddMessageHandler(base::MakeUnique<MetricsHandler>());
+  web_ui->AddMessageHandler(std::make_unique<BrowsingHistoryHandler>());
+  web_ui->AddMessageHandler(std::make_unique<MetricsHandler>());
 
   web_ui->AddMessageHandler(
-      base::MakeUnique<browser_sync::ForeignSessionHandler>());
-  web_ui->AddMessageHandler(base::MakeUnique<HistoryLoginHandler>(
+      std::make_unique<browser_sync::ForeignSessionHandler>());
+  web_ui->AddMessageHandler(std::make_unique<HistoryLoginHandler>(
       base::Bind(&MdHistoryUI::UpdateDataSource, base::Unretained(this))));
 
   web_ui->RegisterMessageCallback("menuPromoShown",

@@ -39,7 +39,7 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
     WebURLLoaderTestDelegate* delegate,
     const WebURLResponse& response,
     const WebData& data,
-    const WebURLError& error) {
+    const Optional<WebURLError>& error) {
   DCHECK(!using_default_loader_);
   if (!client_)
     return;
@@ -54,14 +54,14 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
 
   // didReceiveResponse() and didReceiveData() might end up getting ::cancel()
   // to be called which will make the ResourceLoader to delete |this|.
-  WeakPtr<WebURLLoaderMock> self = weak_factory_.CreateWeakPtr();
+  base::WeakPtr<WebURLLoaderMock> self = weak_factory_.GetWeakPtr();
 
   delegate->DidReceiveResponse(client_, response);
   if (!self)
     return;
 
-  if (error.reason) {
-    delegate->DidFail(client_, error, data.size(), 0, 0);
+  if (error) {
+    delegate->DidFail(client_, *error, data.size(), 0, 0);
     return;
   }
 
@@ -85,7 +85,7 @@ WebURL WebURLLoaderMock::ServeRedirect(
     const WebURLResponse& redirect_response) {
   KURL redirect_url(redirect_response.HttpHeaderField("Location"));
 
-  WeakPtr<WebURLLoaderMock> self = weak_factory_.CreateWeakPtr();
+  base::WeakPtr<WebURLLoaderMock> self = weak_factory_.GetWeakPtr();
 
   bool report_raw_headers = false;
   bool follow = client_->WillFollowRedirect(
@@ -103,7 +103,7 @@ WebURL WebURLLoaderMock::ServeRedirect(
 
 void WebURLLoaderMock::LoadSynchronously(const WebURLRequest& request,
                                          WebURLResponse& response,
-                                         WebURLError& error,
+                                         base::Optional<WebURLError>& error,
                                          WebData& data,
                                          int64_t& encoded_data_length,
                                          int64_t& encoded_body_length) {
@@ -158,8 +158,8 @@ void WebURLLoaderMock::SetDefersLoading(bool deferred) {
 void WebURLLoaderMock::DidChangePriority(WebURLRequest::Priority new_priority,
                                          int intra_priority_value) {}
 
-WeakPtr<WebURLLoaderMock> WebURLLoaderMock::GetWeakPtr() {
-  return weak_factory_.CreateWeakPtr();
+base::WeakPtr<WebURLLoaderMock> WebURLLoaderMock::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 } // namespace blink

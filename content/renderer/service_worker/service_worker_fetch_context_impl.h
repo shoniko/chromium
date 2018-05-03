@@ -5,8 +5,8 @@
 #ifndef CONTENT_RENDERER_SERVICE_WORKER_SERVICE_WORKER_FETCH_CONTEXT_IMPL_H_
 #define CONTENT_RENDERER_SERVICE_WORKER_SERVICE_WORKER_FETCH_CONTEXT_IMPL_H_
 
-#include "content/public/common/url_loader_factory.mojom.h"
 #include "content/public/renderer/child_url_loader_factory_getter.h"
+#include "services/network/public/interfaces/url_loader_factory.mojom.h"
 #include "third_party/WebKit/public/platform/WebWorkerFetchContext.h"
 #include "url/gurl.h"
 
@@ -16,13 +16,15 @@ class SingleThreadTaskRunner;
 
 namespace content {
 class ResourceDispatcher;
+class URLLoaderThrottleProvider;
 
 class ServiceWorkerFetchContextImpl : public blink::WebWorkerFetchContext {
  public:
   ServiceWorkerFetchContextImpl(
       const GURL& worker_script_url,
       ChildURLLoaderFactoryGetter::Info url_loader_factory_getter_info,
-      int service_worker_provider_id);
+      int service_worker_provider_id,
+      std::unique_ptr<URLLoaderThrottleProvider> throttle_provider);
   ~ServiceWorkerFetchContextImpl() override;
 
   // blink::WebWorkerFetchContext implementation:
@@ -31,8 +33,6 @@ class ServiceWorkerFetchContextImpl : public blink::WebWorkerFetchContext {
   std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory() override;
   void WillSendRequest(blink::WebURLRequest&) override;
   bool IsControlledByServiceWorker() const override;
-  void SetDataSaverEnabled(bool enabled) override;
-  bool IsDataSaverEnabled() const override;
   blink::WebURL SiteForCookies() const override;
 
  private:
@@ -45,7 +45,7 @@ class ServiceWorkerFetchContextImpl : public blink::WebWorkerFetchContext {
   std::unique_ptr<ResourceDispatcher> resource_dispatcher_;
   scoped_refptr<ChildURLLoaderFactoryGetter> url_loader_factory_getter_;
 
-  bool is_data_saver_enabled_ = false;
+  std::unique_ptr<URLLoaderThrottleProvider> throttle_provider_;
 };
 
 }  // namespace content

@@ -14,7 +14,6 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/process_metrics.h"
 #include "base/rand_util.h"
@@ -57,7 +56,7 @@
 #include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
 #include "ios/chrome/browser/sync/ios_chrome_sync_client.h"
 #include "ios/chrome/browser/tab_parenting_global_observer.h"
-#include "ios/chrome/browser/tabs/tab_model_list.h"
+#import "ios/chrome/browser/tabs/tab_model_list.h"
 #include "ios/chrome/browser/translate/translate_ranker_metrics_provider.h"
 #include "ios/chrome/common/channel_info.h"
 #include "ios/web/public/web_thread.h"
@@ -146,12 +145,13 @@ void IOSChromeMetricsServiceClient::CollectFinalMetricsForLog(
 std::unique_ptr<metrics::MetricsLogUploader>
 IOSChromeMetricsServiceClient::CreateUploader(
     base::StringPiece server_url,
+    base::StringPiece insecure_server_url,
     base::StringPiece mime_type,
     metrics::MetricsLogUploader::MetricServiceType service_type,
     const metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
-  return base::MakeUnique<metrics::NetMetricsLogUploader>(
+  return std::make_unique<metrics::NetMetricsLogUploader>(
       GetApplicationContext()->GetSystemURLRequestContext(), server_url,
-      mime_type, service_type, on_upload_complete);
+      insecure_server_url, mime_type, service_type, on_upload_complete);
 }
 
 base::TimeDelta IOSChromeMetricsServiceClient::GetStandardUploadInterval() {
@@ -174,26 +174,26 @@ void IOSChromeMetricsServiceClient::WebStateDidStopLoading(
 
 void IOSChromeMetricsServiceClient::Initialize() {
   PrefService* local_state = GetApplicationContext()->GetLocalState();
-  metrics_service_ = base::MakeUnique<metrics::MetricsService>(
+  metrics_service_ = std::make_unique<metrics::MetricsService>(
       metrics_state_manager_, this, local_state);
 
   if (base::FeatureList::IsEnabled(ukm::kUkmFeature))
-    ukm_service_ = base::MakeUnique<ukm::UkmService>(local_state, this);
+    ukm_service_ = std::make_unique<ukm::UkmService>(local_state, this);
 
   // Register metrics providers.
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<metrics::NetworkMetricsProvider>());
+      std::make_unique<metrics::NetworkMetricsProvider>());
 
   // Currently, we configure OmniboxMetricsProvider to not log events to UMA
   // if there is a single incognito session visible. In the future, it may
   // be worth revisiting this to still log events from non-incognito sessions.
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<OmniboxMetricsProvider>(
-          base::Bind(&::IsOffTheRecordSessionActive)));
+      std::make_unique<OmniboxMetricsProvider>(
+          base::Bind(&TabModelList::IsOffTheRecordSessionActive)));
 
   {
     auto stability_metrics_provider =
-        base::MakeUnique<IOSChromeStabilityMetricsProvider>(
+        std::make_unique<IOSChromeStabilityMetricsProvider>(
             GetApplicationContext()->GetLocalState());
     stability_metrics_provider_ = stability_metrics_provider.get();
     metrics_service_->RegisterMetricsProvider(
@@ -201,28 +201,28 @@ void IOSChromeMetricsServiceClient::Initialize() {
   }
 
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<metrics::ScreenInfoMetricsProvider>());
+      std::make_unique<metrics::ScreenInfoMetricsProvider>());
 
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<metrics::DriveMetricsProvider>(ios::FILE_LOCAL_STATE));
+      std::make_unique<metrics::DriveMetricsProvider>(ios::FILE_LOCAL_STATE));
 
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<metrics::CallStackProfileMetricsProvider>());
+      std::make_unique<metrics::CallStackProfileMetricsProvider>());
 
   metrics_service_->RegisterMetricsProvider(
       SigninStatusMetricsProvider::CreateInstance(
-          base::MakeUnique<IOSChromeSigninStatusMetricsProviderDelegate>()));
+          std::make_unique<IOSChromeSigninStatusMetricsProviderDelegate>()));
 
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<MobileSessionShutdownMetricsProvider>(
+      std::make_unique<MobileSessionShutdownMetricsProvider>(
           metrics_service_.get()));
 
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<syncer::DeviceCountMetricsProvider>(
+      std::make_unique<syncer::DeviceCountMetricsProvider>(
           base::Bind(&IOSChromeSyncClient::GetDeviceInfoTrackers)));
 
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<translate::TranslateRankerMetricsProvider>());
+      std::make_unique<translate::TranslateRankerMetricsProvider>());
 }
 
 void IOSChromeMetricsServiceClient::CollectFinalHistograms() {
@@ -297,6 +297,16 @@ void IOSChromeMetricsServiceClient::OnSyncPrefsChanged(bool must_purge) {
     ukm_service_->Purge();
     ukm_service_->ResetClientId();
   }
+  // Signal service manager to enable/disable UKM based on new state.
+  UpdateRunningServices();
+}
+
+void IOSChromeMetricsServiceClient::OnIncognitoWebStateAdded() {
+  // Signal service manager to enable/disable UKM based on new state.
+  UpdateRunningServices();
+}
+
+void IOSChromeMetricsServiceClient::OnIncognitoWebStateRemoved() {
   // Signal service manager to enable/disable UKM based on new state.
   UpdateRunningServices();
 }

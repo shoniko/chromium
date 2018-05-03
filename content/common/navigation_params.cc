@@ -35,7 +35,9 @@ CommonNavigationParams::CommonNavigationParams()
       previews_state(PREVIEWS_UNSPECIFIED),
       navigation_start(base::TimeTicks::Now()),
       method("GET"),
-      should_check_main_world_csp(CSPDisposition::CHECK) {}
+      should_check_main_world_csp(CSPDisposition::CHECK),
+      started_from_context_menu(false),
+      has_user_gesture(false) {}
 
 CommonNavigationParams::CommonNavigationParams(
     const GURL& url,
@@ -51,9 +53,11 @@ CommonNavigationParams::CommonNavigationParams(
     PreviewsState previews_state,
     const base::TimeTicks& navigation_start,
     std::string method,
-    const scoped_refptr<ResourceRequestBody>& post_data,
+    const scoped_refptr<network::ResourceRequestBody>& post_data,
     base::Optional<SourceLocation> source_location,
-    CSPDisposition should_check_main_world_csp)
+    CSPDisposition should_check_main_world_csp,
+    bool started_from_context_menu,
+    bool has_user_gesture)
     : url(url),
       referrer(referrer),
       transition(transition),
@@ -69,7 +73,9 @@ CommonNavigationParams::CommonNavigationParams(
       method(method),
       post_data(post_data),
       source_location(source_location),
-      should_check_main_world_csp(should_check_main_world_csp) {
+      should_check_main_world_csp(should_check_main_world_csp),
+      started_from_context_menu(started_from_context_menu),
+      has_user_gesture(has_user_gesture) {
   // |method != "POST"| should imply absence of |post_data|.
   if (method != "POST" && post_data) {
     NOTREACHED();
@@ -83,63 +89,11 @@ CommonNavigationParams::CommonNavigationParams(
 CommonNavigationParams::~CommonNavigationParams() {
 }
 
-BeginNavigationParams::BeginNavigationParams()
-    : load_flags(0),
-      has_user_gesture(false),
-      skip_service_worker(false),
-      request_context_type(REQUEST_CONTEXT_TYPE_LOCATION),
-      mixed_content_context_type(blink::WebMixedContentContextType::kBlockable),
-      is_form_submission(false) {}
-
-BeginNavigationParams::BeginNavigationParams(
-    std::string headers,
-    int load_flags,
-    bool has_user_gesture,
-    bool skip_service_worker,
-    RequestContextType request_context_type,
-    blink::WebMixedContentContextType mixed_content_context_type,
-    bool is_form_submission,
-    const base::Optional<url::Origin>& initiator_origin)
-    : headers(headers),
-      load_flags(load_flags),
-      has_user_gesture(has_user_gesture),
-      skip_service_worker(skip_service_worker),
-      request_context_type(request_context_type),
-      mixed_content_context_type(mixed_content_context_type),
-      is_form_submission(is_form_submission),
-      initiator_origin(initiator_origin) {}
-
-BeginNavigationParams::BeginNavigationParams(
-    const BeginNavigationParams& other) = default;
-
-BeginNavigationParams::~BeginNavigationParams() {}
-
-StartNavigationParams::StartNavigationParams()
-    : transferred_request_child_id(-1),
-      transferred_request_request_id(-1) {
-}
-
-StartNavigationParams::StartNavigationParams(
-    const std::string& extra_headers,
-    int transferred_request_child_id,
-    int transferred_request_request_id)
-    : extra_headers(extra_headers),
-      transferred_request_child_id(transferred_request_child_id),
-      transferred_request_request_id(transferred_request_request_id) {
-}
-
-StartNavigationParams::StartNavigationParams(
-    const StartNavigationParams& other) = default;
-
-StartNavigationParams::~StartNavigationParams() {
-}
-
 RequestNavigationParams::RequestNavigationParams()
     : is_overriding_user_agent(false),
       can_load_local_resources(false),
       nav_entry_id(0),
       is_history_navigation_in_new_child(false),
-      has_committed_real_load(false),
       intended_as_new_entry(false),
       pending_history_list_offset(-1),
       current_history_list_offset(-1),
@@ -148,9 +102,7 @@ RequestNavigationParams::RequestNavigationParams()
       should_clear_history_list(false),
       should_create_service_worker(false),
       service_worker_provider_id(kInvalidServiceWorkerProviderId),
-      appcache_host_id(kAppCacheNoHostId),
-      has_user_gesture(false) {
-}
+      appcache_host_id(kAppCacheNoHostId) {}
 
 RequestNavigationParams::RequestNavigationParams(
     bool is_overriding_user_agent,
@@ -162,14 +114,12 @@ RequestNavigationParams::RequestNavigationParams(
     int nav_entry_id,
     bool is_history_navigation_in_new_child,
     std::map<std::string, bool> subframe_unique_names,
-    bool has_committed_real_load,
     bool intended_as_new_entry,
     int pending_history_list_offset,
     int current_history_list_offset,
     int current_history_list_length,
     bool is_view_source,
-    bool should_clear_history_list,
-    bool has_user_gesture)
+    bool should_clear_history_list)
     : is_overriding_user_agent(is_overriding_user_agent),
       redirects(redirects),
       original_url(original_url),
@@ -179,7 +129,6 @@ RequestNavigationParams::RequestNavigationParams(
       nav_entry_id(nav_entry_id),
       is_history_navigation_in_new_child(is_history_navigation_in_new_child),
       subframe_unique_names(subframe_unique_names),
-      has_committed_real_load(has_committed_real_load),
       intended_as_new_entry(intended_as_new_entry),
       pending_history_list_offset(pending_history_list_offset),
       current_history_list_offset(current_history_list_offset),
@@ -188,8 +137,7 @@ RequestNavigationParams::RequestNavigationParams(
       should_clear_history_list(should_clear_history_list),
       should_create_service_worker(false),
       service_worker_provider_id(kInvalidServiceWorkerProviderId),
-      appcache_host_id(kAppCacheNoHostId),
-      has_user_gesture(has_user_gesture) {}
+      appcache_host_id(kAppCacheNoHostId) {}
 
 RequestNavigationParams::RequestNavigationParams(
     const RequestNavigationParams& other) = default;
@@ -199,10 +147,8 @@ RequestNavigationParams::~RequestNavigationParams() {
 
 NavigationParams::NavigationParams(
     const CommonNavigationParams& common_params,
-    const StartNavigationParams& start_params,
     const RequestNavigationParams& request_params)
     : common_params(common_params),
-      start_params(start_params),
       request_params(request_params) {
 }
 

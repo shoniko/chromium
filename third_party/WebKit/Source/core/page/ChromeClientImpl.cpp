@@ -96,8 +96,6 @@
 #include "public/platform/WebRect.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/web/WebAutofillClient.h"
-#include "public/web/WebColorChooser.h"
-#include "public/web/WebColorSuggestion.h"
 #include "public/web/WebConsoleMessage.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebInputElement.h"
@@ -160,7 +158,7 @@ ChromeClientImpl::ChromeClientImpl(WebViewImpl* web_view)
       cursor_overridden_(false),
       did_request_non_empty_tool_tip_(false) {}
 
-ChromeClientImpl::~ChromeClientImpl() {}
+ChromeClientImpl::~ChromeClientImpl() = default;
 
 ChromeClientImpl* ChromeClientImpl::Create(WebViewImpl* web_view) {
   return new ChromeClientImpl(web_view);
@@ -281,12 +279,11 @@ Page* ChromeClientImpl::CreateWindow(LocalFrame* frame,
   return new_view->GetPage();
 }
 
-void ChromeClientImpl::DidOverscroll(
-    const FloatSize& overscroll_delta,
-    const FloatSize& accumulated_overscroll,
-    const FloatPoint& position_in_viewport,
-    const FloatSize& velocity_in_viewport,
-    const WebScrollBoundaryBehavior& behavior) {
+void ChromeClientImpl::DidOverscroll(const FloatSize& overscroll_delta,
+                                     const FloatSize& accumulated_overscroll,
+                                     const FloatPoint& position_in_viewport,
+                                     const FloatSize& velocity_in_viewport,
+                                     const WebOverscrollBehavior& behavior) {
   if (!web_view_->Client())
     return;
 
@@ -351,7 +348,8 @@ bool ChromeClientImpl::OpenJavaScriptAlertDelegate(LocalFrame* frame,
   NotifyPopupOpeningObservers();
   WebLocalFrameImpl* webframe = WebLocalFrameImpl::FromFrame(frame);
   if (webframe->Client()) {
-    if (WebUserGestureIndicator::IsProcessingUserGesture())
+    // (TODO(mustaq): why is it going through the web layer? crbug.com/781328
+    if (WebUserGestureIndicator::IsProcessingUserGesture(webframe))
       WebUserGestureIndicator::DisableTimeout();
     webframe->Client()->RunModalAlertDialog(message);
     return true;
@@ -365,7 +363,8 @@ bool ChromeClientImpl::OpenJavaScriptConfirmDelegate(LocalFrame* frame,
   NotifyPopupOpeningObservers();
   WebLocalFrameImpl* webframe = WebLocalFrameImpl::FromFrame(frame);
   if (webframe->Client()) {
-    if (WebUserGestureIndicator::IsProcessingUserGesture())
+    // (TODO(mustaq): why is it going through the web layer? crbug.com/781328
+    if (WebUserGestureIndicator::IsProcessingUserGesture(webframe))
       WebUserGestureIndicator::DisableTimeout();
     return webframe->Client()->RunModalConfirmDialog(message);
   }
@@ -380,7 +379,8 @@ bool ChromeClientImpl::OpenJavaScriptPromptDelegate(LocalFrame* frame,
   NotifyPopupOpeningObservers();
   WebLocalFrameImpl* webframe = WebLocalFrameImpl::FromFrame(frame);
   if (webframe->Client()) {
-    if (WebUserGestureIndicator::IsProcessingUserGesture())
+    // (TODO(mustaq): why is it going through the web layer?
+    if (WebUserGestureIndicator::IsProcessingUserGesture(webframe))
       WebUserGestureIndicator::DisableTimeout();
     WebString actual_value;
     bool ok = webframe->Client()->RunModalPromptDialog(message, default_value,
@@ -499,11 +499,10 @@ void ChromeClientImpl::ShowMouseOverURL(const HitTestResult& result) {
                 IsHTMLEmbedElement(*result.InnerNode()))) {
       LayoutObject* object = result.InnerNode()->GetLayoutObject();
       if (object && object->IsLayoutEmbeddedContent()) {
-        PluginView* plugin_view = ToLayoutEmbeddedContent(object)->Plugin();
-        if (plugin_view && plugin_view->IsPluginContainer()) {
-          WebPluginContainerImpl* plugin =
-              ToWebPluginContainerImpl(plugin_view);
-          url = plugin->Plugin()->LinkAtPosition(
+        WebPluginContainerImpl* plugin_view =
+            ToLayoutEmbeddedContent(object)->Plugin();
+        if (plugin_view) {
+          url = plugin_view->Plugin()->LinkAtPosition(
               result.RoundedPointInInnerNodeFrame());
         }
       }
@@ -831,7 +830,7 @@ WebLayerTreeView* ChromeClientImpl::GetWebLayerTreeView(LocalFrame* frame) {
 
 void ChromeClientImpl::RequestDecode(LocalFrame* frame,
                                      const PaintImage& image,
-                                     WTF::Function<void(bool)> callback) {
+                                     base::OnceCallback<void(bool)> callback) {
   WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
   web_frame->LocalRoot()->FrameWidget()->RequestDecode(image,
                                                        std::move(callback));
@@ -941,6 +940,17 @@ void ChromeClientImpl::SetNeedsLowLatencyInput(LocalFrame* frame,
 
   if (WebWidgetClient* client = widget->Client())
     client->SetNeedsLowLatencyInput(needs_low_latency);
+}
+
+void ChromeClientImpl::RequestUnbufferedInputEvents(LocalFrame* frame) {
+  DCHECK(frame);
+  WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
+  WebFrameWidgetBase* widget = web_frame->LocalRoot()->FrameWidget();
+  if (!widget)
+    return;
+
+  if (WebWidgetClient* client = widget->Client())
+    client->RequestUnbufferedInputEvents();
 }
 
 void ChromeClientImpl::SetTouchAction(LocalFrame* frame,
@@ -1064,9 +1074,9 @@ void ChromeClientImpl::DidUpdateBrowserControls() const {
   web_view_->DidUpdateBrowserControls();
 }
 
-void ChromeClientImpl::SetScrollBoundaryBehavior(
-    const WebScrollBoundaryBehavior& scroll_boundary_behavior) {
-  web_view_->SetScrollBoundaryBehavior(scroll_boundary_behavior);
+void ChromeClientImpl::SetOverscrollBehavior(
+    const WebOverscrollBehavior& overscroll_behavior) {
+  web_view_->SetOverscrollBehavior(overscroll_behavior);
 }
 
 void ChromeClientImpl::RegisterPopupOpeningObserver(
@@ -1097,10 +1107,6 @@ std::unique_ptr<WebFrameScheduler> ChromeClientImpl::CreateFrameScheduler(
     WebFrameScheduler::FrameType frame_type) {
   return web_view_->Scheduler()->CreateFrameScheduler(blame_context,
                                                       frame_type);
-}
-
-double ChromeClientImpl::LastFrameTimeMonotonic() const {
-  return web_view_->LastFrameTimeMonotonic();
 }
 
 WebAutofillClient* ChromeClientImpl::AutofillClientFromFrame(

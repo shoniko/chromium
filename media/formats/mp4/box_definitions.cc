@@ -14,19 +14,23 @@
 #include "media/base/media_switches.h"
 #include "media/base/video_types.h"
 #include "media/base/video_util.h"
-#include "media/formats/mp4/avc.h"
 #include "media/formats/mp4/es_descriptor.h"
 #include "media/formats/mp4/rcheck.h"
 #include "media/media_features.h"
-#include "media/video/h264_parser.h"
+#include "third_party/libaom/av1_features.h"
+
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+#include "media/formats/mp4/avc.h"
+#include "media/video/h264_parser.h"  // nogncheck
 
 #if BUILDFLAG(ENABLE_DOLBY_VISION_DEMUXING)
 #include "media/formats/mp4/dolby_vision.h"
-#endif
+#endif  // BUILDFLAG(ENABLE_DOLBY_VISION_DEMUXING)
 
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
 #include "media/formats/mp4/hevc.h"
-#endif
+#endif  // BUILDFLAG(ENABLE_HEVC_DEMUXING)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 namespace media {
 namespace mp4 {
@@ -38,9 +42,9 @@ const size_t kFlacMetadataBlockStreaminfoSize = 34;
 
 }  // namespace
 
-FileType::FileType() {}
+FileType::FileType() = default;
 FileType::FileType(const FileType& other) = default;
-FileType::~FileType() {}
+FileType::~FileType() = default;
 FourCC FileType::BoxType() const { return FOURCC_FTYP; }
 
 bool FileType::Parse(BoxReader* reader) {
@@ -49,10 +53,10 @@ bool FileType::Parse(BoxReader* reader) {
   return reader->SkipBytes(sizeof(FourCC) * num_brands);  // compatible_brands
 }
 
-ProtectionSystemSpecificHeader::ProtectionSystemSpecificHeader() {}
+ProtectionSystemSpecificHeader::ProtectionSystemSpecificHeader() = default;
 ProtectionSystemSpecificHeader::ProtectionSystemSpecificHeader(
     const ProtectionSystemSpecificHeader& other) = default;
-ProtectionSystemSpecificHeader::~ProtectionSystemSpecificHeader() {}
+ProtectionSystemSpecificHeader::~ProtectionSystemSpecificHeader() = default;
 FourCC ProtectionSystemSpecificHeader::BoxType() const { return FOURCC_PSSH; }
 
 bool ProtectionSystemSpecificHeader::Parse(BoxReader* reader) {
@@ -63,10 +67,12 @@ bool ProtectionSystemSpecificHeader::Parse(BoxReader* reader) {
   return true;
 }
 
-FullProtectionSystemSpecificHeader::FullProtectionSystemSpecificHeader() {}
+FullProtectionSystemSpecificHeader::FullProtectionSystemSpecificHeader() =
+    default;
 FullProtectionSystemSpecificHeader::FullProtectionSystemSpecificHeader(
     const FullProtectionSystemSpecificHeader& other) = default;
-FullProtectionSystemSpecificHeader::~FullProtectionSystemSpecificHeader() {}
+FullProtectionSystemSpecificHeader::~FullProtectionSystemSpecificHeader() =
+    default;
 FourCC FullProtectionSystemSpecificHeader::BoxType() const {
   return FOURCC_PSSH;
 }
@@ -117,10 +123,10 @@ bool FullProtectionSystemSpecificHeader::Parse(mp4::BoxReader* reader) {
   return true;
 }
 
-SampleAuxiliaryInformationOffset::SampleAuxiliaryInformationOffset() {}
+SampleAuxiliaryInformationOffset::SampleAuxiliaryInformationOffset() = default;
 SampleAuxiliaryInformationOffset::SampleAuxiliaryInformationOffset(
     const SampleAuxiliaryInformationOffset& other) = default;
-SampleAuxiliaryInformationOffset::~SampleAuxiliaryInformationOffset() {}
+SampleAuxiliaryInformationOffset::~SampleAuxiliaryInformationOffset() = default;
 FourCC SampleAuxiliaryInformationOffset::BoxType() const { return FOURCC_SAIO; }
 
 bool SampleAuxiliaryInformationOffset::Parse(BoxReader* reader) {
@@ -157,7 +163,7 @@ SampleAuxiliaryInformationSize::SampleAuxiliaryInformationSize()
 }
 SampleAuxiliaryInformationSize::SampleAuxiliaryInformationSize(
     const SampleAuxiliaryInformationSize& other) = default;
-SampleAuxiliaryInformationSize::~SampleAuxiliaryInformationSize() {}
+SampleAuxiliaryInformationSize::~SampleAuxiliaryInformationSize() = default;
 FourCC SampleAuxiliaryInformationSize::BoxType() const { return FOURCC_SAIZ; }
 
 bool SampleAuxiliaryInformationSize::Parse(BoxReader* reader) {
@@ -172,10 +178,10 @@ bool SampleAuxiliaryInformationSize::Parse(BoxReader* reader) {
   return true;
 }
 
-SampleEncryptionEntry::SampleEncryptionEntry() {}
+SampleEncryptionEntry::SampleEncryptionEntry() = default;
 SampleEncryptionEntry::SampleEncryptionEntry(
     const SampleEncryptionEntry& other) = default;
-SampleEncryptionEntry::~SampleEncryptionEntry() {}
+SampleEncryptionEntry::~SampleEncryptionEntry() = default;
 
 bool SampleEncryptionEntry::Parse(BufferReader* reader,
                                   uint8_t iv_size,
@@ -224,7 +230,7 @@ bool SampleEncryptionEntry::GetTotalSizeOfSubsamples(size_t* total_size) const {
 
 SampleEncryption::SampleEncryption() : use_subsample_encryption(false) {}
 SampleEncryption::SampleEncryption(const SampleEncryption& other) = default;
-SampleEncryption::~SampleEncryption() {}
+SampleEncryption::~SampleEncryption() = default;
 FourCC SampleEncryption::BoxType() const {
   return FOURCC_SENC;
 }
@@ -239,7 +245,7 @@ bool SampleEncryption::Parse(BoxReader* reader) {
 
 OriginalFormat::OriginalFormat() : format(FOURCC_NULL) {}
 OriginalFormat::OriginalFormat(const OriginalFormat& other) = default;
-OriginalFormat::~OriginalFormat() {}
+OriginalFormat::~OriginalFormat() = default;
 FourCC OriginalFormat::BoxType() const { return FOURCC_FRMA; }
 
 bool OriginalFormat::Parse(BoxReader* reader) {
@@ -248,7 +254,7 @@ bool OriginalFormat::Parse(BoxReader* reader) {
 
 SchemeType::SchemeType() : type(FOURCC_NULL), version(0) {}
 SchemeType::SchemeType(const SchemeType& other) = default;
-SchemeType::~SchemeType() {}
+SchemeType::~SchemeType() = default;
 FourCC SchemeType::BoxType() const { return FOURCC_SCHM; }
 
 bool SchemeType::Parse(BoxReader* reader) {
@@ -270,7 +276,7 @@ TrackEncryption::TrackEncryption()
 {
 }
 TrackEncryption::TrackEncryption(const TrackEncryption& other) = default;
-TrackEncryption::~TrackEncryption() {}
+TrackEncryption::~TrackEncryption() = default;
 FourCC TrackEncryption::BoxType() const { return FOURCC_TENC; }
 
 bool TrackEncryption::Parse(BoxReader* reader) {
@@ -306,19 +312,19 @@ bool TrackEncryption::Parse(BoxReader* reader) {
   return true;
 }
 
-SchemeInfo::SchemeInfo() {}
+SchemeInfo::SchemeInfo() = default;
 SchemeInfo::SchemeInfo(const SchemeInfo& other) = default;
-SchemeInfo::~SchemeInfo() {}
+SchemeInfo::~SchemeInfo() = default;
 FourCC SchemeInfo::BoxType() const { return FOURCC_SCHI; }
 
 bool SchemeInfo::Parse(BoxReader* reader) {
   return reader->ScanChildren() && reader->ReadChild(&track_encryption);
 }
 
-ProtectionSchemeInfo::ProtectionSchemeInfo() {}
+ProtectionSchemeInfo::ProtectionSchemeInfo() = default;
 ProtectionSchemeInfo::ProtectionSchemeInfo(const ProtectionSchemeInfo& other) =
     default;
-ProtectionSchemeInfo::~ProtectionSchemeInfo() {}
+ProtectionSchemeInfo::~ProtectionSchemeInfo() = default;
 FourCC ProtectionSchemeInfo::BoxType() const { return FOURCC_SINF; }
 
 bool ProtectionSchemeInfo::Parse(BoxReader* reader) {
@@ -355,7 +361,7 @@ MovieHeader::MovieHeader()
       volume(-1),
       next_track_id(0) {}
 MovieHeader::MovieHeader(const MovieHeader& other) = default;
-MovieHeader::~MovieHeader() {}
+MovieHeader::~MovieHeader() = default;
 FourCC MovieHeader::BoxType() const { return FOURCC_MVHD; }
 
 bool MovieHeader::Parse(BoxReader* reader) {
@@ -397,7 +403,7 @@ TrackHeader::TrackHeader()
       width(0),
       height(0) {}
 TrackHeader::TrackHeader(const TrackHeader& other) = default;
-TrackHeader::~TrackHeader() {}
+TrackHeader::~TrackHeader() = default;
 FourCC TrackHeader::BoxType() const { return FOURCC_TKHD; }
 
 bool TrackHeader::Parse(BoxReader* reader) {
@@ -440,7 +446,7 @@ bool TrackHeader::Parse(BoxReader* reader) {
 
 SampleDescription::SampleDescription() : type(kInvalid) {}
 SampleDescription::SampleDescription(const SampleDescription& other) = default;
-SampleDescription::~SampleDescription() {}
+SampleDescription::~SampleDescription() = default;
 FourCC SampleDescription::BoxType() const { return FOURCC_STSD; }
 
 bool SampleDescription::Parse(BoxReader* reader) {
@@ -460,10 +466,10 @@ bool SampleDescription::Parse(BoxReader* reader) {
   return true;
 }
 
-SampleTable::SampleTable() {}
+SampleTable::SampleTable() = default;
 SampleTable::SampleTable(const SampleTable& other) = default;
 
-SampleTable::~SampleTable() {}
+SampleTable::~SampleTable() = default;
 FourCC SampleTable::BoxType() const { return FOURCC_STBL; }
 
 bool SampleTable::Parse(BoxReader* reader) {
@@ -482,9 +488,9 @@ bool SampleTable::Parse(BoxReader* reader) {
   return true;
 }
 
-EditList::EditList() {}
+EditList::EditList() = default;
 EditList::EditList(const EditList& other) = default;
-EditList::~EditList() {}
+EditList::~EditList() = default;
 FourCC EditList::BoxType() const { return FOURCC_ELST; }
 
 bool EditList::Parse(BoxReader* reader) {
@@ -518,9 +524,9 @@ bool EditList::Parse(BoxReader* reader) {
   return true;
 }
 
-Edit::Edit() {}
+Edit::Edit() = default;
 Edit::Edit(const Edit& other) = default;
-Edit::~Edit() {}
+Edit::~Edit() = default;
 FourCC Edit::BoxType() const { return FOURCC_EDTS; }
 
 bool Edit::Parse(BoxReader* reader) {
@@ -529,7 +535,7 @@ bool Edit::Parse(BoxReader* reader) {
 
 HandlerReference::HandlerReference() : type(kInvalid) {}
 HandlerReference::HandlerReference(const HandlerReference& other) = default;
-HandlerReference::~HandlerReference() {}
+HandlerReference::~HandlerReference() = default;
 FourCC HandlerReference::BoxType() const { return FOURCC_HDLR; }
 
 bool HandlerReference::Parse(BoxReader* reader) {
@@ -574,6 +580,7 @@ bool HandlerReference::Parse(BoxReader* reader) {
   return true;
 }
 
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 AVCDecoderConfigurationRecord::AVCDecoderConfigurationRecord()
     : version(0),
       profile_indication(0),
@@ -582,7 +589,7 @@ AVCDecoderConfigurationRecord::AVCDecoderConfigurationRecord()
       length_size(0) {}
 AVCDecoderConfigurationRecord::AVCDecoderConfigurationRecord(
     const AVCDecoderConfigurationRecord& other) = default;
-AVCDecoderConfigurationRecord::~AVCDecoderConfigurationRecord() {}
+AVCDecoderConfigurationRecord::~AVCDecoderConfigurationRecord() = default;
 FourCC AVCDecoderConfigurationRecord::BoxType() const { return FOURCC_AVCC; }
 
 bool AVCDecoderConfigurationRecord::Parse(BoxReader* reader) {
@@ -633,6 +640,7 @@ bool AVCDecoderConfigurationRecord::ParseInternal(BufferReader* reader,
 
   return true;
 }
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 VPCodecConfigurationRecord::VPCodecConfigurationRecord()
     : profile(VIDEO_CODEC_PROFILE_UNKNOWN) {}
@@ -640,7 +648,7 @@ VPCodecConfigurationRecord::VPCodecConfigurationRecord()
 VPCodecConfigurationRecord::VPCodecConfigurationRecord(
     const VPCodecConfigurationRecord& other) = default;
 
-VPCodecConfigurationRecord::~VPCodecConfigurationRecord() {}
+VPCodecConfigurationRecord::~VPCodecConfigurationRecord() = default;
 
 FourCC VPCodecConfigurationRecord::BoxType() const {
   return FOURCC_VPCC;
@@ -676,7 +684,7 @@ bool VPCodecConfigurationRecord::Parse(BoxReader* reader) {
 PixelAspectRatioBox::PixelAspectRatioBox() : h_spacing(1), v_spacing(1) {}
 PixelAspectRatioBox::PixelAspectRatioBox(const PixelAspectRatioBox& other) =
     default;
-PixelAspectRatioBox::~PixelAspectRatioBox() {}
+PixelAspectRatioBox::~PixelAspectRatioBox() = default;
 FourCC PixelAspectRatioBox::BoxType() const { return FOURCC_PASP; }
 
 bool PixelAspectRatioBox::Parse(BoxReader* reader) {
@@ -695,7 +703,7 @@ VideoSampleEntry::VideoSampleEntry()
 
 VideoSampleEntry::VideoSampleEntry(const VideoSampleEntry& other) = default;
 
-VideoSampleEntry::~VideoSampleEntry() {}
+VideoSampleEntry::~VideoSampleEntry() = default;
 FourCC VideoSampleEntry::BoxType() const {
   DCHECK(false) << "VideoSampleEntry should be parsed according to the "
                 << "handler type recovered in its Media ancestor.";
@@ -728,6 +736,7 @@ bool VideoSampleEntry::Parse(BoxReader* reader) {
   const FourCC actual_format =
       format == FOURCC_ENCV ? sinf.format.format : format;
   switch (actual_format) {
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
     case FOURCC_AVC1:
     case FOURCC_AVC3: {
       DVLOG(2) << __func__ << " reading AVCDecoderConfigurationRecord (avcC)";
@@ -810,6 +819,7 @@ bool VideoSampleEntry::Parse(BoxReader* reader) {
     }
 #endif  // BUILDFLAG(ENABLE_HEVC_DEMUXING)
 #endif  // BUILDFLAG(ENABLE_DOLBY_VISION_DEMUXING)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
     case FOURCC_VP09: {
       DVLOG(2) << __func__ << " parsing VPCodecConfigurationRecord (vpcC)";
       std::unique_ptr<VPCodecConfigurationRecord> vp_config(
@@ -820,6 +830,18 @@ bool VideoSampleEntry::Parse(BoxReader* reader) {
       video_codec_profile = vp_config->profile;
       break;
     }
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+    case FOURCC_AV01: {
+      DVLOG(2) << __func__ << " reading AV1 configuration.";
+      // TODO(dalecurtis): AV1 profiles are not finalized, this needs updating
+      // to read the actual profile and configuration before enabling for
+      // release. http://crbug.com/784993
+      frame_bitstream_converter = nullptr;
+      video_codec = kCodecAV1;
+      video_codec_profile = AV1PROFILE_PROFILE0;
+      break;
+    }
+#endif
     default:
       // Unknown/unsupported format
       MEDIA_LOG(ERROR, reader->media_log()) << __func__
@@ -840,6 +862,7 @@ bool VideoSampleEntry::IsFormatValid() const {
   const FourCC actual_format =
       format == FOURCC_ENCV ? sinf.format.format : format;
   switch (actual_format) {
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
     case FOURCC_AVC1:
     case FOURCC_AVC3:
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
@@ -854,8 +877,13 @@ bool VideoSampleEntry::IsFormatValid() const {
     case FOURCC_DVA1:
     case FOURCC_DVAV:
 #endif  // BUILDFLAG(ENABLE_DOLBY_VISION_DEMUXING)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
     case FOURCC_VP09:
       return true;
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+    case FOURCC_AV01:
+      return true;
+#endif
     default:
       return false;
   }
@@ -867,7 +895,7 @@ ElementaryStreamDescriptor::ElementaryStreamDescriptor()
 ElementaryStreamDescriptor::ElementaryStreamDescriptor(
     const ElementaryStreamDescriptor& other) = default;
 
-ElementaryStreamDescriptor::~ElementaryStreamDescriptor() {}
+ElementaryStreamDescriptor::~ElementaryStreamDescriptor() = default;
 
 FourCC ElementaryStreamDescriptor::BoxType() const {
   return FOURCC_ESDS;
@@ -883,8 +911,13 @@ bool ElementaryStreamDescriptor::Parse(BoxReader* reader) {
 
   object_type = es_desc.object_type();
 
-  if (es_desc.IsAAC(object_type))
+  if (es_desc.IsAAC(object_type)) {
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
     RCHECK(aac.Parse(es_desc.decoder_specific_info(), reader->media_log()));
+#else
+    return false;
+#endif
+  }
 
   return true;
 }
@@ -894,7 +927,7 @@ FlacSpecificBox::FlacSpecificBox()
 
 FlacSpecificBox::FlacSpecificBox(const FlacSpecificBox& other) = default;
 
-FlacSpecificBox::~FlacSpecificBox() {}
+FlacSpecificBox::~FlacSpecificBox() = default;
 
 FourCC FlacSpecificBox::BoxType() const {
   return FOURCC_DFLA;
@@ -965,7 +998,7 @@ AudioSampleEntry::AudioSampleEntry()
 
 AudioSampleEntry::AudioSampleEntry(const AudioSampleEntry& other) = default;
 
-AudioSampleEntry::~AudioSampleEntry() {}
+AudioSampleEntry::~AudioSampleEntry() = default;
 
 FourCC AudioSampleEntry::BoxType() const {
   DCHECK(false) << "AudioSampleEntry should be parsed according to the "
@@ -1042,7 +1075,7 @@ MediaHeader::MediaHeader()
       duration(0),
       language_code(0) {}
 MediaHeader::MediaHeader(const MediaHeader& other) = default;
-MediaHeader::~MediaHeader() {}
+MediaHeader::~MediaHeader() = default;
 FourCC MediaHeader::BoxType() const { return FOURCC_MDHD; }
 
 bool MediaHeader::Parse(BoxReader* reader) {
@@ -1092,9 +1125,9 @@ std::string MediaHeader::language() const {
   return lang_chars;
 }
 
-MediaInformation::MediaInformation() {}
+MediaInformation::MediaInformation() = default;
 MediaInformation::MediaInformation(const MediaInformation& other) = default;
-MediaInformation::~MediaInformation() {}
+MediaInformation::~MediaInformation() = default;
 FourCC MediaInformation::BoxType() const { return FOURCC_MINF; }
 
 bool MediaInformation::Parse(BoxReader* reader) {
@@ -1102,9 +1135,9 @@ bool MediaInformation::Parse(BoxReader* reader) {
          reader->ReadChild(&sample_table);
 }
 
-Media::Media() {}
+Media::Media() = default;
 Media::Media(const Media& other) = default;
-Media::~Media() {}
+Media::~Media() = default;
 FourCC Media::BoxType() const { return FOURCC_MDIA; }
 
 bool Media::Parse(BoxReader* reader) {
@@ -1123,9 +1156,9 @@ bool Media::Parse(BoxReader* reader) {
   return true;
 }
 
-Track::Track() {}
+Track::Track() = default;
 Track::Track(const Track& other) = default;
-Track::~Track() {}
+Track::~Track() = default;
 FourCC Track::BoxType() const { return FOURCC_TRAK; }
 
 bool Track::Parse(BoxReader* reader) {
@@ -1139,7 +1172,7 @@ bool Track::Parse(BoxReader* reader) {
 MovieExtendsHeader::MovieExtendsHeader() : fragment_duration(0) {}
 MovieExtendsHeader::MovieExtendsHeader(const MovieExtendsHeader& other) =
     default;
-MovieExtendsHeader::~MovieExtendsHeader() {}
+MovieExtendsHeader::~MovieExtendsHeader() = default;
 FourCC MovieExtendsHeader::BoxType() const { return FOURCC_MEHD; }
 
 bool MovieExtendsHeader::Parse(BoxReader* reader) {
@@ -1159,7 +1192,7 @@ TrackExtends::TrackExtends()
       default_sample_size(0),
       default_sample_flags(0) {}
 TrackExtends::TrackExtends(const TrackExtends& other) = default;
-TrackExtends::~TrackExtends() {}
+TrackExtends::~TrackExtends() = default;
 FourCC TrackExtends::BoxType() const { return FOURCC_TREX; }
 
 bool TrackExtends::Parse(BoxReader* reader) {
@@ -1172,9 +1205,9 @@ bool TrackExtends::Parse(BoxReader* reader) {
   return true;
 }
 
-MovieExtends::MovieExtends() {}
+MovieExtends::MovieExtends() = default;
 MovieExtends::MovieExtends(const MovieExtends& other) = default;
-MovieExtends::~MovieExtends() {}
+MovieExtends::~MovieExtends() = default;
 FourCC MovieExtends::BoxType() const { return FOURCC_MVEX; }
 
 bool MovieExtends::Parse(BoxReader* reader) {
@@ -1186,7 +1219,7 @@ bool MovieExtends::Parse(BoxReader* reader) {
 
 Movie::Movie() : fragmented(false) {}
 Movie::Movie(const Movie& other) = default;
-Movie::~Movie() {}
+Movie::~Movie() = default;
 FourCC Movie::BoxType() const { return FOURCC_MOOV; }
 
 bool Movie::Parse(BoxReader* reader) {
@@ -1204,7 +1237,7 @@ bool Movie::Parse(BoxReader* reader) {
 TrackFragmentDecodeTime::TrackFragmentDecodeTime() : decode_time(0) {}
 TrackFragmentDecodeTime::TrackFragmentDecodeTime(
     const TrackFragmentDecodeTime& other) = default;
-TrackFragmentDecodeTime::~TrackFragmentDecodeTime() {}
+TrackFragmentDecodeTime::~TrackFragmentDecodeTime() = default;
 FourCC TrackFragmentDecodeTime::BoxType() const { return FOURCC_TFDT; }
 
 bool TrackFragmentDecodeTime::Parse(BoxReader* reader) {
@@ -1218,7 +1251,7 @@ bool TrackFragmentDecodeTime::Parse(BoxReader* reader) {
 MovieFragmentHeader::MovieFragmentHeader() : sequence_number(0) {}
 MovieFragmentHeader::MovieFragmentHeader(const MovieFragmentHeader& other) =
     default;
-MovieFragmentHeader::~MovieFragmentHeader() {}
+MovieFragmentHeader::~MovieFragmentHeader() = default;
 FourCC MovieFragmentHeader::BoxType() const { return FOURCC_MFHD; }
 
 bool MovieFragmentHeader::Parse(BoxReader* reader) {
@@ -1235,7 +1268,7 @@ TrackFragmentHeader::TrackFragmentHeader()
 
 TrackFragmentHeader::TrackFragmentHeader(const TrackFragmentHeader& other) =
     default;
-TrackFragmentHeader::~TrackFragmentHeader() {}
+TrackFragmentHeader::~TrackFragmentHeader() = default;
 FourCC TrackFragmentHeader::BoxType() const { return FOURCC_TFHD; }
 
 bool TrackFragmentHeader::Parse(BoxReader* reader) {
@@ -1283,7 +1316,7 @@ bool TrackFragmentHeader::Parse(BoxReader* reader) {
 TrackFragmentRun::TrackFragmentRun()
     : sample_count(0), data_offset(0) {}
 TrackFragmentRun::TrackFragmentRun(const TrackFragmentRun& other) = default;
-TrackFragmentRun::~TrackFragmentRun() {}
+TrackFragmentRun::~TrackFragmentRun() = default;
 FourCC TrackFragmentRun::BoxType() const { return FOURCC_TRUN; }
 
 bool TrackFragmentRun::Parse(BoxReader* reader) {
@@ -1361,7 +1394,7 @@ bool TrackFragmentRun::Parse(BoxReader* reader) {
 
 SampleToGroup::SampleToGroup() : grouping_type(0), grouping_type_parameter(0) {}
 SampleToGroup::SampleToGroup(const SampleToGroup& other) = default;
-SampleToGroup::~SampleToGroup() {}
+SampleToGroup::~SampleToGroup() = default;
 FourCC SampleToGroup::BoxType() const { return FOURCC_SBGP; }
 
 bool SampleToGroup::Parse(BoxReader* reader) {
@@ -1410,7 +1443,7 @@ CencSampleEncryptionInfoEntry::CencSampleEncryptionInfoEntry()
 }
 CencSampleEncryptionInfoEntry::CencSampleEncryptionInfoEntry(
     const CencSampleEncryptionInfoEntry& other) = default;
-CencSampleEncryptionInfoEntry::~CencSampleEncryptionInfoEntry() {}
+CencSampleEncryptionInfoEntry::~CencSampleEncryptionInfoEntry() = default;
 
 bool CencSampleEncryptionInfoEntry::Parse(BoxReader* reader) {
   uint8_t flag;
@@ -1445,7 +1478,7 @@ bool CencSampleEncryptionInfoEntry::Parse(BoxReader* reader) {
 SampleGroupDescription::SampleGroupDescription() : grouping_type(0) {}
 SampleGroupDescription::SampleGroupDescription(
     const SampleGroupDescription& other) = default;
-SampleGroupDescription::~SampleGroupDescription() {}
+SampleGroupDescription::~SampleGroupDescription() = default;
 FourCC SampleGroupDescription::BoxType() const { return FOURCC_SGPD; }
 
 bool SampleGroupDescription::Parse(BoxReader* reader) {
@@ -1496,9 +1529,9 @@ bool SampleGroupDescription::Parse(BoxReader* reader) {
   return true;
 }
 
-TrackFragment::TrackFragment() {}
+TrackFragment::TrackFragment() = default;
 TrackFragment::TrackFragment(const TrackFragment& other) = default;
-TrackFragment::~TrackFragment() {}
+TrackFragment::~TrackFragment() = default;
 FourCC TrackFragment::BoxType() const { return FOURCC_TRAF; }
 
 bool TrackFragment::Parse(BoxReader* reader) {
@@ -1529,9 +1562,9 @@ bool TrackFragment::Parse(BoxReader* reader) {
   return true;
 }
 
-MovieFragment::MovieFragment() {}
+MovieFragment::MovieFragment() = default;
 MovieFragment::MovieFragment(const MovieFragment& other) = default;
-MovieFragment::~MovieFragment() {}
+MovieFragment::~MovieFragment() = default;
 FourCC MovieFragment::BoxType() const { return FOURCC_MOOF; }
 
 bool MovieFragment::Parse(BoxReader* reader) {
@@ -1542,10 +1575,10 @@ bool MovieFragment::Parse(BoxReader* reader) {
   return true;
 }
 
-IndependentAndDisposableSamples::IndependentAndDisposableSamples() {}
+IndependentAndDisposableSamples::IndependentAndDisposableSamples() = default;
 IndependentAndDisposableSamples::IndependentAndDisposableSamples(
     const IndependentAndDisposableSamples& other) = default;
-IndependentAndDisposableSamples::~IndependentAndDisposableSamples() {}
+IndependentAndDisposableSamples::~IndependentAndDisposableSamples() = default;
 FourCC IndependentAndDisposableSamples::BoxType() const { return FOURCC_SDTP; }
 
 bool IndependentAndDisposableSamples::Parse(BoxReader* reader) {

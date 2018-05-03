@@ -68,7 +68,7 @@ class PLATFORM_EXPORT HarfBuzzShaper final {
   const UChar* GetText() const { return text_; }
   unsigned TextLength() const { return text_length_; }
 
-  ~HarfBuzzShaper() {}
+  ~HarfBuzzShaper() = default;
 
  private:
 
@@ -85,6 +85,7 @@ class PLATFORM_EXPORT HarfBuzzShaper final {
                            const ReshapeQueueItem&,
                            const SimpleFontData*,
                            UScriptCode,
+                           CanvasRotationInVertical,
                            bool is_last_resort,
                            ShapeResult*) const;
 
@@ -94,6 +95,7 @@ class PLATFORM_EXPORT HarfBuzzShaper final {
   void CommitGlyphs(RangeData*,
                     const SimpleFontData* current_font,
                     UScriptCode current_run_script,
+                    CanvasRotationInVertical,
                     bool is_last_resort,
                     const BufferSlice&,
                     ShapeResult*) const;

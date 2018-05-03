@@ -17,18 +17,15 @@ class MenuModel;
 }  // namespace ui
 
 namespace views {
-class MenuModelAdapter;
 class MenuRunner;
 }  // namespace views
 
 namespace message_center {
-class MessageCenterController;
 
 class MESSAGE_CENTER_EXPORT MessageViewContextMenuController
     : public views::ContextMenuController {
  public:
-  explicit MessageViewContextMenuController(
-      MessageCenterController* controller);
+  explicit MessageViewContextMenuController();
   ~MessageViewContextMenuController() override;
 
  private:
@@ -37,13 +34,10 @@ class MESSAGE_CENTER_EXPORT MessageViewContextMenuController
                               const gfx::Point& point,
                               ui::MenuSourceType source_type) override;
 
-  // Callback for MenuModelAdapter
+  // Callback for MenuRunner
   void OnMenuClosed();
 
-  MessageCenterController* controller_;
-
   std::unique_ptr<ui::MenuModel> menu_model_;
-  std::unique_ptr<views::MenuModelAdapter> menu_model_adapter_;
   std::unique_ptr<views::MenuRunner> menu_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(MessageViewContextMenuController);

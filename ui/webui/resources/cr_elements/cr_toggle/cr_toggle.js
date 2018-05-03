@@ -28,17 +28,13 @@ Polymer({
       reflectToAttribute: true,
       observer: 'disabledChanged_',
     },
-
-    tabIndex: {
-      type: Number,
-      value: 0,
-    },
   },
 
   hostAttributes: {
     'aria-disabled': 'false',
     'aria-pressed': 'false',
     role: 'button',
+    tabindex: 0,
   },
 
   listeners: {
@@ -72,7 +68,7 @@ Polymer({
 
   /** @override */
   attached: function() {
-    let direction = getComputedStyle(this).direction == 'rtl' ? -1 : 1;
+    let direction = this.matches(':host-context([dir=rtl]) cr-toggle') ? -1 : 1;
 
     this.boundPointerMove_ = (e) => {
       // Prevent unwanted text selection to occur while moving the pointer, this
@@ -99,15 +95,14 @@ Polymer({
 
   /** @private */
   disabledChanged_: function() {
-    this.tabIndex = this.disabled ? -1 : 0;
+    this.setAttribute('tabindex', this.disabled ? -1 : 0);
     this.setAttribute('aria-disabled', this.disabled ? 'true' : 'false');
   },
 
   /** @private */
   onFocus_: function() {
     this.ensureRipple();
-    this.$$('paper-ripple').holdDown =
-        cr.ui.FocusOutlineManager.forDocument(document).visible;
+    this.$$('paper-ripple').holdDown = true;
   },
 
   /** @private */

@@ -87,7 +87,6 @@ extern const char kChromeUIHistoryURL[];
 extern const char kChromeUIIdentityInternalsHost[];
 extern const char kChromeUIInspectHost[];
 extern const char kChromeUIInspectURL[];
-extern const char kChromeUIInstantHost[];
 extern const char kChromeUIInterstitialHost[];
 extern const char kChromeUIInterstitialURL[];
 extern const char kChromeUIInterventionsInternalsHost[];
@@ -193,7 +192,6 @@ extern const char kChromeUIInternetConfigDialogHost[];
 extern const char kChromeUIInternetDetailDialogHost[];
 extern const char kChromeUIKeyboardOverlayHost[];
 extern const char kChromeUIKeyboardOverlayURL[];
-extern const char kChromeUIMdCupsSettingsURL[];
 extern const char kChromeUIMobileSetupHost[];
 extern const char kChromeUIMobileSetupURL[];
 extern const char kChromeUINetworkHost[];
@@ -206,8 +204,6 @@ extern const char kChromeUIScreenlockIconHost[];
 extern const char kChromeUIScreenlockIconURL[];
 extern const char kChromeUISetTimeHost[];
 extern const char kChromeUISetTimeURL[];
-extern const char kChromeUISimUnlockHost[];
-extern const char kChromeUISimUnlockURL[];
 extern const char kChromeUISlowHost[];
 extern const char kChromeUISlowTraceHost[];
 extern const char kChromeUISlowURL[];
@@ -215,7 +211,6 @@ extern const char kChromeUISysInternalsHost[];
 extern const char kChromeUITermsOemURL[];
 extern const char kChromeUIUserImageHost[];
 extern const char kChromeUIUserImageURL[];
-extern const char kChromeUIVoiceSearchHost[];
 #endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
@@ -264,6 +259,7 @@ extern const char kImportDataSubPage[];
 extern const char kLanguageOptionsSubPage[];
 extern const char kManageProfileSubPage[];
 extern const char kPasswordManagerSubPage[];
+extern const char kPrintingSettingsSubPage[];
 extern const char kResetProfileSettingsSubPage[];
 extern const char kSearchEnginesSubPage[];
 extern const char kSignOutSubPage[];
@@ -279,6 +275,9 @@ extern const char kInternetSubPage[];
 extern const char kNetworkDetailSubPage[];
 extern const char kPowerSubPage[];
 extern const char kStylusSubPage[];
+#endif
+#if defined(OS_WIN)
+extern const char kCleanupSubPage[];
 #endif
 
 // Extensions sub pages.

@@ -23,11 +23,11 @@
 #include "bindings/core/v8/ScriptEventListener.h"
 #include "bindings/core/v8/html_script_element_or_svg_script_element.h"
 #include "core/dom/Attribute.h"
-#include "core/dom/ScriptLoader.h"
-#include "core/dom/ScriptRunner.h"
 #include "core/dom/events/Event.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html_names.h"
+#include "core/script/ScriptLoader.h"
+#include "core/script/ScriptRunner.h"
 #include "core/xlink_names.h"
 
 namespace blink {
@@ -141,10 +141,6 @@ bool SVGScriptElement::AllowInlineScriptForCSP(
   return GetDocument().GetContentSecurityPolicy()->AllowInlineScript(
       this, GetDocument().Url(), nonce, context_line, script_content,
       inline_type);
-}
-
-AtomicString SVGScriptElement::InitiatorName() const {
-  return Element::localName();
 }
 
 Document& SVGScriptElement::GetDocument() const {

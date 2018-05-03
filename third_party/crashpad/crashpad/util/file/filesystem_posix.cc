@@ -21,8 +21,28 @@
 #include <unistd.h>
 
 #include "base/logging.h"
+#include "build/build_config.h"
 
 namespace crashpad {
+
+bool FileModificationTime(const base::FilePath& path, timespec* mtime) {
+  struct stat st;
+  if (lstat(path.value().c_str(), &st) != 0) {
+    PLOG(ERROR) << "lstat " << path.value();
+    return false;
+  }
+
+#if defined(OS_MACOSX)
+  *mtime = st.st_mtimespec;
+#elif defined(OS_ANDROID)
+  // This is needed to compile with traditional NDK headers.
+  mtime->tv_sec = st.st_mtime;
+  mtime->tv_nsec = st.st_mtime_nsec;
+#else
+  *mtime = st.st_mtim;
+#endif
+  return true;
+}
 
 bool LoggingCreateDirectory(const base::FilePath& path,
                             FilePermissions permissions,
@@ -56,7 +76,7 @@ bool MoveFileOrDirectory(const base::FilePath& source,
 bool IsRegularFile(const base::FilePath& path) {
   struct stat st;
   if (lstat(path.value().c_str(), &st) != 0) {
-    PLOG_IF(ERROR, errno != ENOENT) << "stat " << path.value();
+    PLOG(ERROR) << "stat " << path.value();
     return false;
   }
   return S_ISREG(st.st_mode);
@@ -69,11 +89,9 @@ bool IsDirectory(const base::FilePath& path, bool allow_symlinks) {
       PLOG(ERROR) << "stat " << path.value();
       return false;
     }
-  } else {
-    if (lstat(path.value().c_str(), &st) != 0) {
-      PLOG(ERROR) << "lstat " << path.value();
-      return false;
-    }
+  } else if (lstat(path.value().c_str(), &st) != 0) {
+    PLOG(ERROR) << "lstat " << path.value();
+    return false;
   }
   return S_ISDIR(st.st_mode);
 }

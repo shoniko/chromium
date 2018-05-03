@@ -53,7 +53,6 @@ video::-webkit-media-controls-panel {
 
   min-width: 48px;
   flex: 1;
-  padding-bottom: 12px;
 
   font-size: 12px;
   font-weight: normal;  /* Make sure that we don't inherit non-defaults. */
@@ -212,7 +211,7 @@ video::-webkit-media-controls-overlay-play-button {
   -webkit-appearance: -internal-media-control;
   display: flex;
   justify-content: center;
-  align-items: flex-end;
+  align-items: center;
   flex: 1;
   min-height: 0;
   width: 100%;
@@ -220,6 +219,7 @@ video::-webkit-media-controls-overlay-play-button {
   overflow: hidden;
   background: transparent;
   margin-bottom: -40px;
+  position: relative;
 }
 
 input[pseudo="-webkit-media-controls-overlay-play-button" i]::-internal-media-controls-overlay-play-button-internal {
@@ -234,6 +234,12 @@ input[pseudo="-webkit-media-controls-overlay-play-button" i]::-internal-media-co
     url(default_100_percent/modern/ic_play_arrow.png) 1x,
     url(default_200_percent/modern/ic_play_arrow.png) 2x);
   background-color: rgba(255, 255, 255, .9);
+
+  transition: opacity cubic-bezier(0.4, 0.0, 0.6, 1) 600ms;
+}
+
+.phase-pre-ready input[pseudo="-webkit-media-controls-overlay-play-button" i]::-internal-media-controls-overlay-play-button-internal {
+  transition: none;
 }
 
 .state-playing input[pseudo="-webkit-media-controls-play-button" i],
@@ -252,9 +258,20 @@ video::-webkit-media-controls-timeline {
   -webkit-appearance: -internal-media-control;
 
   height: 2px;
-  padding: 0;
-  margin: 5px 16px;
+  padding-left: 16px;
+  padding-right: 16px;
+  margin: 0;
   background: transparent;
+}
+
+audio::-webkit-media-controls-timeline {
+  padding-top: 26px;
+  padding-bottom: 26px;
+}
+
+video::-webkit-media-controls-timeline {
+  padding-top: 5px;
+  padding-bottom: 17px;
 }
 
 input[pseudo="-webkit-media-controls-timeline" i]::-internal-media-controls-segmented-track {
@@ -286,6 +303,8 @@ input[pseudo="-webkit-media-controls-timeline" i]::-internal-track-segment-backg
   position: absolute;
   width: 100%;
   top: 0;
+  height: 2px;
+  overflow: hidden;
 }
 
 input[pseudo="-webkit-media-controls-timeline" i]::-internal-track-segment-highlight-before,
@@ -351,8 +370,10 @@ video::-webkit-media-controls-time-remaining-display {
  * Overflow Menu
  */
 
-video::-internal-media-controls-overflow-menu-list,
-audio::-internal-media-controls-overflow-menu-list {
+audio::-internal-media-controls-text-track-list,
+video::-internal-media-controls-text-track-list,
+audio::-internal-media-controls-overflow-menu-list,
+video::-internal-media-controls-overflow-menu-list {
   position: fixed;
   max-width: 50%;
   max-height: 250px;
@@ -366,8 +387,12 @@ audio::-internal-media-controls-overflow-menu-list {
   border-radius: 2px;
 }
 
-video::-internal-media-controls-overflow-menu-list-item,
-audio::-internal-media-controls-overflow-menu-list-item {
+audio::-internal-media-controls-text-track-list-header,
+video::-internal-media-controls-text-track-list-header,
+audio::-internal-media-controls-text-track-list-item,
+video::-internal-media-controls-text-track-list-item,
+audio::-internal-media-controls-overflow-menu-list-item,
+video::-internal-media-controls-overflow-menu-list-item {
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -382,13 +407,49 @@ audio::-internal-media-controls-overflow-menu-list-item {
 }
 
 label[pseudo="-internal-media-controls-overflow-menu-list-item"] input {
-  margin-left: -22px;
-  margin-right: 2px;
+  margin-left: -9px;
+  margin-right: 6px;
 }
 
+audio::-internal-media-controls-text-track-list-header:hover,
+video::-internal-media-controls-text-track-list-header:hover,
+audio::-internal-media-controls-overflow-menu-list-item:hover,
 video::-internal-media-controls-overflow-menu-list-item:hover,
-audio::-internal-media-controls-overflow-menu-list-item:hover {
+audio::-internal-media-controls-text-track-list-item:hover,
+video::-internal-media-controls-text-track-list-item:hover {
   background-color: #e0e0e0;
+}
+
+audio::-internal-media-controls-text-track-list-header,
+video::-internal-media-controls-text-track-list-header,
+audio::-internal-media-controls-text-track-list-item,
+video::-internal-media-controls-text-track-list-item {
+  padding-left: 58px;
+  display: block;
+}
+
+audio::-internal-media-controls-text-track-list-header,
+video::-internal-media-controls-text-track-list-header {
+  background-size: 18px;
+  background-position: 20px center;
+  background-repeat: no-repeat;
+  background-image: -webkit-image-set(
+    url(default_100_percent/modern/ic_arrow_back.png) 1x,
+    url(default_200_percent/modern/ic_arrow_back.png) 2x);
+}
+
+label[pseudo="-internal-media-controls-text-track-list-item"] input {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 15px;
+  float: right;
+}
+
+label[pseudo="-internal-media-controls-text-track-list-item"] input:checked {
+  background-image: -webkit-image-set(
+    url(default_100_percent/modern/ic_check_blue.png) 1x,
+    url(default_200_percent/modern/ic_check_blue.png) 2x);
 }
 
 /**
@@ -397,18 +458,21 @@ audio::-internal-media-controls-overflow-menu-list-item:hover {
 
 audio::-webkit-media-controls {
   min-width: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-audio::-webkit-media-controls {
+audio::-webkit-media-controls-overlay-enclosure {
+  display: none;
+}
+
+audio::-webkit-media-controls-enclosure {
   max-height: 54px;
   flex-direction: row;
   background: #F1F3F4;
   border-radius: 100px;
   overflow: hidden;
-}
-
-audio::-webkit-media-controls-overlay-enclosure {
-  display: none;
 }
 
 audio::-webkit-media-controls-panel {
@@ -444,4 +508,55 @@ audio::-webkit-media-controls-play-button,
 audio::-webkit-media-controls-mute-button,
 audio::-internal-media-controls-overflow-button {
   flex: 0 0 32px;
+}
+
+/**
+ * Preload state
+ */
+
+.use-default-poster {
+  background: #F1F3F4;
+}
+
+.state-no-source input[pseudo="-webkit-media-controls-overlay-play-button" i],
+.use-default-poster div[pseudo="-internal-media-controls-button-panel" i],
+.use-default-poster input[pseudo="-webkit-media-controls-timeline" i] {
+  display: none;
+}
+
+/**
+ * Loading spinner
+ */
+
+video::-internal-media-controls-loading-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: .5;
+}
+
+audio::-internal-media-controls-loading-panel {
+  display: none;
+}
+
+.state-loading-metadata div[pseudo="-webkit-media-controls-panel" i] {
+  background-image: none;
+}
+
+.state-loading-metadata div[pseudo="-internal-media-controls-button-panel" i],
+.state-loading-metadata input[pseudo="-webkit-media-controls-timeline" i],
+.state-loading-metadata input[pseudo="-webkit-media-controls-overlay-play-button" i]::-internal-media-controls-overlay-play-button-internal {
+  opacity: 0;
+}
+
+/**
+ * Scrubbing
+ */
+
+.state-scrubbing div[pseudo="-internal-media-controls-button-panel" i],
+.state-scrubbing input[pseudo="-webkit-media-controls-overlay-play-button" i] {
+  display: none;
 }

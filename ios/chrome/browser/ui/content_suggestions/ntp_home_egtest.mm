@@ -5,6 +5,9 @@
 #import <EarlGrey/EarlGrey.h>
 #import <XCTest/XCTest.h>
 
+#include <memory>
+
+#include "base/ios/ios_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/scoped_command_line.h"
 #include "components/reading_list/core/reading_list_model.h"
@@ -21,7 +24,9 @@
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_provider_test_singleton.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_test_utils.h"
+#import "ios/chrome/browser/ui/ntp/new_tab_page_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
+#import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/app/history_test_util.h"
@@ -54,7 +59,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
     return nullptr;
   }
   std::unique_ptr<net::test_server::BasicHttpResponse> http_response =
-      base::MakeUnique<net::test_server::BasicHttpResponse>();
+      std::make_unique<net::test_server::BasicHttpResponse>();
   http_response->set_code(net::HTTP_OK);
   http_response->set_content("<html><head><title>" + std::string(kPageTitle) +
                              "</title></head><body>" +
@@ -65,9 +70,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
 // Test case for the NTP home UI. More precisely, this tests the positions of
 // the elements after interacting with the device.
-@interface NTPHomeTestCase : ChromeTestCase {
-  std::unique_ptr<base::test::ScopedCommandLine> _scopedCommandLine;
-}
+@interface NTPHomeTestCase : ChromeTestCase
 
 // Current non-incognito browser state.
 @property(nonatomic, assign, readonly) ios::ChromeBrowserState* browserState;
@@ -82,12 +85,6 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
 + (void)setUp {
   [super setUp];
-  if (IsIPadIdiom()) {
-    // Make sure we are on the Home panel on iPad.
-    chrome_test_util::OpenNewTab();
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
-        performAction:grey_typeText(@"chrome://newtab/#most_visited\n")];
-  }
 
   // Clear the pasteboard in case there is a URL copied, triggering an omnibox
   // suggestion.
@@ -126,11 +123,6 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 }
 
 - (void)setUp {
-  // The command line is set up before [super setUp] in order to have the NTP
-  // opened with the command line already setup.
-  _scopedCommandLine = base::MakeUnique<base::test::ScopedCommandLine>();
-  base::CommandLine* commandLine = _scopedCommandLine->GetProcessCommandLine();
-  commandLine->AppendSwitch(switches::kEnableSuggestionsUI);
   self.provider->FireCategoryStatusChanged(self.category,
                                            CategoryStatus::AVAILABLE);
 
@@ -145,7 +137,6 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
       self.category, CategoryStatus::ALL_SUGGESTIONS_EXPLICITLY_DISABLED);
   [EarlGrey rotateDeviceToOrientation:UIDeviceOrientationPortrait
                            errorOrNil:nil];
-  _scopedCommandLine.reset();
   [super tearDown];
 }
 
@@ -178,7 +169,9 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
     EARL_GREY_TEST_DISABLED(@"Disabled for iPad due to device rotation bug.");
   }
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
-  CGFloat collectionWidth = CollectionView().bounds.size.width;
+  UIEdgeInsets safeArea = SafeAreaInsetsForView(CollectionView());
+  CGFloat collectionWidth =
+      CGRectGetWidth(UIEdgeInsetsInsetRect(CollectionView().bounds, safeArea));
   GREYAssertTrue(collectionWidth > 0, @"The collection width is nil.");
   CGFloat fakeOmniboxWidth = searchFieldWidth(collectionWidth);
 
@@ -190,7 +183,9 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
                            errorOrNil:nil];
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
 
-  CGFloat collectionWidthAfterRotation = CollectionView().bounds.size.width;
+  safeArea = SafeAreaInsetsForView(CollectionView());
+  CGFloat collectionWidthAfterRotation =
+      CGRectGetWidth(UIEdgeInsetsInsetRect(CollectionView().bounds, safeArea));
   GREYAssertNotEqual(collectionWidth, collectionWidthAfterRotation,
                      @"The collection width has not changed.");
   fakeOmniboxWidth = searchFieldWidth(collectionWidthAfterRotation);
@@ -209,7 +204,9 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
     EARL_GREY_TEST_DISABLED(@"Disabled for iPad due to device rotation bug.");
   }
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
-  CGFloat collectionWidth = CollectionView().bounds.size.width;
+  UIEdgeInsets safeArea = SafeAreaInsetsForView(CollectionView());
+  CGFloat collectionWidth =
+      CGRectGetWidth(UIEdgeInsetsInsetRect(CollectionView().bounds, safeArea));
   GREYAssertTrue(collectionWidth > 0, @"The collection width is nil.");
   CGFloat fakeOmniboxWidth = searchFieldWidth(collectionWidth);
 
@@ -228,7 +225,9 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
                                    IDS_IOS_NAVIGATION_BAR_DONE_BUTTON)]
       performAction:grey_tap()];
 
-  CGFloat collectionWidthAfterRotation = CollectionView().bounds.size.width;
+  safeArea = SafeAreaInsetsForView(CollectionView());
+  CGFloat collectionWidthAfterRotation =
+      CGRectGetWidth(UIEdgeInsetsInsetRect(CollectionView().bounds, safeArea));
   GREYAssertNotEqual(collectionWidth, collectionWidthAfterRotation,
                      @"The collection width has not changed.");
   fakeOmniboxWidth = searchFieldWidth(collectionWidthAfterRotation);
@@ -381,6 +380,11 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
 // Tests that tapping the fake omnibox focuses the real omnibox.
 - (void)testTapFakeOmnibox {
+  // TODO(crbug.com/753098): Re-enable this test on iOS 11 iPad once
+  // grey_typeText works on iOS 11.
+  if (IsIPadIdiom() && base::ios::IsRunningOnIOS11OrLater()) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 11.");
+  }
   // Setup the server.
   self.testServer->RegisterRequestHandler(base::Bind(&StandardResponse));
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");

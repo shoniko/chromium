@@ -18,10 +18,7 @@ import org.chromium.components.offlinepages.DeletePageResult;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import javax.annotation.Nullable;
 
@@ -410,7 +407,33 @@ public class OfflinePageBridge {
      */
     public void savePageLater(final String url, final ClientId clientId, boolean userRequested,
             OfflinePageOrigin origin) {
-        nativeSavePageLater(mNativeOfflinePageBridge, url, clientId.getNamespace(),
+        savePageLater(url, clientId, userRequested, origin, null);
+    }
+
+    /**
+     * Save the given URL as an offline page when the network becomes available with the given
+     * origin. Callback with status when done.
+     *
+     * @param url The given URL to save for later.
+     * @param clientId the clientId for the offline page to be saved later.
+     * @param userRequested Whether this request should be prioritized because the user explicitly
+     *                      requested it.
+     * @param origin The app that initiated the request.
+     * @param callback Callback for whether the URL is successfully added to queue. Non-zero number
+     *                 represents a failure reason (See offline_pages::AddRequestResult enum). 0 is
+     * success.
+     */
+    public void savePageLater(final String url, final ClientId clientId, boolean userRequested,
+            OfflinePageOrigin origin, Callback<Integer> callback) {
+        Callback<Integer> wrapper = new Callback<Integer>() {
+            @Override
+            public void onResult(Integer i) {
+                if (callback != null) {
+                    callback.onResult(i);
+                }
+            }
+        };
+        nativeSavePageLater(mNativeOfflinePageBridge, wrapper, url, clientId.getNamespace(),
                 clientId.getId(), origin.encodeAsJsonString(), userRequested);
     }
 
@@ -439,8 +462,27 @@ public class OfflinePageBridge {
      */
     public void savePageLater(final String url, final String namespace, boolean userRequested,
             OfflinePageOrigin origin) {
+        savePageLater(url, namespace, userRequested, origin, null);
+    }
+
+    /**
+     * Save the given URL as an offline page when the network becomes available with a randomly
+     * generated clientId in the given namespace and the given origin. Calls back with whether
+     * the URL has been successfully added to queue.
+     *
+     * @param url The given URL to save for later
+     * @param namespace The namespace for the offline page to be saved later.
+     * @param userRequested Whether this request should be prioritized because the user explicitly
+     *                      requested it.
+     * @param origin The app that initiated the request.
+     * @param callback Callback to call whether the URL is successfully added to the queue. Non-zero
+     *                 number represents failure reason (see offline_pages::AddRequestResult enum).
+     * 0 is success.
+     */
+    public void savePageLater(final String url, final String namespace, boolean userRequested,
+            OfflinePageOrigin origin, Callback<Integer> callback) {
         ClientId clientId = ClientId.createGuidClientIdForNamespace(namespace);
-        savePageLater(url, clientId, userRequested, origin);
+        savePageLater(url, clientId, userRequested, origin, callback);
     }
 
     /**
@@ -532,35 +574,6 @@ public class OfflinePageBridge {
         return nativeIsShowingDownloadButtonInErrorPage(mNativeOfflinePageBridge, webContents);
     }
 
-    private static class CheckPagesExistOfflineCallbackInternal {
-        private Callback<Set<String>> mCallback;
-
-        CheckPagesExistOfflineCallbackInternal(Callback<Set<String>> callback) {
-            mCallback = callback;
-        }
-
-        @CalledByNative("CheckPagesExistOfflineCallbackInternal")
-        public void onResult(String[] results) {
-            Set<String> resultSet = new HashSet<>();
-            Collections.addAll(resultSet, results);
-            mCallback.onResult(resultSet);
-        }
-    }
-
-    /**
-     * Returns via callback any urls in <code>urls</code> for which there exist offline pages.
-     *
-     * TODO(http://crbug.com/598006): Add metrics for preventing UI jank.
-     * TODO(http://crbug.com/693514): Now unused in production code. Can be removed.
-     */
-    public void checkPagesExistOffline(Set<String> urls, Callback<Set<String>> callback) {
-        String[] urlArray = urls.toArray(new String[urls.size()]);
-
-        CheckPagesExistOfflineCallbackInternal callbackInternal =
-                new CheckPagesExistOfflineCallbackInternal(callback);
-        nativeCheckPagesExistOffline(mNativeOfflinePageBridge, urlArray, callbackInternal);
-    }
-
     /** Tells the native side that a new tab has been added for this profile. */
     void registerRecentTab(int tabId) {
         nativeRegisterRecentTab(mNativeOfflinePageBridge, tabId);
@@ -636,6 +649,18 @@ public class OfflinePageBridge {
      */
     public void checkForNewOfflineContent(long freshnessTimeMillis, Callback<String> callback) {
         nativeCheckForNewOfflineContent(mNativeOfflinePageBridge, freshnessTimeMillis, callback);
+    }
+
+    /**
+     * Get the url to launch the offline page associated with the provided offline ID. Depending on
+     * whether it is trusted or not, either http/https or file URL will be returned in the callback.
+     *
+     * @param offlineId ID of the offline page.
+     * @param callback callback to pass back the url string if found. Will pass back
+     * <code>null</code> if not.
+     */
+    public void getLaunchUrlByOfflineId(long offlineId, Callback<String> callback) {
+        nativeGetLaunchUrlByOfflineId(mNativeOfflinePageBridge, offlineId, callback);
     }
 
     /**
@@ -720,8 +745,6 @@ public class OfflinePageBridge {
     @VisibleForTesting
     native void nativeGetAllPages(long nativeOfflinePageBridge, List<OfflinePageItem> offlinePages,
             final Callback<List<OfflinePageItem>> callback);
-    private native void nativeCheckPagesExistOffline(long nativeOfflinePageBridge, Object[] urls,
-            CheckPagesExistOfflineCallbackInternal callback);
     private native void nativeRegisterRecentTab(long nativeOfflinePageBridge, int tabId);
     private native void nativeWillCloseTab(long nativeOfflinePageBridge, WebContents webContents);
     private native void nativeUnregisterRecentTab(long nativeOfflinePageBridge, int tabId);
@@ -756,8 +779,9 @@ public class OfflinePageBridge {
             Callback<OfflinePageItem> callback);
     private native void nativeSavePage(long nativeOfflinePageBridge, SavePageCallback callback,
             WebContents webContents, String clientNamespace, String clientId, String origin);
-    private native void nativeSavePageLater(long nativeOfflinePageBridge, String url,
-            String clientNamespace, String clientId, String origin, boolean userRequested);
+    private native void nativeSavePageLater(long nativeOfflinePageBridge,
+            Callback<Integer> callback, String url, String clientNamespace, String clientId,
+            String origin, boolean userRequested);
     private native String nativeGetOfflinePageHeaderForReload(
             long nativeOfflinePageBridge, WebContents webContents);
     private native boolean nativeIsShowingOfflinePreview(
@@ -772,4 +796,6 @@ public class OfflinePageBridge {
             long nativeOfflinePageBridge, WebContents webContents);
     private native void nativeCheckForNewOfflineContent(
             long nativeOfflinePageBridge, long freshnessTimeMillis, Callback<String> callback);
+    private native void nativeGetLaunchUrlByOfflineId(
+            long nativeOfflinePageBridge, long offlineId, Callback<String> callback);
 }

@@ -7,10 +7,20 @@
 
 #include <memory>
 
+#include "base/gtest_prod_util.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
 
 namespace media_router {
+
+// Possible values for Cast channel connect results.
+enum class MediaRouterChannelConnectResults {
+  FAILURE = 0,
+  SUCCESS = 1,
+
+  // Note = Add entries only immediately above this line.
+  TOTAL_COUNT = 2
+};
 
 // Possible values for channel open errors.
 enum class MediaRouterChannelError {
@@ -37,7 +47,7 @@ class DeviceCountMetrics {
                                   size_t known_device_count);
 
   // Allows tests to swap in a fake clock.
-  void SetClockForTest(std::unique_ptr<base::Clock> clock);
+  void SetClockForTest(base::Clock* clock);
 
  protected:
   // Record device counts.
@@ -47,7 +57,7 @@ class DeviceCountMetrics {
  private:
   base::Time device_count_metrics_record_time_;
 
-  std::unique_ptr<base::Clock> clock_;
+  base::Clock* clock_;
 };
 
 // Metrics for DIAL device counts.
@@ -95,10 +105,26 @@ class CastAnalytics {
   static const char kHistogramCastMdnsChannelOpenSuccess[];
   static const char kHistogramCastMdnsChannelOpenFailure[];
 
-  static void RecordCastChannelConnectResult(bool channel_opened_successfully);
+  static void RecordCastChannelConnectResult(
+      MediaRouterChannelConnectResults result);
   static void RecordDeviceChannelError(MediaRouterChannelError channel_error);
   static void RecordDeviceChannelOpenDuration(bool success,
                                               const base::TimeDelta& duration);
+};
+
+// Metrics for wired display (local screen) sink counts.
+class WiredDisplayDeviceCountMetrics : public DeviceCountMetrics {
+ protected:
+  // |known_device_count| is not recorded, since it should be the same as
+  // |available_device_count|.
+  void RecordDeviceCounts(size_t available_device_count,
+                          size_t known_device_count) override;
+
+ private:
+  FRIEND_TEST_ALL_PREFIXES(WiredDisplayDeviceCountMetricsTest,
+                           RecordWiredDisplaySinkCount);
+
+  static const char kHistogramWiredDisplayDeviceCount[];
 };
 
 }  // namespace media_router

@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -21,6 +22,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "cc/base/switches.h"
 #include "chromecast/base/cast_constants.h"
 #include "chromecast/base/cast_features.h"
 #include "chromecast/base/cast_paths.h"
@@ -81,6 +83,10 @@
 #include "chromecast/net/network_change_notifier_factory_cast.h"
 #endif
 
+#if defined(OS_FUCHSIA)
+#include "chromecast/net/fake_connectivity_checker.h"
+#endif
+
 #if defined(USE_AURA)
 // gn check ignored on OverlayManagerCast as it's not a public ozone
 // header, but is exported to allow injecting the overlay-composited
@@ -89,6 +95,14 @@
 #include "chromecast/graphics/cast_screen.h"
 #include "ui/display/screen.h"
 #include "ui/ozone/platform/cast/overlay_manager_cast.h"  // nogncheck
+#endif
+
+#if BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
+#include "chromecast/browser/extensions/cast_extension_system.h"
+#include "chromecast/browser/extensions/cast_extensions_browser_client.h"
+#include "chromecast/browser/extensions/cast_prefs.h"
+#include "chromecast/common/cast_extensions_client.h"
+#include "extensions/browser/extension_prefs.h"  // nogncheck
 #endif
 
 namespace {
@@ -199,11 +213,7 @@ struct DefaultCommandLineSwitch {
 };
 
 const DefaultCommandLineSwitch kDefaultSwitches[] = {
-#if defined(OS_ANDROID)
-    // TODO(714676): this should probably set the no restrictions autoplay
-    // policy instead.
-    {switches::kIgnoreAutoplayRestrictionsForTests, ""},
-#else
+#if !defined(OS_ANDROID)
     // GPU shader disk cache disabling is largely to conserve disk space.
     {switches::kDisableGpuShaderDiskCache, ""},
     // Enable audio focus by default (even on non-Android platforms).
@@ -216,6 +226,7 @@ const DefaultCommandLineSwitch kDefaultSwitches[] = {
     {switches::kDisableGpuVsync, ""},
     {switches::kSkipGpuDataLoading, ""},
     {switches::kDisableGpuCompositing, ""},
+    {cc::switches::kDisableThreadedAnimation, ""},
 #endif  // defined(OS_ANDROID)
 #endif  // BUILDFLAG(IS_CAST_AUDIO_ONLY)
 #if defined(OS_LINUX)
@@ -260,13 +271,6 @@ void AddDefaultCommandLineSwitches(base::CommandLine* command_line) {
     } else {
       VLOG(2) << "Skip setting default switch '" << name << "', already set";
     }
-  }
-
-  // If browser-side navigation is not explicitly enabled or disabled, disable
-  // it.
-  if (!command_line->HasSwitch(switches::kDisableBrowserSideNavigation) &&
-      !command_line->HasSwitch(switches::kEnableBrowserSideNavigation)) {
-    command_line->AppendSwitch(switches::kDisableBrowserSideNavigation);
   }
 }
 
@@ -351,6 +355,10 @@ media::MediaCapsImpl* CastBrowserMainParts::media_caps() {
   return media_caps_.get();
 }
 
+content::BrowserContext* CastBrowserMainParts::browser_context() {
+  return cast_browser_process_->browser_context();
+}
+
 void CastBrowserMainParts::PreMainMessageLoopStart() {
   // GroupedHistograms needs to be initialized before any threads are created
   // to prevent race conditions between calls to Preregister and those threads
@@ -370,7 +378,7 @@ void CastBrowserMainParts::PreMainMessageLoopStart() {
 
 void CastBrowserMainParts::PostMainMessageLoopStart() {
   cast_browser_process_->SetMetricsHelper(
-      base::MakeUnique<metrics::CastMetricsHelper>(
+      std::make_unique<metrics::CastMetricsHelper>(
           base::ThreadTaskRunnerHandle::Get()));
 
 #if defined(OS_ANDROID)
@@ -405,9 +413,8 @@ int CastBrowserMainParts::PreCreateThreads() {
   }
   breakpad::CrashDumpObserver::Create();
   breakpad::CrashDumpObserver::GetInstance()->RegisterClient(
-      base::MakeUnique<breakpad::ChildProcessCrashObserver>(
-          crash_dumps_dir, kAndroidMinidumpDescriptor,
-          base::Bind(&base::DoNothing)));
+      std::make_unique<breakpad::ChildProcessCrashObserver>(
+          crash_dumps_dir, kAndroidMinidumpDescriptor));
 #else
   base::FilePath home_dir;
   CHECK(PathService::Get(DIR_CAST_HOME, &home_dir));
@@ -443,14 +450,11 @@ int CastBrowserMainParts::PreCreateThreads() {
       command_line->GetSwitchValueASCII(switches::kEnableFeatures),
       command_line->GetSwitchValueASCII(switches::kDisableFeatures));
 
-  // Hook for internal code
-  cast_browser_process_->browser_client()->PreCreateThreads();
-
 #if defined(USE_AURA)
   cast_browser_process_->SetCastScreen(base::WrapUnique(new CastScreen()));
   DCHECK(!display::Screen::GetScreen());
   display::Screen::SetScreenInstance(cast_browser_process_->cast_screen());
-  display_configurator_ = base::MakeUnique<CastDisplayConfigurator>(
+  display_configurator_ = std::make_unique<CastDisplayConfigurator>(
       cast_browser_process_->cast_screen());
 #endif  // defined(USE_AURA)
 
@@ -467,21 +471,28 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   cast_browser_process_->SetNetLog(net_log_.get());
   url_request_context_factory_->InitializeOnUIThread(net_log_.get());
 
+#if defined(OS_FUCHSIA)
+  // TODO(777973): Switch to using the real ConnectivityChecker once setup works
+  // properly.
+  LOG(WARNING) << "Using FakeConnectivityChecker.";
+  cast_browser_process_->SetConnectivityChecker(new FakeConnectivityChecker());
+#else
   cast_browser_process_->SetConnectivityChecker(ConnectivityChecker::Create(
       content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::IO),
       url_request_context_factory_->GetSystemGetter()));
+#endif  // defined(OS_FUCHSIA)
 
   cast_browser_process_->SetBrowserContext(
-      base::MakeUnique<CastBrowserContext>(url_request_context_factory_));
+      std::make_unique<CastBrowserContext>(url_request_context_factory_));
   cast_browser_process_->SetMetricsServiceClient(
-      base::MakeUnique<metrics::CastMetricsServiceClient>(
+      std::make_unique<metrics::CastMetricsServiceClient>(
           cast_browser_process_->pref_service(),
           content::BrowserContext::GetDefaultStoragePartition(
               cast_browser_process_->browser_context())
               ->GetURLRequestContext()));
   cast_browser_process_->SetRemoteDebuggingServer(
-      base::MakeUnique<RemoteDebuggingServer>(
+      std::make_unique<RemoteDebuggingServer>(
           cast_browser_process_->browser_client()
               ->EnableRemoteDebuggingImmediately()));
 
@@ -515,6 +526,29 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
 #endif
   ::media::InitializeMediaLibrary();
   media_caps_->Initialize();
+
+#if BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
+  user_pref_service_ = extensions::cast_prefs::CreateUserPrefService(
+      cast_browser_process_->browser_context());
+
+  extensions_client_ = std::make_unique<extensions::CastExtensionsClient>();
+  extensions::ExtensionsClient::Set(extensions_client_.get());
+
+  extensions_browser_client_ =
+      std::make_unique<extensions::CastExtensionsBrowserClient>(
+          cast_browser_process_->browser_context(), user_pref_service_.get());
+  extensions::ExtensionsBrowserClient::Set(extensions_browser_client_.get());
+
+  extensions::CastExtensionSystem* extension_system =
+      static_cast<extensions::CastExtensionSystem*>(
+          extensions::ExtensionSystem::Get(
+              cast_browser_process_->browser_context()));
+
+  extension_system->InitForRegularProfile(true);
+  extension_system->Init();
+
+  extensions::ExtensionPrefs::Get(cast_browser_process_->browser_context());
+#endif
 
   // Initializing metrics service and network delegates must happen after cast
   // service is intialized because CastMetricsServiceClient and

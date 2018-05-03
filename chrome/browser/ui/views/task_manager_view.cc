@@ -251,7 +251,7 @@ void TaskManagerView::GetGroupRange(int model_index, views::GroupRange* range) {
 }
 
 void TaskManagerView::OnSelectionChanged() {
-  GetDialogClientView()->UpdateDialogButtons();
+  DialogModelChanged();
 }
 
 void TaskManagerView::OnDoubleClick() {
@@ -334,7 +334,7 @@ void TaskManagerView::Init() {
   tab_table_parent_ = tab_table_->CreateParentIfNecessary();
   AddChildView(tab_table_parent_);
 
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
   const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
   const gfx::Insets dialog_insets =

@@ -22,8 +22,8 @@ const int kLineHeightSubtitle = 3;
 NetworkRowTitleView::NetworkRowTitleView(int title_message_id)
     : title_(TrayPopupUtils::CreateDefaultLabel()),
       subtitle_(TrayPopupUtils::CreateDefaultLabel()) {
-  SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::Orientation::kVertical));
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kVertical));
 
   TrayPopupItemStyle title_style(TrayPopupItemStyle::FontStyle::SUB_HEADER);
   title_style.SetupLabel(title_);
@@ -39,7 +39,7 @@ NetworkRowTitleView::NetworkRowTitleView(int title_message_id)
   AddChildView(subtitle_);
 }
 
-NetworkRowTitleView::~NetworkRowTitleView() {}
+NetworkRowTitleView::~NetworkRowTitleView() = default;
 
 void NetworkRowTitleView::SetSubtitle(int subtitle_message_id) {
   if (subtitle_message_id) {

@@ -9,8 +9,6 @@
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/api/LayoutAPIShim.h"
-#include "core/layout/api/LayoutViewItem.h"
 #include "core/paint/PaintLayer.h"
 
 namespace blink {
@@ -79,7 +77,7 @@ IntersectionGeometry::IntersectionGeometry(Element* root,
     InitializeGeometry();
 }
 
-IntersectionGeometry::~IntersectionGeometry() {}
+IntersectionGeometry::~IntersectionGeometry() = default;
 
 bool IntersectionGeometry::InitializeCanComputeGeometry(Element* root,
                                                         Element& target) const {
@@ -113,7 +111,8 @@ void IntersectionGeometry::InitializeTargetRect() {
 }
 
 void IntersectionGeometry::InitializeRootRect() {
-  if (root_->IsLayoutView()) {
+  if (root_->IsLayoutView() &&
+      !RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
     root_rect_ =
         LayoutRect(ToLayoutView(root_)->GetFrameView()->VisibleContentRect());
     root_->MapToVisualRectInAncestorSpace(nullptr, root_rect_);
@@ -148,12 +147,11 @@ void IntersectionGeometry::ClipToRoot() {
   // TODO(szager): the writing mode flipping needs a test.
   LayoutBox* ancestor = ToLayoutBox(root_);
   does_intersect_ = target_->MapToVisualRectInAncestorSpace(
-      (RootIsImplicit() ? nullptr : ancestor), intersection_rect_,
-      kEdgeInclusive);
-  if (ancestor && ancestor->HasOverflowClip())
-    intersection_rect_.Move(-ancestor->ScrolledContentOffset());
+      ancestor, intersection_rect_, kEdgeInclusive);
   if (!does_intersect_)
     return;
+  if (ancestor->HasOverflowClip())
+    intersection_rect_.Move(-ancestor->ScrolledContentOffset());
   LayoutRect root_clip_rect(root_rect_);
   if (ancestor)
     ancestor->FlipForWritingMode(root_clip_rect);
@@ -196,6 +194,8 @@ void IntersectionGeometry::MapIntersectionRectToTargetFrameCoordinates() {
 void IntersectionGeometry::ComputeGeometry() {
   if (!CanComputeGeometry())
     return;
+  DCHECK(root_);
+  DCHECK(target_);
   ClipToRoot();
   MapTargetRectToTargetFrameCoordinates();
   if (does_intersect_)

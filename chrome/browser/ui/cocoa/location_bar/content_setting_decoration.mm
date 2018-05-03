@@ -270,8 +270,8 @@ NSPoint ContentSettingDecoration::GetBubblePointInFrame(NSRect frame) {
   return StarDecoration::GetStarBubblePointInFrame(GetDrawRectInFrame(frame));
 }
 
-bool ContentSettingDecoration::AcceptsMousePress() {
-  return true;
+AcceptsPress ContentSettingDecoration::AcceptsMousePress() {
+  return AcceptsPress::WHEN_ACTIVATED;
 }
 
 bool ContentSettingDecoration::OnMousePressed(NSRect frame, NSPoint location) {
@@ -292,25 +292,29 @@ bool ContentSettingDecoration::OnMousePressed(NSRect frame, NSPoint location) {
           web_contents,
           profile_);
 
-  if (chrome::ShowAllDialogsWithViewsToolkit()) {
+  // If the bubble is already opened, close it. Otherwise, open a new bubble.
+  if (bubbleWindow_ && [bubbleWindow_ isVisible]) {
+    [bubbleWindow_ close];
+    bubbleWindow_.reset();
+    return true;
+  }
+
+  // The blocked Framebust bubble only has a toolkit-views implementation.
+  if (chrome::ShowAllDialogsWithViewsToolkit() ||
+      model->AsFramebustBlockBubbleModel()) {
     gfx::Point origin = gfx::ScreenPointFromNSPoint(anchor);
-    chrome::ContentSettingBubbleViewsBridge::Show(
+    NSWindow* bubble = chrome::ContentSettingBubbleViewsBridge::Show(
         [web_contents->GetTopLevelNativeWindow() contentView], model,
         web_contents, origin, this);
+    bubbleWindow_.reset([bubble retain]);
   } else {
-    // If the bubble is already opened, close it. Otherwise, open a new bubble.
-    if (bubbleWindow_ && [bubbleWindow_ isVisible]) {
-      [bubbleWindow_ close];
-      bubbleWindow_.reset();
-    } else {
-      ContentSettingBubbleController* bubbleController =
-          [ContentSettingBubbleController showForModel:model
-                                           webContents:web_contents
-                                          parentWindow:[field window]
-                                            decoration:this
-                                            anchoredAt:anchor];
-      bubbleWindow_.reset([[bubbleController window] retain]);
-    }
+    ContentSettingBubbleController* bubbleController =
+        [ContentSettingBubbleController showForModel:model
+                                         webContents:web_contents
+                                        parentWindow:[field window]
+                                          decoration:this
+                                          anchoredAt:anchor];
+    bubbleWindow_.reset([[bubbleController window] retain]);
   }
 
   return true;

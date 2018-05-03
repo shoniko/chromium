@@ -41,8 +41,6 @@
 #include "chrome/common/pref_names.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
 #include "content/public/browser/devtools_external_agent_proxy_delegate.h"
@@ -297,8 +295,7 @@ void DevToolsAndroidBridge::RequestDeviceCount(
     const base::Callback<void(int)>& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (device_count_listeners_.empty() ||
-      !callback.Equals(device_count_callback_.callback()))
+  if (device_count_listeners_.empty() || callback.IsCancelled())
     return;
 
   UsbDeviceProvider::CountDevices(callback);

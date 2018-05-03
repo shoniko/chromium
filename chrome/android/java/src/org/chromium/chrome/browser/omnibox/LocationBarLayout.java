@@ -54,6 +54,7 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
+import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -163,7 +164,7 @@ public class LocationBarLayout extends FrameLayout
     private AutocompleteController mAutocomplete;
 
     protected ToolbarDataProvider mToolbarDataProvider;
-    private UrlFocusChangeListener mUrlFocusChangeListener;
+    private ObserverList<UrlFocusChangeListener> mUrlFocusChangeListeners = new ObserverList<>();
 
     protected boolean mNativeInitialized;
 
@@ -236,7 +237,7 @@ public class LocationBarLayout extends FrameLayout
 
     private DeferredOnSelectionRunnable mDeferredOnSelection;
 
-    private abstract class DeferredOnSelectionRunnable implements Runnable {
+    private static abstract class DeferredOnSelectionRunnable implements Runnable {
         protected final OmniboxSuggestion mSuggestion;
         protected final int mPosition;
         protected boolean mShouldLog;
@@ -260,27 +261,6 @@ public class LocationBarLayout extends FrameLayout
         public boolean shouldLog() {
             return mShouldLog;
         }
-    }
-
-    /**
-     * Listener for receiving the messages related with interacting with the omnibox during startup.
-     */
-    public interface OmniboxLivenessListener {
-        /**
-         * Called after the first draw when the omnibox can receive touch events.
-         */
-        void onOmniboxInteractive();
-
-        /**
-         * Called when the native libraries are loaded and listeners with native components
-         * have been initialized.
-         */
-        void onOmniboxFullyFunctional();
-
-        /**
-         * Called when the omnibox is focused.
-         */
-        void onOmniboxFocused();
     }
 
     /**
@@ -866,7 +846,6 @@ public class LocationBarLayout extends FrameLayout
         }
         mDeferredNativeRunnables.clear();
 
-        mUrlBar.onNativeLibraryReady();
         updateVisualsForState();
     }
 
@@ -913,10 +892,8 @@ public class LocationBarLayout extends FrameLayout
         // hide the icon.
         if (mUrlHasFocus && isTablet) return BUTTON_TYPE_NAVIGATION_ICON;
 
-        boolean isOfflinePage = mToolbarDataProvider.isOfflinePage();
-        return getSecurityIconResource(getSecurityLevel(), !isTablet, isOfflinePage) != 0
-                ? BUTTON_TYPE_SECURITY_ICON
-                : BUTTON_TYPE_NONE;
+        return mToolbarDataProvider.shouldShowSecurityIcon() ? BUTTON_TYPE_SECURITY_ICON
+                                                             : BUTTON_TYPE_NONE;
     }
 
     private void changeLocationBarIcon() {
@@ -1102,7 +1079,9 @@ public class LocationBarLayout extends FrameLayout
      */
     protected void handleUrlFocusAnimation(boolean hasFocus) {
         if (hasFocus) mUrlFocusedWithoutAnimations = false;
-        if (mUrlFocusChangeListener != null) mUrlFocusChangeListener.onUrlFocusChange(hasFocus);
+        for (UrlFocusChangeListener listener : mUrlFocusChangeListeners) {
+            listener.onUrlFocusChange(hasFocus);
+        }
 
         updateOmniboxResultsContainer();
         if (hasFocus) updateFadingBackgroundView(true);
@@ -1124,10 +1103,12 @@ public class LocationBarLayout extends FrameLayout
         // now count as a new session.
         mHasStartedNewOmniboxEditSession = false;
         mNewOmniboxEditSessionTimestamp = -1;
-        if (mNativeInitialized && mUrlHasFocus && mToolbarDataProvider.hasTab()) {
+        if (mNativeInitialized && mUrlHasFocus
+                && (mToolbarDataProvider.hasTab()
+                           || (mBottomSheet != null && mBottomSheet.isShowingNewTab()))) {
             mAutocomplete.startZeroSuggest(mToolbarDataProvider.getProfile(),
                     mUrlBar.getTextWithAutocomplete(), mToolbarDataProvider.getCurrentUrl(),
-                    mUrlFocusedFromFakebox);
+                    mToolbarDataProvider.getTitle(), mUrlFocusedFromFakebox);
         }
     }
 
@@ -1252,13 +1233,14 @@ public class LocationBarLayout extends FrameLayout
         mBottomSheet = sheet;
     }
 
-    /**
-     * Sets the URL focus change listner that will be notified when the URL gains or loses focus.
-     * @param listener The listener to be registered.
-     */
     @Override
-    public void setUrlFocusChangeListener(UrlFocusChangeListener listener) {
-        mUrlFocusChangeListener = listener;
+    public void addUrlFocusChangeListener(UrlFocusChangeListener listener) {
+        mUrlFocusChangeListeners.addObserver(listener);
+    }
+
+    @Override
+    public void removeUrlFocusChangeListener(UrlFocusChangeListener listener) {
+        mUrlFocusChangeListeners.removeObserver(listener);
     }
 
     @Override
@@ -1290,65 +1272,23 @@ public class LocationBarLayout extends FrameLayout
         if (type != mNavigationButtonType) setNavigationButtonType(type);
     }
 
-    private int getSecurityLevel() {
-        return getSecurityLevel(getCurrentTab(), mToolbarDataProvider.isOfflinePage());
-    }
-
-    @VisibleForTesting
-    static int getSecurityLevel(Tab tab, boolean isOfflinePage) {
-        if (tab == null || isOfflinePage) return ConnectionSecurityLevel.NONE;
-        return tab.getSecurityLevel();
-    }
-
     /**
-     * Determines the icon that should be displayed for the current security level.
-     * @param securityLevel The security level for which the resource will be returned.
-     * @param isSmallDevice Whether the device form factor is small (like a phone) or large
-     * (like a tablet).
-     * @param isOfflinePage Whether the page for which the icon is shown is an offline page.
-     * @return The resource ID of the icon that should be displayed, 0 if no icon should show.
-     */
-    @DrawableRes
-    public static int getSecurityIconResource(
-            int securityLevel, boolean isSmallDevice, boolean isOfflinePage) {
-        if (isOfflinePage) {
-            return R.drawable.offline_pin_round;
-        }
-        switch (securityLevel) {
-            case ConnectionSecurityLevel.NONE:
-                return isSmallDevice ? 0 : R.drawable.omnibox_info;
-            case ConnectionSecurityLevel.HTTP_SHOW_WARNING:
-                return R.drawable.omnibox_info;
-            case ConnectionSecurityLevel.DANGEROUS:
-                return R.drawable.omnibox_https_invalid;
-            case ConnectionSecurityLevel.SECURE_WITH_POLICY_INSTALLED_CERT:
-            case ConnectionSecurityLevel.SECURE:
-            case ConnectionSecurityLevel.EV_SECURE:
-                return R.drawable.omnibox_https_valid;
-            default:
-                assert false;
-        }
-        return 0;
-    }
-
-    /**
-     * @param securityLevel The security level for which the color will be returned.
      * @param provider The {@link ToolbarDataProvider}.
      * @param resources The Resources for the Context.
-     * @param isOmniboxOpaque Whether the omnibox is an opaque color.
+     * @param isChromeHomeEnabled Whether Chrome Home is enabled.
      * @return The {@link ColorStateList} to use to tint the security state icon.
      */
-    public static ColorStateList getColorStateList(int securityLevel, ToolbarDataProvider provider,
-            Resources resources, boolean isOmniboxOpaque) {
+    public static ColorStateList getColorStateList(
+            ToolbarDataProvider provider, Resources resources, boolean isChromeHomeEnabled) {
+        int securityLevel = provider.getSecurityLevel();
+
         ColorStateList list = null;
         int color = provider.getPrimaryColor();
         boolean needLightIcon = ColorUtils.shouldUseLightForegroundOnBackground(color);
         if (provider.isIncognito() || needLightIcon) {
             // For a dark theme color, use light icons.
             list = ApiCompatibilityUtils.getColorStateList(resources, R.color.light_mode_tint);
-        } else if (!ColorUtils.isUsingDefaultToolbarColor(resources,
-                           FeatureUtilities.isChromeHomeEnabled(), provider.isIncognito(), color)
-                && !isOmniboxOpaque) {
+        } else if (provider.isUsingBrandColor()) {
             // For theme colors which are not dark and are also not
             // light enough to warrant an opaque URL bar, use dark
             // icons.
@@ -1372,20 +1312,18 @@ public class LocationBarLayout extends FrameLayout
      * Updates the security icon displayed in the LocationBar.
      */
     @Override
-    public void updateSecurityIcon(int securityLevel) {
-        boolean isSmallDevice = !DeviceFormFactor.isTablet();
+    public void updateSecurityIcon() {
         @DrawableRes
-        int id = getSecurityIconResource(
-                securityLevel, isSmallDevice, mToolbarDataProvider.isOfflinePage());
+        int id = !mToolbarDataProvider.shouldShowSecurityIcon()
+                ? 0
+                : mToolbarDataProvider.getSecurityIconResource();
         if (id == 0) {
             mSecurityButton.setImageDrawable(null);
         } else {
             // ImageView#setImageResource is no-op if given resource is the current one.
             mSecurityButton.setImageResource(id);
-            mSecurityButton.setTint(
-                    getColorStateList(securityLevel, mToolbarDataProvider, getResources(),
-                            ColorUtils.shouldUseOpaqueTextboxBackground(
-                                    mToolbarDataProvider.getPrimaryColor())));
+            mSecurityButton.setTint(getColorStateList(mToolbarDataProvider, getResources(),
+                    mBottomSheet != null));
         }
 
         updateVerboseStatusVisibility();
@@ -1471,11 +1409,8 @@ public class LocationBarLayout extends FrameLayout
      * omnibox.
      */
     private void updateVerboseStatusVisibility() {
-        // Because is offline page is cleared a bit slower, we also ensure that connection security
-        // level is NONE or HTTP_SHOW_WARNING (http://crbug.com/671453).
-        boolean verboseStatusVisible = !mUrlHasFocus && mToolbarDataProvider.isOfflinePage()
-                && (getSecurityLevel() == ConnectionSecurityLevel.NONE
-                           || getSecurityLevel() == ConnectionSecurityLevel.HTTP_SHOW_WARNING);
+        boolean verboseStatusVisible =
+                !mUrlHasFocus && mToolbarDataProvider.shouldShowVerboseStatus();
 
         int verboseStatusVisibility = verboseStatusVisible ? VISIBLE : GONE;
 
@@ -1552,16 +1487,24 @@ public class LocationBarLayout extends FrameLayout
 
         assert urlContainerChildIndex != -1;
         int urlContainerMarginEnd = 0;
-        for (int i = urlContainerChildIndex + 1; i < getChildCount(); i++) {
-            View childView = getChildAt(i);
-            if (childView.getVisibility() != GONE) {
-                LayoutParams childLayoutParams = (LayoutParams) childView.getLayoutParams();
-                urlContainerMarginEnd = Math.max(urlContainerMarginEnd,
-                        childLayoutParams.width
-                                + ApiCompatibilityUtils.getMarginStart(childLayoutParams)
-                                + ApiCompatibilityUtils.getMarginEnd(childLayoutParams));
+
+        // When Chrome Home is enabled, the URL actions container slides out of view during the
+        // URL defocus animation. Adding margin during this animation creates a hole.
+        boolean addMarginForActionsContainer =
+                mBottomSheet == null || !mUrlFocusChangeInProgress || mUrlHasFocus;
+        if (addMarginForActionsContainer) {
+            for (int i = urlContainerChildIndex + 1; i < getChildCount(); i++) {
+                View childView = getChildAt(i);
+                if (childView.getVisibility() != GONE) {
+                    LayoutParams childLayoutParams = (LayoutParams) childView.getLayoutParams();
+                    urlContainerMarginEnd = Math.max(urlContainerMarginEnd,
+                            childLayoutParams.width
+                                    + ApiCompatibilityUtils.getMarginStart(childLayoutParams)
+                                    + ApiCompatibilityUtils.getMarginEnd(childLayoutParams));
+                }
             }
         }
+
         LayoutParams urlLayoutParams = (LayoutParams) mUrlBar.getLayoutParams();
         if (ApiCompatibilityUtils.getMarginEnd(urlLayoutParams) != urlContainerMarginEnd) {
             ApiCompatibilityUtils.setMarginEnd(urlLayoutParams, urlContainerMarginEnd);
@@ -2308,7 +2251,7 @@ public class LocationBarLayout extends FrameLayout
     public void updateLoadingState(boolean updateUrl) {
         if (updateUrl) setUrlToPageUrl();
         updateNavigationButton();
-        updateSecurityIcon(getSecurityLevel());
+        updateSecurityIcon();
     }
 
     @Override
@@ -2405,12 +2348,9 @@ public class LocationBarLayout extends FrameLayout
         // If the bottom sheet is managing the display of the suggestions, view visibility does not
         // need to be set here.
         if (mBottomSheet != null && mUrlBar != null) {
-            // If the NTP is shown, only show the suggestions if there is content in the URL bar.
-            boolean blockForNTP =
-                    mBottomSheet.isShowingNewTab() && TextUtils.isEmpty(mUrlBar.getText());
             boolean showingOmniboxSuggestions =
                     mBottomSheet.getCurrentSheetContent() == mOmniboxSuggestionsSheetContent;
-            if (visible && !showingOmniboxSuggestions && !blockForNTP) {
+            if (visible && !showingOmniboxSuggestions) {
                 mBottomSheet.showContent(mOmniboxSuggestionsSheetContent);
             }
         } else {
@@ -2552,7 +2492,7 @@ public class LocationBarLayout extends FrameLayout
     @Override
     public void updateVisualsForState() {
         if (updateUseDarkColors() || mIsEmphasizingHttpsScheme != shouldEmphasizeHttpsScheme()) {
-            updateSecurityIcon(getSecurityLevel());
+            updateSecurityIcon();
         }
         ColorStateList colorStateList = ApiCompatibilityUtils.getColorStateList(getResources(),
                 mUseDarkColors ? R.color.dark_mode_tint : R.color.light_mode_tint);

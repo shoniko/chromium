@@ -651,10 +651,8 @@ LogMessage::~LogMessage() {
       // "com.apple.console" is used.
       const class ASLClient {
        public:
-        explicit ASLClient(const std::string& main_bundle_id)
-            : client_(
-                  asl_open(nullptr, main_bundle_id.c_str(), ASL_OPT_NO_DELAY)) {
-        }
+        explicit ASLClient(const std::string& facility)
+            : client_(asl_open(nullptr, facility.c_str(), ASL_OPT_NO_DELAY)) {}
         ~ASLClient() { asl_close(client_); }
 
         aslclient get() const { return client_; }
@@ -813,11 +811,9 @@ LogMessage::~LogMessage() {
 
     // Ensure the first characters of the string are on the stack so they
     // are contained in minidumps for diagnostic purposes.
-    char str_stack[1024];
-    str_newline.copy(str_stack, arraysize(str_stack));
-    base::debug::Alias(str_stack);
+    DEBUG_ALIAS_FOR_CSTR(str_stack, str_newline.c_str(), 1024);
 
-    if (!(log_assert_handler_stack == nullptr) &&
+    if (log_assert_handler_stack.IsCreated() &&
         !log_assert_handler_stack.Get().empty()) {
       LogAssertHandlerFunction log_assert_handler =
           log_assert_handler_stack.Get().top();

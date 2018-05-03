@@ -21,7 +21,7 @@
 // https://drafts.csswg.org/cssom/#the-cssrule-interface
 
 [
-    DependentLifetime
+    Exposed=Window
 ] interface CSSRule {
     const unsigned short STYLE_RULE = 1;
     const unsigned short CHARSET_RULE = 2;

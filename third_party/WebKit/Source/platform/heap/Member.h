@@ -5,10 +5,17 @@
 #ifndef Member_h
 #define Member_h
 
+#include "platform/heap/Heap.h"
 #include "platform/heap/HeapPage.h"
+#include "platform/heap/IncrementalMarkingFlag.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashFunctions.h"
 #include "platform/wtf/HashTraits.h"
+
+namespace WTF {
+template <typename P, typename Traits, typename Allocator>
+class ConstructTraits;
+}  // namespace WTF
 
 namespace blink {
 
@@ -100,6 +107,11 @@ class MemberBase {
   MemberBase& operator=(U* other) {
     raw_ = other;
     CheckPointer();
+    return *this;
+  }
+
+  MemberBase& operator=(WTF::HashTableDeletedValueType) {
+    raw_ = reinterpret_cast<T*>(-1);
     return *this;
   }
 
@@ -195,8 +207,12 @@ class Member : public MemberBase<T, TracenessMemberConfiguration::kTraced> {
  public:
   Member() : Parent() {}
   Member(std::nullptr_t) : Parent(nullptr) {}
-  Member(T* raw) : Parent(raw) { WriteBarrier(this->raw_); }
-  Member(T& raw) : Parent(raw) { WriteBarrier(this->raw_); }
+  Member(T* raw) : Parent(raw) {
+    // No write barrier for initializing stores.
+  }
+  Member(T& raw) : Parent(raw) {
+    // No write barrier for initializing stores.
+  }
   Member(WTF::HashTableDeletedValueType x) : Parent(x) {}
 
   Member(const Member& other) : Parent(other) { WriteBarrier(this->raw_); }
@@ -211,6 +227,12 @@ class Member : public MemberBase<T, TracenessMemberConfiguration::kTraced> {
 
   template <typename U>
   Member& operator=(const Persistent<U>& other) {
+    Parent::operator=(other);
+    WriteBarrier(this->raw_);
+    return *this;
+  }
+
+  Member& operator=(const Member& other) {
     Parent::operator=(other);
     WriteBarrier(this->raw_);
     return *this;
@@ -237,6 +259,11 @@ class Member : public MemberBase<T, TracenessMemberConfiguration::kTraced> {
     return *this;
   }
 
+  Member& operator=(WTF::HashTableDeletedValueType x) {
+    Parent::operator=(x);
+    return *this;
+  }
+
   Member& operator=(std::nullptr_t) {
     Parent::operator=(nullptr);
     return *this;
@@ -244,17 +271,21 @@ class Member : public MemberBase<T, TracenessMemberConfiguration::kTraced> {
 
  protected:
   ALWAYS_INLINE void WriteBarrier(const T* value) const {
-#if defined(HEAP_INCREMENTAL_MARKING)
-    if (value) {
-      BasePage const* const page = PageFromObject(value);
+#if BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
+    if (LIKELY(value && !this->IsHashTableDeletedValue())) {
+      // The following method for retrieving a page works as allocation of
+      // mixins on large object pages is prohibited.
+      BasePage* const page = PageFromObject(value);
       if (page->IsIncrementalMarking()) {
         DCHECK(ThreadState::Current()->IsIncrementalMarking());
-        // TODO(mlippautz): Add to marking work list once include-cycles have
-        // been resolved.
+        ThreadState::Current()->Heap().WriteBarrierInternal(page, value);
       }
     }
-#endif  // HEAP_INCREMENTAL_MARKING
+#endif  // BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
   }
+
+  template <typename P, typename Traits, typename Allocator>
+  friend class WTF::ConstructTraits;
 };
 
 // A checked version of Member<>, verifying that only same-thread references
@@ -565,6 +596,28 @@ template <typename T>
 struct IsTraceable<blink::TraceWrapperMember<T>> {
   STATIC_ONLY(IsTraceable);
   static const bool value = true;
+};
+
+template <typename T, typename Traits, typename Allocator>
+class ConstructTraits<blink::Member<T>, Traits, Allocator> {
+  STATIC_ONLY(ConstructTraits);
+
+ public:
+  template <typename... Args>
+  static blink::Member<T>* ConstructAndNotifyElement(void* location,
+                                                     Args&&... args) {
+    blink::Member<T>* object =
+        new (NotNull, location) blink::Member<T>(std::forward<Args>(args)...);
+    object->WriteBarrier(object->raw_);
+    return object;
+  }
+
+  static void NotifyNewElements(blink::Member<T>* array, size_t len) {
+    while (len-- > 0) {
+      array->WriteBarrier(array->raw_);
+      array++;
+    }
+  }
 };
 
 }  // namespace WTF

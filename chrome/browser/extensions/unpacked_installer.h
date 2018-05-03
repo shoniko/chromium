@@ -43,7 +43,7 @@ class UnpackedInstaller
 
   // Loads the extension from the directory |extension_path|, which is
   // the top directory of a specific extension where its manifest file lives.
-  // Errors are reported through ExtensionErrorReporter. On success,
+  // Errors are reported through LoadErrorReporter. On success,
   // ExtensionService::AddExtension() is called.
   void Load(const base::FilePath& extension_path);
 
@@ -58,10 +58,6 @@ class UnpackedInstaller
   bool LoadFromCommandLine(const base::FilePath& extension_path,
                            std::string* extension_id,
                            bool only_allow_apps);
-
-  // Allows prompting for plugins to be disabled; intended for testing only.
-  bool prompt_for_plugins() { return prompt_for_plugins_; }
-  void set_prompt_for_plugins(bool val) { prompt_for_plugins_ = val; }
 
   // Allows overriding of whether modern manifest versions are required;
   // intended for testing.
@@ -86,10 +82,8 @@ class UnpackedInstaller
   explicit UnpackedInstaller(ExtensionService* extension_service);
   virtual ~UnpackedInstaller();
 
-  // Must be called from the UI thread.
-  void ShowInstallPrompt();
-
-  // Begin management policy and requirements checks.
+  // Must be called from the UI thread. Begin management policy and requirements
+  // checks.
   void StartInstallChecks();
 
   // Callback from PreloadCheckGroup.
@@ -149,10 +143,6 @@ class UnpackedInstaller
 
   // The extension being installed.
   scoped_refptr<Extension> extension_;
-
-  // If true and the extension contains plugins, we prompt the user before
-  // loading.
-  bool prompt_for_plugins_;
 
   // Whether to require the extension installed to have a modern manifest
   // version.

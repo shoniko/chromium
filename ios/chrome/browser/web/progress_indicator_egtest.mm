@@ -4,8 +4,9 @@
 
 #import <EarlGrey/EarlGrey.h>
 
+#include <memory>
+
 #include "base/mac/foundation_util.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/condition_variable.h"
@@ -72,7 +73,7 @@ id<GREYMatcher> ProgressViewWithProgress(CGFloat progress) {
 }
 
 // Response provider that serves the page which never finishes loading.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code.
+// TODO(crbug.com/708307): Convert this to Embedded Test Server.
 class InfinitePendingResponseProvider : public HtmlResponseProvider {
  public:
   explicit InfinitePendingResponseProvider(const GURL& url)
@@ -180,7 +181,7 @@ class InfinitePendingResponseProvider : public HtmlResponseProvider {
   const GURL infinitePendingURL =
       web::test::HttpServer::MakeUrl(kInfinitePendingPageURL);
   auto uniqueInfinitePendingProvider =
-      base::MakeUnique<InfinitePendingResponseProvider>(infinitePendingURL);
+      std::make_unique<InfinitePendingResponseProvider>(infinitePendingURL);
   InfinitePendingResponseProvider* infinitePendingProvider =
       uniqueInfinitePendingProvider.get();
   web::test::SetUpHttpServer(std::move(uniqueInfinitePendingProvider));
@@ -217,7 +218,7 @@ class InfinitePendingResponseProvider : public HtmlResponseProvider {
 
   // Add responseProvider for page that never finishes loading.
   auto uniqueInfinitePendingProvider =
-      base::MakeUnique<InfinitePendingResponseProvider>(infinitePendingURL);
+      std::make_unique<InfinitePendingResponseProvider>(infinitePendingURL);
   InfinitePendingResponseProvider* infinitePendingProvider =
       uniqueInfinitePendingProvider.get();
   web::test::AddResponseProvider(std::move(uniqueInfinitePendingProvider));

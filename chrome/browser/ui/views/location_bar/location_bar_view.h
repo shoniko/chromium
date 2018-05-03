@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/views/dropdown_bar_host.h"
 #include "chrome/browser/ui/views/dropdown_bar_host_delegate.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
+#include "chrome/browser/ui/views/location_bar/content_setting_image_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "components/prefs/pref_member.h"
 #include "components/security_state/core/security_state.h"
@@ -31,7 +32,7 @@
 
 class CommandUpdater;
 class ContentSettingBubbleModelDelegate;
-class ContentSettingImageView;
+class FindBarIcon;
 class GURL;
 class IntentPickerView;
 class KeywordHintView;
@@ -68,7 +69,8 @@ class LocationBarView : public LocationBar,
                         public ChromeOmniboxEditController,
                         public DropdownBarHostDelegate,
                         public zoom::ZoomEventManagerObserver,
-                        public views::ButtonListener {
+                        public views::ButtonListener,
+                        public ContentSettingImageView::Delegate {
  public:
   class Delegate {
    public:
@@ -151,14 +153,16 @@ class LocationBarView : public LocationBar,
   void SetStarToggled(bool on);
 
 #if defined(OS_CHROMEOS)
-  // The intent picker, should not always be visible.
+  // The intent picker, should not always be visible.  It will be null when
+  // |browser_| is null.
   IntentPickerView* intent_picker_view() { return intent_picker_view_; }
 #endif  // defined(OS_CHROMEOS)
 
-  // The star. It may not be visible.
+  // The star. It may not be visible.  It will be null when |browser_| is null.
   StarView* star_view() { return star_view_; }
 
-  // The save credit card icon. It may not be visible.
+  // The save credit card icon. It may not be visible.  It will be null when
+  // |browser_| is null.
   autofill::SaveCardIconView* save_credit_card_icon_view() {
     return save_credit_card_icon_view_;
   }
@@ -236,6 +240,11 @@ class LocationBarView : public LocationBar,
   ToolbarModel* GetToolbarModel() override;
   content::WebContents* GetWebContents() override;
 
+  // ContentSettingImageView::Delegate:
+  content::WebContents* GetContentSettingWebContents() override;
+  ContentSettingBubbleModelDelegate* GetContentSettingBubbleModelDelegate()
+      override;
+
   // ZoomEventManagerObserver:
   // Updates the view for the zoom icon when default zoom levels change.
   void OnDefaultZoomLevelChanged() override;
@@ -277,6 +286,9 @@ class LocationBarView : public LocationBar,
   // Updates |save_credit_card_icon_view_|. Returns true if visibility changed.
   bool RefreshSaveCreditCardIconView();
 
+  // Updates |find_bar_icon_|. Returns true if visibility changed.
+  bool RefreshFindBarIcon();
+
   // Updates the Translate icon based on the current tab's Translate status.
   void RefreshTranslateIcon();
 
@@ -312,6 +324,7 @@ class LocationBarView : public LocationBar,
   void UpdateContentSettingsIcons() override;
   void UpdateManagePasswordsIconAndBubble() override;
   void UpdateSaveCreditCardIcon() override;
+  void UpdateFindBarIconVisibility() override;
   void UpdateBookmarkStarVisibility() override;
   void UpdateZoomViewVisibility() override;
   void UpdateLocationBarVisibility(bool visible, bool animation) override;
@@ -353,7 +366,7 @@ class LocationBarView : public LocationBar,
   // The Browser this LocationBarView is in.  Note that at least
   // chromeos::SimpleWebViewDialog uses a LocationBarView outside any browser
   // window, so this may be NULL.
-  Browser* browser_;
+  Browser* const browser_;
 
   OmniboxViewViews* omnibox_view_ = nullptr;
 
@@ -391,18 +404,22 @@ class LocationBarView : public LocationBar,
   // The manage passwords icon.
   ManagePasswordsIconViews* manage_passwords_icon_view_ = nullptr;
 
-  // The save credit card icon.
+  // The save credit card icon.  It will be null when |browser_| is null.
   autofill::SaveCardIconView* save_credit_card_icon_view_ = nullptr;
 
   // The icon for Translate.
   TranslateIconView* translate_icon_view_ = nullptr;
 
 #if defined(OS_CHROMEOS)
-  // The intent picker for accessing ARC's apps.
+  // The intent picker for accessing ARC's apps.  It will be null when
+  // |browser_| is null.
   IntentPickerView* intent_picker_view_ = nullptr;
 #endif  // defined(OS_CHROMEOS)
 
-  // The star for bookmarking.
+  // The icon displayed when the find bar is visible.
+  FindBarIcon* find_bar_icon_ = nullptr;
+
+  // The star for bookmarking.  It will be null when |browser_| is null.
   StarView* star_view_ = nullptr;
 
   // An [x] that appears in touch mode (when the OSK is visible) and allows the
@@ -423,7 +440,10 @@ class LocationBarView : public LocationBar,
   // Tracks this preference to determine whether bookmark editing is allowed.
   BooleanPrefMember edit_bookmarks_enabled_;
 
-  DISALLOW_COPY_AND_ASSIGN(LocationBarView);
+  // The security level when the location bar was last updated. Used to decide
+  // whether to animate security level transitions.
+  security_state::SecurityLevel last_update_security_level_ =
+      security_state::NONE;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_LOCATION_BAR_VIEW_H_

@@ -17,8 +17,8 @@ namespace {
 
 // Returns the property's path() value.
 // If the property's value is not a path(), returns nullptr.
-StylePath* GetPath(CSSPropertyID property, const ComputedStyle& style) {
-  switch (property) {
+StylePath* GetPath(const CSSProperty& property, const ComputedStyle& style) {
+  switch (property.PropertyID()) {
     case CSSPropertyD:
       return style.SvgStyle().D();
     case CSSPropertyOffsetPath: {
@@ -34,10 +34,10 @@ StylePath* GetPath(CSSPropertyID property, const ComputedStyle& style) {
 }
 
 // Set the property to the given path() value.
-void SetPath(CSSPropertyID property,
+void SetPath(const CSSProperty& property,
              ComputedStyle& style,
              scoped_refptr<blink::StylePath> path) {
-  switch (property) {
+  switch (property.PropertyID()) {
     case CSSPropertyD:
       style.SetD(std::move(path));
       return;
@@ -86,20 +86,21 @@ InterpolationValue CSSPathInterpolationType::MaybeConvertNeutral(
 InterpolationValue CSSPathInterpolationType::MaybeConvertInitial(
     const StyleResolverState&,
     ConversionCheckers&) const {
-  return PathInterpolationFunctions::ConvertValue(nullptr);
+  return PathInterpolationFunctions::ConvertValue(
+      nullptr, PathInterpolationFunctions::ForceAbsolute);
 }
 
 class InheritedPathChecker : public CSSInterpolationType::CSSConversionChecker {
  public:
   static std::unique_ptr<InheritedPathChecker> Create(
-      CSSPropertyID property,
+      const CSSProperty& property,
       scoped_refptr<StylePath> style_path) {
     return WTF::WrapUnique(
         new InheritedPathChecker(property, std::move(style_path)));
   }
 
  private:
-  InheritedPathChecker(CSSPropertyID property,
+  InheritedPathChecker(const CSSProperty& property,
                        scoped_refptr<StylePath> style_path)
       : property_(property), style_path_(std::move(style_path)) {}
 
@@ -108,7 +109,7 @@ class InheritedPathChecker : public CSSInterpolationType::CSSConversionChecker {
     return GetPath(property_, *state.ParentStyle()) == style_path_.get();
   }
 
-  const CSSPropertyID property_;
+  const CSSProperty& property_;
   const scoped_refptr<StylePath> style_path_;
 };
 
@@ -121,7 +122,8 @@ InterpolationValue CSSPathInterpolationType::MaybeConvertInherit(
   conversion_checkers.push_back(InheritedPathChecker::Create(
       CssProperty(), GetPath(CssProperty(), *state.ParentStyle())));
   return PathInterpolationFunctions::ConvertValue(
-      GetPath(CssProperty(), *state.ParentStyle()));
+      GetPath(CssProperty(), *state.ParentStyle()),
+      PathInterpolationFunctions::ForceAbsolute);
 }
 
 InterpolationValue CSSPathInterpolationType::MaybeConvertValue(
@@ -132,14 +134,15 @@ InterpolationValue CSSPathInterpolationType::MaybeConvertValue(
     return nullptr;
   }
   return PathInterpolationFunctions::ConvertValue(
-      cssvalue::ToCSSPathValue(value).ByteStream());
+      cssvalue::ToCSSPathValue(value).ByteStream(),
+      PathInterpolationFunctions::ForceAbsolute);
 }
 
 InterpolationValue
 CSSPathInterpolationType::MaybeConvertStandardPropertyUnderlyingValue(
     const ComputedStyle& style) const {
   return PathInterpolationFunctions::ConvertValue(
-      GetPath(CssProperty(), style));
+      GetPath(CssProperty(), style), PathInterpolationFunctions::ForceAbsolute);
 }
 
 PairwiseInterpolationValue CSSPathInterpolationType::MaybeMergeSingles(

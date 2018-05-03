@@ -61,6 +61,8 @@ packaging_files = packaging_files_binaries + [
                     "$root_out_dir/xdg-mime",
                     "$root_out_dir/xdg-settings",
                     "$root_out_dir/locales/en-US.pak",
+                    "$root_out_dir/MEIPreload/manifest.json",
+                    "$root_out_dir/MEIPreload/preloaded_data.pb",
                   ]
 
 action_foreach("calculate_deb_dependencies") {
@@ -282,6 +284,28 @@ copy("theme_files") {
     "$branding_dir_100/product_logo_16.png",
     "$branding_dir_100/product_logo_32.png",
   ]
+  if (is_chrome_branded) {
+    sources += [
+      "$branding_dir/linux/product_logo_32_beta.xpm",
+      "$branding_dir/linux/product_logo_32_dev.xpm",
+      "$branding_dir/product_logo_128_beta.png",
+      "$branding_dir/product_logo_128_dev.png",
+      "$branding_dir/product_logo_22_beta.png",
+      "$branding_dir/product_logo_22_dev.png",
+      "$branding_dir/product_logo_24_beta.png",
+      "$branding_dir/product_logo_24_dev.png",
+      "$branding_dir/product_logo_256_beta.png",
+      "$branding_dir/product_logo_256_dev.png",
+      "$branding_dir/product_logo_48_beta.png",
+      "$branding_dir/product_logo_48_dev.png",
+      "$branding_dir/product_logo_64_beta.png",
+      "$branding_dir/product_logo_64_dev.png",
+      "$branding_dir_100/product_logo_16_beta.png",
+      "$branding_dir_100/product_logo_16_dev.png",
+      "$branding_dir_100/product_logo_32_beta.png",
+      "$branding_dir_100/product_logo_32_dev.png",
+    ]
+  }
   outputs = [
     "$root_out_dir/installer/theme/{{source_file_part}}",
   ]
@@ -326,6 +350,7 @@ group("installer_deps") {
     ":theme_files",
     "//chrome",
     "//chrome:packed_resources",
+    "//chrome/browser/resources/media/mei_preload:component",
     "//sandbox/linux:chrome_sandbox",
   ]
   if (enable_nacl) {
@@ -408,7 +433,9 @@ template("linux_package") {
       "-o",
       rebase_path(root_out_dir, root_build_dir),
       "-s",
-      rebase_path(sysroot),
+      rebase_path(sysroot, root_build_dir),
+      "-t",
+      target_os,
     ]
     if (is_official_build) {
       args += [ "-f" ]
@@ -459,6 +486,8 @@ template("linux_package") {
         branding_path_component,
         "-o",
         rebase_path(root_out_dir, root_build_dir),
+        "-t",
+        target_os,
       ]
       if (is_official_build) {
         args += [ "-f" ]

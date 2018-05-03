@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
@@ -29,10 +28,6 @@
 #include "net/base/net_errors.h"
 
 namespace subresource_filter {
-
-bool ContentSubresourceFilterThrottleManager::Delegate::AllowRulesetRules() {
-  return true;
-}
 
 ContentSubresourceFilterThrottleManager::
     ContentSubresourceFilterThrottleManager(
@@ -92,18 +87,6 @@ void ContentSubresourceFilterThrottleManager::ReadyToCommitNavigation(
   if (level == ActivationLevel::DISABLED)
     return;
 
-  // If the ruleset rules are disabled then we should never reach this point.
-  // Main frames: should never get notified about page activation.
-  // Sub frames: should never be constructed if its associated page has ruleset
-  // rules disabled.
-  //
-  // However, navigation code is known to be quite fragile to these assumptions
-  // so it is not clear that a subframe's WillStartRequest (e.g. throttle
-  // insertion) will always occur before it's associated main frame's
-  // WillProcessResponse. Be defensive for that case.
-  if (!delegate_->AllowRulesetRules())
-    return;
-
   TRACE_EVENT1(
       TRACE_DISABLED_BY_DEFAULT("loading"),
       "ContentSubresourceFilterThrottleManager::ReadyToCommitNavigation",
@@ -141,7 +124,7 @@ void ContentSubresourceFilterThrottleManager::DidFinishNavigation(
     statistics_.reset();
     if (filter) {
       statistics_ =
-          base::MakeUnique<PageLoadStatistics>(filter->activation_state());
+          std::make_unique<PageLoadStatistics>(filter->activation_state());
       if (filter->activation_state().enable_logging) {
         DCHECK(filter->activation_state().activation_level !=
                ActivationLevel::DISABLED);
@@ -211,10 +194,6 @@ void ContentSubresourceFilterThrottleManager::OnPageActivationComputed(
   if (activation_state.activation_level == ActivationLevel::DISABLED)
     return;
 
-  // Do not notify page activation if ruleset rules are disabled. This ensures
-  // we don't initialize/verify the ruleset.
-  if (!delegate_->AllowRulesetRules())
-    return;
   auto it = ongoing_activation_throttles_.find(navigation_handle);
   if (it != ongoing_activation_throttles_.end()) {
     it->second->NotifyPageActivationWithRuleset(EnsureRulesetHandle(),
@@ -233,7 +212,7 @@ void ContentSubresourceFilterThrottleManager::MaybeAppendNavigationThrottles(
     throttles->push_back(std::move(filtering_throttle));
   }
 
-  CHECK(!base::ContainsKey(ongoing_activation_throttles_, navigation_handle));
+  DCHECK(!base::ContainsKey(ongoing_activation_throttles_, navigation_handle));
   if (auto activation_throttle =
           MaybeCreateActivationStateComputingThrottle(navigation_handle)) {
     ongoing_activation_throttles_[navigation_handle] =
@@ -251,11 +230,9 @@ ContentSubresourceFilterThrottleManager::
         content::NavigationHandle* navigation_handle) {
   if (navigation_handle->IsInMainFrame())
     return nullptr;
-  if (!delegate_->AllowRulesetRules())
-    return nullptr;
   AsyncDocumentSubresourceFilter* parent_filter =
       GetParentFrameFilter(navigation_handle);
-  return parent_filter ? base::MakeUnique<SubframeNavigationFilteringThrottle>(
+  return parent_filter ? std::make_unique<SubframeNavigationFilteringThrottle>(
                              navigation_handle, parent_filter)
                        : nullptr;
 }
@@ -270,10 +247,7 @@ ContentSubresourceFilterThrottleManager::
         navigation_handle);
   }
 
-  // Subframes: create only for frames with activated parents, and if we're
-  // abiding by ruleset rules for this page load.
-  if (!delegate_->AllowRulesetRules())
-    return nullptr;
+  // Subframes: create only for frames with activated parents.
   AsyncDocumentSubresourceFilter* parent_filter =
       GetParentFrameFilter(navigation_handle);
   if (!parent_filter)
@@ -320,9 +294,8 @@ void ContentSubresourceFilterThrottleManager::MaybeCallFirstDisallowedLoad() {
 
 VerifiedRuleset::Handle*
 ContentSubresourceFilterThrottleManager::EnsureRulesetHandle() {
-  DCHECK(delegate_->AllowRulesetRules());
   if (!ruleset_handle_)
-    ruleset_handle_ = base::MakeUnique<VerifiedRuleset::Handle>(dealer_handle_);
+    ruleset_handle_ = std::make_unique<VerifiedRuleset::Handle>(dealer_handle_);
   return ruleset_handle_.get();
 }
 

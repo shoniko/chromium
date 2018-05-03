@@ -211,10 +211,14 @@ bool RunIdeWriter(const std::string& ide,
     std::string win_kit;
     if (command_line->HasSwitch(kSwitchIdeValueWinSdk))
       win_kit = command_line->GetSwitchValueASCII(kSwitchIdeValueWinSdk);
+    std::string ninja_extra_args;
+    if (command_line->HasSwitch(kSwitchNinjaExtraArgs))
+      ninja_extra_args =
+          command_line->GetSwitchValueASCII(kSwitchNinjaExtraArgs);
     bool no_deps = command_line->HasSwitch(kSwitchNoDeps);
-    bool res = VisualStudioWriter::RunAndWriteFiles(build_settings, builder,
-                                                    version, sln_name, filters,
-                                                    win_kit, no_deps, err);
+    bool res = VisualStudioWriter::RunAndWriteFiles(
+        build_settings, builder, version, sln_name, filters, win_kit,
+        ninja_extra_args, no_deps, err);
     if (res && !quiet) {
       OutputString("Generating Visual Studio projects took " +
                    base::Int64ToString(timer.Elapsed().InMilliseconds()) +
@@ -300,7 +304,7 @@ IDE options
       Generate files for an IDE. Currently supported values:
       "eclipse" - Eclipse CDT settings file.
       "vs" - Visual Studio project/solution files.
-             (default Visual Studio version: 2015)
+             (default Visual Studio version: 2017)
       "vs2013" - Visual Studio 2013 project/solution files.
       "vs2015" - Visual Studio 2015 project/solution files.
       "vs2017" - Visual Studio 2017 project/solution files.
@@ -329,6 +333,10 @@ Visual Studio Flags
       As an example, "10.0.15063.0" can be specified to use Creators Update SDK
       instead of the default one.
 
+  --ninja-extra-args=<string>
+      This string is passed without any quoting to the ninja invocation
+      command-line. Can be used to configure ninja flags, like "-j".
+
 Xcode Flags
 
   --workspace=<file_name>
@@ -337,8 +345,7 @@ Xcode Flags
 
   --ninja-extra-args=<string>
       This string is passed without any quoting to the ninja invocation
-      command-line. Can be used to configure ninja flags, like "-j" if using
-      goma for example.
+      command-line. Can be used to configure ninja flags, like "-j".
 
   --root-target=<target_name>
       Name of the target corresponding to "All" target in Xcode. If unset,
@@ -455,12 +462,12 @@ int RunGen(const std::vector<std::string>& args) {
     for (const auto& rules : write_info.rules)
       targets_collected += rules.second.size();
 
-    std::string stats = "Made " + base::SizeTToString(targets_collected) +
-        " targets from " +
+    std::string stats =
+        "Made " + base::NumberToString(targets_collected) + " targets from " +
         base::IntToString(
             setup->scheduler().input_file_manager()->GetInputFileCount()) +
-        " files in " +
-        base::Int64ToString(elapsed_time.InMilliseconds()) + "ms\n";
+        " files in " + base::Int64ToString(elapsed_time.InMilliseconds()) +
+        "ms\n";
     OutputString(stats);
   }
 

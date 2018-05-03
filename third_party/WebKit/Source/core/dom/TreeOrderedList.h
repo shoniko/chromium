@@ -30,6 +30,7 @@
 #ifndef TreeOrderedList_h
 #define TreeOrderedList_h
 
+#include "base/macros.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/ListHashSet.h"
 
@@ -38,11 +39,10 @@ namespace blink {
 class Node;
 
 class TreeOrderedList final {
-  WTF_MAKE_NONCOPYABLE(TreeOrderedList);
   DISALLOW_NEW();
 
  public:
-  TreeOrderedList() {}
+  TreeOrderedList() = default;
 
   void Add(Node*);
   void Remove(const Node*);
@@ -67,6 +67,7 @@ class TreeOrderedList final {
 
  private:
   HeapListHashSet<Member<Node>, 32> nodes_;
+  DISALLOW_COPY_AND_ASSIGN(TreeOrderedList);
 };
 
 }  // namespace blink

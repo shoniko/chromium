@@ -4,9 +4,10 @@
 
 #include "components/viz/service/gl/gpu_service_impl.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/crash_logging.h"
 #include "base/lazy_instance.h"
 #include "base/memory/shared_memory.h"
 #include "base/run_loop.h"
@@ -14,6 +15,7 @@
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "components/crash/core/common/crash_key.h"
 #include "components/viz/common/gpu/in_process_context_provider.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
@@ -25,7 +27,6 @@
 #include "gpu/config/gpu_util.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "gpu/ipc/common/memory_stats.h"
-#include "gpu/ipc/gpu_in_process_thread_service.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_memory_buffer_factory.h"
@@ -33,11 +34,11 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
+#include "media/gpu/gpu_video_accelerator_util.h"
 #include "media/gpu/gpu_video_encode_accelerator_factory.h"
-#include "media/gpu/ipc/service/gpu_jpeg_decode_accelerator_factory_provider.h"
 #include "media/gpu/ipc/service/gpu_video_decode_accelerator.h"
-#include "media/gpu/ipc/service/gpu_video_encode_accelerator.h"
 #include "media/gpu/ipc/service/media_gpu_channel_manager.h"
+#include "media/mojo/services/mojo_jpeg_decode_accelerator_service.h"
 #include "media/mojo/services/mojo_video_encode_accelerator_provider.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "ui/gl/gl_implementation.h"
@@ -50,6 +51,13 @@
 #include "base/android/throw_uncaught_exception.h"
 #include "media/gpu/android/content_video_view_overlay_allocator.h"
 #endif
+
+#if defined(OS_CHROMEOS)
+#include "components/arc/video_accelerator/gpu_arc_video_decode_accelerator.h"
+#include "components/arc/video_accelerator/gpu_arc_video_encode_accelerator.h"
+#include "components/arc/video_accelerator/protected_buffer_manager.h"
+#include "components/arc/video_accelerator/protected_buffer_manager_proxy.h"
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
 #include "gpu/ipc/service/direct_composition_surface_win.h"
@@ -108,9 +116,12 @@ GpuServiceImpl::GpuServiceImpl(
       gpu_preferences_(gpu_preferences),
       gpu_info_(gpu_info),
       gpu_feature_info_(gpu_feature_info),
-      bindings_(base::MakeUnique<mojo::BindingSet<mojom::GpuService>>()),
+      bindings_(std::make_unique<mojo::BindingSet<mojom::GpuService>>()),
       weak_ptr_factory_(this) {
   DCHECK(!io_runner_->BelongsToCurrentThread());
+#if defined(OS_CHROMEOS)
+  protected_buffer_manager_ = std::make_unique<arc::ProtectedBufferManager>();
+#endif  // defined(OS_CHROMEOS)
   weak_ptr_ = weak_ptr_factory_.GetWeakPtr();
 }
 
@@ -147,10 +158,11 @@ void GpuServiceImpl::UpdateGPUInfo() {
       media::GpuVideoDecodeAccelerator::GetCapabilities(gpu_preferences_,
                                                         gpu_workarounds);
   gpu_info_.video_encode_accelerator_supported_profiles =
-      media::GpuVideoEncodeAccelerator::GetSupportedProfiles(gpu_preferences_);
-  gpu_info_.jpeg_decode_accelerator_supported =
-      media::GpuJpegDecodeAcceleratorFactoryProvider::
-          IsAcceleratedJpegDecodeSupported();
+      media::GpuVideoAcceleratorUtil::ConvertMediaToGpuEncodeProfiles(
+          media::GpuVideoEncodeAcceleratorFactory::GetSupportedProfiles(
+              gpu_preferences_));
+  gpu_info_.jpeg_decode_accelerator_supported = media::
+      GpuJpegDecodeAcceleratorFactory::IsAcceleratedJpegDecodeSupported();
   // Record initialization only after collecting the GPU info because that can
   // take a significant amount of time.
   gpu_info_.initialization_time = base::Time::Now() - start_time_;
@@ -176,22 +188,20 @@ void GpuServiceImpl::InitializeWithHost(
 
   sync_point_manager_ = sync_point_manager;
   if (!sync_point_manager_) {
-    owned_sync_point_manager_ = base::MakeUnique<gpu::SyncPointManager>();
+    owned_sync_point_manager_ = std::make_unique<gpu::SyncPointManager>();
     sync_point_manager_ = owned_sync_point_manager_.get();
   }
 
   shutdown_event_ = shutdown_event;
   if (!shutdown_event_) {
-    owned_shutdown_event_ = base::MakeUnique<base::WaitableEvent>(
+    owned_shutdown_event_ = std::make_unique<base::WaitableEvent>(
         base::WaitableEvent::ResetPolicy::MANUAL,
         base::WaitableEvent::InitialState::NOT_SIGNALED);
     shutdown_event_ = owned_shutdown_event_.get();
   }
 
-  if (gpu_preferences_.enable_gpu_scheduler) {
-    scheduler_ = base::MakeUnique<gpu::Scheduler>(
-        base::ThreadTaskRunnerHandle::Get(), sync_point_manager_);
-  }
+  scheduler_ = std::make_unique<gpu::Scheduler>(
+      base::ThreadTaskRunnerHandle::Get(), sync_point_manager_);
 
   // Defer creation of the render thread. This is to prevent it from handling
   // IPC messages before the sandbox has been enabled and all other necessary
@@ -233,11 +243,80 @@ void GpuServiceImpl::RecordLogMessage(int severity,
   (*gpu_host_)->RecordLogMessage(severity, header, message);
 }
 
-void GpuServiceImpl::CreateJpegDecodeAccelerator(
-    media::mojom::GpuJpegDecodeAcceleratorRequest jda_request) {
+void GpuServiceImpl::CreateArcVideoDecodeAccelerator(
+    arc::mojom::VideoDecodeAcceleratorRequest vda_request) {
+#if defined(OS_CHROMEOS)
   DCHECK(io_runner_->BelongsToCurrentThread());
-  // TODO(c.padhi): Implement this, see https://crbug.com/699255.
-  NOTIMPLEMENTED();
+  main_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &GpuServiceImpl::CreateArcVideoDecodeAcceleratorOnMainThread,
+          weak_ptr_, std::move(vda_request)));
+#else
+  NOTREACHED();
+#endif  // defined(OS_CHROMEOS)
+}
+
+void GpuServiceImpl::CreateArcVideoEncodeAccelerator(
+    arc::mojom::VideoEncodeAcceleratorRequest vea_request) {
+#if defined(OS_CHROMEOS)
+  DCHECK(io_runner_->BelongsToCurrentThread());
+  main_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &GpuServiceImpl::CreateArcVideoEncodeAcceleratorOnMainThread,
+          weak_ptr_, std::move(vea_request)));
+#else
+  NOTREACHED();
+#endif  // defined(OS_CHROMEOS)
+}
+
+void GpuServiceImpl::CreateArcProtectedBufferManager(
+    arc::mojom::ProtectedBufferManagerRequest pbm_request) {
+#if defined(OS_CHROMEOS)
+  DCHECK(io_runner_->BelongsToCurrentThread());
+  main_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &GpuServiceImpl::CreateArcProtectedBufferManagerOnMainThread,
+          weak_ptr_, std::move(pbm_request)));
+#else
+  NOTREACHED();
+#endif  // defined(OS)CHROMEOS)
+}
+
+#if defined(OS_CHROMEOS)
+void GpuServiceImpl::CreateArcVideoDecodeAcceleratorOnMainThread(
+    arc::mojom::VideoDecodeAcceleratorRequest vda_request) {
+  DCHECK(main_runner_->BelongsToCurrentThread());
+  mojo::MakeStrongBinding(
+      std::make_unique<arc::GpuArcVideoDecodeAccelerator>(
+          gpu_preferences_, protected_buffer_manager_.get()),
+      std::move(vda_request));
+}
+
+void GpuServiceImpl::CreateArcVideoEncodeAcceleratorOnMainThread(
+    arc::mojom::VideoEncodeAcceleratorRequest vea_request) {
+  DCHECK(main_runner_->BelongsToCurrentThread());
+  mojo::MakeStrongBinding(
+      std::make_unique<arc::GpuArcVideoEncodeAccelerator>(gpu_preferences_),
+      std::move(vea_request));
+}
+
+void GpuServiceImpl::CreateArcProtectedBufferManagerOnMainThread(
+    arc::mojom::ProtectedBufferManagerRequest pbm_request) {
+  DCHECK(main_runner_->BelongsToCurrentThread());
+  mojo::MakeStrongBinding(
+      std::make_unique<arc::GpuArcProtectedBufferManagerProxy>(
+          protected_buffer_manager_.get()),
+      std::move(pbm_request));
+}
+#endif  // defined(OS_CHROMEOS)
+
+void GpuServiceImpl::CreateJpegDecodeAccelerator(
+    media::mojom::JpegDecodeAcceleratorRequest jda_request) {
+  DCHECK(io_runner_->BelongsToCurrentThread());
+  media::MojoJpegDecodeAcceleratorService::Create(std::move(jda_request));
 }
 
 void GpuServiceImpl::CreateVideoEncodeAcceleratorProvider(
@@ -404,6 +483,11 @@ void GpuServiceImpl::UpdateGpuInfoPlatform(
 }
 #endif
 
+void GpuServiceImpl::DidCreateContextSuccessfully() {
+  DCHECK(main_runner_->BelongsToCurrentThread());
+  (*gpu_host_)->DidCreateContextSuccessfully();
+}
+
 void GpuServiceImpl::DidCreateOffscreenContext(const GURL& active_url) {
   DCHECK(main_runner_->BelongsToCurrentThread());
   (*gpu_host_)->DidCreateOffscreenContext(active_url);
@@ -445,8 +529,8 @@ void GpuServiceImpl::SendAcceleratedSurfaceCreatedChildWindow(
 
 void GpuServiceImpl::SetActiveURL(const GURL& url) {
   DCHECK(main_runner_->BelongsToCurrentThread());
-  constexpr char kActiveURL[] = "url-chunk";
-  base::debug::SetCrashKeyValue(kActiveURL, url.possibly_invalid_spec());
+  static crash_reporter::CrashKeyString<1024> crash_key("url-chunk");
+  crash_key.Set(url.possibly_invalid_spec());
 }
 
 void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
@@ -473,7 +557,7 @@ void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
       client_id, client_tracing_id, is_gpu_host);
 
   mojo::MessagePipe pipe;
-  gpu_channel->Init(base::MakeUnique<gpu::SyncChannelFilteredSender>(
+  gpu_channel->Init(std::make_unique<gpu::SyncChannelFilteredSender>(
       pipe.handle0.release(), gpu_channel, io_runner_, shutdown_event_));
 
   media_gpu_channel_manager_->AddChannel(client_id);

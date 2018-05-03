@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/aura/env.h"
@@ -25,12 +26,16 @@
 #include "ui/display/screen.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/path.h"
+#include "ui/keyboard/container_floating_behavior.h"
 #include "ui/keyboard/container_full_width_behavior.h"
+#include "ui/keyboard/container_type.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/keyboard/keyboard_layout_manager.h"
 #include "ui/keyboard/keyboard_ui.h"
 #include "ui/keyboard/keyboard_util.h"
+#include "ui/keyboard/notification_manager.h"
 #include "ui/wm/core/window_animations.h"
 
 #if defined(OS_CHROMEOS)
@@ -163,46 +168,29 @@ namespace keyboard {
 
 // Observer for both keyboard show and hide animations. It should be owned by
 // KeyboardController.
-class CallbackAnimationObserver : public ui::LayerAnimationObserver {
+class CallbackAnimationObserver : public ui::ImplicitAnimationObserver {
  public:
-  CallbackAnimationObserver(const scoped_refptr<ui::LayerAnimator>& animator,
-                            base::OnceCallback<void(void)> callback);
-  ~CallbackAnimationObserver() override;
+  CallbackAnimationObserver(base::OnceClosure callback)
+      : callback_(std::move(callback)) {}
 
  private:
-  // Overridden from ui::LayerAnimationObserver:
-  void OnLayerAnimationEnded(ui::LayerAnimationSequence* seq) override;
-  void OnLayerAnimationAborted(ui::LayerAnimationSequence* seq) override;
-  void OnLayerAnimationScheduled(ui::LayerAnimationSequence* seq) override {}
+  // ui::ImplicitAnimationObserver:
+  void OnImplicitAnimationsCompleted() override {
+    if (WasAnimationAbortedForProperty(ui::LayerAnimationElement::TRANSFORM) ||
+        WasAnimationAbortedForProperty(ui::LayerAnimationElement::OPACITY)) {
+      return;
+    }
+    DCHECK(
+        WasAnimationCompletedForProperty(ui::LayerAnimationElement::TRANSFORM));
+    DCHECK(
+        WasAnimationCompletedForProperty(ui::LayerAnimationElement::OPACITY));
+    std::move(callback_).Run();
+  }
 
-  scoped_refptr<ui::LayerAnimator> animator_;
-  base::OnceCallback<void(void)> callback_;
+  base::OnceClosure callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CallbackAnimationObserver);
 };
-
-CallbackAnimationObserver::CallbackAnimationObserver(
-    const scoped_refptr<ui::LayerAnimator>& animator,
-    base::OnceCallback<void(void)> callback)
-    : animator_(animator), callback_(std::move(callback)) {}
-
-CallbackAnimationObserver::~CallbackAnimationObserver() {
-  animator_->RemoveObserver(this);
-}
-
-void CallbackAnimationObserver::OnLayerAnimationEnded(
-    ui::LayerAnimationSequence* seq) {
-  if (animator_->is_animating())
-    return;
-  animator_->RemoveObserver(this);
-  DCHECK(!callback_.is_null());
-  std::move(callback_).Run();
-}
-
-void CallbackAnimationObserver::OnLayerAnimationAborted(
-    ui::LayerAnimationSequence* seq) {
-  animator_->RemoveObserver(this);
-}
 
 // static
 KeyboardController* KeyboardController::instance_ = NULL;
@@ -214,11 +202,12 @@ KeyboardController::KeyboardController(std::unique_ptr<KeyboardUI> ui,
       show_on_content_update_(false),
       keyboard_locked_(false),
       state_(KeyboardControllerState::UNKNOWN),
+      enqueued_container_type_(ContainerType::FULL_WIDTH),
       weak_factory_report_lingering_state_(this),
       weak_factory_will_hide_(this) {
   ui_->GetInputMethod()->AddObserver(this);
   ui_->SetController(this);
-  container_behavior_ = std::make_unique<ContainerFullWidthBehavior>();
+  SetContainerBehaviorInternal(enqueued_container_type_);
   ChangeState(KeyboardControllerState::INITIAL);
 }
 
@@ -272,8 +261,11 @@ void KeyboardController::NotifyContentsBoundsChanging(
     const gfx::Rect& new_bounds) {
   current_keyboard_bounds_ = new_bounds;
   if (ui_->HasContentsWindow() && ui_->GetContentsWindow()->IsVisible()) {
-    for (KeyboardControllerObserver& observer : observer_list_)
-      observer.OnKeyboardBoundsChanging(new_bounds);
+    notification_manager_.SendNotifications(
+        container_behavior_->BoundsObscureUsableRegion(),
+        container_behavior_->BoundsAffectWorkspaceLayout(), keyboard_locked(),
+        new_bounds, observer_list_);
+
     if (keyboard::IsKeyboardOverscrollEnabled())
       ui_->InitInsets(new_bounds);
     else
@@ -281,6 +273,11 @@ void KeyboardController::NotifyContentsBoundsChanging(
   } else {
     current_keyboard_bounds_ = gfx::Rect();
   }
+}
+
+void KeyboardController::MoveKeyboard(const gfx::Rect new_bounds) {
+  DCHECK(keyboard_visible());
+  SetContainerBounds(new_bounds, false);
 }
 
 void KeyboardController::SetContainerBounds(const gfx::Rect& new_bounds,
@@ -358,6 +355,13 @@ void KeyboardController::HideKeyboard(HideReason reason) {
 
       set_keyboard_locked(false);
 
+      animation_observer_ = std::make_unique<CallbackAnimationObserver>(
+          base::BindOnce(&KeyboardController::HideAnimationFinished,
+                         base::Unretained(this)));
+      ui::ScopedLayerAnimationSettings layer_animation_settings(
+          container_->layer()->GetAnimator());
+      layer_animation_settings.AddObserver(animation_observer_.get());
+
       aura::Window* window = container_.get();
 
       {
@@ -375,6 +379,30 @@ void KeyboardController::HideKeyboard(HideReason reason) {
 
       break;
     }
+    default:
+      NOTREACHED();
+  }
+}
+
+void KeyboardController::HideAnimationFinished() {
+  if (state_ != KeyboardControllerState::HIDDEN)
+    return;
+
+  if (enqueued_container_type_ != container_behavior_->GetType()) {
+    SetContainerBehaviorInternal(enqueued_container_type_);
+    ShowKeyboard(false /* lock */);
+  }
+}
+
+void KeyboardController::SetContainerBehaviorInternal(
+    const ContainerType type) {
+  switch (type) {
+    case ContainerType::FULL_WIDTH:
+      container_behavior_ = std::make_unique<ContainerFullWidthBehavior>(this);
+      break;
+    case ContainerType::FLOATING:
+      container_behavior_ = std::make_unique<ContainerFloatingBehavior>(this);
+      break;
     default:
       NOTREACHED();
   }
@@ -412,9 +440,11 @@ void KeyboardController::OnWindowRemovingFromRootWindow(aura::Window* window,
     window->GetRootWindow()->RemoveObserver(this);
 }
 
-void KeyboardController::OnWindowBoundsChanged(aura::Window* window,
-                                               const gfx::Rect& old_bounds,
-                                               const gfx::Rect& new_bounds) {
+void KeyboardController::OnWindowBoundsChanged(
+    aura::Window* window,
+    const gfx::Rect& old_bounds,
+    const gfx::Rect& new_bounds,
+    ui::PropertyChangeReason reason) {
   if (!window->IsRootWindow())
     return;
   // Keep the same height when window resizes. It gets called when the screen
@@ -422,11 +452,7 @@ void KeyboardController::OnWindowBoundsChanged(aura::Window* window,
   if (!keyboard_container_initialized() || !ui_->HasContentsWindow())
     return;
 
-  int container_height = container_->bounds().height();
-
-  container_->SetBounds(gfx::Rect(new_bounds.x(),
-                                  new_bounds.bottom() - container_height,
-                                  new_bounds.width(), container_height));
+  container_behavior_->SetCanonicalBounds(GetContainerWindow(), new_bounds);
 }
 
 void KeyboardController::Reload() {
@@ -449,8 +475,9 @@ void KeyboardController::OnTextInputStateChanged(
   TRACE_EVENT0("vk", "OnTextInputStateChanged");
 
   bool focused =
-      client && (client->GetTextInputType() != ui::TEXT_INPUT_TYPE_NONE);
-  bool should_hide = !focused && !keyboard_locked_;
+      client && (client->GetTextInputType() != ui::TEXT_INPUT_TYPE_NONE &&
+                 client->GetTextInputMode() != ui::TEXT_INPUT_MODE_NONE);
+  bool should_hide = !focused && container_behavior_->TextBlurHidesKeyboard();
 
   if (should_hide) {
     switch (state_) {
@@ -588,15 +615,12 @@ void KeyboardController::PopulateKeyboardContent(int64_t display_id,
   container_animator->set_preemption_strategy(
       ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
 
-  animation_observer_.reset(new CallbackAnimationObserver(
-      container_animator,
-      base::BindOnce(&KeyboardController::ShowAnimationFinished,
-                     base::Unretained(this))));
-  container_animator->AddObserver(animation_observer_.get());
-
   ui_->ShowKeyboardContainer(container_.get());
 
+  animation_observer_ = std::make_unique<CallbackAnimationObserver>(
+      base::BindOnce(&MarkKeyboardLoadFinished));
   ui::ScopedLayerAnimationSettings settings(container_animator);
+  settings.AddObserver(animation_observer_.get());
 
   container_behavior_->DoShowingAnimation(container_.get(), &settings);
 
@@ -608,10 +632,6 @@ bool KeyboardController::WillHideKeyboard() const {
   bool res = weak_factory_will_hide_.HasWeakPtrs();
   DCHECK(res == (state_ == KeyboardControllerState::WILL_HIDE));
   return res;
-}
-
-void KeyboardController::ShowAnimationFinished() {
-  MarkKeyboardLoadFinished();
 }
 
 void KeyboardController::
@@ -628,12 +648,8 @@ void KeyboardController::NotifyKeyboardConfigChanged() {
 }
 
 void KeyboardController::AdjustKeyboardBounds() {
-  int keyboard_height = GetContainerWindow()->bounds().height();
-  const gfx::Rect& root_bounds = container_->GetRootWindow()->bounds();
-  gfx::Rect new_bounds = root_bounds;
-  new_bounds.set_y(root_bounds.height() - keyboard_height);
-  new_bounds.set_height(keyboard_height);
-  GetContainerWindow()->SetBounds(new_bounds);
+  container_behavior_->SetCanonicalBounds(
+      GetContainerWindow(), container_->GetRootWindow()->bounds());
 }
 
 void KeyboardController::CheckStateTransition(KeyboardControllerState prev,
@@ -647,15 +663,14 @@ void KeyboardController::CheckStateTransition(KeyboardControllerState prev,
   const int transition_record =
       (valid_transition ? 1 : -1) *
       (static_cast<int>(prev) * 1000 + static_cast<int>(next));
-  UMA_HISTOGRAM_SPARSE_SLOWLY("VirtualKeyboard.ControllerStateTransition",
-                              transition_record);
+  base::UmaHistogramSparse("VirtualKeyboard.ControllerStateTransition",
+                           transition_record);
   UMA_HISTOGRAM_BOOLEAN("VirtualKeyboard.ControllerStateTransitionIsValid",
                         transition_record > 0);
 
   DCHECK(error_message.str().empty())
       << "State: " << StateToStr(prev) << " -> " << StateToStr(next) << " "
-      << error_message.str()
-      << "  stack trace: " << base::debug::StackTrace(10).ToString();
+      << error_message.str();
 }
 
 void KeyboardController::ChangeState(KeyboardControllerState state) {
@@ -693,6 +708,23 @@ void KeyboardController::ReportLingeringState() {
                             state_, KeyboardControllerState::COUNT);
 }
 
+const gfx::Rect KeyboardController::GetWorkspaceObscuringBounds() const {
+  if (keyboard_visible() && container_behavior_->BoundsObscureUsableRegion())
+    return current_keyboard_bounds_;
+  return gfx::Rect();
+}
+
+const gfx::Rect KeyboardController::GetKeyboardLockScreenOffsetBounds() const {
+  // Overscroll is generally dependent on lock state, however, its behavior
+  // temporarily overridden by a static field in certain lock screen contexts.
+  // Furthermore, floating keyboard should never affect layout.
+  if (keyboard_visible() && !keyboard::IsKeyboardOverscrollEnabled() &&
+      container_behavior_->GetType() != ContainerType::FLOATING) {
+    return current_keyboard_bounds_;
+  }
+  return gfx::Rect();
+}
+
 const gfx::Rect KeyboardController::AdjustSetBoundsRequest(
     const gfx::Rect& display_bounds,
     const gfx::Rect& requested_bounds) const {
@@ -702,6 +734,29 @@ const gfx::Rect KeyboardController::AdjustSetBoundsRequest(
 
 bool KeyboardController::IsOverscrollAllowed() const {
   return container_behavior_->IsOverscrollAllowed();
+}
+
+void KeyboardController::HandlePointerEvent(const ui::LocatedEvent& event) {
+  container_behavior_->HandlePointerEvent(event);
+}
+
+void KeyboardController::SetContainerType(const ContainerType type) {
+  if (container_behavior_->GetType() == type)
+    return;
+
+  enqueued_container_type_ = type;
+  if (state_ == KeyboardControllerState::SHOWN) {
+    HideKeyboard(HIDE_REASON_AUTOMATIC);
+  } else {
+    SetContainerBehaviorInternal(type);
+  }
+}
+
+bool KeyboardController::SetDraggableArea(const gfx::Rect& rect) {
+  if (container_behavior_) {
+    return container_behavior_->SetDraggableArea(rect);
+  }
+  return false;
 }
 
 }  // namespace keyboard

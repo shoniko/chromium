@@ -18,9 +18,9 @@
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/notification/download_notification_manager.h"
-#include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/notifications/notification_display_service_factory.h"
+#include "chrome/browser/notifications/notification_handler.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -183,8 +183,6 @@ DownloadItemNotification::DownloadItemNotification(
   // overridden by UpdateNotificationData() below.
   message_center::RichNotificationData rich_notification_data;
   rich_notification_data.should_make_spoken_feedback_for_popup_updates = false;
-  // Dangerous notifications don't have a click handler.
-  rich_notification_data.clickable = !item_->IsDangerous();
   notification_ = std::make_unique<message_center::Notification>(
       message_center::NOTIFICATION_TYPE_PROGRESS, GetNotificationId(),
       base::string16(),  // title
@@ -198,7 +196,8 @@ DownloadItemNotification::DownloadItemNotification(
       rich_notification_data, nullptr);
 
   notification_->set_progress(0);
-  notification_->set_never_timeout(false);
+  // Dangerous notifications don't have a click handler.
+  notification_->set_clickable(!item_->IsDangerous());
 
   Update();
 }
@@ -220,7 +219,7 @@ void DownloadItemNotification::OnDownloadRemoved(content::DownloadItem* item) {
 
   // Removing the notification causes calling |NotificationDelegate::Close()|.
   NotificationDisplayServiceFactory::GetForProfile(profile())->Close(
-      NotificationCommon::DOWNLOAD, GetNotificationId());
+      NotificationHandler::Type::DOWNLOAD, GetNotificationId());
 
   item_ = nullptr;
 }
@@ -235,7 +234,7 @@ void DownloadItemNotification::DisablePopup() {
   notification_->set_priority(message_center::LOW_PRIORITY);
   closed_ = false;
   NotificationDisplayServiceFactory::GetForProfile(profile())->Display(
-      NotificationCommon::DOWNLOAD, GetNotificationId(), *notification_);
+      NotificationHandler::Type::DOWNLOAD, *notification_);
 }
 
 void DownloadItemNotification::OnNotificationClose() {
@@ -321,7 +320,7 @@ std::string DownloadItemNotification::GetNotificationId() const {
 
 void DownloadItemNotification::CloseNotification() {
   NotificationDisplayServiceFactory::GetForProfile(profile())->Close(
-      NotificationCommon::DOWNLOAD, GetNotificationId());
+      NotificationHandler::Type::DOWNLOAD, GetNotificationId());
 }
 
 void DownloadItemNotification::Update() {
@@ -351,13 +350,8 @@ void DownloadItemNotification::UpdateNotificationData(bool display,
   DownloadCommands command(item_);
 
   notification_->set_title(GetTitle());
-  if (message_center::IsNewStyleNotificationEnabled()) {
-    notification_->set_message(GetSubStatusString());
-    notification_->set_progress_status(GetStatusString());
-    notification_->set_use_image_as_icon(true);
-  } else {
-    notification_->set_message(GetStatusString());
-  }
+  notification_->set_message(GetSubStatusString());
+  notification_->set_progress_status(GetStatusString());
 
   if (item_->IsDangerous()) {
     notification_->set_type(message_center::NOTIFICATION_TYPE_BASE_FORMAT);
@@ -428,7 +422,7 @@ void DownloadItemNotification::UpdateNotificationData(bool display,
       notification_->set_priority(notification_->priority() + 1);
     }
     NotificationDisplayServiceFactory::GetForProfile(profile())->Display(
-        NotificationCommon::DOWNLOAD, GetNotificationId(), *notification_);
+        NotificationHandler::Type::DOWNLOAD, *notification_);
   }
 
   if (item_->IsDone() && image_decode_status_ == NOT_STARTED) {
@@ -455,46 +449,25 @@ void DownloadItemNotification::UpdateNotificationData(bool display,
 void DownloadItemNotification::UpdateNotificationIcon() {
   if (item_->IsDangerous()) {
     DownloadItemModel model(item_);
-    if (message_center::IsNewStyleNotificationEnabled()) {
-      SetNotificationIcon(
-          kNotificationDownloadIcon,
-          model.MightBeMalicious()
-              ? message_center::kSystemNotificationColorCriticalWarning
-              : message_center::kSystemNotificationColorWarning);
-
-    } else {
-      SetNotificationIcon(vector_icons::kWarningIcon,
-                          model.MightBeMalicious() ? gfx::kGoogleRed700
-                                                   : gfx::kGoogleYellow700);
-    }
+    SetNotificationIcon(
+        kNotificationDownloadIcon,
+        model.MightBeMalicious()
+            ? message_center::kSystemNotificationColorCriticalWarning
+            : message_center::kSystemNotificationColorWarning);
     return;
   }
 
-  bool is_off_the_record = item_->GetBrowserContext() &&
-                           item_->GetBrowserContext()->IsOffTheRecord();
   switch (item_->GetState()) {
     case content::DownloadItem::IN_PROGRESS:
     case content::DownloadItem::COMPLETE:
-      if (message_center::IsNewStyleNotificationEnabled()) {
-        SetNotificationIcon(kNotificationDownloadIcon,
-                            message_center::kSystemNotificationColorNormal);
-      } else {
-        if (is_off_the_record) {
-          SetNotificationIcon(kFileDownloadIncognitoIcon, gfx::kChromeIconGrey);
-        } else {
-          SetNotificationIcon(kFileDownloadIcon, gfx::kGoogleBlue500);
-        }
-      }
+      SetNotificationIcon(kNotificationDownloadIcon,
+                          message_center::kSystemNotificationColorNormal);
       break;
 
     case content::DownloadItem::INTERRUPTED:
-      if (message_center::IsNewStyleNotificationEnabled()) {
-        SetNotificationIcon(
-            kNotificationDownloadIcon,
-            message_center::kSystemNotificationColorCriticalWarning);
-      } else {
-        SetNotificationIcon(vector_icons::kErrorCircleIcon, gfx::kGoogleRed700);
-      }
+      SetNotificationIcon(
+          kNotificationDownloadIcon,
+          message_center::kSystemNotificationColorCriticalWarning);
       break;
 
     case content::DownloadItem::CANCELLED:
@@ -508,14 +481,10 @@ void DownloadItemNotification::UpdateNotificationIcon() {
 
 void DownloadItemNotification::SetNotificationIcon(const gfx::VectorIcon& icon,
                                                    SkColor color) {
-  if (message_center::IsNewStyleNotificationEnabled()) {
-    notification_->set_accent_color(color);
-    notification_->set_small_image(gfx::Image(
-        gfx::CreateVectorIcon(icon, message_center::kSmallImageSizeMD, color)));
-    notification_->set_vector_small_image(icon);
-  } else {
-    notification_->set_icon(gfx::Image(gfx::CreateVectorIcon(icon, 40, color)));
-  }
+  notification_->set_accent_color(color);
+  notification_->set_small_image(gfx::Image(
+      gfx::CreateVectorIcon(icon, message_center::kSmallImageSizeMD, color)));
+  notification_->set_vector_small_image(icon);
 }
 
 void DownloadItemNotification::OnImageLoaded(const std::string& image_data) {
@@ -626,13 +595,8 @@ base::string16 DownloadItemNotification::GetTitle() const {
       }
       break;
     case content::DownloadItem::COMPLETE:
-      if (message_center::IsNewStyleNotificationEnabled()) {
-        title_text =
-            l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_COMPLETE_TITLE);
-      } else {
-        title_text = l10n_util::GetStringFUTF16(
-            IDS_DOWNLOAD_STATUS_DOWNLOADED_TITLE, file_name);
-      }
+      title_text =
+          l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_COMPLETE_TITLE);
       break;
     case content::DownloadItem::INTERRUPTED:
       title_text = l10n_util::GetStringFUTF16(
@@ -798,10 +762,8 @@ base::string16 DownloadItemNotification::GetSubStatusString() const {
       // If the file has been removed: Removed
       if (item_->GetFileExternallyRemoved())
         return l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_REMOVED);
-      else if (message_center::IsNewStyleNotificationEnabled())
-        return item_->GetFileNameToReportUser().LossyDisplayName();
       else
-        return base::string16();
+        return item_->GetFileNameToReportUser().LossyDisplayName();
     case content::DownloadItem::CANCELLED:
       // "Cancelled"
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_CANCELLED);
@@ -867,16 +829,8 @@ base::string16 DownloadItemNotification::GetStatusString() const {
       show_size_ratio ? model.GetProgressSizesString() :
                         ui::FormatBytes(item_->GetReceivedBytes());
 
-  if (message_center::IsNewStyleNotificationEnabled()) {
-    return l10n_util::GetStringFUTF16(IDS_DOWNLOAD_NOTIFICATION_STATUS_SHORT,
-                                      size, host_name);
-  } else {
-    base::string16 sub_status_text = GetSubStatusString();
-    // Download is not completed yet: "3.4/5.6 MB, <SUB STATUS>\nFrom
-    // example.com"
-    return l10n_util::GetStringFUTF16(IDS_DOWNLOAD_NOTIFICATION_STATUS, size,
-                                      sub_status_text, host_name);
-  }
+  return l10n_util::GetStringFUTF16(IDS_DOWNLOAD_NOTIFICATION_STATUS_SHORT,
+                                    size, host_name);
 }
 
 Browser* DownloadItemNotification::GetBrowser() const {

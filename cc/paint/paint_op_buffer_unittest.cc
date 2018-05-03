@@ -8,14 +8,17 @@
 #include "cc/paint/decoded_draw_image.h"
 #include "cc/paint/display_item_list.h"
 #include "cc/paint/image_provider.h"
+#include "cc/paint/image_transfer_cache_entry.h"
 #include "cc/paint/paint_image_builder.h"
+#include "cc/paint/paint_op_buffer_serializer.h"
 #include "cc/paint/paint_op_reader.h"
 #include "cc/paint/paint_op_writer.h"
+#include "cc/test/geometry_test_utils.h"
+#include "cc/test/paint_op_helper.h"
 #include "cc/test/skia_common.h"
 #include "cc/test/test_skcanvas.h"
+#include "cc/test/transfer_cache_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/skia/include/core/SkFlattenableSerialization.h"
-#include "third_party/skia/include/core/SkWriteBuffer.h"
 #include "third_party/skia/include/effects/SkBlurMaskFilter.h"
 #include "third_party/skia/include/effects/SkColorMatrixFilter.h"
 #include "third_party/skia/include/effects/SkDashPathEffect.h"
@@ -44,80 +47,6 @@ void ValidateOps(PaintOpBuffer* buffer) {
 
 class PaintOpSerializationTestUtils {
  public:
-  static void ExpectFlattenableEqual(SkFlattenable* expected,
-                                     SkFlattenable* actual) {
-    sk_sp<SkData> expected_data(SkValidatingSerializeFlattenable(expected));
-    sk_sp<SkData> actual_data(SkValidatingSerializeFlattenable(actual));
-    ASSERT_EQ(expected_data->size(), actual_data->size());
-    EXPECT_TRUE(expected_data->equals(actual_data.get()));
-  }
-
-  static void ExpectPaintShadersEqual(const PaintShader* one,
-                                      const PaintShader* two) {
-    if (!one) {
-      EXPECT_FALSE(two);
-      return;
-    }
-
-    ASSERT_TRUE(one);
-    ASSERT_TRUE(two);
-
-    EXPECT_EQ(one->shader_type_, two->shader_type_);
-    EXPECT_EQ(one->flags_, two->flags_);
-    EXPECT_EQ(one->end_radius_, two->end_radius_);
-    EXPECT_EQ(one->start_radius_, two->start_radius_);
-    EXPECT_EQ(one->tx_, two->tx_);
-    EXPECT_EQ(one->ty_, two->ty_);
-    EXPECT_EQ(one->fallback_color_, two->fallback_color_);
-    EXPECT_EQ(one->scaling_behavior_, two->scaling_behavior_);
-    if (one->local_matrix_) {
-      EXPECT_TRUE(two->local_matrix_.has_value());
-      EXPECT_TRUE(*one->local_matrix_ == *two->local_matrix_);
-    } else {
-      EXPECT_FALSE(two->local_matrix_.has_value());
-    }
-    EXPECT_EQ(one->center_, two->center_);
-    EXPECT_EQ(one->tile_, two->tile_);
-    EXPECT_EQ(one->start_point_, two->start_point_);
-    EXPECT_EQ(one->end_point_, two->end_point_);
-    EXPECT_EQ(one->start_degrees_, two->start_degrees_);
-    EXPECT_EQ(one->end_degrees_, two->end_degrees_);
-    EXPECT_THAT(one->colors_, testing::ElementsAreArray(two->colors_));
-    EXPECT_THAT(one->positions_, testing::ElementsAreArray(two->positions_));
-  }
-
-  static void ExpectPaintFlagsEqual(const PaintFlags& expected,
-                                    const PaintFlags& actual) {
-    // Can't just ToSkPaint and operator== here as SkPaint does pointer
-    // comparisons on all the ref'd skia objects on the SkPaint, which
-    // is not true after serialization.
-    EXPECT_EQ(expected.getTextSize(), actual.getTextSize());
-    EXPECT_EQ(expected.getColor(), actual.getColor());
-    EXPECT_EQ(expected.getStrokeWidth(), actual.getStrokeWidth());
-    EXPECT_EQ(expected.getStrokeMiter(), actual.getStrokeMiter());
-    EXPECT_EQ(expected.getBlendMode(), actual.getBlendMode());
-    EXPECT_EQ(expected.getStrokeCap(), actual.getStrokeCap());
-    EXPECT_EQ(expected.getStrokeJoin(), actual.getStrokeJoin());
-    EXPECT_EQ(expected.getStyle(), actual.getStyle());
-    EXPECT_EQ(expected.getTextEncoding(), actual.getTextEncoding());
-    EXPECT_EQ(expected.getHinting(), actual.getHinting());
-    EXPECT_EQ(expected.getFilterQuality(), actual.getFilterQuality());
-
-    // TODO(enne): compare typeface too
-    ExpectFlattenableEqual(expected.getPathEffect().get(),
-                           actual.getPathEffect().get());
-    ExpectFlattenableEqual(expected.getMaskFilter().get(),
-                           actual.getMaskFilter().get());
-    ExpectFlattenableEqual(expected.getColorFilter().get(),
-                           actual.getColorFilter().get());
-    ExpectFlattenableEqual(expected.getLooper().get(),
-                           actual.getLooper().get());
-    ExpectFlattenableEqual(expected.getImageFilter().get(),
-                           actual.getImageFilter().get());
-
-    ExpectPaintShadersEqual(expected.getShader(), actual.getShader());
-  }
-
   static void FillArbitraryShaderValues(PaintShader* shader, bool use_matrix) {
     shader->shader_type_ = PaintShader::Type::kTwoPointConicalGradient;
     shader->flags_ = 12345;
@@ -143,6 +72,65 @@ class PaintOpSerializationTestUtils {
                        SkColorSetARGB(9, 0, 1, 2)};
     shader->positions_ = {0.f, 0.4f, 1.f};
   }
+};
+
+class TestOptionsProvider : public ImageProvider,
+                            public TransferCacheTestHelper {
+ public:
+  TestOptionsProvider() {
+    serialize_options_.canvas = &canvas_;
+    serialize_options_.image_provider = this;
+    serialize_options_.transfer_cache = this;
+    deserialize_options_.transfer_cache = this;
+  }
+  ~TestOptionsProvider() override = default;
+
+  const PaintOp::SerializeOptions& serialize_options() const {
+    return serialize_options_;
+  }
+  PaintOp::SerializeOptions& mutable_serialize_options() {
+    return serialize_options_;
+  }
+  const PaintOp::DeserializeOptions deserialize_options() const {
+    return deserialize_options_;
+  }
+  PaintOp::DeserializeOptions mutable_deserialize_options() {
+    return deserialize_options_;
+  }
+  ImageProvider* image_provider() { return this; }
+  TransferCacheTestHelper* transfer_cache_helper() { return this; }
+
+ private:
+  ScopedDecodedDrawImage GetDecodedDrawImage(
+      const DrawImage& draw_image) override {
+    auto& entry = entry_map_[++transfer_cache_entry_id_];
+    SkBitmap bitmap;
+    const auto& paint_image = draw_image.paint_image();
+    bitmap.allocPixelsFlags(
+        SkImageInfo::MakeN32Premul(paint_image.width(), paint_image.height()),
+        SkBitmap::kZeroPixels_AllocFlag);
+    sk_sp<SkImage> image = SkImage::MakeFromBitmap(bitmap);
+    entry.set_image_for_testing(image);
+    return ScopedDecodedDrawImage(
+        DecodedDrawImage(transfer_cache_entry_id_, SkSize::MakeEmpty(),
+                         SkSize::Make(1u, 1u), draw_image.filter_quality()));
+  }
+
+  ServiceTransferCacheEntry* GetEntryInternal(TransferCacheEntryType entry_type,
+                                              uint32_t entry_id) override {
+    if (entry_type != TransferCacheEntryType::kImage)
+      return TransferCacheTestHelper::GetEntryInternal(entry_type, entry_id);
+    auto it = entry_map_.find(entry_id);
+    CHECK(it != entry_map_.end());
+    return &it->second;
+  }
+
+  uint32_t transfer_cache_entry_id_ = 0u;
+  base::flat_map<uint32_t, ServiceImageTransferCacheEntry> entry_map_;
+
+  testing::StrictMock<MockCanvas> canvas_;
+  PaintOp::SerializeOptions serialize_options_;
+  PaintOp::DeserializeOptions deserialize_options_;
 };
 
 TEST(PaintOpBufferTest, Empty) {
@@ -188,8 +176,7 @@ class PaintOpAppendTest : public ::testing::Test {
     ASSERT_EQ(iter->GetType(), PaintOpType::SaveLayer);
     SaveLayerOp* save_op = static_cast<SaveLayerOp*>(*iter);
     EXPECT_EQ(save_op->bounds, rect_);
-    PaintOpSerializationTestUtils::ExpectPaintFlagsEqual(save_op->flags,
-                                                         flags_);
+    EXPECT_EQ(save_op->flags, flags_);
     ++iter;
 
     ASSERT_EQ(iter->GetType(), PaintOpType::Save);
@@ -235,7 +222,6 @@ TEST_F(PaintOpAppendTest, MoveThenDestruct) {
   // Original should be empty, and safe to destruct.
   EXPECT_EQ(original.size(), 0u);
   EXPECT_EQ(original.bytes_used(), sizeof(PaintOpBuffer));
-  EXPECT_EQ(PaintOpBuffer::Iterator(&original), false);
 }
 
 TEST_F(PaintOpAppendTest, MoveThenDestructOperatorEq) {
@@ -262,6 +248,7 @@ TEST_F(PaintOpAppendTest, MoveThenReappend) {
   // Should be possible to reappend to the original and get the same result.
   PushOps(&original);
   VerifyOps(&original);
+  EXPECT_EQ(original, destination);
 }
 
 TEST_F(PaintOpAppendTest, MoveThenReappendOperatorEq) {
@@ -274,6 +261,7 @@ TEST_F(PaintOpAppendTest, MoveThenReappendOperatorEq) {
   // Should be possible to reappend to the original and get the same result.
   PushOps(&original);
   VerifyOps(&original);
+  EXPECT_EQ(original, destination);
 }
 
 // Verify that a SaveLayerAlpha / Draw / Restore can be optimized to just
@@ -702,7 +690,7 @@ class PaintOpBufferOffsetsTest : public ::testing::Test {
   }
 
   void Playback(SkCanvas* canvas, const std::vector<size_t>& offsets) {
-    buffer_.Playback(canvas, nullptr, nullptr, &offsets);
+    buffer_.Playback(canvas, PlaybackParams(nullptr), &offsets);
   }
 
  protected:
@@ -711,7 +699,7 @@ class PaintOpBufferOffsetsTest : public ::testing::Test {
 };
 
 TEST_F(PaintOpBufferOffsetsTest, ContiguousIndices) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   push_op<DrawColorOp>(0u, SkBlendMode::kClear);
   push_op<DrawColorOp>(1u, SkBlendMode::kClear);
@@ -730,7 +718,7 @@ TEST_F(PaintOpBufferOffsetsTest, ContiguousIndices) {
 }
 
 TEST_F(PaintOpBufferOffsetsTest, NonContiguousIndices) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   push_op<DrawColorOp>(0u, SkBlendMode::kClear);
   push_op<DrawColorOp>(1u, SkBlendMode::kClear);
@@ -748,7 +736,7 @@ TEST_F(PaintOpBufferOffsetsTest, NonContiguousIndices) {
 }
 
 TEST_F(PaintOpBufferOffsetsTest, FirstTwoIndices) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   push_op<DrawColorOp>(0u, SkBlendMode::kClear);
   push_op<DrawColorOp>(1u, SkBlendMode::kClear);
@@ -764,7 +752,7 @@ TEST_F(PaintOpBufferOffsetsTest, FirstTwoIndices) {
 }
 
 TEST_F(PaintOpBufferOffsetsTest, MiddleIndex) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   push_op<DrawColorOp>(0u, SkBlendMode::kClear);
   push_op<DrawColorOp>(1u, SkBlendMode::kClear);
@@ -779,7 +767,7 @@ TEST_F(PaintOpBufferOffsetsTest, MiddleIndex) {
 }
 
 TEST_F(PaintOpBufferOffsetsTest, LastTwoElements) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   push_op<DrawColorOp>(0u, SkBlendMode::kClear);
   push_op<DrawColorOp>(1u, SkBlendMode::kClear);
@@ -795,7 +783,7 @@ TEST_F(PaintOpBufferOffsetsTest, LastTwoElements) {
 }
 
 TEST_F(PaintOpBufferOffsetsTest, ContiguousIndicesWithSaveLayerAlphaRestore) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   push_op<DrawColorOp>(0u, SkBlendMode::kClear);
   push_op<DrawColorOp>(1u, SkBlendMode::kClear);
@@ -821,7 +809,7 @@ TEST_F(PaintOpBufferOffsetsTest, ContiguousIndicesWithSaveLayerAlphaRestore) {
 
 TEST_F(PaintOpBufferOffsetsTest,
        NonContiguousIndicesWithSaveLayerAlphaRestore) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   push_op<DrawColorOp>(0u, SkBlendMode::kClear);
   push_op<DrawColorOp>(1u, SkBlendMode::kClear);
@@ -865,7 +853,7 @@ TEST_F(PaintOpBufferOffsetsTest,
 
 TEST_F(PaintOpBufferOffsetsTest,
        ContiguousIndicesWithSaveLayerAlphaDrawRestore) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   auto add_draw_rect = [this](SkColor c) {
     PaintFlags flags;
@@ -898,7 +886,7 @@ TEST_F(PaintOpBufferOffsetsTest,
 
 TEST_F(PaintOpBufferOffsetsTest,
        NonContiguousIndicesWithSaveLayerAlphaDrawRestore) {
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   auto add_draw_rect = [this](SkColor c) {
     PaintFlags flags;
@@ -956,7 +944,7 @@ TEST_F(PaintOpBufferOffsetsTest,
 
 TEST(PaintOpBufferTest, SaveLayerAlphaDrawRestoreWithBadBlendMode) {
   PaintOpBuffer buffer;
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   auto add_draw_rect = [](PaintOpBuffer* buffer, SkColor c) {
     PaintFlags flags;
@@ -986,7 +974,7 @@ TEST(PaintOpBufferTest, SaveLayerAlphaDrawRestoreWithBadBlendMode) {
 
 TEST(PaintOpBufferTest, UnmatchedSaveRestoreNoSideEffects) {
   PaintOpBuffer buffer;
-  MockCanvas canvas;
+  testing::StrictMock<MockCanvas> canvas;
 
   auto add_draw_rect = [](PaintOpBuffer* buffer, SkColor c) {
     PaintFlags flags;
@@ -1030,9 +1018,21 @@ std::vector<uint8_t> test_uint8s = {
     0, 255, 128, 10, 45,
 };
 
+static SkRect make_largest_skrect() {
+  const float limit = std::numeric_limits<float>::max();
+  return {-limit, -limit, limit, limit};
+}
+
+static SkIRect make_largest_skirect() {
+  // we use half the limit, so that the resulting width/height will not
+  // overflow.
+  const int32_t limit = std::numeric_limits<int32_t>::max() >> 1;
+  return {-limit, -limit, limit, limit};
+}
+
 std::vector<SkRect> test_rects = {
     SkRect::MakeXYWH(1, 2.5, 3, 4), SkRect::MakeXYWH(0, 0, 0, 0),
-    SkRect::MakeLargest(),          SkRect::MakeXYWH(0.5f, 0.5f, 8.2f, 8.2f),
+    make_largest_skrect(),          SkRect::MakeXYWH(0.5f, 0.5f, 8.2f, 8.2f),
     SkRect::MakeXYWH(-1, -1, 0, 0), SkRect::MakeXYWH(-100, -101, -102, -103),
     SkRect::MakeXYWH(0, 0, 0, 0),   SkRect::MakeXYWH(0, 0, 0, 0),
     SkRect::MakeXYWH(0, 0, 0, 0),   SkRect::MakeXYWH(0, 0, 0, 0),
@@ -1051,8 +1051,10 @@ std::vector<SkRRect> test_rrects = {
 
 std::vector<SkIRect> test_irects = {
     SkIRect::MakeXYWH(1, 2, 3, 4),   SkIRect::MakeXYWH(0, 0, 0, 0),
-    SkIRect::MakeLargest(),          SkIRect::MakeXYWH(0, 0, 10, 10),
+    make_largest_skirect(),          SkIRect::MakeXYWH(0, 0, 10, 10),
     SkIRect::MakeXYWH(-1, -1, 0, 0), SkIRect::MakeXYWH(-100, -101, -102, -103)};
+
+std::vector<uint32_t> test_ids = {0, 1, 56, 0xFFFFFFFF, 0xFFFFFFFE, 0x10001};
 
 std::vector<SkMatrix> test_matrices = {
     SkMatrix::I(),
@@ -1142,8 +1144,6 @@ std::vector<PaintFlags> test_flags = {
       looper_builder.addLayer(layer_info);
       flags.setLooper(looper_builder.detach());
 
-      flags.setImageFilter(SkOffsetImageFilter::Make(10, 11, nullptr));
-
       sk_sp<PaintShader> shader = PaintShader::MakeColor(SK_ColorTRANSPARENT);
       PaintOpSerializationTestUtils::FillArbitraryShaderValues(shader.get(),
                                                                true);
@@ -1213,24 +1213,58 @@ std::vector<std::vector<SkPoint>> test_point_arrays = {
      SkPoint::Make(9, 9), SkPoint::Make(50, 50), SkPoint::Make(100, 100)},
 };
 
-std::vector<sk_sp<SkTextBlob>> test_blobs = {
+std::vector<std::vector<PaintTypeface>> test_typefaces = {
+    [] { return std::vector<PaintTypeface>{PaintTypeface::TestTypeface()}; }(),
+    [] {
+      return std::vector<PaintTypeface>{PaintTypeface::TestTypeface(),
+                                        PaintTypeface::TestTypeface()};
+    }(),
+};
+
+std::vector<scoped_refptr<PaintTextBlob>> test_paint_blobs = {
     [] {
       SkPaint font;
       font.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+      font.setTypeface(test_typefaces[0][0].ToSkTypeface());
 
       SkTextBlobBuilder builder;
-      builder.allocRun(font, 5, 1.2f, 2.3f, &test_rects[0]);
-      return builder.make();
+      int glyph_count = 5;
+      const auto& run =
+          builder.allocRun(font, glyph_count, 1.2f, 2.3f, &test_rects[0]);
+      // allocRun() allocates only the glyph buffer.
+      std::fill(run.glyphs, run.glyphs + glyph_count, 0);
+      return base::MakeRefCounted<PaintTextBlob>(builder.make(),
+                                                 test_typefaces[0]);
     }(),
     [] {
       SkPaint font;
       font.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+      font.setTypeface(test_typefaces[1][0].ToSkTypeface());
 
       SkTextBlobBuilder builder;
-      builder.allocRun(font, 5, 1.2f, 2.3f, &test_rects[0]);
-      builder.allocRunPos(font, 16, &test_rects[1]);
-      builder.allocRunPosH(font, 8, 0, &test_rects[2]);
-      return builder.make();
+      int glyph_count = 5;
+      const auto& run1 =
+          builder.allocRun(font, glyph_count, 1.2f, 2.3f, &test_rects[0]);
+      // allocRun() allocates only the glyph buffer.
+      std::fill(run1.glyphs, run1.glyphs + glyph_count, 0);
+
+      glyph_count = 16;
+      const auto& run2 = builder.allocRunPos(font, glyph_count, &test_rects[1]);
+      // allocRun() allocates the glyph buffer, and 2 scalars per glyph for the
+      // pos buffer.
+      std::fill(run2.glyphs, run2.glyphs + glyph_count, 0);
+      std::fill(run2.pos, run2.pos + glyph_count * 2, 0);
+
+      font.setTypeface(test_typefaces[1][1].ToSkTypeface());
+      glyph_count = 8;
+      const auto& run3 =
+          builder.allocRunPosH(font, glyph_count, 0, &test_rects[2]);
+      // allocRun() allocates the glyph buffer, and 1 scalar per glyph for the
+      // pos buffer.
+      std::fill(run3.glyphs, run3.glyphs + glyph_count, 0);
+      std::fill(run3.pos, run3.pos + glyph_count, 0);
+      return base::MakeRefCounted<PaintTextBlob>(builder.make(),
+                                                 test_typefaces[1]);
     }(),
 };
 
@@ -1257,11 +1291,10 @@ class SimpleSerializer {
     for (size_t i = 0; i < buffer.size(); ++i)
       bytes_written_[i] = 0;
 
-    PaintOp::SerializeOptions options;
-
     size_t op_idx = 0;
     for (const auto* op : PaintOpBuffer::Iterator(&buffer)) {
-      size_t bytes_written = op->Serialize(current_, remaining_, options);
+      size_t bytes_written = op->Serialize(
+          current_, remaining_, options_provider_.serialize_options());
       if (!bytes_written)
         return;
 
@@ -1283,21 +1316,26 @@ class SimpleSerializer {
 
   const std::vector<size_t>& bytes_written() const { return bytes_written_; }
   size_t TotalBytesWritten() const { return output_size_ - remaining_; }
+  TestOptionsProvider* options_provider() { return &options_provider_; }
 
  private:
   char* current_ = nullptr;
   size_t output_size_ = 0u;
   size_t remaining_ = 0u;
   std::vector<size_t> bytes_written_;
+  TestOptionsProvider options_provider_;
 };
 
 class DeserializerIterator {
  public:
-  DeserializerIterator(const void* input, size_t input_size)
+  DeserializerIterator(const void* input,
+                       size_t input_size,
+                       TransferCacheDeserializeHelper* transfer_cache)
       : DeserializerIterator(input,
                              static_cast<const char*>(input),
                              input_size,
-                             input_size) {}
+                             input_size,
+                             transfer_cache) {}
 
   DeserializerIterator(DeserializerIterator&&) = default;
   DeserializerIterator& operator=(DeserializerIterator&&) = default;
@@ -1306,11 +1344,13 @@ class DeserializerIterator {
 
   DeserializerIterator begin() {
     return DeserializerIterator(input_, static_cast<const char*>(input_),
-                                input_size_, input_size_);
+                                input_size_, input_size_,
+                                options_.transfer_cache);
   }
   DeserializerIterator end() {
-    return DeserializerIterator(
-        input_, static_cast<const char*>(input_) + input_size_, input_size_, 0);
+    return DeserializerIterator(input_,
+                                static_cast<const char*>(input_) + input_size_,
+                                input_size_, 0, options_.transfer_cache);
   }
   bool operator!=(const DeserializerIterator& other) {
     return input_ != other.input_ || current_ != other.current_ ||
@@ -1337,11 +1377,13 @@ class DeserializerIterator {
   DeserializerIterator(const void* input,
                        const char* current,
                        size_t input_size,
-                       size_t remaining)
+                       size_t remaining,
+                       TransferCacheDeserializeHelper* transfer_cache)
       : input_(input),
         current_(current),
         input_size_(input_size),
         remaining_(remaining) {
+    options_.transfer_cache = transfer_cache;
     data_.reset(static_cast<char*>(base::AlignedAlloc(
         sizeof(LargestPaintOp), PaintOpBuffer::PaintOpAlign)));
     DeserializeCurrentOp();
@@ -1359,9 +1401,9 @@ class DeserializerIterator {
 
     if (!remaining_)
       return;
-    deserialized_op_ =
-        PaintOp::Deserialize(current_, remaining_, data_.get(),
-                             sizeof(LargestPaintOp), &last_bytes_read_);
+    deserialized_op_ = PaintOp::Deserialize(current_, remaining_, data_.get(),
+                                            sizeof(LargestPaintOp),
+                                            &last_bytes_read_, options_);
   }
 
   const void* input_ = nullptr;
@@ -1369,6 +1411,7 @@ class DeserializerIterator {
   size_t input_size_ = 0u;
   size_t remaining_ = 0u;
   size_t last_bytes_read_ = 0u;
+  PaintOp::DeserializeOptions options_;
   std::unique_ptr<char, base::AlignedFreeDeleter> data_;
   PaintOp* deserialized_op_ = nullptr;
 };
@@ -1414,6 +1457,12 @@ void PushConcatOps(PaintOpBuffer* buffer) {
   for (size_t i = 0; i < test_matrices.size(); ++i)
     buffer->push<ConcatOp>(test_matrices[i]);
   ValidateOps<ConcatOp>(buffer);
+}
+
+void PushCustomDataOps(PaintOpBuffer* buffer) {
+  for (size_t i = 0; i < test_ids.size(); ++i)
+    buffer->push<CustomDataOp>(test_ids[i]);
+  ValidateOps<CustomDataOp>(buffer);
 }
 
 void PushDrawColorOps(PaintOpBuffer* buffer) {
@@ -1512,10 +1561,10 @@ void PushDrawRRectOps(PaintOpBuffer* buffer) {
 }
 
 void PushDrawTextBlobOps(PaintOpBuffer* buffer) {
-  size_t len = std::min(std::min(test_blobs.size(), test_flags.size()),
+  size_t len = std::min(std::min(test_paint_blobs.size(), test_flags.size()),
                         test_floats.size() - 1);
   for (size_t i = 0; i < len; ++i) {
-    buffer->push<DrawTextBlobOp>(test_blobs[i], test_floats[i],
+    buffer->push<DrawTextBlobOp>(test_paint_blobs[i], test_floats[i],
                                  test_floats[i + 1], test_flags[i]);
   }
   ValidateOps<DrawTextBlobOp>(buffer);
@@ -1574,7 +1623,7 @@ void PushSaveLayerAlphaOps(PaintOpBuffer* buffer) {
 }
 
 void PushScaleOps(PaintOpBuffer* buffer) {
-  for (size_t i = 0; i < test_floats.size(); i += 2)
+  for (size_t i = 0; i < test_floats.size() - 1; i += 2)
     buffer->push<ScaleOp>(test_floats[i], test_floats[i + 1]);
   ValidateOps<ScaleOp>(buffer);
 }
@@ -1586,254 +1635,9 @@ void PushSetMatrixOps(PaintOpBuffer* buffer) {
 }
 
 void PushTranslateOps(PaintOpBuffer* buffer) {
-  for (size_t i = 0; i < test_floats.size(); i += 2)
+  for (size_t i = 0; i < test_floats.size() - 1; i += 2)
     buffer->push<TranslateOp>(test_floats[i], test_floats[i + 1]);
   ValidateOps<TranslateOp>(buffer);
-}
-
-void CompareFlags(const PaintFlags& original, const PaintFlags& written) {
-  PaintOpSerializationTestUtils::ExpectPaintFlagsEqual(original, written);
-}
-
-void CompareImages(const PaintImage& original, const PaintImage& written) {}
-
-void CompareMatrices(const SkMatrix& original, const SkMatrix& written) {
-  // Compare the 3x3 matrix values.
-  EXPECT_EQ(original, written);
-
-  // If a serialized matrix says it is identity, then the original must have
-  // those values, as the serialization process clobbers the matrix values.
-  if (original.isIdentity()) {
-    EXPECT_EQ(SkMatrix::I(), original);
-    EXPECT_EQ(SkMatrix::I(), written);
-  }
-
-  EXPECT_EQ(original.getType(), written.getType());
-}
-
-void CompareAnnotateOp(const AnnotateOp* original, const AnnotateOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_EQ(original->annotation_type, written->annotation_type);
-  EXPECT_EQ(original->rect, written->rect);
-  EXPECT_EQ(!!original->data, !!written->data);
-  if (original->data) {
-    EXPECT_EQ(original->data->size(), written->data->size());
-    EXPECT_EQ(0, memcmp(original->data->data(), written->data->data(),
-                        written->data->size()));
-  }
-}
-
-void CompareClipPathOp(const ClipPathOp* original, const ClipPathOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_TRUE(original->path == written->path);
-  EXPECT_EQ(original->op, written->op);
-  EXPECT_EQ(original->antialias, written->antialias);
-}
-
-void CompareClipRectOp(const ClipRectOp* original, const ClipRectOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_EQ(original->rect, written->rect);
-  EXPECT_EQ(original->op, written->op);
-  EXPECT_EQ(original->antialias, written->antialias);
-}
-
-void CompareClipRRectOp(const ClipRRectOp* original,
-                        const ClipRRectOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_EQ(original->rrect, written->rrect);
-  EXPECT_EQ(original->op, written->op);
-  EXPECT_EQ(original->antialias, written->antialias);
-}
-
-void CompareConcatOp(const ConcatOp* original, const ConcatOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareMatrices(original->matrix, written->matrix);
-}
-
-void CompareDrawColorOp(const DrawColorOp* original,
-                        const DrawColorOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_EQ(original->color, written->color);
-}
-
-void CompareDrawDRRectOp(const DrawDRRectOp* original,
-                         const DrawDRRectOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_EQ(original->outer, written->outer);
-  EXPECT_EQ(original->inner, written->inner);
-}
-
-void CompareDrawImageOp(const DrawImageOp* original,
-                        const DrawImageOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  CompareImages(original->image, written->image);
-  EXPECT_EQ(original->left, written->left);
-  EXPECT_EQ(original->top, written->top);
-}
-
-void CompareDrawImageRectOp(const DrawImageRectOp* original,
-                            const DrawImageRectOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  CompareImages(original->image, written->image);
-  EXPECT_EQ(original->src, written->src);
-  EXPECT_EQ(original->dst, written->dst);
-}
-
-void CompareDrawIRectOp(const DrawIRectOp* original,
-                        const DrawIRectOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_EQ(original->rect, written->rect);
-}
-
-void CompareDrawLineOp(const DrawLineOp* original, const DrawLineOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_EQ(original->x0, written->x0);
-  EXPECT_EQ(original->y0, written->y0);
-  EXPECT_EQ(original->x1, written->x1);
-  EXPECT_EQ(original->y1, written->y1);
-}
-
-void CompareDrawOvalOp(const DrawOvalOp* original, const DrawOvalOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_EQ(original->oval, written->oval);
-}
-
-void CompareDrawPathOp(const DrawPathOp* original, const DrawPathOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_TRUE(original->path == written->path);
-}
-
-void CompareDrawRectOp(const DrawRectOp* original, const DrawRectOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_EQ(original->rect, written->rect);
-}
-
-void CompareDrawRRectOp(const DrawRRectOp* original,
-                        const DrawRRectOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_EQ(original->rrect, written->rrect);
-}
-
-void CompareDrawTextBlobOp(const DrawTextBlobOp* original,
-                           const DrawTextBlobOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_EQ(original->x, written->x);
-  EXPECT_EQ(original->y, written->y);
-
-  // TODO(enne): implement SkTextBlob serialization: http://crbug.com/737629
-  if (!original->blob || !written->blob)
-    return;
-
-  ASSERT_TRUE(original->blob);
-  ASSERT_TRUE(written->blob);
-
-  // No text blob operator==, so flatten them both and compare.
-  size_t max_size = original->skip;
-
-  std::vector<char> original_mem;
-  original_mem.resize(max_size);
-  SkBinaryWriteBuffer original_flattened(&original_mem[0], max_size);
-  original->blob->flatten(original_flattened);
-  original_mem.resize(original_flattened.bytesWritten());
-
-  std::vector<char> written_mem;
-  written_mem.resize(max_size);
-  SkBinaryWriteBuffer written_flattened(&written_mem[0], max_size);
-  written->blob->flatten(written_flattened);
-  written_mem.resize(written_flattened.bytesWritten());
-
-  ASSERT_EQ(original_mem.size(), written_mem.size());
-  EXPECT_EQ(original_mem, written_mem);
-}
-
-void CompareNoopOp(const NoopOp* original, const NoopOp* written) {
-  // Nothing to compare.
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-}
-
-void CompareRestoreOp(const RestoreOp* original, const RestoreOp* written) {
-  // Nothing to compare.
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-}
-
-void CompareRotateOp(const RotateOp* original, const RotateOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_EQ(original->degrees, written->degrees);
-}
-
-void CompareSaveOp(const SaveOp* original, const SaveOp* written) {
-  // Nothing to compare.
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-}
-
-void CompareSaveLayerOp(const SaveLayerOp* original,
-                        const SaveLayerOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareFlags(original->flags, written->flags);
-  EXPECT_EQ(original->bounds, written->bounds);
-}
-
-void CompareSaveLayerAlphaOp(const SaveLayerAlphaOp* original,
-                             const SaveLayerAlphaOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_EQ(original->bounds, written->bounds);
-  EXPECT_EQ(original->alpha, written->alpha);
-  EXPECT_EQ(original->preserve_lcd_text_requests,
-            written->preserve_lcd_text_requests);
-}
-
-void CompareScaleOp(const ScaleOp* original, const ScaleOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_EQ(original->sx, written->sx);
-  EXPECT_EQ(original->sy, written->sy);
-}
-
-void CompareSetMatrixOp(const SetMatrixOp* original,
-                        const SetMatrixOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  CompareMatrices(original->matrix, written->matrix);
-}
-
-void CompareTranslateOp(const TranslateOp* original,
-                        const TranslateOp* written) {
-  EXPECT_TRUE(original->IsValid());
-  EXPECT_TRUE(written->IsValid());
-  EXPECT_EQ(original->dx, written->dx);
-  EXPECT_EQ(original->dy, written->dy);
 }
 
 class PaintOpSerializationTest : public ::testing::TestWithParam<uint8_t> {
@@ -1858,6 +1662,9 @@ class PaintOpSerializationTest : public ::testing::TestWithParam<uint8_t> {
         break;
       case PaintOpType::Concat:
         PushConcatOps(&buffer_);
+        break;
+      case PaintOpType::CustomData:
+        PushCustomDataOps(&buffer_);
         break;
       case PaintOpType::DrawColor:
         PushDrawColorOps(&buffer_);
@@ -1925,119 +1732,6 @@ class PaintOpSerializationTest : public ::testing::TestWithParam<uint8_t> {
     }
   }
 
-  static void ExpectOpsEqual(const PaintOp* original, const PaintOp* written) {
-    ASSERT_TRUE(original);
-    ASSERT_TRUE(written);
-    ASSERT_EQ(original->GetType(), written->GetType());
-    EXPECT_EQ(original->skip, written->skip);
-
-    switch (original->GetType()) {
-      case PaintOpType::Annotate:
-        CompareAnnotateOp(static_cast<const AnnotateOp*>(original),
-                          static_cast<const AnnotateOp*>(written));
-        break;
-      case PaintOpType::ClipPath:
-        CompareClipPathOp(static_cast<const ClipPathOp*>(original),
-                          static_cast<const ClipPathOp*>(written));
-        break;
-      case PaintOpType::ClipRect:
-        CompareClipRectOp(static_cast<const ClipRectOp*>(original),
-                          static_cast<const ClipRectOp*>(written));
-        break;
-      case PaintOpType::ClipRRect:
-        CompareClipRRectOp(static_cast<const ClipRRectOp*>(original),
-                           static_cast<const ClipRRectOp*>(written));
-        break;
-      case PaintOpType::Concat:
-        CompareConcatOp(static_cast<const ConcatOp*>(original),
-                        static_cast<const ConcatOp*>(written));
-        break;
-      case PaintOpType::DrawColor:
-        CompareDrawColorOp(static_cast<const DrawColorOp*>(original),
-                           static_cast<const DrawColorOp*>(written));
-        break;
-      case PaintOpType::DrawDRRect:
-        CompareDrawDRRectOp(static_cast<const DrawDRRectOp*>(original),
-                            static_cast<const DrawDRRectOp*>(written));
-        break;
-      case PaintOpType::DrawImage:
-        CompareDrawImageOp(static_cast<const DrawImageOp*>(original),
-                           static_cast<const DrawImageOp*>(written));
-        break;
-      case PaintOpType::DrawImageRect:
-        CompareDrawImageRectOp(static_cast<const DrawImageRectOp*>(original),
-                               static_cast<const DrawImageRectOp*>(written));
-        break;
-      case PaintOpType::DrawIRect:
-        CompareDrawIRectOp(static_cast<const DrawIRectOp*>(original),
-                           static_cast<const DrawIRectOp*>(written));
-        break;
-      case PaintOpType::DrawLine:
-        CompareDrawLineOp(static_cast<const DrawLineOp*>(original),
-                          static_cast<const DrawLineOp*>(written));
-        break;
-      case PaintOpType::DrawOval:
-        CompareDrawOvalOp(static_cast<const DrawOvalOp*>(original),
-                          static_cast<const DrawOvalOp*>(written));
-        break;
-      case PaintOpType::DrawPath:
-        CompareDrawPathOp(static_cast<const DrawPathOp*>(original),
-                          static_cast<const DrawPathOp*>(written));
-        break;
-      case PaintOpType::DrawRecord:
-        // Not supported.
-        break;
-      case PaintOpType::DrawRect:
-        CompareDrawRectOp(static_cast<const DrawRectOp*>(original),
-                          static_cast<const DrawRectOp*>(written));
-        break;
-      case PaintOpType::DrawRRect:
-        CompareDrawRRectOp(static_cast<const DrawRRectOp*>(original),
-                           static_cast<const DrawRRectOp*>(written));
-        break;
-      case PaintOpType::DrawTextBlob:
-        CompareDrawTextBlobOp(static_cast<const DrawTextBlobOp*>(original),
-                              static_cast<const DrawTextBlobOp*>(written));
-        break;
-      case PaintOpType::Noop:
-        CompareNoopOp(static_cast<const NoopOp*>(original),
-                      static_cast<const NoopOp*>(written));
-        break;
-      case PaintOpType::Restore:
-        CompareRestoreOp(static_cast<const RestoreOp*>(original),
-                         static_cast<const RestoreOp*>(written));
-        break;
-      case PaintOpType::Rotate:
-        CompareRotateOp(static_cast<const RotateOp*>(original),
-                        static_cast<const RotateOp*>(written));
-        break;
-      case PaintOpType::Save:
-        CompareSaveOp(static_cast<const SaveOp*>(original),
-                      static_cast<const SaveOp*>(written));
-        break;
-      case PaintOpType::SaveLayer:
-        CompareSaveLayerOp(static_cast<const SaveLayerOp*>(original),
-                           static_cast<const SaveLayerOp*>(written));
-        break;
-      case PaintOpType::SaveLayerAlpha:
-        CompareSaveLayerAlphaOp(static_cast<const SaveLayerAlphaOp*>(original),
-                                static_cast<const SaveLayerAlphaOp*>(written));
-        break;
-      case PaintOpType::Scale:
-        CompareScaleOp(static_cast<const ScaleOp*>(original),
-                       static_cast<const ScaleOp*>(written));
-        break;
-      case PaintOpType::SetMatrix:
-        CompareSetMatrixOp(static_cast<const SetMatrixOp*>(original),
-                           static_cast<const SetMatrixOp*>(written));
-        break;
-      case PaintOpType::Translate:
-        CompareTranslateOp(static_cast<const TranslateOp*>(original),
-                           static_cast<const TranslateOp*>(written));
-        break;
-    }
-  }
-
   void ResizeOutputBuffer() {
     // An arbitrary deserialization buffer size that should fit all the ops
     // in the buffer_.
@@ -2086,11 +1780,13 @@ TEST_P(PaintOpSerializationTest, SmokeTest) {
 
   PaintOpBuffer::Iterator iter(&buffer_);
   size_t i = 0;
-  for (auto* base_written :
-       DeserializerIterator(output_.get(), serializer.TotalBytesWritten())) {
+  for (auto* base_written : DeserializerIterator(
+           output_.get(), serializer.TotalBytesWritten(),
+           serializer.options_provider()->transfer_cache_helper())) {
     SCOPED_TRACE(base::StringPrintf(
         "%s #%zu", PaintOpTypeToString(GetParamType()).c_str(), i));
-    ExpectOpsEqual(*iter, base_written);
+    ASSERT_EQ(!*iter, !base_written);
+    EXPECT_EQ(**iter, *base_written);
     ++iter;
     ++i;
   }
@@ -2112,7 +1808,7 @@ TEST_P(PaintOpSerializationTest, SerializationFailures) {
   serializer.Serialize(buffer_);
   std::vector<size_t> bytes_written = serializer.bytes_written();
 
-  PaintOp::SerializeOptions options;
+  TestOptionsProvider options_provider;
 
   size_t op_idx = 0;
   for (PaintOpBuffer::Iterator iter(&buffer_); iter; ++iter, ++op_idx) {
@@ -2124,7 +1820,8 @@ TEST_P(PaintOpSerializationTest, SerializationFailures) {
     // Attempt to write op into a buffer of size |i|, and only expect
     // it to succeed if the buffer is large enough.
     for (size_t i = 0; i < bytes_written[op_idx] + 2; ++i) {
-      size_t written_bytes = iter->Serialize(output_.get(), i, options);
+      size_t written_bytes = iter->Serialize(
+          output_.get(), i, options_provider.serialize_options());
       if (i >= expected_bytes) {
         EXPECT_EQ(expected_bytes, written_bytes) << "i: " << i;
       } else {
@@ -2146,8 +1843,10 @@ TEST_P(PaintOpSerializationTest, DeserializationFailures) {
 
   SimpleSerializer serializer(output_.get(), output_size_);
   serializer.Serialize(buffer_);
+  TestOptionsProvider* options_provider = serializer.options_provider();
 
-  char* current = static_cast<char*>(output_.get());
+  char* first = static_cast<char*>(output_.get());
+  char* current = first;
 
   static constexpr size_t kAlign = PaintOpBuffer::PaintOpAlign;
   static constexpr size_t kOutputOpSize = kBufferBytesPerOp;
@@ -2155,6 +1854,7 @@ TEST_P(PaintOpSerializationTest, DeserializationFailures) {
       static_cast<char*>(base::AlignedAlloc(kOutputOpSize, kAlign)));
 
   size_t op_idx = 0;
+  size_t total_read = 0;
   for (PaintOpBuffer::Iterator iter(&buffer_); iter; ++iter, ++op_idx) {
     PaintOp* serialized = reinterpret_cast<PaintOp*>(current);
     uint32_t skip = serialized->skip;
@@ -2164,18 +1864,26 @@ TEST_P(PaintOpSerializationTest, DeserializationFailures) {
     // deserialization failure to return nullptr.  Also test a few valid sizes
     // larger than read size.
     for (size_t read_size = 0; read_size < skip + kAlign * 2 + 2; ++read_size) {
-      SCOPED_TRACE(base::StringPrintf(
-          "%s #%zd, read_size: %zu",
-          PaintOpTypeToString(GetParamType()).c_str(), op_idx, read_size));
+      SCOPED_TRACE(
+          base::StringPrintf("%s #%zd, read_size: %zu, align: %zu, skip: %u",
+                             PaintOpTypeToString(GetParamType()).c_str(),
+                             op_idx, read_size, kAlign, skip));
       // Because PaintOp::Deserialize early outs when the input size is < skip
       // deliberately lie about the skip.  This op tooooootally fits.
       // This will verify that individual op deserializing code behaves
       // properly when presented with invalid offsets.
       serialized->skip = read_size;
       size_t bytes_read = 0;
-      PaintOp* written =
-          PaintOp::Deserialize(current, read_size, deserialize_buffer_.get(),
-                               kOutputOpSize, &bytes_read);
+      PaintOp* written = PaintOp::Deserialize(
+          current, read_size, deserialize_buffer_.get(), kOutputOpSize,
+          &bytes_read, options_provider->deserialize_options());
+
+      // Deserialize buffers with valid ops until the last op. This verifies
+      // that the complete buffer is invalidated on encountering the first
+      // corrupted op.
+      auto deserialized_buffer = PaintOpBuffer::MakeFromMemory(
+          first, total_read + read_size,
+          options_provider->deserialize_options());
 
       // Skips are only valid if they are aligned.
       if (read_size >= skip && read_size % kAlign == 0) {
@@ -2183,15 +1891,412 @@ TEST_P(PaintOpSerializationTest, DeserializationFailures) {
         ASSERT_LE(written->skip, kOutputOpSize);
         EXPECT_EQ(GetParamType(), written->GetType());
         EXPECT_EQ(serialized->skip, bytes_read);
+
+        ASSERT_NE(nullptr, deserialized_buffer);
+        EXPECT_EQ(deserialized_buffer->size(), op_idx + 1);
+      } else if (read_size == 0 && op_idx != 0) {
+        // If no data was read for a subsequent op while some ops were
+        // deserialized, we still have a valid buffer with the deserialized ops.
+        ASSERT_NE(nullptr, deserialized_buffer);
+        EXPECT_EQ(deserialized_buffer->size(), op_idx);
       } else {
+        // If a subsequent op was corrupted or no ops could be serialized, we
+        // have an invalid buffer.
         EXPECT_EQ(nullptr, written);
+        // If the buffer is exactly 0 bytes, then MakeFromMemory treats it as a
+        // valid empty buffer.
+        if (deserialized_buffer) {
+          EXPECT_EQ(0u, read_size);
+          EXPECT_EQ(0u, deserialized_buffer->size());
+          // Verify that we can create an iterator from this buffer, but it's
+          // empty.
+          PaintOpBuffer::Iterator it(deserialized_buffer.get());
+          EXPECT_FALSE(it);
+        } else {
+          EXPECT_NE(0u, read_size);
+          EXPECT_EQ(nullptr, deserialized_buffer.get());
+        }
       }
 
       if (written)
         written->DestroyThis();
     }
 
+    serialized->skip = skip;
     current += skip;
+    total_read += skip;
+  }
+}
+
+TEST_P(PaintOpSerializationTest, UsesOverridenFlags) {
+  if (!PaintOp::TypeHasFlags(GetParamType()))
+    return;
+
+  PushTestOps(GetParamType());
+  ResizeOutputBuffer();
+
+  TestOptionsProvider options_provider;
+  size_t deserialized_size = sizeof(LargestPaintOp) + PaintOp::kMaxSkip;
+  std::unique_ptr<char, base::AlignedFreeDeleter> deserialized(
+      static_cast<char*>(
+          base::AlignedAlloc(deserialized_size, PaintOpBuffer::PaintOpAlign)));
+  for (const auto* op : PaintOpBuffer::Iterator(&buffer_)) {
+    options_provider.mutable_serialize_options().flags_to_serialize =
+        &static_cast<const PaintOpWithFlags*>(op)->flags;
+
+    size_t bytes_written = op->Serialize(output_.get(), output_size_,
+                                         options_provider.serialize_options());
+    size_t bytes_read = 0u;
+    PaintOp* written = PaintOp::Deserialize(
+        output_.get(), bytes_written, deserialized.get(), deserialized_size,
+        &bytes_read, options_provider.deserialize_options());
+    ASSERT_TRUE(written);
+    EXPECT_EQ(*op, *written);
+    written->DestroyThis();
+    written = nullptr;
+
+    PaintFlags override_flags = static_cast<const PaintOpWithFlags*>(op)->flags;
+    override_flags.setAlpha(override_flags.getAlpha() * 0.5);
+    options_provider.mutable_serialize_options().flags_to_serialize =
+        &override_flags;
+    bytes_written = op->Serialize(output_.get(), output_size_,
+                                  options_provider.serialize_options());
+    written = PaintOp::Deserialize(
+        output_.get(), bytes_written, deserialized.get(), deserialized_size,
+        &bytes_read, options_provider.deserialize_options());
+    ASSERT_TRUE(written);
+    ASSERT_TRUE(written->IsPaintOpWithFlags());
+    EXPECT_EQ(static_cast<const PaintOpWithFlags*>(written)->flags.getAlpha(),
+              override_flags.getAlpha());
+    written->DestroyThis();
+    written = nullptr;
+  }
+}
+
+TEST(PaintOpSerializationTest, CompleteBufferSerialization) {
+  PaintOpBuffer buffer;
+  PushDrawIRectOps(&buffer);
+
+  PaintOpBufferSerializer::Preamble preamble;
+  preamble.playback_rect = gfx::Rect(1000.f, 1000.f);
+
+  std::unique_ptr<char, base::AlignedFreeDeleter> memory(
+      static_cast<char*>(base::AlignedAlloc(PaintOpBuffer::kInitialBufferSize,
+                                            PaintOpBuffer::PaintOpAlign)));
+  TestOptionsProvider options_provider;
+  SimpleBufferSerializer serializer(memory.get(),
+                                    PaintOpBuffer::kInitialBufferSize,
+                                    options_provider.image_provider(),
+                                    options_provider.transfer_cache_helper());
+  serializer.Serialize(&buffer, nullptr, preamble);
+  ASSERT_NE(serializer.written(), 0u);
+
+  auto deserialized_buffer =
+      PaintOpBuffer::MakeFromMemory(memory.get(), serializer.written(),
+                                    options_provider.deserialize_options());
+  ASSERT_TRUE(deserialized_buffer);
+
+  // The deserialized buffer has an extra pair of save/restores, for the
+  // preamble and root buffer.
+  ASSERT_EQ(deserialized_buffer->size(), buffer.size() + 3u);
+
+  size_t i = 0;
+  auto serialized_iter = PaintOpBuffer::Iterator(&buffer);
+  for (const auto* op : PaintOpBuffer::Iterator(deserialized_buffer.get())) {
+    SCOPED_TRACE(i);
+    i++;
+
+    if (i == 1) {
+      // Save.
+      ASSERT_EQ(op->GetType(), PaintOpType::Save)
+          << PaintOpTypeToString(op->GetType());
+      continue;
+    }
+
+    if (i == 2) {
+      // Preamble.
+      ASSERT_EQ(op->GetType(), PaintOpType::ClipRect)
+          << PaintOpTypeToString(op->GetType());
+      EXPECT_EQ(
+          static_cast<const ClipRectOp*>(op)->rect,
+          SkRect::MakeFromIRect(gfx::RectToSkIRect(preamble.playback_rect)));
+      continue;
+    }
+
+    if (serialized_iter) {
+      // Root buffer.
+      ASSERT_EQ(op->GetType(), (*serialized_iter)->GetType())
+          << PaintOpTypeToString(op->GetType());
+      EXPECT_EQ(*op, **serialized_iter);
+      ++serialized_iter;
+      continue;
+    }
+
+    // End restore.
+    ASSERT_EQ(op->GetType(), PaintOpType::Restore)
+        << PaintOpTypeToString(op->GetType());
+  }
+}
+
+TEST(PaintOpSerializationTest, Preamble) {
+  PaintOpBufferSerializer::Preamble preamble;
+  preamble.translation = gfx::Vector2dF(10.f, 20.f);
+  preamble.playback_rect = gfx::Rect(5, 5);
+  preamble.post_translation = gfx::Vector2dF(4.3f, 7.f);
+  preamble.post_scale = 0.5f;
+
+  PaintOpBuffer buffer;
+  buffer.push<DrawColorOp>(SK_ColorBLUE, SkBlendMode::kSrc);
+
+  std::unique_ptr<char, base::AlignedFreeDeleter> memory(
+      static_cast<char*>(base::AlignedAlloc(PaintOpBuffer::kInitialBufferSize,
+                                            PaintOpBuffer::PaintOpAlign)));
+  TestOptionsProvider options_provider;
+  SimpleBufferSerializer serializer(memory.get(),
+                                    PaintOpBuffer::kInitialBufferSize,
+                                    options_provider.image_provider(),
+                                    options_provider.transfer_cache_helper());
+  serializer.Serialize(&buffer, nullptr, preamble);
+  ASSERT_NE(serializer.written(), 0u);
+
+  auto deserialized_buffer =
+      PaintOpBuffer::MakeFromMemory(memory.get(), serializer.written(),
+                                    options_provider.deserialize_options());
+  ASSERT_TRUE(deserialized_buffer);
+  // 4 ops for the preamble and 2 for save/restore.
+  ASSERT_EQ(deserialized_buffer->size(), buffer.size() + 6u);
+
+  size_t i = 0;
+  for (const auto* op : PaintOpBuffer::Iterator(deserialized_buffer.get())) {
+    i++;
+
+    if (i == 1) {
+      // Save.
+      ASSERT_EQ(op->GetType(), PaintOpType::Save)
+          << PaintOpTypeToString(op->GetType());
+      continue;
+    }
+
+    if (i == 2) {
+      // Translate.
+      ASSERT_EQ(op->GetType(), PaintOpType::Translate)
+          << PaintOpTypeToString(op->GetType());
+      const auto* translate_op = static_cast<const TranslateOp*>(op);
+      EXPECT_EQ(translate_op->dx, -preamble.translation.x());
+      EXPECT_EQ(translate_op->dy, -preamble.translation.y());
+      continue;
+    }
+
+    if (i == 3) {
+      // Clip.
+      ASSERT_EQ(op->GetType(), PaintOpType::ClipRect)
+          << PaintOpTypeToString(op->GetType());
+      const auto* clip_op = static_cast<const ClipRectOp*>(op);
+      EXPECT_RECT_EQ(gfx::SkRectToRectF(clip_op->rect), preamble.playback_rect);
+      continue;
+    }
+
+    if (i == 4) {
+      // Post translate.
+      ASSERT_EQ(op->GetType(), PaintOpType::Translate)
+          << PaintOpTypeToString(op->GetType());
+      const auto* translate_op = static_cast<const TranslateOp*>(op);
+      EXPECT_EQ(translate_op->dx, preamble.post_translation.x());
+      EXPECT_EQ(translate_op->dy, preamble.post_translation.y());
+      continue;
+    }
+
+    if (i == 5) {
+      // Scale.
+      ASSERT_EQ(op->GetType(), PaintOpType::Scale)
+          << PaintOpTypeToString(op->GetType());
+      const auto* scale_op = static_cast<const ScaleOp*>(op);
+      EXPECT_EQ(scale_op->sx, preamble.post_scale);
+      EXPECT_EQ(scale_op->sy, preamble.post_scale);
+      continue;
+    }
+
+    if (i == 6) {
+      // Buffer.
+      EXPECT_EQ(*op, *buffer.GetFirstOp());
+      continue;
+    }
+
+    // End restore.
+    ASSERT_EQ(op->GetType(), PaintOpType::Restore)
+        << PaintOpTypeToString(op->GetType());
+  }
+}
+
+TEST(PaintOpSerializationTest, SerializesNestedRecords) {
+  auto record = sk_make_sp<PaintOpBuffer>();
+  record->push<ScaleOp>(0.5f, 0.75f);
+  record->push<DrawRectOp>(SkRect::MakeWH(10.f, 20.f), PaintFlags());
+  PaintOpBuffer buffer;
+  buffer.push<DrawRecordOp>(record);
+
+  std::unique_ptr<char, base::AlignedFreeDeleter> memory(
+      static_cast<char*>(base::AlignedAlloc(PaintOpBuffer::kInitialBufferSize,
+                                            PaintOpBuffer::PaintOpAlign)));
+  TestOptionsProvider options_provider;
+  SimpleBufferSerializer serializer(memory.get(),
+                                    PaintOpBuffer::kInitialBufferSize,
+                                    options_provider.image_provider(),
+                                    options_provider.transfer_cache_helper());
+  PaintOpBufferSerializer::Preamble preamble;
+  serializer.Serialize(&buffer, nullptr, preamble);
+  ASSERT_NE(serializer.written(), 0u);
+
+  auto deserialized_buffer =
+      PaintOpBuffer::MakeFromMemory(memory.get(), serializer.written(),
+                                    options_provider.deserialize_options());
+  ASSERT_TRUE(deserialized_buffer);
+  ASSERT_EQ(deserialized_buffer->size(), record->size() + 4u);
+
+  size_t i = 0;
+  auto serialized_iter = PaintOpBuffer::Iterator(record.get());
+  for (const auto* op : PaintOpBuffer::Iterator(deserialized_buffer.get())) {
+    i++;
+    if (i <= 2) {
+      // First 2 saves.
+      ASSERT_EQ(op->GetType(), PaintOpType::Save)
+          << PaintOpTypeToString(op->GetType());
+      continue;
+    }
+
+    if (serialized_iter) {
+      // Nested buffer.
+      ASSERT_EQ(op->GetType(), (*serialized_iter)->GetType())
+          << PaintOpTypeToString(op->GetType());
+      EXPECT_EQ(*op, **serialized_iter);
+      ++serialized_iter;
+      continue;
+    }
+
+    // End restores.
+    ASSERT_EQ(op->GetType(), PaintOpType::Restore)
+        << PaintOpTypeToString(op->GetType());
+  }
+}
+
+TEST(PaintOpBufferTest, ClipsImagesDuringSerialization) {
+  struct {
+    gfx::Rect clip_rect;
+    gfx::Rect image_rect;
+    bool should_draw;
+  } test_cases[] = {
+      {gfx::Rect(0, 0, 100, 100), gfx::Rect(50, 50, 100, 100), true},
+      {gfx::Rect(0, 0, 100, 100), gfx::Rect(105, 105, 100, 100), false},
+      {gfx::Rect(0, 0, 500, 500), gfx::Rect(450, 450, 100, 100), true},
+      {gfx::Rect(0, 0, 500, 500), gfx::Rect(750, 750, 100, 100), false},
+      {gfx::Rect(250, 250, 250, 250), gfx::Rect(450, 450, 100, 100), true},
+      {gfx::Rect(250, 250, 250, 250), gfx::Rect(50, 50, 100, 100), false},
+      {gfx::Rect(0, 0, 100, 500), gfx::Rect(250, 250, 100, 100), false},
+      {gfx::Rect(0, 0, 200, 500), gfx::Rect(100, 250, 100, 100), true}};
+
+  for (const auto& test_case : test_cases) {
+    PaintOpBuffer buffer;
+    buffer.push<DrawImageOp>(
+        CreateDiscardablePaintImage(test_case.image_rect.size()),
+        static_cast<SkScalar>(test_case.image_rect.x()),
+        static_cast<SkScalar>(test_case.image_rect.y()), nullptr);
+
+    std::unique_ptr<char, base::AlignedFreeDeleter> memory(
+        static_cast<char*>(base::AlignedAlloc(PaintOpBuffer::kInitialBufferSize,
+                                              PaintOpBuffer::PaintOpAlign)));
+    TestOptionsProvider options_provider;
+    SimpleBufferSerializer serializer(memory.get(),
+                                      PaintOpBuffer::kInitialBufferSize,
+                                      options_provider.image_provider(),
+                                      options_provider.transfer_cache_helper());
+    PaintOpBufferSerializer::Preamble preamble;
+    preamble.playback_rect = test_case.clip_rect;
+    serializer.Serialize(&buffer, nullptr, preamble);
+    ASSERT_NE(serializer.written(), 0u);
+
+    auto deserialized_buffer =
+        PaintOpBuffer::MakeFromMemory(memory.get(), serializer.written(),
+                                      options_provider.deserialize_options());
+    ASSERT_TRUE(deserialized_buffer);
+
+    auto deserialized_iter = PaintOpBuffer::Iterator(deserialized_buffer.get());
+    ASSERT_EQ((*deserialized_iter)->GetType(), PaintOpType::Save)
+        << PaintOpTypeToString((*deserialized_iter)->GetType());
+    ++deserialized_iter;
+    ASSERT_EQ((*deserialized_iter)->GetType(), PaintOpType::ClipRect)
+        << PaintOpTypeToString((*deserialized_iter)->GetType());
+    ++deserialized_iter;
+    if (test_case.should_draw) {
+      ASSERT_EQ((*deserialized_iter)->GetType(), PaintOpType::DrawImage)
+          << PaintOpTypeToString((*deserialized_iter)->GetType());
+      ++deserialized_iter;
+    }
+    ASSERT_EQ((*deserialized_iter)->GetType(), PaintOpType::Restore)
+        << PaintOpTypeToString((*deserialized_iter)->GetType());
+    ++deserialized_iter;
+    ASSERT_EQ(deserialized_iter.end(), deserialized_iter);
+  }
+}
+
+TEST(PaintOpBufferSerializationTest, AlphaFoldingDuringSerialization) {
+  PaintOpBuffer buffer;
+
+  uint8_t alpha = 100;
+  buffer.push<SaveLayerAlphaOp>(nullptr, alpha, false);
+
+  PaintFlags draw_flags;
+  draw_flags.setColor(SK_ColorMAGENTA);
+  draw_flags.setAlpha(50);
+  SkRect rect = SkRect::MakeXYWH(1, 2, 3, 4);
+  buffer.push<DrawRectOp>(rect, draw_flags);
+  buffer.push<RestoreOp>();
+
+  PaintOpBufferSerializer::Preamble preamble;
+  preamble.playback_rect = gfx::Rect(1000.f, 1000.f);
+
+  std::unique_ptr<char, base::AlignedFreeDeleter> memory(
+      static_cast<char*>(base::AlignedAlloc(PaintOpBuffer::kInitialBufferSize,
+                                            PaintOpBuffer::PaintOpAlign)));
+  TestOptionsProvider options_provider;
+  SimpleBufferSerializer serializer(memory.get(),
+                                    PaintOpBuffer::kInitialBufferSize,
+                                    options_provider.image_provider(),
+                                    options_provider.transfer_cache_helper());
+  serializer.Serialize(&buffer, nullptr, preamble);
+  ASSERT_NE(serializer.written(), 0u);
+
+  auto deserialized_buffer =
+      PaintOpBuffer::MakeFromMemory(memory.get(), serializer.written(),
+                                    options_provider.deserialize_options());
+  ASSERT_TRUE(deserialized_buffer);
+
+  // 3 additional ops for save, clip and restore.
+  ASSERT_EQ(deserialized_buffer->size(), 4u);
+  size_t i = 0;
+  for (const auto* op : PaintOpBuffer::Iterator(deserialized_buffer.get())) {
+    ++i;
+    if (i == 1) {
+      EXPECT_EQ(op->GetType(), PaintOpType::Save);
+      continue;
+    }
+
+    if (i == 2) {
+      EXPECT_EQ(op->GetType(), PaintOpType::ClipRect);
+      continue;
+    }
+
+    if (i == 4) {
+      EXPECT_EQ(op->GetType(), PaintOpType::Restore);
+      continue;
+    }
+
+    ASSERT_EQ(op->GetType(), PaintOpType::DrawRect);
+    // Expect the alpha from the draw and the save layer to be folded together.
+    // Since alpha is stored in a uint8_t and gets rounded, so use tolerance.
+    float expected_alpha = alpha * 50 / 255.f;
+    EXPECT_LE(std::abs(expected_alpha -
+                       static_cast<const DrawRectOp*>(op)->flags.getAlpha()),
+              1.f);
   }
 }
 
@@ -2211,14 +2316,16 @@ TEST(PaintOpBufferTest, PaintOpDeserialize) {
   PaintOp* op = *iter;
   ASSERT_TRUE(op);
 
-  PaintOp::SerializeOptions options;
-  size_t bytes_written = op->Serialize(input_.get(), kSize, options);
+  TestOptionsProvider options_provider;
+  size_t bytes_written =
+      op->Serialize(input_.get(), kSize, options_provider.serialize_options());
   ASSERT_GT(bytes_written, 0u);
 
   // can deserialize from exactly the right size
   size_t bytes_read = 0;
-  PaintOp* success = PaintOp::Deserialize(input_.get(), bytes_written,
-                                          output_.get(), kSize, &bytes_read);
+  PaintOp* success =
+      PaintOp::Deserialize(input_.get(), bytes_written, output_.get(), kSize,
+                           &bytes_read, options_provider.deserialize_options());
   ASSERT_TRUE(success);
   EXPECT_EQ(bytes_written, bytes_read);
   success->DestroyThis();
@@ -2227,20 +2334,23 @@ TEST(PaintOpBufferTest, PaintOpDeserialize) {
   // (the DeserializationFailures test above tests if the skip is lying)
   for (size_t i = 0; i < bytes_written - 1; ++i)
     EXPECT_FALSE(PaintOp::Deserialize(input_.get(), i, output_.get(), kSize,
-                                      &bytes_read));
+                                      &bytes_read,
+                                      options_provider.deserialize_options()));
 
   // unaligned skips fail to deserialize
   PaintOp* serialized = reinterpret_cast<PaintOp*>(input_.get());
   EXPECT_EQ(0u, serialized->skip % kAlign);
   serialized->skip -= 1;
   EXPECT_FALSE(PaintOp::Deserialize(input_.get(), bytes_written, output_.get(),
-                                    kSize, &bytes_read));
+                                    kSize, &bytes_read,
+                                    options_provider.deserialize_options()));
   serialized->skip += 1;
 
   // bogus types fail to deserialize
   serialized->type = static_cast<uint8_t>(PaintOpType::LastPaintOpType) + 1;
   EXPECT_FALSE(PaintOp::Deserialize(input_.get(), bytes_written, output_.get(),
-                                    kSize, &bytes_read));
+                                    kSize, &bytes_read,
+                                    options_provider.deserialize_options()));
 }
 
 // Test that deserializing invalid SkClipOp enums fails silently.
@@ -2271,18 +2381,18 @@ TEST(PaintOpBufferTest, ValidateSkClip) {
   SkClipOp bad_clip_max = static_cast<SkClipOp>(~static_cast<uint32_t>(0));
   buffer.push<ClipRectOp>(test_rects[1], bad_clip_max, false);
 
-  PaintOp::SerializeOptions options;
+  TestOptionsProvider options_provider;
 
   int op_idx = 0;
   for (PaintOpBuffer::Iterator iter(&buffer); iter; ++iter) {
     const PaintOp* op = *iter;
-    size_t bytes_written =
-        op->Serialize(serialized.get(), buffer_size, options);
+    size_t bytes_written = op->Serialize(serialized.get(), buffer_size,
+                                         options_provider.serialize_options());
     ASSERT_GT(bytes_written, 0u);
     size_t bytes_read = 0;
-    PaintOp* written =
-        PaintOp::Deserialize(serialized.get(), bytes_written,
-                             deserialized.get(), buffer_size, &bytes_read);
+    PaintOp* written = PaintOp::Deserialize(
+        serialized.get(), bytes_written, deserialized.get(), buffer_size,
+        &bytes_read, options_provider.deserialize_options());
     // First op should succeed.  Other ops with bad enums should
     // serialize correctly but fail to deserialize due to the bad
     // SkClipOp enum.
@@ -2351,18 +2461,18 @@ TEST(PaintOpBufferTest, ValidateSkBlendMode) {
     buffer.push<DrawRectOp>(test_rects[i % test_rects.size()], flags);
   }
 
-  PaintOp::SerializeOptions options;
+  TestOptionsProvider options_provider;
 
   int op_idx = 0;
   for (PaintOpBuffer::Iterator iter(&buffer); iter; ++iter) {
     const PaintOp* op = *iter;
-    size_t bytes_written =
-        op->Serialize(serialized.get(), buffer_size, options);
+    size_t bytes_written = op->Serialize(serialized.get(), buffer_size,
+                                         options_provider.serialize_options());
     ASSERT_GT(bytes_written, 0u);
     size_t bytes_read = 0;
-    PaintOp* written =
-        PaintOp::Deserialize(serialized.get(), bytes_written,
-                             deserialized.get(), buffer_size, &bytes_read);
+    PaintOp* written = PaintOp::Deserialize(
+        serialized.get(), bytes_written, deserialized.get(), buffer_size,
+        &bytes_read, options_provider.deserialize_options());
     // First two ops should succeed.  Other ops with bad enums should
     // serialize correctly but fail to deserialize due to the bad
     // SkBlendMode enum.
@@ -2406,19 +2516,19 @@ TEST(PaintOpBufferTest, ValidateRects) {
   buffer.push<SaveLayerOp>(&bad_rect, &test_flags[0]);
   buffer.push<SaveLayerAlphaOp>(&bad_rect, test_uint8s[0], true);
 
-  PaintOp::SerializeOptions options;
+  TestOptionsProvider options_provider;
 
   // Every op should serialize but fail to deserialize due to the bad rect.
   int op_idx = 0;
   for (PaintOpBuffer::Iterator iter(&buffer); iter; ++iter) {
     const PaintOp* op = *iter;
-    size_t bytes_written =
-        op->Serialize(serialized.get(), buffer_size, options);
+    size_t bytes_written = op->Serialize(serialized.get(), buffer_size,
+                                         options_provider.serialize_options());
     ASSERT_GT(bytes_written, 0u);
     size_t bytes_read = 0;
-    PaintOp* written =
-        PaintOp::Deserialize(serialized.get(), bytes_written,
-                             deserialized.get(), buffer_size, &bytes_read);
+    PaintOp* written = PaintOp::Deserialize(
+        serialized.get(), bytes_written, deserialized.get(), buffer_size,
+        &bytes_read, options_provider.deserialize_options());
     EXPECT_FALSE(written) << "op: " << op_idx;
     ++op_idx;
   }
@@ -2558,7 +2668,10 @@ TEST(PaintOpBufferTest, BoundingRect_DrawTextBlobOp) {
     auto* op = static_cast<DrawTextBlobOp*>(base_op);
 
     ASSERT_TRUE(PaintOp::GetBounds(op, &rect));
-    EXPECT_EQ(rect, op->blob->bounds().makeOffset(op->x, op->y).makeSorted());
+    EXPECT_EQ(rect, op->blob->ToSkTextBlob()
+                        ->bounds()
+                        .makeOffset(op->x, op->y)
+                        .makeSorted());
   }
 }
 
@@ -2580,7 +2693,8 @@ class MockImageProvider : public ImageProvider {
       return ScopedDecodedDrawImage();
 
     SkBitmap bitmap;
-    bitmap.allocN32Pixels(10, 10);
+    bitmap.allocPixelsFlags(SkImageInfo::MakeN32Premul(10, 10),
+                            SkBitmap::kZeroPixels_AllocFlag);
     sk_sp<SkImage> image = SkImage::MakeFromBitmap(bitmap);
     size_t i = index_++;
     return ScopedDecodedDrawImage(
@@ -2605,10 +2719,6 @@ TEST(PaintOpBufferTest, SkipsOpsOutsideClip) {
   buffer.push<ClipRectOp>(SkRect::MakeXYWH(0, 0, 100, 100),
                           SkClipOp::kIntersect, false);
 
-  SkRect rect = SkRect::MakeXYWH(0, 0, 100, 100);
-  uint8_t alpha = 220;
-  buffer.push<SaveLayerAlphaOp>(&rect, alpha, false);
-
   PaintFlags flags;
   PaintImage paint_image = CreateDiscardablePaintImage(gfx::Size(10, 10));
   buffer.push<DrawImageOp>(paint_image, 105.0f, 105.0f, &flags);
@@ -2618,18 +2728,17 @@ TEST(PaintOpBufferTest, SkipsOpsOutsideClip) {
                              SkShader::TileMode::kRepeat_TileMode, nullptr));
   buffer.push<DrawRectOp>(SkRect::MakeXYWH(110, 110, 100, 100), image_flags);
 
+  SkRect rect = SkRect::MakeXYWH(0, 0, 100, 100);
   buffer.push<DrawRectOp>(rect, PaintFlags());
-  buffer.push<RestoreOp>();
 
-  // Using a strict mock to ensure that skipping image ops optimizes the
-  // save/restore sequences. The single save/restore call is from the
-  // PaintOpBuffer's use of SkAutoRestoreCanvas.
+  // The single save/restore call is from the PaintOpBuffer's use of
+  // SkAutoRestoreCanvas.
   testing::StrictMock<MockCanvas> canvas;
   testing::Sequence s;
   EXPECT_CALL(canvas, willSave()).InSequence(s);
   EXPECT_CALL(canvas, OnDrawRectWithColor(_)).InSequence(s);
   EXPECT_CALL(canvas, willRestore()).InSequence(s);
-  buffer.Playback(&canvas, &image_provider);
+  buffer.Playback(&canvas, PlaybackParams(&image_provider));
 }
 
 TEST(PaintOpBufferTest, SkipsOpsWithFailedDecodes) {
@@ -2649,7 +2758,7 @@ TEST(PaintOpBufferTest, SkipsOpsWithFailedDecodes) {
   testing::StrictMock<MockCanvas> canvas;
   testing::Sequence s;
   EXPECT_CALL(canvas, OnDrawPaintWithColor(_)).InSequence(s);
-  buffer.Playback(&canvas, &image_provider);
+  buffer.Playback(&canvas, PlaybackParams(&image_provider));
 }
 
 MATCHER(NonLazyImage, "") {
@@ -2741,7 +2850,206 @@ TEST(PaintOpBufferTest, ReplacesImagesFromProvider) {
   EXPECT_CALL(canvas, onDrawOval(SkRect::MakeWH(10, 10),
                                  MatchesShader(flags, scale_adjustment[2])));
 
-  buffer.Playback(&canvas, &image_provider);
+  buffer.Playback(&canvas, PlaybackParams(&image_provider));
+}
+
+class PaintFilterSerializationTest : public ::testing::TestWithParam<bool> {};
+
+INSTANTIATE_TEST_CASE_P(PaintFilterSerializationTests,
+                        PaintFilterSerializationTest,
+                        ::testing::Values(true, false));
+
+TEST_P(PaintFilterSerializationTest, Basic) {
+  SkScalar scalars[9] = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f, 9.f};
+  std::vector<sk_sp<PaintFilter>> filters = {
+      sk_sp<PaintFilter>{new ColorFilterPaintFilter(
+          SkColorFilter::MakeLinearToSRGBGamma(), nullptr)},
+      sk_sp<PaintFilter>{new BlurPaintFilter(
+          0.5f, 0.3f, SkBlurImageFilter::kRepeat_TileMode, nullptr)},
+      sk_sp<PaintFilter>{new DropShadowPaintFilter(
+          5.f, 10.f, 0.1f, 0.3f, SK_ColorBLUE,
+          SkDropShadowImageFilter::kDrawShadowOnly_ShadowMode, nullptr)},
+      sk_sp<PaintFilter>{new MagnifierPaintFilter(SkRect::MakeXYWH(5, 6, 7, 8),
+                                                  10.5f, nullptr)},
+      sk_sp<PaintFilter>{new AlphaThresholdPaintFilter(
+          SkRegion(SkIRect::MakeXYWH(0, 0, 100, 200)), 10.f, 20.f, nullptr)},
+      sk_sp<PaintFilter>{new MatrixConvolutionPaintFilter(
+          SkISize::Make(3, 3), scalars, 30.f, 123.f, SkIPoint::Make(0, 0),
+          SkMatrixConvolutionImageFilter::kClampToBlack_TileMode, true,
+          nullptr)},
+      sk_sp<PaintFilter>{new MorphologyPaintFilter(
+          MorphologyPaintFilter::MorphType::kErode, 15, 30, nullptr)},
+      sk_sp<PaintFilter>{new OffsetPaintFilter(-1.f, -2.f, nullptr)},
+      sk_sp<PaintFilter>{new TilePaintFilter(
+          SkRect::MakeXYWH(1, 2, 3, 4), SkRect::MakeXYWH(4, 3, 2, 1), nullptr)},
+      sk_sp<PaintFilter>{new TurbulencePaintFilter(
+          TurbulencePaintFilter::TurbulenceType::kFractalNoise, 3.3f, 4.4f, 2,
+          123, nullptr)},
+      sk_sp<PaintFilter>{
+          new MatrixPaintFilter(SkMatrix::I(), kHigh_SkFilterQuality, nullptr)},
+      sk_sp<PaintFilter>{new LightingDistantPaintFilter(
+          PaintFilter::LightingType::kSpecular, SkPoint3::Make(1, 2, 3),
+          SK_ColorCYAN, 1.1f, 2.2f, 3.3f, nullptr)},
+      sk_sp<PaintFilter>{new LightingPointPaintFilter(
+          PaintFilter::LightingType::kDiffuse, SkPoint3::Make(2, 3, 4),
+          SK_ColorRED, 1.2f, 3.4f, 5.6f, nullptr)},
+      sk_sp<PaintFilter>{new LightingSpotPaintFilter(
+          PaintFilter::LightingType::kSpecular, SkPoint3::Make(100, 200, 300),
+          SkPoint3::Make(400, 500, 600), 1, 2, SK_ColorMAGENTA, 3, 4, 5,
+          nullptr)},
+      sk_sp<PaintFilter>{
+          new ImagePaintFilter(CreateDiscardablePaintImage(gfx::Size(100, 100)),
+                               SkRect::MakeWH(50, 50), SkRect::MakeWH(70, 70),
+                               kMedium_SkFilterQuality)}};
+
+  filters.emplace_back(new ComposePaintFilter(filters[0], filters[1]));
+  filters.emplace_back(
+      new XfermodePaintFilter(SkBlendMode::kDst, filters[2], filters[3]));
+  filters.emplace_back(new ArithmeticPaintFilter(
+      1.1f, 2.2f, 3.3f, 4.4f, false, filters[4], filters[5], nullptr));
+  filters.emplace_back(new DisplacementMapEffectPaintFilter(
+      SkDisplacementMapEffect::kR_ChannelSelectorType,
+      SkDisplacementMapEffect::kG_ChannelSelectorType, 10, filters[6],
+      filters[7]));
+  filters.emplace_back(new MergePaintFilter(filters.data(), filters.size()));
+  filters.emplace_back(new RecordPaintFilter(
+      sk_sp<PaintRecord>{new PaintRecord}, SkRect::MakeXYWH(10, 15, 20, 25)));
+
+  TestOptionsProvider options_provider;
+  for (size_t i = 0; i < filters.size(); ++i) {
+    SCOPED_TRACE(i);
+
+    auto& filter = filters[i];
+    std::vector<uint8_t> memory;
+    size_t buffer_size = filter->type() == PaintFilter::Type::kPaintRecord
+                             ? PaintOpBuffer::kInitialBufferSize
+                             : PaintFilter::GetFilterSize(filter.get());
+    buffer_size += PaintOpWriter::HeaderBytes();
+    memory.resize(buffer_size);
+
+    PaintOpWriter writer(memory.data(), memory.size(),
+                         options_provider.transfer_cache_helper(),
+                         options_provider.image_provider(), GetParam());
+    writer.Write(filter.get());
+    ASSERT_GT(writer.size(), 0u) << PaintFilter::TypeToString(filter->type());
+
+    sk_sp<PaintFilter> deserialized_filter;
+    PaintOpReader reader(memory.data(), writer.size(),
+                         options_provider.transfer_cache_helper(), GetParam());
+    reader.Read(&deserialized_filter);
+    ASSERT_TRUE(deserialized_filter);
+    EXPECT_TRUE(*filter == *deserialized_filter);
+  }
+}
+
+TEST(PaintOpBufferTest, PaintRecordShaderSerialization) {
+  std::unique_ptr<char, base::AlignedFreeDeleter> memory(
+      static_cast<char*>(base::AlignedAlloc(PaintOpBuffer::kInitialBufferSize,
+                                            PaintOpBuffer::PaintOpAlign)));
+  sk_sp<PaintOpBuffer> record_buffer(new PaintOpBuffer);
+  record_buffer->push<DrawRectOp>(SkRect::MakeXYWH(0, 0, 1, 1), PaintFlags());
+
+  TestOptionsProvider options_provider;
+  PaintFlags flags;
+  flags.setShader(PaintShader::MakePaintRecord(
+      record_buffer, SkRect::MakeWH(10, 10), SkShader::kClamp_TileMode,
+      SkShader::kRepeat_TileMode, nullptr));
+  PaintOpBuffer buffer;
+  buffer.push<DrawRectOp>(SkRect::MakeXYWH(1, 2, 3, 4), flags);
+
+  SimpleBufferSerializer serializer(memory.get(),
+                                    PaintOpBuffer::kInitialBufferSize,
+                                    options_provider.image_provider(),
+                                    options_provider.transfer_cache_helper());
+  serializer.Serialize(&buffer);
+  ASSERT_TRUE(serializer.valid());
+  ASSERT_GT(serializer.written(), 0u);
+
+  auto deserialized_buffer =
+      PaintOpBuffer::MakeFromMemory(memory.get(), serializer.written(),
+                                    options_provider.deserialize_options());
+  ASSERT_TRUE(deserialized_buffer);
+  PaintOpBuffer::Iterator it(deserialized_buffer.get());
+  ASSERT_TRUE(it);
+  auto* op = *it;
+  ASSERT_TRUE(op->GetType() == PaintOpType::DrawRect);
+  auto* rect_op = static_cast<DrawRectOp*>(op);
+  EXPECT_FLOAT_RECT_EQ(rect_op->rect, SkRect::MakeXYWH(1, 2, 3, 4));
+  EXPECT_TRUE(rect_op->flags == flags);
+  EXPECT_TRUE(*rect_op->flags.getShader() == *flags.getShader());
+  EXPECT_TRUE(!!rect_op->flags.getShader()->GetSkShader());
+}
+
+TEST(PaintOpBufferTest, CustomData) {
+  // Basic tests: size, move, comparison.
+  {
+    PaintOpBuffer buffer;
+    EXPECT_EQ(buffer.size(), 0u);
+    EXPECT_EQ(buffer.bytes_used(), sizeof(PaintOpBuffer));
+    buffer.push<CustomDataOp>(1234u);
+    EXPECT_EQ(buffer.size(), 1u);
+    EXPECT_GT(buffer.bytes_used(),
+              sizeof(PaintOpBuffer) + sizeof(CustomDataOp));
+
+    PaintOpBuffer new_buffer = std::move(buffer);
+    EXPECT_EQ(buffer.size(), 0u);
+    EXPECT_EQ(new_buffer.size(), 1u);
+    EXPECT_EQ(new_buffer.GetFirstOp()->GetType(), PaintOpType::CustomData);
+
+    PaintOpBuffer buffer2;
+    buffer2.push<CustomDataOp>(1234u);
+    EXPECT_TRUE(*new_buffer.GetFirstOp() == *buffer2.GetFirstOp());
+  }
+
+  // Push and verify.
+  {
+    PaintOpBuffer buffer;
+    buffer.push<SaveOp>();
+    buffer.push<CustomDataOp>(0xFFFFFFFF);
+    buffer.push<RestoreOp>();
+    EXPECT_EQ(buffer.size(), 3u);
+
+    PaintOpBuffer::Iterator iter(&buffer);
+    ASSERT_EQ(iter->GetType(), PaintOpType::Save);
+    ++iter;
+    ASSERT_EQ(iter->GetType(), PaintOpType::CustomData);
+    ++iter;
+    ASSERT_EQ(iter->GetType(), PaintOpType::Restore);
+    ++iter;
+  }
+
+  // Playback.
+  {
+    PaintOpBuffer buffer;
+    buffer.push<CustomDataOp>(9999u);
+    testing::StrictMock<MockCanvas> canvas;
+    EXPECT_CALL(canvas, onCustomCallback(&canvas, 9999)).Times(1);
+    buffer.Playback(&canvas, PlaybackParams(nullptr, SkMatrix::I(),
+                                            base::BindRepeating(
+                                                &MockCanvas::onCustomCallback,
+                                                base::Unretained(&canvas))));
+  }
+}
+
+TEST(PaintOpBufferTest, SecurityConstrainedImageSerialization) {
+  auto image = CreateDiscardablePaintImage(gfx::Size(10, 10));
+  sk_sp<PaintFilter> filter = sk_make_sp<ImagePaintFilter>(
+      image, SkRect::MakeWH(10, 10), SkRect::MakeWH(10, 10),
+      kLow_SkFilterQuality);
+  const bool enable_security_constraints = true;
+
+  std::unique_ptr<char, base::AlignedFreeDeleter> memory(
+      static_cast<char*>(base::AlignedAlloc(PaintOpBuffer::kInitialBufferSize,
+                                            PaintOpBuffer::PaintOpAlign)));
+  PaintOpWriter writer(memory.get(), PaintOpBuffer::kInitialBufferSize, nullptr,
+                       nullptr, enable_security_constraints);
+  writer.Write(filter.get());
+
+  sk_sp<PaintFilter> out_filter;
+  PaintOpReader reader(memory.get(), writer.size(), nullptr,
+                       enable_security_constraints);
+  reader.Read(&out_filter);
+  EXPECT_TRUE(*filter == *out_filter);
 }
 
 }  // namespace cc

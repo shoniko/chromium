@@ -5,7 +5,7 @@
 /** @fileoverview Runs the Polymer Settings interactive UI tests. */
 
 /** @const {string} Path to source root. */
-var ROOT_PATH = '../../../../../';
+const ROOT_PATH = '../../../../../';
 
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(
@@ -108,5 +108,5 @@ CrSettingsAnimatedPagesTest.prototype = {
 };
 
 TEST_F('CrSettingsAnimatedPagesTest', 'All', function() {
-  mocha.run()
+  mocha.run();
 });

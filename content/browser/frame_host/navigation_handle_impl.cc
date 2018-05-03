@@ -27,16 +27,16 @@
 #include "content/browser/service_worker/service_worker_navigation_handle.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/frame_messages.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_ui_data.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/resource_request_body.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/common/url_utils.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/redirect_info.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
@@ -46,7 +46,7 @@ namespace {
 
 // Use this to get a new unique ID for a NavigationHandle during construction.
 // The returned ID is guaranteed to be nonzero (zero is the "no ID" indicator).
-int64_t GetUniqueIDInConstructor() {
+int64_t CreateUniqueHandleID() {
   static int64_t unique_id_counter = 0;
   return ++unique_id_counter;
 }
@@ -55,12 +55,6 @@ void UpdateThrottleCheckResult(
     NavigationThrottle::ThrottleCheckResult* to_update,
     NavigationThrottle::ThrottleCheckResult result) {
   *to_update = result;
-}
-
-void NotifyAbandonedTransferNavigation(const GlobalRequestID& id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (ResourceDispatcherHostImpl* rdh = ResourceDispatcherHostImpl::Get())
-    rdh->CancelRequest(id.child_id, id.request_id);
 }
 
 }  // namespace
@@ -76,12 +70,23 @@ std::unique_ptr<NavigationHandleImpl> NavigationHandleImpl::Create(
     int pending_nav_entry_id,
     bool started_from_context_menu,
     CSPDisposition should_check_main_world_csp,
-    bool is_form_submission) {
+    bool is_form_submission,
+    const base::Optional<std::string>& suggested_filename,
+    const std::string& method,
+    scoped_refptr<network::ResourceRequestBody> resource_request_body,
+    const Referrer& sanitized_referrer,
+    bool has_user_gesture,
+    ui::PageTransition transition,
+    bool is_external_protocol,
+    RequestContextType request_context_type,
+    blink::WebMixedContentContextType mixed_content_context_type) {
   return std::unique_ptr<NavigationHandleImpl>(new NavigationHandleImpl(
       url, redirect_chain, frame_tree_node, is_renderer_initiated,
       is_same_document, navigation_start, pending_nav_entry_id,
       started_from_context_menu, should_check_main_world_csp,
-      is_form_submission));
+      is_form_submission, suggested_filename, method, resource_request_body,
+      sanitized_referrer, has_user_gesture, transition, is_external_protocol,
+      request_context_type, mixed_content_context_type));
 }
 
 NavigationHandleImpl::NavigationHandleImpl(
@@ -94,11 +99,20 @@ NavigationHandleImpl::NavigationHandleImpl(
     int pending_nav_entry_id,
     bool started_from_context_menu,
     CSPDisposition should_check_main_world_csp,
-    bool is_form_submission)
+    bool is_form_submission,
+    const base::Optional<std::string>& suggested_filename,
+    const std::string& method,
+    scoped_refptr<network::ResourceRequestBody> resource_request_body,
+    const Referrer& sanitized_referrer,
+    bool has_user_gesture,
+    ui::PageTransition transition,
+    bool is_external_protocol,
+    RequestContextType request_context_type,
+    blink::WebMixedContentContextType mixed_content_context_type)
     : url_(url),
-      has_user_gesture_(false),
-      transition_(ui::PAGE_TRANSITION_LINK),
-      is_external_protocol_(false),
+      has_user_gesture_(has_user_gesture),
+      transition_(transition),
+      is_external_protocol_(is_external_protocol),
       net_error_code_(net::OK),
       render_frame_host_(nullptr),
       is_renderer_initiated_(is_renderer_initiated),
@@ -108,18 +122,17 @@ NavigationHandleImpl::NavigationHandleImpl(
       should_update_history_(false),
       subframe_entry_committed_(false),
       connection_info_(net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN),
-      should_ssl_errors_be_fatal_(false),
       original_url_(url),
+      method_(method),
       state_(INITIAL),
       is_transferring_(false),
       frame_tree_node_(frame_tree_node),
       next_index_(0),
       navigation_start_(navigation_start),
       pending_nav_entry_id_(pending_nav_entry_id),
-      request_context_type_(REQUEST_CONTEXT_TYPE_UNSPECIFIED),
-      mixed_content_context_type_(
-          blink::WebMixedContentContextType::kBlockable),
-      navigation_id_(GetUniqueIDInConstructor()),
+      request_context_type_(request_context_type),
+      mixed_content_context_type_(mixed_content_context_type),
+      navigation_id_(CreateUniqueHandleID()),
       should_replace_current_entry_(false),
       redirect_chain_(redirect_chain),
       is_download_(false),
@@ -131,6 +144,7 @@ NavigationHandleImpl::NavigationHandleImpl(
       should_check_main_world_csp_(should_check_main_world_csp),
       is_form_submission_(is_form_submission),
       expected_render_process_host_id_(ChildProcessHost::kInvalidUniqueID),
+      suggested_filename_(suggested_filename),
       weak_factory_(this) {
   TRACE_EVENT_ASYNC_BEGIN2("navigation", "NavigationHandle", this,
                            "frame_tree_node",
@@ -147,6 +161,23 @@ NavigationHandleImpl::NavigationHandleImpl(
 
   starting_site_instance_ =
       frame_tree_node_->current_frame_host()->GetSiteInstance();
+
+  if (method != "POST")
+    DCHECK(!resource_request_body);
+
+  // Update the navigation parameters.
+  if (method_ == "POST")
+    resource_request_body_ = resource_request_body;
+
+  // Mirrors the logic in RenderFrameImpl::SendDidCommitProvisionalLoad.
+  if (transition_ & ui::PAGE_TRANSITION_CLIENT_REDIRECT) {
+    // If the page contained a client redirect (meta refresh,
+    // document.location), set the referrer appropriately.
+    sanitized_referrer_ =
+        Referrer(redirect_chain_[0], sanitized_referrer.policy);
+  } else {
+    sanitized_referrer_ = sanitized_referrer;
+  }
 
   // Try to match this with a pending NavigationEntry if possible.  Note that
   // the NavigationController itself may be gone if this is a navigation inside
@@ -199,22 +230,8 @@ NavigationHandleImpl::~NavigationHandleImpl() {
     }
   }
 
-  // Transfer requests that have not matched up with another navigation request
-  // from the renderer need to be cleaned up. These are marked as protected in
-  // the RDHI, so they do not get cancelled when frames are destroyed.
-  if (is_transferring()) {
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            base::BindOnce(&NotifyAbandonedTransferNavigation,
-                                           GetGlobalRequestID()));
-  }
-
   if (!IsRendererDebugURL(url_))
     GetDelegate()->DidFinishNavigation(this);
-
-  // Cancel the navigation on the IO thread if the NavigationHandle is being
-  // destroyed in the middle of the NavigationThrottles checks.
-  if (!IsBrowserSideNavigationEnabled() && !complete_callback_.is_null())
-    RunCompleteCallback(NavigationThrottle::CANCEL_AND_IGNORE);
 
   if (IsInMainFrame()) {
     TRACE_EVENT_ASYNC_END2("navigation", "Navigation StartToCommit", this,
@@ -279,32 +296,27 @@ const base::TimeTicks& NavigationHandleImpl::NavigationStart() {
 }
 
 bool NavigationHandleImpl::IsPost() {
-  CHECK_NE(INITIAL, state_)
-      << "This accessor should not be called before the request is started.";
   return method_ == "POST";
 }
 
+const scoped_refptr<network::ResourceRequestBody>&
+NavigationHandleImpl::GetResourceRequestBody() {
+  return resource_request_body_;
+}
+
 const Referrer& NavigationHandleImpl::GetReferrer() {
-  CHECK_NE(INITIAL, state_)
-      << "This accessor should not be called before the request is started.";
   return sanitized_referrer_;
 }
 
 bool NavigationHandleImpl::HasUserGesture() {
-  CHECK_NE(INITIAL, state_)
-      << "This accessor should not be called before the request is started.";
   return has_user_gesture_;
 }
 
 ui::PageTransition NavigationHandleImpl::GetPageTransition() {
-  CHECK_NE(INITIAL, state_)
-      << "This accessor should not be called before the request is started.";
   return transition_;
 }
 
 bool NavigationHandleImpl::IsExternalProtocol() {
-  CHECK_NE(INITIAL, state_)
-      << "This accessor should not be called before the request is started.";
   return is_external_protocol_;
 }
 
@@ -335,12 +347,8 @@ NavigationHandleImpl::GetConnectionInfo() {
   return connection_info_;
 }
 
-base::Optional<net::SSLInfo> NavigationHandleImpl::GetSSLInfo() {
+const net::SSLInfo& NavigationHandleImpl::GetSSLInfo() {
   return ssl_info_;
-}
-
-bool NavigationHandleImpl::ShouldSSLErrorsBeFatal() {
-  return should_ssl_errors_be_fatal_;
 }
 
 bool NavigationHandleImpl::HasCommitted() {
@@ -373,7 +381,7 @@ const GURL& NavigationHandleImpl::GetPreviousURL() {
 }
 
 net::HostPortPair NavigationHandleImpl::GetSocketAddress() {
-  DCHECK(state_ == DID_COMMIT || state_ == DID_COMMIT_ERROR_PAGE);
+  DCHECK(state_ >= WILL_PROCESS_RESPONSE);
   return socket_address_;
 }
 
@@ -397,29 +405,9 @@ void NavigationHandleImpl::RegisterThrottleForTesting(
 }
 
 NavigationThrottle::ThrottleCheckResult
-NavigationHandleImpl::CallWillStartRequestForTesting(
-    bool is_post,
-    const Referrer& sanitized_referrer,
-    bool has_user_gesture,
-    ui::PageTransition transition,
-    bool is_external_protocol) {
+NavigationHandleImpl::CallWillStartRequestForTesting() {
   NavigationThrottle::ThrottleCheckResult result = NavigationThrottle::DEFER;
-
-  scoped_refptr<ResourceRequestBody> resource_request_body;
-  std::string method = "GET";
-  if (is_post) {
-    method = "POST";
-
-    std::string body = "test=body";
-    resource_request_body = new ResourceRequestBody();
-    resource_request_body->AppendBytes(body.data(), body.size());
-  }
-
-  WillStartRequest(method, resource_request_body, sanitized_referrer,
-                   has_user_gesture, transition, is_external_protocol,
-                   REQUEST_CONTEXT_TYPE_LOCATION,
-                   blink::WebMixedContentContextType::kBlockable,
-                   base::Bind(&UpdateThrottleCheckResult, &result));
+  WillStartRequest(base::Bind(&UpdateThrottleCheckResult, &result));
 
   // Reset the callback to ensure it will not be called later.
   complete_callback_.Reset();
@@ -445,6 +433,17 @@ NavigationHandleImpl::CallWillRedirectRequestForTesting(
 }
 
 NavigationThrottle::ThrottleCheckResult
+NavigationHandleImpl::CallWillFailRequestForTesting(
+    base::Optional<net::SSLInfo> ssl_info) {
+  NavigationThrottle::ThrottleCheckResult result = NavigationThrottle::DEFER;
+  WillFailRequest(ssl_info, base::Bind(&UpdateThrottleCheckResult, &result));
+
+  // Reset the callback to ensure it will not be called later.
+  complete_callback_.Reset();
+  return result;
+}
+
+NavigationThrottle::ThrottleCheckResult
 NavigationHandleImpl::CallWillProcessResponseForTesting(
     content::RenderFrameHost* render_frame_host,
     const std::string& raw_response_headers) {
@@ -453,8 +452,8 @@ NavigationHandleImpl::CallWillProcessResponseForTesting(
   NavigationThrottle::ThrottleCheckResult result = NavigationThrottle::DEFER;
   WillProcessResponse(static_cast<RenderFrameHostImpl*>(render_frame_host),
                       headers, net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN,
-                      SSLStatus(), GlobalRequestID(), false, false, false,
-                      base::Closure(),
+                      net::HostPortPair(), net::SSLInfo(), GlobalRequestID(),
+                      false, false, false,
                       base::Bind(&UpdateThrottleCheckResult, &result));
 
   // Reset the callback to ensure it will not be called later.
@@ -530,28 +529,23 @@ bool NavigationHandleImpl::IsDownload() {
   return is_download_;
 }
 
+const base::Optional<std::string>&
+NavigationHandleImpl::GetSuggestedFilename() {
+  return suggested_filename_;
+}
+
 void NavigationHandleImpl::InitServiceWorkerHandle(
     ServiceWorkerContextWrapper* service_worker_context) {
-  DCHECK(IsBrowserSideNavigationEnabled());
   service_worker_handle_.reset(
       new ServiceWorkerNavigationHandle(service_worker_context));
 }
 
 void NavigationHandleImpl::InitAppCacheHandle(
     ChromeAppCacheService* appcache_service) {
-  DCHECK(IsBrowserSideNavigationEnabled());
   appcache_handle_.reset(new AppCacheNavigationHandle(appcache_service));
 }
 
 void NavigationHandleImpl::WillStartRequest(
-    const std::string& method,
-    scoped_refptr<content::ResourceRequestBody> resource_request_body,
-    const Referrer& sanitized_referrer,
-    bool has_user_gesture,
-    ui::PageTransition transition,
-    bool is_external_protocol,
-    RequestContextType request_context_type,
-    blink::WebMixedContentContextType mixed_content_context_type,
     const ThrottleChecksFinishedCallback& callback) {
   TRACE_EVENT_ASYNC_STEP_INTO0("navigation", "NavigationHandle", this,
                                "WillStartRequest");
@@ -562,27 +556,6 @@ void NavigationHandleImpl::WillStartRequest(
     return;
   }
 
-  if (method != "POST")
-    DCHECK(!resource_request_body);
-
-  // Update the navigation parameters.
-  method_ = method;
-  if (method_ == "POST")
-    resource_request_body_ = resource_request_body;
-  has_user_gesture_ = has_user_gesture;
-  transition_ = transition;
-  // Mirrors the logic in RenderFrameImpl::SendDidCommitProvisionalLoad.
-  if (transition_ & ui::PAGE_TRANSITION_CLIENT_REDIRECT) {
-    // If the page contained a client redirect (meta refresh,
-    // document.location), set the referrer appropriately.
-    sanitized_referrer_ =
-        Referrer(redirect_chain_[0], sanitized_referrer.policy);
-  } else {
-    sanitized_referrer_ = sanitized_referrer;
-  }
-  is_external_protocol_ = is_external_protocol;
-  request_context_type_ = request_context_type;
-  mixed_content_context_type_ = mixed_content_context_type;
   state_ = WILL_SEND_REQUEST;
   complete_callback_ = callback;
 
@@ -595,8 +568,7 @@ void NavigationHandleImpl::WillStartRequest(
   if (!IsRendererDebugURL(url_))
     RegisterNavigationThrottles();
 
-  if (IsBrowserSideNavigationEnabled())
-    navigation_ui_data_ = GetDelegate()->GetNavigationUIData(this);
+  navigation_ui_data_ = GetDelegate()->GetNavigationUIData(this);
 
   // Notify each throttle of the request.
   base::Closure on_defer_callback_copy = on_defer_callback_for_testing_;
@@ -614,19 +586,14 @@ void NavigationHandleImpl::WillStartRequest(
   RunCompleteCallback(result);
 }
 
-void NavigationHandleImpl::WillRedirectRequest(
+void NavigationHandleImpl::UpdateStateFollowingRedirect(
     const GURL& new_url,
     const std::string& new_method,
     const GURL& new_referrer_url,
     bool new_is_external_protocol,
     scoped_refptr<net::HttpResponseHeaders> response_headers,
     net::HttpResponseInfo::ConnectionInfo connection_info,
-    RenderProcessHost* post_redirect_process,
     const ThrottleChecksFinishedCallback& callback) {
-  TRACE_EVENT_ASYNC_STEP_INTO1("navigation", "NavigationHandle", this,
-                               "WillRedirectRequest", "url",
-                               new_url.possibly_invalid_spec());
-
   // |new_url| is not expected to be a "renderer debug" url. It should be
   // blocked in NavigationRequest::OnRequestRedirected or in
   // ResourceLoader::OnReceivedRedirect. If it is not the case,
@@ -638,7 +605,6 @@ void NavigationHandleImpl::WillRedirectRequest(
   // Update the navigation parameters.
   url_ = new_url;
   method_ = new_method;
-  UpdateSiteURL(post_redirect_process);
 
   if (!(transition_ & ui::PAGE_TRANSITION_CLIENT_REDIRECT)) {
     sanitized_referrer_.url = new_referrer_url;
@@ -656,6 +622,24 @@ void NavigationHandleImpl::WillRedirectRequest(
 
   state_ = WILL_REDIRECT_REQUEST;
   complete_callback_ = callback;
+}
+
+void NavigationHandleImpl::WillRedirectRequest(
+    const GURL& new_url,
+    const std::string& new_method,
+    const GURL& new_referrer_url,
+    bool new_is_external_protocol,
+    scoped_refptr<net::HttpResponseHeaders> response_headers,
+    net::HttpResponseInfo::ConnectionInfo connection_info,
+    RenderProcessHost* post_redirect_process,
+    const ThrottleChecksFinishedCallback& callback) {
+  TRACE_EVENT_ASYNC_STEP_INTO1("navigation", "NavigationHandle", this,
+                               "WillRedirectRequest", "url",
+                               new_url.possibly_invalid_spec());
+  UpdateStateFollowingRedirect(new_url, new_method, new_referrer_url,
+                               new_is_external_protocol, response_headers,
+                               connection_info, callback);
+  UpdateSiteURL(post_redirect_process);
 
   if (IsSelfReferentialURL()) {
     state_ = CANCELING;
@@ -681,13 +665,12 @@ void NavigationHandleImpl::WillRedirectRequest(
 
 void NavigationHandleImpl::WillFailRequest(
     base::Optional<net::SSLInfo> ssl_info,
-    bool should_ssl_errors_be_fatal,
     const ThrottleChecksFinishedCallback& callback) {
   TRACE_EVENT_ASYNC_STEP_INTO0("navigation", "NavigationHandle", this,
                                "WillFailRequest");
+  if (ssl_info.has_value())
+    ssl_info_ = ssl_info.value();
 
-  ssl_info_ = ssl_info;
-  should_ssl_errors_be_fatal_ = should_ssl_errors_be_fatal;
   complete_callback_ = callback;
   state_ = WILL_FAIL_REQUEST;
 
@@ -711,12 +694,12 @@ void NavigationHandleImpl::WillProcessResponse(
     RenderFrameHostImpl* render_frame_host,
     scoped_refptr<net::HttpResponseHeaders> response_headers,
     net::HttpResponseInfo::ConnectionInfo connection_info,
-    const SSLStatus& ssl_status,
+    const net::HostPortPair& socket_address,
+    const net::SSLInfo& ssl_info,
     const GlobalRequestID& request_id,
     bool should_replace_current_entry,
     bool is_download,
     bool is_stream,
-    const base::Closure& transfer_callback,
     const ThrottleChecksFinishedCallback& callback) {
   TRACE_EVENT_ASYNC_STEP_INTO0("navigation", "NavigationHandle", this,
                                "WillProcessResponse");
@@ -730,9 +713,9 @@ void NavigationHandleImpl::WillProcessResponse(
   is_download_ = is_download;
   is_stream_ = is_stream;
   state_ = WILL_PROCESS_RESPONSE;
-  ssl_status_ = ssl_status;
+  ssl_info_ = ssl_info;
+  socket_address_ = socket_address;
   complete_callback_ = callback;
-  transfer_callback_ = transfer_callback;
 
   // Notify each throttle of the response.
   base::Closure on_defer_callback_copy = on_defer_callback_for_testing_;
@@ -746,13 +729,18 @@ void NavigationHandleImpl::WillProcessResponse(
   }
 
   // If the navigation is done processing the response, then it's ready to
-  // commit. Determine which RenderFrameHost should render the response, based
-  // on its site (after any redirects).
-  // Note: if MaybeTransferAndProceed returns false, this means that this
-  // NavigationHandle was deleted, so return immediately.
-  if (result.action() == NavigationThrottle::PROCEED &&
-      !MaybeTransferAndProceed())
-    return;
+  // commit. Inform observers that the navigation is now ready to commit, unless
+  // it is not set to commit (204/205s/downloads).
+  if (result.action() == NavigationThrottle::PROCEED && render_frame_host_) {
+    CHECK(!suggested_filename_.has_value() ||
+          !(url_.SchemeIsBlob() || url_.SchemeIsFileSystem() ||
+            url_.SchemeIs(url::kAboutScheme) ||
+            url_.SchemeIs(url::kDataScheme)))
+        << "Blob, filesystem, data, and about URLs with a suggested filename "
+           "should always result in a download, so we should never process a "
+           "navigation response here.";
+    ReadyToCommitNavigation(render_frame_host_);
+  }
 
   TRACE_EVENT_ASYNC_STEP_INTO1("navigation", "NavigationHandle", this,
                                "ProcessResponse", "result", result.action());
@@ -780,8 +768,7 @@ void NavigationHandleImpl::ReadyToCommitNavigation(
                         ready_to_commit_time_ - navigation_start_);
   }
 
-  if (IsBrowserSideNavigationEnabled())
-    SetExpectedProcess(render_frame_host->GetProcess());
+  SetExpectedProcess(render_frame_host->GetProcess());
 
   if (!IsRendererDebugURL(url_) && !IsSameDocument())
     GetDelegate()->ReadyToCommitNavigation(this);
@@ -806,7 +793,6 @@ void NavigationHandleImpl::DidCommitNavigation(
   render_frame_host_ = render_frame_host;
   previous_url_ = previous_url;
   base_url_ = params.base_url;
-  socket_address_ = params.socket_address;
   navigation_type_ = navigation_type;
 
   // For back-forward navigations, record metrics.
@@ -879,19 +865,6 @@ void NavigationHandleImpl::SetExpectedProcess(
       expected_process, site_url_);
 }
 
-void NavigationHandleImpl::Transfer() {
-  DCHECK(!IsBrowserSideNavigationEnabled());
-  // This is an actual transfer. Inform the NavigationResourceThrottle. This
-  // will allow to mark the URLRequest as transferring. When it is marked as
-  // transferring, the URLRequest can no longer be cancelled by its original
-  // RenderFrame. Instead it will persist until being picked up by the transfer
-  // RenderFrame, even if the original RenderFrame is destroyed.
-  // Note: |transfer_callback_| can be null in unit tests.
-  if (!transfer_callback_.is_null())
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, transfer_callback_);
-  transfer_callback_.Reset();
-}
-
 NavigationThrottle::ThrottleCheckResult
 NavigationHandleImpl::CheckWillStartRequest() {
   DCHECK(state_ == WILL_SEND_REQUEST || state_ == DEFERRING_START);
@@ -899,6 +872,8 @@ NavigationHandleImpl::CheckWillStartRequest() {
   DCHECK(state_ != DEFERRING_START || next_index_ != 0);
   base::WeakPtr<NavigationHandleImpl> weak_ref = weak_factory_.GetWeakPtr();
   for (size_t i = next_index_; i < throttles_.size(); ++i) {
+    TRACE_EVENT1("navigation", "NavigationThrottle::WillStartRequest",
+                 "throttle", throttles_[i]->GetNameForLogging());
     NavigationThrottle::ThrottleCheckResult result =
         throttles_[i]->WillStartRequest();
     if (!weak_ref) {
@@ -906,6 +881,9 @@ NavigationHandleImpl::CheckWillStartRequest() {
       // Return immediately.
       return NavigationThrottle::DEFER;
     }
+    // TODO(csharrison): It would be nice if the Check* traces also included
+    // synchronous time in the throttle's respective method, and did not include
+    // time spent in the next throttle's method.
     TRACE_EVENT_ASYNC_STEP_INTO0(
         "navigation", "NavigationHandle", this,
         base::StringPrintf("CheckWillStartRequest: %s: %d",
@@ -965,9 +943,6 @@ NavigationHandleImpl::CheckWillRedirectRequest() {
       case NavigationThrottle::BLOCK_REQUEST_AND_COLLAPSE:
         frame_tree_node_->SetCollapsed(true);  // Fall through.
       case NavigationThrottle::BLOCK_REQUEST:
-        CHECK(IsBrowserSideNavigationEnabled())
-            << "BLOCK_REQUEST and BLOCK_REQUEST_AND_COLLAPSE must not be used "
-               "on redirect without PlzNavigate";
       case NavigationThrottle::CANCEL:
       case NavigationThrottle::CANCEL_AND_IGNORE:
         state_ = CANCELING;
@@ -1131,14 +1106,11 @@ void NavigationHandleImpl::ResumeInternal() {
     }
 
     // If the navigation is about to proceed after having been deferred while
-    // processing the response, then it's ready to commit. Determine which
-    // RenderFrameHost should render the response, based on its site (after any
-    // redirects).
-    // Note: if MaybeTransferAndProceed returns false, this means that this
-    // NavigationHandle was deleted, so return immediately.
-    if (result.action() == NavigationThrottle::PROCEED &&
-        !MaybeTransferAndProceed())
-      return;
+    // processing the response, then it's ready to commit. Inform observers that
+    // the navigation is now ready to commit, unless it is not set to commit
+    // (204/205s/downloads).
+    if (result.action() == NavigationThrottle::PROCEED && render_frame_host_)
+      ReadyToCommitNavigation(render_frame_host_);
   }
   DCHECK_NE(NavigationThrottle::DEFER, result.action());
 
@@ -1155,8 +1127,7 @@ void NavigationHandleImpl::CancelDeferredNavigationInternal(
          result.action() == NavigationThrottle::CANCEL ||
          result.action() == NavigationThrottle::BLOCK_REQUEST_AND_COLLAPSE);
   DCHECK(result.action() != NavigationThrottle::BLOCK_REQUEST_AND_COLLAPSE ||
-         state_ == DEFERRING_START ||
-         (state_ == DEFERRING_REDIRECT && IsBrowserSideNavigationEnabled()));
+         state_ == DEFERRING_START || state_ == DEFERRING_REDIRECT);
 
   if (result.action() == NavigationThrottle::BLOCK_REQUEST_AND_COLLAPSE)
     frame_tree_node_->SetCollapsed(true);
@@ -1165,93 +1136,6 @@ void NavigationHandleImpl::CancelDeferredNavigationInternal(
                                "CancelDeferredNavigation");
   state_ = CANCELING;
   RunCompleteCallback(result);
-}
-
-bool NavigationHandleImpl::MaybeTransferAndProceed() {
-  DCHECK_EQ(WILL_PROCESS_RESPONSE, state_);
-
-  // Check if the navigation should transfer. This may result in the
-  // destruction of this NavigationHandle, and the cancellation of the request.
-  if (!MaybeTransferAndProceedInternal())
-    return false;
-
-  // Inform observers that the navigation is now ready to commit, unless a
-  // transfer of the navigation failed.
-  // PlzNavigate: when a navigation is not set to commit (204/205s/downloads) do
-  // not call ReadyToCommitNavigation.
-  DCHECK(!IsBrowserSideNavigationEnabled() || render_frame_host_ ||
-         net_error_code_ == net::ERR_ABORTED);
-  if (!IsBrowserSideNavigationEnabled() || render_frame_host_)
-    ReadyToCommitNavigation(render_frame_host_);
-  return true;
-}
-
-bool NavigationHandleImpl::MaybeTransferAndProceedInternal() {
-  DCHECK(render_frame_host_ || (IsBrowserSideNavigationEnabled() &&
-                                net_error_code_ == net::ERR_ABORTED));
-
-  // PlzNavigate: the final RenderFrameHost handling this navigation has been
-  // decided before calling WillProcessResponse in
-  // NavigationRequest::OnResponseStarted.
-  // TODO(clamy): See if PlzNavigate could use this code to check whether to
-  // use the RFH determined at the start of the navigation or to switch to
-  // another one.
-  if (IsBrowserSideNavigationEnabled())
-    return true;
-
-  // A navigation from a RenderFrame that is no longer active should not attempt
-  // to transfer.
-  if (!render_frame_host_->is_active()) {
-    // This will cause the deletion of this NavigationHandle and the
-    // cancellation of the navigation.
-    render_frame_host_->SetNavigationHandle(nullptr);
-    return false;
-  }
-
-  // If this is a download, do not do a cross-site check. The renderer will
-  // see it is a download and abort the request.
-  //
-  // Similarly, HTTP 204 (No Content) responses leave the renderer showing the
-  // previous page. The navigation should be allowed to finish without running
-  // the unload handler or swapping in the pending RenderFrameHost.
-  if (is_download_ || is_stream_ ||
-      (response_headers_.get() && response_headers_->response_code() == 204)) {
-    return true;
-  }
-
-  // The content embedder can decide that a transfer to a different process is
-  // required for this URL.
-  bool should_transfer =
-      GetContentClient()->browser()->ShouldSwapProcessesForRedirect(
-          frame_tree_node_->navigator()->GetController()->GetBrowserContext(),
-          original_url_, url_);
-
-  RenderFrameHostManager* manager =
-      render_frame_host_->frame_tree_node()->render_manager();
-
-  // In the site-per-process model, the RenderFrameHostManager may also decide
-  // (independently from the content embedder's ShouldSwapProcessesForRedirect
-  // above) that a process transfer is needed. Process transfers are skipped for
-  // WebUI processes for now, since e.g. chrome://settings has multiple
-  // "cross-site" chrome:// frames, and that doesn't yet work cross-process.
-  if (!ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(
-          render_frame_host_->GetProcess()->GetID())) {
-    should_transfer |= manager->IsRendererTransferNeededForNavigation(
-        render_frame_host_, url_);
-  }
-
-  // Start the transfer if needed.
-  if (should_transfer) {
-    // This may destroy the NavigationHandle if the transfer fails.
-    base::WeakPtr<NavigationHandleImpl> weak_self = weak_factory_.GetWeakPtr();
-    manager->OnCrossSiteResponse(render_frame_host_, request_id_,
-                                 redirect_chain_, sanitized_referrer_,
-                                 transition_, should_replace_current_entry_);
-    if (!weak_self)
-      return false;
-  }
-
-  return true;
 }
 
 void NavigationHandleImpl::RunCompleteCallback(
@@ -1299,7 +1183,10 @@ void NavigationHandleImpl::RegisterNavigationThrottles() {
   AddThrottle(
       MixedContentNavigationThrottle::CreateThrottleForNavigation(this));
 
-  AddThrottle(RenderFrameDevToolsAgentHost::CreateThrottleForNavigation(this));
+  for (auto& throttle :
+       RenderFrameDevToolsAgentHost::CreateNavigationThrottles(this)) {
+    AddThrottle(std::move(throttle));
+  }
 
   // Insert all testing NavigationThrottles last.
   throttles_.insert(throttles_.end(),

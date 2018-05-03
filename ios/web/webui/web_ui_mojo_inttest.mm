@@ -4,7 +4,6 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #import "ios/testing/wait_util.h"
@@ -103,6 +102,7 @@ class TestUI : public WebUIIOSController {
     source->AddResourcePath("mojo_bindings.js", IDR_IOS_MOJO_BINDINGS_JS);
     source->AddResourcePath("mojo_test.mojom.js", IDR_MOJO_TEST_MOJO_JS);
     source->SetDefaultResource(IDR_MOJO_TEST_HTML);
+    source->UseGzip();
 
     web::WebState* web_state = web_ui->GetWebState();
     web::WebUIIOSDataSource::Add(web_state->GetBrowserState(), source);
@@ -126,7 +126,7 @@ class TestWebUIControllerFactory : public WebUIIOSControllerFactory {
       const GURL& url) const override {
     DCHECK_EQ(url.scheme(), kTestWebUIScheme);
     DCHECK_EQ(url.host(), kTestWebUIURLHost);
-    return base::MakeUnique<TestUI>(web_ui, ui_handler_);
+    return std::make_unique<TestUI>(web_ui, ui_handler_);
   }
 
  private:
@@ -140,9 +140,9 @@ class WebUIMojoTest : public WebIntTest {
  protected:
   void SetUp() override {
     WebIntTest::SetUp();
-    ui_handler_ = base::MakeUnique<TestUIHandler>();
+    ui_handler_ = std::make_unique<TestUIHandler>();
     web::WebState::CreateParams params(GetBrowserState());
-    web_state_ = base::MakeUnique<web::WebStateImpl>(params);
+    web_state_ = std::make_unique<web::WebStateImpl>(params);
     web_state_->GetNavigationManagerImpl().InitializeSession();
     WebUIIOSControllerFactory::RegisterFactory(
         new TestWebUIControllerFactory(ui_handler_.get()));
@@ -180,7 +180,6 @@ class WebUIMojoTest : public WebIntTest {
 // |TestUIHandler| successfully receives "ack" message from WebUI page.
 TEST_F(WebUIMojoTest, MessageExchange) {
   @autoreleasepool {
-    web_state()->SetWebUsageEnabled(true);
     web_state()->GetView();  // WebState won't load URL without view.
     GURL url(url::SchemeHostPort(kTestWebUIScheme, kTestWebUIURLHost, 0)
                  .Serialize());

@@ -405,7 +405,7 @@ TEST_F(HistoryStateOperationsTest, PushState) {
 // resets the page to a GET request.
 TEST_F(HistoryStateOperationsTest, ReplaceStatePostRequest) {
   // Add POST data to the current NavigationItem.
-  base::scoped_nsobject<NSData> post_data([NSData data]);
+  NSData* post_data = [NSData data];
   static_cast<web::NavigationItemImpl*>(GetLastCommittedItem())
       ->SetPostData(post_data);
   ASSERT_TRUE(GetLastCommittedItem()->HasPostData());
@@ -443,4 +443,19 @@ TEST_F(HistoryStateOperationsTest, ReplaceStateNoHashChangeEvent) {
   // Verify that the hashchange event was not fired.
   EXPECT_FALSE(static_cast<web::NavigationItemImpl*>(GetLastCommittedItem())
                    ->IsCreatedFromHashChange());
+}
+
+// Regression test for crbug.com/788464.
+TEST_F(HistoryStateOperationsTest, ReplaceStateThenReload) {
+  GURL url = web::test::HttpServer::MakeUrl(
+      "http://ios/testing/data/http_server_files/"
+      "onload_replacestate_reload.html");
+  LoadUrl(url);
+  GURL new_url = web::test::HttpServer::MakeUrl(
+      "http://ios/testing/data/http_server_files/pony.html");
+  BOOL completed =
+      testing::WaitUntilConditionOrTimeout(kWaitForStateUpdateTimeout, ^{
+        return GetLastCommittedItem()->GetURL() == new_url;
+      });
+  EXPECT_TRUE(completed);
 }

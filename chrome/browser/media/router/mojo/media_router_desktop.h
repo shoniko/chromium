@@ -7,8 +7,9 @@
 
 #include "base/gtest_prod_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/media/router/mojo/extension_media_route_provider_proxy.h"
 #include "chrome/browser/media/router/mojo/media_router_mojo_impl.h"
+#include "chrome/browser/media/router/providers/cast/dual_media_sink_service.h"
+#include "chrome/browser/media/router/providers/extension/extension_media_route_provider_proxy.h"
 
 namespace content {
 class RenderFrameHost;
@@ -19,8 +20,8 @@ class Extension;
 }
 
 namespace media_router {
-class CastMediaSinkService;
-class DialMediaSinkServiceProxy;
+class DualMediaSinkService;
+class WiredDisplayMediaRouteProvider;
 
 // MediaRouter implementation that uses the MediaRouteProvider implemented in
 // the component extension.
@@ -46,42 +47,36 @@ class MediaRouterDesktop : public MediaRouterMojoImpl {
   void OnUserGesture() override;
 
  protected:
-  // Error handler callback for |binding_|.
-  void OnConnectionError() override;
-
-  // Issues 0+ calls to |media_route_provider_| to ensure its state is in sync
-  // with MediaRouter on a best-effort basis.
-  // The extension might have become out of sync with MediaRouter due to one
-  // of few reasons:
-  // (1) The extension crashed and lost unpersisted changes.
-  // (2) The extension was updated; temporary data is cleared.
-  // (3) The extension has an unforseen bug which causes temporary data to be
-  //     persisted incorrectly on suspension.
-  void SyncStateToMediaRouteProvider() override;
+  // MediaRouterMojoImpl override:
+  base::Optional<MediaRouteProviderId> GetProviderIdForPresentation(
+      const std::string& presentation_id) override;
 
  private:
-  friend class MediaRouterDesktopTest;
-  friend class MediaRouterDesktopTestTest;
+  template <bool>
+  friend class MediaRouterDesktopTestBase;
   friend class MediaRouterFactory;
-  FRIEND_TEST_ALL_PREFIXES(MediaRouterDesktopTest, TestProvideSinks);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterDesktopTest, ProvideSinks);
 
-  enum class FirewallCheck {
-    // Skips the firewall check for the benefit of unit tests so they do not
-    // have to depend on the system's firewall configuration.
-    SKIP_FOR_TESTING,
-    // Perform the firewall check (default).
-    RUN,
-  };
+  // This constructor performs a firewall check on Windows and is not suitable
+  // for use in unit tests; instead use the constructor below.
+  explicit MediaRouterDesktop(content::BrowserContext* context);
 
+  // Used by tests only. This constructor skips the firewall check so unit tests
+  // do not have to depend on the system's firewall configuration.
   MediaRouterDesktop(content::BrowserContext* context,
-                     FirewallCheck check_firewall = FirewallCheck::RUN);
+                     DualMediaSinkService* media_sink_service);
 
   // mojom::MediaRouter implementation.
-  // Notifies |request_manager_| that the Mojo connection to MediaRouteProvider
-  // is valid.
   void RegisterMediaRouteProvider(
+      MediaRouteProviderId provider_id,
       mojom::MediaRouteProviderPtr media_route_provider_ptr,
       mojom::MediaRouter::RegisterMediaRouteProviderCallback callback) override;
+
+  // Registers a Mojo pointer to the extension MRP with
+  // |extension_provider_proxy_| and does initializations specific to the
+  // extension MRP.
+  void RegisterExtensionMediaRouteProvider(
+      mojom::MediaRouteProviderPtr extension_provider_ptr);
 
   // Binds |this| to a Mojo interface request, so that clients can acquire a
   // handle to a MediaRouter instance via the Mojo service connector.
@@ -89,15 +84,23 @@ class MediaRouterDesktop : public MediaRouterMojoImpl {
   void BindToMojoRequest(mojo::InterfaceRequest<mojom::MediaRouter> request,
                          const extensions::Extension& extension);
 
-  // Starts browser side sink discovery.
-  void StartDiscovery();
+  // Provides the current list of sinks from |media_sink_service_| to the
+  // extension. Also registers with |media_sink_service_| to listen for updates.
+  void ProvideSinksToExtension();
 
   // Notifies the Media Router that the list of MediaSinks discovered by a
   // MediaSinkService has been updated.
   // |provider_name|: Name of the MediaSinkService providing the sinks.
   // |sinks|: sinks discovered by MediaSinkService.
   void ProvideSinks(const std::string& provider_name,
-                    std::vector<MediaSinkInternal> sinks);
+                    const std::vector<MediaSinkInternal>& sinks);
+
+  // Initializes MRPs and adds them to |media_route_providers_|.
+  void InitializeMediaRouteProviders();
+
+  // Helper methods for InitializeMediaRouteProviders().
+  void InitializeExtensionMediaRouteProviderProxy();
+  void InitializeWiredDisplayMediaRouteProvider();
 
 #if defined(OS_WIN)
   // Ensures that mDNS discovery is enabled in the MRPM extension. This can be
@@ -113,26 +116,23 @@ class MediaRouterDesktop : public MediaRouterMojoImpl {
 
   // MediaRouteProvider proxy that forwards calls to the MRPM in the component
   // extension.
-  ExtensionMediaRouteProviderProxy extension_provider_;
+  std::unique_ptr<ExtensionMediaRouteProviderProxy> extension_provider_proxy_;
 
-  // Media sink service for DIAL devices.
-  scoped_refptr<DialMediaSinkServiceProxy> dial_media_sink_service_proxy_;
+  // MediaRouteProvider for casting to local screens.
+  std::unique_ptr<WiredDisplayMediaRouteProvider> wired_display_provider_;
 
-  // Media sink service for CAST devices.
-  scoped_refptr<CastMediaSinkService> cast_media_sink_service_;
+  DualMediaSinkService* media_sink_service_;
+  DualMediaSinkService::Subscription media_sink_service_subscription_;
 
   // A flag to ensure that we record the provider version once, during the
   // initial event page wakeup attempt.
   bool provider_version_was_recorded_ = false;
 
 #if defined(OS_WIN)
-  // A pair of flags to ensure that mDNS discovery is only enabled on Windows
-  // when there will be appropriate context for the user to associate a firewall
-  // prompt with Media Router. |should_enable_mdns_discovery_| can only go from
-  // |false| to |true|. On Windows, |is_mdns_enabled_| is set to |false| in
-  // RegisterMediaRouteProvider and only set to |true| when we successfully call
-  // the extension to enable mDNS.
-  bool is_mdns_enabled_ = false;
+  // A flag to ensure that mDNS discovery is only enabled on Windows when there
+  // will be appropriate context for the user to associate a firewall prompt
+  // with Media Router. |should_enable_mdns_discovery_| can only go from
+  // |false| to |true|.
   bool should_enable_mdns_discovery_ = false;
 #endif
 

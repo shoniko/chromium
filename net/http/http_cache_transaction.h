@@ -186,6 +186,16 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // If result is an error code, a future Read should fail with |result|.
   void WriterAboutToBeRemovedFromEntry(int result);
 
+  // Invoked when this transaction is about to become a reader because the cache
+  // entry has finished writing.
+  void WriteModeTransactionAboutToBecomeReader();
+
+  // Invoked when HttpCache decides whether this transaction should join
+  // parallel writing or create a new writers object. This is then used
+  // for logging metrics. Can be called repeatedly, but doesn't change once the
+  // value has been set to something other than PARALLEL_WRITING_NONE.
+  void MaybeSetParallelWritingPatternForMetrics(ParallelWritingPattern pattern);
+
  private:
   static const size_t kNumValidationHeaders = 2;
   // Helper struct to pair a header name with its value, for
@@ -287,6 +297,13 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
     VALIDATION_CAUSE_STALE,
     VALIDATION_CAUSE_ZERO_FRESHNESS,
     VALIDATION_CAUSE_MAX
+  };
+
+  enum MemoryEntryDataHints {
+    // If this hint is set, the caching headers indicate we can't do anything
+    // with this entry (unless we are ignoring them thanks to a loadflag),
+    // i.e. it's expired and has nothing that permits validations.
+    HINT_UNUSABLE_PER_CACHING_HEADERS = (1 << 0),
   };
 
   // Runs the state transition loop. Resets and calls |callback_| on exit,
@@ -396,6 +413,24 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // copy is valid).  Returns true if able to make the request conditional.
   bool ConditionalizeRequest();
 
+  // Determines if saved response permits conditionalization, and extracts
+  // etag/last-modified values. Only depends on |response_.headers|.
+  // |*etag_value| and |*last_modified_value| will be set if true is returned,
+  // but may also be modified in other cases.
+  bool IsResponseConditionalizable(std::string* etag_value,
+                                   std::string* last_modified_value) const;
+
+  // Returns true if the resource info MemoryEntryDataHints bit flags in
+  // |in_memory_info| and the current request & load flags suggest that
+  // the cache entry in question is not actually usable for HTTP
+  // (i.e. already expired, and nothing is forcing us to disregard that).
+  bool MaybeRejectBasedOnEntryInMemoryData(uint8_t in_memory_info);
+
+  // Returns true if response_ is such that, if saved to cache, it would only
+  // be usable if load flags asked us to ignore caching headers.
+  // (return value of false makes no statement as to suitability of the entry).
+  bool ComputeUnusablePerCachingHeaders();
+
   // Makes sure that a 206 response is expected.  Returns true on success.
   // On success, handling_206_ will be set to true if we are processing a
   // partial entry.
@@ -478,6 +513,11 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // Returns the currently active network transaction.
   const HttpTransaction* network_transaction() const;
   HttpTransaction* network_transaction();
+
+  // Returns the network transaction from |this| or from writers only if it was
+  // moved from |this| to writers. This is so that statistics of the network
+  // transaction are not attributed to any other writer member.
+  const HttpTransaction* GetOwnedOrMovedNetworkTransaction() const;
 
   // Returns true if we should bother attempting to resume this request if it is
   // aborted while in progress. If |has_data| is true, the size of the stored
@@ -588,9 +628,20 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   base::Time open_entry_last_used_;
   base::TimeDelta stale_entry_freshness_;
   base::TimeDelta stale_entry_age_;
+  bool cant_conditionalize_zero_freshness_from_memhint_;
   bool recorded_histograms_;
+  ParallelWritingPattern parallel_writing_pattern_;
 
   NetworkTransactionInfo network_transaction_info_;
+
+  // True if this transaction created the network transaction that is now being
+  // used by writers. This is used to check that only this transaction should
+  // account for the network bytes and other statistics of the network
+  // transaction.
+  // TODO(shivanisha) Note that if this transaction dies mid-way and there are
+  // other writer transactions, no transaction then accounts for those
+  // statistics.
+  bool moved_network_transaction_to_writers_;
 
   // The helper object to use to create WebSocketHandshakeStreamBase
   // objects. Only relevant when establishing a WebSocket connection.

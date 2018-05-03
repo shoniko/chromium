@@ -150,9 +150,10 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
         this.offlineAdUi_.disabled = true;
         this.activeDirectoryMachine_ = e.detail.machinename;
         this.activeDirectoryUsername_ = e.detail.username;
-        chrome.send(
-            'oauthEnrollAdCompleteLogin',
-            [e.detail.machinename, e.detail.username, e.detail.password]);
+        chrome.send('oauthEnrollAdCompleteLogin', [
+          e.detail.machinename, e.detail.distinguished_name, e.detail.username,
+          e.detail.password
+        ]);
       }.bind(this));
 
       this.authenticator_.addEventListener(
@@ -271,6 +272,8 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
           run_at: 'document_start'
         }]);
       }
+
+      $('oauth-enroll-auth-view').partition = data.webviewPartitionName;
 
       $('login-header-bar').signinUIState = SIGNIN_UI_STATE.ENROLLMENT;
       $('progress-dots').hidden = true;

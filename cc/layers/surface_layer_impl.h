@@ -25,9 +25,10 @@ class CC_EXPORT SurfaceLayerImpl : public LayerImpl {
   }
   ~SurfaceLayerImpl() override;
 
-  void SetPrimarySurfaceInfo(const viz::SurfaceInfo& surface_info);
-  const viz::SurfaceInfo& primary_surface_info() const {
-    return primary_surface_info_;
+  void SetPrimarySurfaceId(const viz::SurfaceId& surface_id,
+                           base::Optional<uint32_t> deadline_in_frames);
+  const viz::SurfaceId& primary_surface_id() const {
+    return primary_surface_id_;
   }
 
   // A fallback Surface is a Surface that is already known to exist in the
@@ -40,13 +41,14 @@ class CC_EXPORT SurfaceLayerImpl : public LayerImpl {
     return fallback_surface_id_;
   }
 
+  base::Optional<uint32_t> deadline_in_frames() const {
+    return deadline_in_frames_;
+  }
+
   void SetStretchContentToFillBounds(bool stretch_content);
   bool stretch_content_to_fill_bounds() const {
     return stretch_content_to_fill_bounds_;
   }
-
-  void SetDefaultBackgroundColor(SkColor background_color);
-  SkColor default_background_color() const { return default_background_color_; }
 
   // LayerImpl overrides.
   std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
@@ -60,7 +62,7 @@ class CC_EXPORT SurfaceLayerImpl : public LayerImpl {
  private:
   viz::SurfaceDrawQuad* CreateSurfaceDrawQuad(
       viz::RenderPass* render_pass,
-      const viz::SurfaceInfo& surface_info,
+      const viz::SurfaceId& surface_id,
       const base::Optional<viz::SurfaceId>& fallback_surface_id);
 
   void GetDebugBorderProperties(SkColor* color, float* width) const override;
@@ -68,11 +70,11 @@ class CC_EXPORT SurfaceLayerImpl : public LayerImpl {
   void AsValueInto(base::trace_event::TracedValue* dict) const override;
   const char* LayerTypeAsString() const override;
 
-  viz::SurfaceInfo primary_surface_info_;
+  viz::SurfaceId primary_surface_id_;
   viz::SurfaceId fallback_surface_id_;
+  base::Optional<uint32_t> deadline_in_frames_;
 
   bool stretch_content_to_fill_bounds_ = false;
-  SkColor default_background_color_ = SK_ColorWHITE;
 
   DISALLOW_COPY_AND_ASSIGN(SurfaceLayerImpl);
 };

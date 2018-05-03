@@ -19,6 +19,7 @@ enum BufferFormat {
   RGBX_8888,
   RGBA_8888,
   BGRX_8888,
+  BGRX_1010102,
   BGRA_8888,
   RGBA_F16,
   YVU_420,
@@ -41,13 +42,19 @@ enum BufferUsage {
   LAST = GPU_READ_CPU_READ_WRITE_PERSISTENT
 };
 
+struct BufferUsageAndFormat {
+  BufferUsage usage;
+  BufferFormat format;
+};
+
 // gfx::GpuMemoryBufferType
 enum GpuMemoryBufferType {
   EMPTY_BUFFER,
   SHARED_MEMORY_BUFFER,
   IO_SURFACE_BUFFER,
   NATIVE_PIXMAP,
-  LAST = NATIVE_PIXMAP
+  DXGI_SHARED_HANDLE,
+  ANDROID_HARDWARE_BUFFER,
 };
 
 // gfx::GpuMemoryBufferId
@@ -73,6 +80,8 @@ struct NativePixmapHandle {
 
 // gfx::GpuMemoryBufferHandle
 struct GpuMemoryBufferHandle {
+  // TODO(676224): Use preprocessor to restrict platform-specific members to
+  // desired platform.
   GpuMemoryBufferType type;
   GpuMemoryBufferId id;
   handle<shared_buffer>? shared_memory_handle;
