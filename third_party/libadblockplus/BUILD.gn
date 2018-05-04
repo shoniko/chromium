@@ -38,7 +38,11 @@ action("make") {
 
     # workaround for building for Target platform on Linux GYP issue
     "--envCXX.host=g++",
-    "--envCC.host=gcc"
+    "--envCC.host=gcc",
+    # For some reason, the .host env variables are ignored on Ubuntu 16.04.
+    # Given that, we need to fallback to _host variables
+    "--envCXX_host=g++",
+    "--envCC_host=gcc"
   ]
 }
 
