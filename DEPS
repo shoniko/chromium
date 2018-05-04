@@ -583,7 +583,7 @@ deps = {
     'condition':
       'checkout_android',
     'url':
-      Var('adblockplus_git') + '/libadblockplus-android@7ef63f2b8458a5b23595bd22c180c0e6f2398801'
+      Var('adblockplus_git') + '/libadblockplus-android@1416d0ca58f92c0542f131888c72ea46437bc84a'
   },
   'src/third_party/yasm/source/patched-yasm':
     (Var("chromium_git")) + '/chromium/deps/yasm/patched-yasm.git@b98114e18d8b9b84586b10d24353ab8616d4c5fc',
