@@ -192,6 +192,11 @@ void handleOnLoad(content::WebContents* webContents, int frameTreeNodeId) {
   } 
 }
 
+void ReleaseIsolateHolder(gin::IsolateHolder* isolateHolder) {
+  delete isolateHolder;
+  LOG(WARNING) << "Deleted IsolateHolder";
+}
+
 class IsolateHolderV8Provider : public AdblockPlus::IV8IsolateProvider  
 {  
   public:  
@@ -207,8 +212,8 @@ class IsolateHolderV8Provider : public AdblockPlus::IV8IsolateProvider
 
     ~IsolateHolderV8Provider() override
     {
-      delete isolateHolder;
-      LOG(WARNING) << "Deleted IsolateHolderV8Provider (and IsolateHolder)";
+      LOG(WARNING) << "Posting 'delete isolateHolder' task";
+      task_runner.Get()->PostTask(FROM_HERE, base::BindOnce(&ReleaseIsolateHolder, isolateHolder));
     }
   
   private:
