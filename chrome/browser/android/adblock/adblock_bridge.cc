@@ -130,7 +130,7 @@ console.log('finished injecting css rules');";
   return ss.str();
 }
 
-void handleOnLoad(content::WebContents* webContents) {
+void handleOnLoad(content::WebContents* webContents, int frameTreeNodeId) {
   LOG(WARNING) << "Adblock: handleOnLoad()";
   // it can be released in UI thread while this is not yet invoked
   if (!AdblockBridge::enable_adblock ||
@@ -173,13 +173,21 @@ void handleOnLoad(content::WebContents* webContents) {
       LOG(WARNING) << "Adblock: element hiding - generated JS";
 
       // run JS
-      content::RenderFrameHost* frameHost = webContents->GetMainFrame();
-      frameHost->ExecuteJavaScriptInIsolatedWorld(
-        base::UTF8ToUTF16(js),
-        content::RenderFrameHost::JavaScriptResultCallback(),
-        ISOLATED_WORLD_ID_ADBLOCK);
+      content::RenderFrameHost* frameHost = (frameTreeNodeId
+        ? webContents->UnsafeFindFrameByFrameTreeNodeId(frameTreeNodeId)
+        : webContents->GetMainFrame());
 
-      LOG(WARNING) << "Adblock: element hiding - called JS";
+      if (frameHost) {
+        frameHost->ExecuteJavaScriptInIsolatedWorld(
+          base::UTF8ToUTF16(js),
+          content::RenderFrameHost::JavaScriptResultCallback(),
+          ISOLATED_WORLD_ID_ADBLOCK);
+
+        LOG(WARNING) << "Adblock: element hiding - called JS in frame"
+                     << " '" << frameHost->GetFrameName() << "'";
+      } else {
+        LOG(ERROR) << "Adblock: failed to find frameHost for frameTreeNodeId " << frameTreeNodeId;
+      }
     }
   } 
 }
@@ -255,8 +263,11 @@ class AdblockLoadCompleteListener : public content::NotificationObserver {
                  const content::NotificationSource& source,
                  const content::NotificationDetails& details) override {
       content::WebContents* webContents = content::Source<content::WebContents>(source).ptr();
-      LOG(WARNING) << "Adblock: received onLoad() notification of type "
-        << type << " with url " << webContents->GetURL().spec();
+      int frameTreeNodeId = (int)content::Details<int>(details).ptr();
+
+      LOG(WARNING) << "Adblock: received onLoad() notification of type " << type
+                   << " with url " << webContents->GetURL().spec()
+                   << " and frame node id " << frameTreeNodeId;
       
       if (!AdblockBridge::getFilterEnginePtr()) {
         LOG(WARNING) << "Adblock: inject JS skipped (no filter engine)";
@@ -284,7 +295,7 @@ class AdblockLoadCompleteListener : public content::NotificationObserver {
       }
 
       // run in (background) thread in order not to block main (UI) thread for few seconds
-      task_runner.Get()->PostTask(FROM_HERE, base::BindOnce(&handleOnLoad, webContents));
+      task_runner.Get()->PostTask(FROM_HERE, base::BindOnce(&handleOnLoad, webContents, frameTreeNodeId));
     }
 
     DISALLOW_COPY_AND_ASSIGN(AdblockLoadCompleteListener);

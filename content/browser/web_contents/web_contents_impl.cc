@@ -3727,10 +3727,14 @@ void WebContentsImpl::DidFinishNavigation(NavigationHandle* navigation_handle) {
       navigation_handle->GetURL().SchemeIsHTTPOrHTTPS()) {
       LOG(WARNING) << "Adblock ready to inject JS to " << navigation_handle->GetURL().spec();
       
+      int frameTreeNodeId = (!navigation_handle->IsInMainFrame()
+        ? navigation_handle->GetFrameTreeNodeId()
+        : 0);
+
       NotificationService::current()->Notify(
         NOTIFICATION_DID_FINISH_NAVIGATION,
         Source<WebContents>(this),
-        NotificationService::NoDetails());
+        Details<int>((int*)frameTreeNodeId));
     } else {
       LOG(WARNING) << "Adblock not suitable URL " << navigation_handle->GetURL().spec();
     }
