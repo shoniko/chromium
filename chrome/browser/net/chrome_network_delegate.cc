@@ -397,57 +397,61 @@ int ChromeNetworkDelegate::OnBeforeStartTransaction(
       LOG(WARNING) << "Adblock: No referer";
     }
 
-    LOG(WARNING) << "Adblock: invoking IsDocumentWhitelisted(" << url << ")";  
-    if (filterEngine->IsDocumentWhitelisted(url, documentUrls)) {
-      LOG(WARNING) << "Adblock: document whitelisted " << url;
+    if (info && info->IsMainFrame() && resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
+      LOG(WARNING) << "Adblock: " << url << " is main frame, allow loading"; 
     } else {
-      AdblockPlus::FilterEngine::ContentType adblock_content_type;
-      
-      switch (resource_type) {
-        case content::RESOURCE_TYPE_XHR:
-          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_XMLHTTPREQUEST;
-          break;
+      LOG(WARNING) << "Adblock: invoking IsDocumentWhitelisted(" << url << ")";  
+      if (filterEngine->IsDocumentWhitelisted(url, documentUrls)) {
+        LOG(WARNING) << "Adblock: document whitelisted " << url;
+      } else {
+        AdblockPlus::FilterEngine::ContentType adblock_content_type;
+        
+        switch (resource_type) {
+          case content::RESOURCE_TYPE_XHR:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_XMLHTTPREQUEST;
+            break;
 
-        case content::RESOURCE_TYPE_STYLESHEET:
-          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_STYLESHEET;
-          break;
+          case content::RESOURCE_TYPE_STYLESHEET:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_STYLESHEET;
+            break;
 
-        case content::RESOURCE_TYPE_SCRIPT:
-          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SCRIPT;
-          break;
+          case content::RESOURCE_TYPE_SCRIPT:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SCRIPT;
+            break;
 
-        case content::RESOURCE_TYPE_FONT_RESOURCE:
-          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_FONT;
-          break;
+          case content::RESOURCE_TYPE_FONT_RESOURCE:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_FONT;
+            break;
 
-        case content::RESOURCE_TYPE_OBJECT:
-          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OBJECT;
-          break;
+          case content::RESOURCE_TYPE_OBJECT:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OBJECT;
+            break;
 
-        case content::RESOURCE_TYPE_SUB_FRAME:
-          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SUBDOCUMENT;
-          break;
+          case content::RESOURCE_TYPE_SUB_FRAME:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SUBDOCUMENT;
+            break;
 
-        case content::RESOURCE_TYPE_MEDIA:
-          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_MEDIA;
-          break;
+          case content::RESOURCE_TYPE_MEDIA:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_MEDIA;
+            break;
 
-        default:
-          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OTHER;
-      }
+          default:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OTHER;
+        }
 
-      LOG(WARNING) << "Adblock: mapped to adblock content type " << adblock_content_type;
+        LOG(WARNING) << "Adblock: mapped to adblock content type " << adblock_content_type;
 
-      AdblockPlus::FilterPtr filterPtr = filterEngine->Matches(url, adblock_content_type, documentUrls);
-      if (filterPtr && filterPtr->GetType() != AdblockPlus::Filter::TYPE_EXCEPTION) {
-        LOG(ERROR) << "Adblock: !!! Prevented loading " << url;
+        AdblockPlus::FilterPtr filterPtr = filterEngine->Matches(url, adblock_content_type, documentUrls);
+        if (filterPtr && filterPtr->GetType() != AdblockPlus::Filter::TYPE_EXCEPTION) {
+          LOG(ERROR) << "Adblock: !!! Prevented loading " << url;
 
-        // URL access blocked by Adblock Plus.
-        request->net_log().AddEvent(
-          net::NetLogEventType::CHROME_POLICY_ABORTED_REQUEST,
-          net::NetLog::StringCallback("url", &request->url().possibly_invalid_spec()));
+          // URL access blocked by Adblock Plus.
+          request->net_log().AddEvent(
+            net::NetLogEventType::CHROME_POLICY_ABORTED_REQUEST,
+            net::NetLog::StringCallback("url", &request->url().possibly_invalid_spec()));
 
-        return net::ERR_BLOCKED_BY_ADMINISTRATOR;
+          return net::ERR_BLOCKED_BY_ADMINISTRATOR;
+        }
       }
     }
   }
