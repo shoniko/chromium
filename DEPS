@@ -1,6 +1,8 @@
 vars = {
-  'adblockplus_git':
+  'adblockplus_github':
     'https://github.com/adblockplus',
+  'adblockplus_gitlab':
+    'https://gitlab.com/eyeo/adblockplus',
   'android_git':
     'https://android.googlesource.com',
   'angle_revision':
@@ -338,7 +340,7 @@ deps = {
   'src/third_party/hunspell_dictionaries':
     (Var("chromium_git")) + '/chromium/deps/hunspell_dictionaries.git@a9bac57ce6c9d390a52ebaad3259f5fdb871210e',
   'src/third_party/icu':
-    (Var("chromium_git")) + '/chromium/deps/icu.git@c8ca2962b46670ec89071ffd1291688983cd319c',
+    (Var("adblockplus_gitlab")) + '/icu.git@5de8e3b1791c2025c9f527bb07ee8db7705804bf',
   'src/third_party/jsoncpp/source':
     (Var("chromium_git")) + '/external/github.com/open-source-parsers/jsoncpp.git@f572e8e42e22cfcf5ab0aea26574f408943edfa4',
   'src/third_party/jsr-305/src': {
@@ -577,13 +579,13 @@ deps = {
     'condition':
       'checkout_android',
     'url':
-      Var('adblockplus_git') + '/libadblockplus@99836840e314b7941fdb51cb2b91f23ca3ee3414',
+      Var('adblockplus_github') + '/libadblockplus@99836840e314b7941fdb51cb2b91f23ca3ee3414',
   },
   'src/third_party/libadblockplus_android/src': {
     'condition':
       'checkout_android',
     'url':
-      Var('adblockplus_git') + '/libadblockplus-android@1416d0ca58f92c0542f131888c72ea46437bc84a'
+      Var('adblockplus_github') + '/libadblockplus-android@1416d0ca58f92c0542f131888c72ea46437bc84a'
   },
   'src/third_party/yasm/source/patched-yasm':
     (Var("chromium_git")) + '/chromium/deps/yasm/patched-yasm.git@b98114e18d8b9b84586b10d24353ab8616d4c5fc',
@@ -594,7 +596,7 @@ deps = {
   'src/tools/swarming_client':
     (Var("chromium_git")) + '/infra/luci/client-py.git@88229872dd17e71658fe96763feaa77915d8cbd6',
   'src/v8':
-    (Var("adblockplus_git")) + '/v8-googlesource@8230b69454fc852bad9d6658d621f0d704276dca',
+    (Var("adblockplus_github")) + '/v8-googlesource@8230b69454fc852bad9d6658d621f0d704276dca',
 }
 
 gclient_gn_args = [
